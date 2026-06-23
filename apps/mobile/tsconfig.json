@@ -4,11 +4,26 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@weglue/shared": ["../../packages/shared/src/index.ts"],
-      "@weglue/shared/*": ["../../packages/shared/src/*"],
-      "@/*": ["./*"]
+      "@weglue/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@weglue/shared/*": [
+        "../../packages/shared/src/*"
+      ],
+      "@/*": [
+        "./*"
+      ]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "expo-env.d.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.d.ts",
+    "expo-env.d.ts",
+    "nativewind-env.d.ts",
+    ".expo/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
