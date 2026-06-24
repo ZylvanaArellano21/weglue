@@ -1,23 +1,31 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Zain } from "next/font/google";
+import type { ReactNode } from "react";
 import { Providers } from "./providers";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const zain = Zain({
+  subsets: ["latin"],
+  weight: ["400", "700", "800"],
+  variable: "--font-zain",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: { default: "We Glue", template: "%s | We Glue" },
-  description: "We Glue — bringing things together.",
+  description: "We Glue — your campus community, all in one place.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="bg-white text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-50">
+    <html lang="en" className={`${inter.variable} ${zain.variable}`}>
+      <body className="bg-cream text-gray-900 antialiased font-inter">
         <Providers>{children}</Providers>
       </body>
     </html>

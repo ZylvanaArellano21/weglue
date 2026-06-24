@@ -1,0 +1,13 @@
+{
+  "name": "@weglue/database",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/types.ts",
+  "types": "./src/types.ts",
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

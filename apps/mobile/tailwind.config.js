@@ -1,23 +1,20 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   presets: [require("nativewind/preset")],
   theme: {
     extend: {
       colors: {
-        brand: {
-          50: "#fdf4ff",
-          100: "#fae8ff",
-          200: "#f3d0fe",
-          300: "#e9a8fd",
-          400: "#d876fa",
-          500: "#c044f0",
-          600: "#a627d4",
-          700: "#8b1daf",
-          800: "#731a8f",
-          900: "#601974",
-          950: "#3f0550",
-        },
+        teal: "#0FA6A6",
+        cream: "#FEFCF0",
+      },
+      fontFamily: {
+        zain: ["Zain_400Regular"],
+        "zain-bold": ["Zain_700Bold"],
+        inter: ["Inter_400Regular"],
+        "inter-medium": ["Inter_500Medium"],
+        "inter-semibold": ["Inter_600SemiBold"],
+        "inter-bold": ["Inter_700Bold"],
       },
     },
   },

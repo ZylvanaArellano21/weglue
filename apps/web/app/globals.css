@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Zain:wght@400;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,5 +7,11 @@
 @layer base {
   :root {
     --font-inter: "Inter", system-ui, sans-serif;
+    --font-zain: "Zain", serif;
+  }
+
+  body {
+    background-color: #FEFCF0;
+    color: #111827;
   }
 }

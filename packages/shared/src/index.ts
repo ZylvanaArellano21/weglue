@@ -1,4 +1,5 @@
-export * from "./types/index.js";
-export * from "./utils/index.js";
-export * from "./store/index.js";
-export { supabase, getSupabaseClient } from "./lib/supabase.js";
+export * from "./types";
+export * from "./utils";
+export * from "./stores/authStore";
+export * from "./stores/onboardingStore";
+export { supabase, getSupabaseClient } from "./lib/supabase";
