@@ -109,8 +109,7 @@ const styles = StyleSheet.create({
     fontFamily: "Zain_700Bold",
     color: "#000000",
     textAlign: "center",
-    lineHeight: 56,
-    marginTop: 24,
+    marginTop: 32,
   },
   subtitle: {
     fontSize: 28,
