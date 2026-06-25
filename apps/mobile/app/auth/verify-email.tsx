@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -72,42 +73,42 @@ export default function VerifyEmailScreen() {
     }, 1000);
   }
 
-  const resendLabel = cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email";
+  const resendLabel = cooldown > 0 ? `Resend in ${cooldown}s` : "Resend Email";
 
   return (
     <SafeAreaView style={styles.container}>
       {ToastComponent}
       <View style={styles.content}>
-        <Text style={styles.emoji}>📧</Text>
-        <Text style={styles.title}>Check your inbox</Text>
+        {/* Logo icon */}
+        <Image
+          source={require("../../assets/logo.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+
+        <Text style={styles.title}>Confirm your email</Text>
+
         <Text style={styles.subtitle}>We sent a verification link to</Text>
         <Text style={styles.email}>{email}</Text>
+
         <Text style={styles.instruction}>
-          Tap the link in the email to verify your account. Once verified,
-          you&apos;ll be taken to the next step automatically.
+          Tap the link in the email to verify your account. Once verified, you
+          will be taken to the next step automatically.
         </Text>
 
         <TouchableOpacity
-          style={[styles.resendBtn, cooldown > 0 && styles.resendBtnDisabled]}
+          style={[styles.resendBtn, (resending || cooldown > 0) && styles.resendBtnDisabled]}
           onPress={handleResend}
           disabled={resending || cooldown > 0}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
           {resending ? (
-            <ActivityIndicator color="#0FA6A6" />
+            <ActivityIndicator color="#FEFCF0" />
           ) : (
             <Text style={[styles.resendText, cooldown > 0 && styles.resendTextMuted]}>
               {resendLabel}
             </Text>
           )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => router.replace("/auth/login")}
-          style={{ marginTop: 12 }}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.loginLink}>Already verified? Log in</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -122,12 +123,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 32,
   },
-  emoji: { fontSize: 56, marginBottom: 20 },
+  logo: {
+    width: 80,
+    height: 72,
+    marginBottom: 28,
+  },
   title: {
-    fontSize: 26,
+    fontSize: 28,
     fontFamily: "Zain_700Bold",
-    color: "#000",
-    marginBottom: 10,
+    color: "#1a1a1a",
+    marginBottom: 12,
     textAlign: "center",
   },
   subtitle: { fontSize: 15, color: "#5F5D5D", textAlign: "center" },
@@ -143,22 +148,26 @@ const styles = StyleSheet.create({
     color: "#5F5D5D",
     textAlign: "center",
     lineHeight: 20,
-    marginBottom: 32,
+    marginBottom: 36,
   },
   resendBtn: {
-    height: 48,
-    paddingHorizontal: 32,
+    width: "100%",
+    height: 52,
     borderRadius: 40,
-    borderWidth: 1.5,
-    borderColor: "#0FA6A6",
+    backgroundColor: "#0FA6A6",
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 160,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
   },
   resendBtnDisabled: {
-    borderColor: "#C0C0C0",
+    backgroundColor: "#CCCCCC",
+    shadowOpacity: 0,
+    elevation: 0,
   },
-  resendText: { fontSize: 15, fontWeight: "600", color: "#0FA6A6" },
-  resendTextMuted: { color: "#C0C0C0" },
-  loginLink: { fontSize: 13, color: "#5F5D5D", textDecorationLine: "underline" },
+  resendText: { fontSize: 16, fontWeight: "600", color: "#FEFCF0" },
+  resendTextMuted: { color: "#FEFCF0" },
 });

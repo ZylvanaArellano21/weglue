@@ -23,7 +23,7 @@ const PRESET_COLORS = [
 
 export default function ProfilePicScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, profile, setProfile } = useAuthStore();
   const { pendingUsername, selectedInterests, selectedActivities } = useOnboardingStore();
   const { show, ToastComponent } = useToast();
 
@@ -111,12 +111,16 @@ export default function ProfilePicScreen() {
         avatarUrl = `preset:${selectedPreset}`;
       }
 
-      // Update profile
+      // Update profile and refresh the store so tab guards see the new avatar_url
       await supabase.from("profiles").update({
         avatar_url: avatarUrl,
         avatar_type: avatarType,
         username: pendingUsername || (user.email?.split("@")[0] ?? "user"),
       }).eq("id", user.id);
+
+      if (profile) {
+        setProfile({ ...profile, avatar_url: avatarUrl });
+      }
 
       // Save interests
       if (selectedInterests.length > 0) {

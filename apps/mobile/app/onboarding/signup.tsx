@@ -161,9 +161,18 @@ export default function OnboardingSignupScreen() {
             />
             {!!errors.password ? (
               <Text style={styles.errorText}>{errors.password}</Text>
-            ) : (
-              <Text style={styles.errorText}>Min. 8 characters, 1 capital letter, 1 number</Text>
-            )}
+            ) : null}
+            <View style={styles.hintRow}>
+              <Text style={[styles.hintItem, password.length === 0 ? styles.hintGray : password.length >= 8 ? styles.hintGreen : styles.hintRed]}>
+                Min. 8 characters
+              </Text>
+              <Text style={[styles.hintItem, password.length === 0 ? styles.hintGray : /[A-Z]/.test(password) ? styles.hintGreen : styles.hintRed]}>
+                1 capital letter
+              </Text>
+              <Text style={[styles.hintItem, password.length === 0 ? styles.hintGray : /[0-9]/.test(password) ? styles.hintGreen : styles.hintRed]}>
+                1 number
+              </Text>
+            </View>
 
             {/* Microsoft SSO (coming soon) */}
             <TouchableOpacity
@@ -196,7 +205,7 @@ export default function OnboardingSignupScreen() {
 
             {/* Log in link */}
             <TouchableOpacity
-              onPress={() => router.push("/auth/login")}
+              onPress={() => router.replace("/auth/login")}
               style={{ alignSelf: "center", marginTop: 16 }}
             >
               <Text style={styles.footerText}>
@@ -281,7 +290,11 @@ const styles = StyleSheet.create({
   msLogo: { flexDirection: "row", flexWrap: "wrap", width: 18, height: 18, gap: 1.5, marginRight: 2 },
   msSquare: { width: 7.5, height: 7.5 },
   secondaryBtnText: { fontSize: 16, fontWeight: "600", color: "#000" },
-  hintText: { fontSize: 11, color: "#5F5D5D", marginTop: 4, marginLeft: 4 },
+  hintRow: { flexDirection: "row", gap: 12, marginTop: 6, marginLeft: 4, flexWrap: "wrap" },
+  hintItem: { fontSize: 11, fontWeight: "500" },
+  hintGray: { color: "#9CA3AF" },
+  hintRed: { color: "#F02719" },
+  hintGreen: { color: "#0FA6A6" },
   tealLink: { fontSize: 12, color: "#0FA6A6", fontWeight: "600" },
   footerText: { fontSize: 12, color: "#5F5D5D" },
 });

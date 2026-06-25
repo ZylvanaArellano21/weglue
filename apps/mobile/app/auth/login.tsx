@@ -163,7 +163,7 @@ export default function LoginScreen() {
 
             {/* Create account link */}
             <TouchableOpacity
-              onPress={() => router.replace("/")}
+              onPress={() => router.replace("/onboarding/interests")}
               style={{ alignSelf: "center", marginTop: 20 }}
             >
               <Text style={styles.footerText}>

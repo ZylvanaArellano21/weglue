@@ -111,9 +111,12 @@ export default function ActivitiesScreen() {
       {/* Fixed Find my matches button */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
+          style={[
+            styles.primaryBtn,
+            (loading || selectedActivities.length === 0) && styles.primaryBtnDisabled,
+          ]}
           onPress={handleFindMatches}
-          disabled={loading}
+          disabled={loading || selectedActivities.length === 0}
           activeOpacity={0.85}
         >
           {loading ? (
@@ -172,6 +175,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 4,
+  },
+  primaryBtnDisabled: {
+    backgroundColor: "#CCCCCC",
+    shadowOpacity: 0,
+    elevation: 0,
   },
   primaryBtnText: { color: "#FEFCF0", fontSize: 16, fontWeight: "600" },
 });

@@ -3,7 +3,7 @@ import { ActivityIndicator, View } from "react-native";
 import { useAuthStore } from "@weglue/shared";
 
 export default function TabsLayout() {
-  const { session, isLoading, isOnboarded } = useAuthStore();
+  const { session, isLoading, profile } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -13,8 +13,23 @@ export default function TabsLayout() {
     );
   }
 
+  // No session → Welcome screen
   if (!session) return <Redirect href="/" />;
-  if (!isOnboarded) return <Redirect href="/auth/survey" />;
+
+  // Email not confirmed → verification waiting screen
+  if (!session.user.email_confirmed_at) {
+    return (
+      <Redirect
+        href={{
+          pathname: "/auth/verify-email",
+          params: { email: session.user.email ?? "", from: "signup" },
+        }}
+      />
+    );
+  }
+
+  // Profile picture not set → must complete that step before accessing the main app
+  if (!profile?.avatar_url) return <Redirect href="/onboarding/profile-pic" />;
 
   return (
     <Tabs

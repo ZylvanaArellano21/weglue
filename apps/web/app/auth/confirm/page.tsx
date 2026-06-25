@@ -148,18 +148,33 @@ export default function AuthConfirmPage() {
 
           {state === "success" && (
             <>
-              {/* Teal checkmark circle */}
+              <h1
+                className="font-zain text-3xl font-bold mb-2"
+                style={{ color: "#1a1a1a" }}
+              >
+                Your email has been confirmed
+              </h1>
+              <p className="text-sm mb-10" style={{ color: "#5F5D5D" }}>
+                Connection starts with you
+              </p>
+
+              {/* Teal outline checkmark circle */}
               <div
-                className="w-20 h-20 rounded-full flex items-center justify-center mb-6"
-                style={{ backgroundColor: "#0FA6A6" }}
+                className="flex items-center justify-center mb-10"
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: "50%",
+                  border: "3px solid #0FA6A6",
+                }}
               >
                 <svg
-                  width="36"
-                  height="36"
+                  width="32"
+                  height="32"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="#fff"
-                  strokeWidth="3"
+                  stroke="#0FA6A6"
+                  strokeWidth="2.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
@@ -167,27 +182,17 @@ export default function AuthConfirmPage() {
                 </svg>
               </div>
 
-              <h1
-                className="font-zain text-3xl font-bold mb-2"
-                style={{ color: "#111" }}
-              >
-                Your email has been confirmed
-              </h1>
-              <p className="text-sm mb-8" style={{ color: "#5F5D5D" }}>
-                Connection starts with you
-              </p>
-
               {/* Open app button */}
               <button
                 onClick={handleOpenApp}
-                className="w-full h-13 rounded-full font-semibold text-white text-base py-4 mb-4 transition-opacity hover:opacity-90"
-                style={{ backgroundColor: "#0FA6A6" }}
+                className="w-full rounded-full font-semibold text-white text-base py-4 mb-4 transition-opacity hover:opacity-90"
+                style={{ backgroundColor: "#0FA6A6", maxWidth: 320 }}
               >
                 Go back to We Glue
               </button>
 
               {showFallback && (
-                <p className="text-xs mt-2" style={{ color: "#5F5D5D" }}>
+                <p className="text-xs mt-2 text-center" style={{ color: "#5F5D5D" }}>
                   Open the We Glue app on your phone to continue.
                 </p>
               )}

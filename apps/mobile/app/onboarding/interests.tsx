@@ -91,8 +91,12 @@ export default function InterestsScreen() {
       {/* Fixed Next button */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={styles.primaryBtn}
+          style={[
+            styles.primaryBtn,
+            selectedInterests.length === 0 && styles.primaryBtnDisabled,
+          ]}
           onPress={() => router.push("/onboarding/activities")}
+          disabled={selectedInterests.length === 0}
           activeOpacity={0.85}
         >
           <Text style={styles.primaryBtnText}>Next</Text>
@@ -172,6 +176,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 4,
+  },
+  primaryBtnDisabled: {
+    backgroundColor: "#CCCCCC",
+    shadowOpacity: 0,
+    elevation: 0,
   },
   primaryBtnText: { color: "#FEFCF0", fontSize: 16, fontWeight: "600" },
 });

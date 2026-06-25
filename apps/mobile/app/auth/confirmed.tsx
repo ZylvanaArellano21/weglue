@@ -13,8 +13,8 @@ export default function AuthConfirmedScreen() {
     async function handleConfirmed() {
       const url = await Linking.getInitialURL();
 
+      // Step 1: establish a session from the tokens in the deep link hash
       if (url) {
-        // Extract tokens from hash fragment: weglue://auth/confirmed#access_token=...&refresh_token=...
         const fragment = url.split("#")[1] ?? "";
         const params = new URLSearchParams(fragment);
         const access_token = params.get("access_token");
@@ -25,23 +25,38 @@ export default function AuthConfirmedScreen() {
             access_token,
             refresh_token,
           });
-          if (!error) {
-            router.replace("/onboarding/profile-pic");
+          if (error) {
+            show("Session could not be restored. Please log in.", "error");
+            router.replace("/auth/login");
             return;
           }
         }
       }
 
-      // Fallback: check if a session already exists (e.g., polling caught it first)
-      const { data } = await supabase.auth.getSession();
-      if (data.session?.user?.email_confirmed_at) {
-        router.replace("/onboarding/profile-pic");
+      // Step 2: confirm a valid session exists
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
+
+      if (!session?.user?.email_confirmed_at) {
+        show("Email confirmed! Please log in to continue.", "success");
+        router.replace("/auth/login");
         return;
       }
 
-      // No valid session — send to login with a message
-      show("Email confirmed! Please log in to continue.", "success");
-      router.replace("/auth/login");
+      // Step 3: check the profile — avatar_url determines how far along the user is
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("avatar_url")
+        .eq("id", session.user.id)
+        .single();
+
+      if (!profile?.avatar_url) {
+        // Email confirmed but profile not yet complete → Profile Picture screen
+        router.replace("/onboarding/profile-pic");
+      } else {
+        // Fully set up — go straight to Club Catalog
+        router.replace("/(tabs)/home");
+      }
     }
 
     handleConfirmed();
