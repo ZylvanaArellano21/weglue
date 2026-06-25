@@ -30,7 +30,7 @@ export default function LoginScreen() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
     });
@@ -44,7 +44,19 @@ export default function LoginScreen() {
       }
       return;
     }
-    // Auth listener in _layout.tsx handles navigation
+
+    if (data?.user) {
+      const { data: interests } = await supabase
+        .from("user_interests")
+        .select("id")
+        .eq("user_id", data.user.id)
+        .limit(1);
+      if ((interests?.length ?? 0) > 0) {
+        router.replace("/(tabs)/home");
+      } else {
+        router.replace("/onboarding/interests");
+      }
+    }
   }
 
   return (
@@ -69,7 +81,7 @@ export default function LoginScreen() {
           {/* Logo + Brand */}
           <View style={styles.brand}>
             <Image
-              source={require("../../assets/icon.png")}
+              source={require("../../assets/logo.png")}
               style={styles.logo}
               resizeMode="contain"
             />
@@ -140,7 +152,12 @@ export default function LoginScreen() {
               onPress={() => show("Coming soon!", "info")}
               activeOpacity={0.85}
             >
-              <Text style={styles.msIcon}>⊞</Text>
+              <View style={styles.msLogo}>
+                <View style={[styles.msSquare, { backgroundColor: "#F25022" }]} />
+                <View style={[styles.msSquare, { backgroundColor: "#7FBA00" }]} />
+                <View style={[styles.msSquare, { backgroundColor: "#00A4EF" }]} />
+                <View style={[styles.msSquare, { backgroundColor: "#FFB900" }]} />
+              </View>
               <Text style={styles.secondaryBtnText}>Continue with Microsoft</Text>
             </TouchableOpacity>
 
@@ -244,7 +261,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
-  msIcon: { fontSize: 16 },
+  msLogo: { flexDirection: "row", flexWrap: "wrap", width: 18, height: 18, gap: 1.5, marginRight: 2 },
+  msSquare: { width: 7.5, height: 7.5 },
   secondaryBtnText: { fontSize: 16, fontWeight: "600", color: "#000" },
   footerText: { fontSize: 12, color: "#5F5D5D" },
 });

@@ -115,7 +115,7 @@ export default function ProfilePicScreen() {
       await supabase.from("profiles").update({
         avatar_url: avatarUrl,
         avatar_type: avatarType,
-        username: pendingUsername || user.email?.split("@")[0] ?? "user",
+        username: pendingUsername || (user.email?.split("@")[0] ?? "user"),
       }).eq("id", user.id);
 
       // Save interests

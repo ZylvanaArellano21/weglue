@@ -44,10 +44,11 @@ export default function SignupScreen() {
   async function handleSignup() {
     if (!validate()) return;
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
+        emailRedirectTo: "https://weglue.app/auth/confirm",
         data: {
           full_name: fullName.trim(),
           username: username.trim().replace(/^@/, ""),
@@ -59,7 +60,14 @@ export default function SignupScreen() {
       setErrors({ general: error.message });
       return;
     }
-    router.push("/auth/avatar");
+    if (data.session) {
+      router.push("/auth/avatar");
+    } else {
+      router.push({
+        pathname: "/auth/verify-email",
+        params: { email: email.trim().toLowerCase(), from: "signup" },
+      });
+    }
   }
 
   return (

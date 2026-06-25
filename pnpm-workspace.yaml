@@ -7,10 +7,5 @@ packages:
 # strict "exports" field that Node ≥20 enforces, breaking Metro's internal
 # require() calls. Pinning to 0.80.x eliminates the version conflict.
 overrides:
-  metro: '~0.80.0'
-  metro-cache: '~0.80.0'
-  metro-config: '~0.80.0'
-  metro-transform-worker: '~0.80.0'
-  metro-runtime: '~0.80.0'
-  metro-source-map: '~0.80.0'
-  metro-resolver: '~0.80.0'
+  '@types/react': '^18.3.3'
+  '@types/react-dom': '^18.3.0'

@@ -12,18 +12,30 @@ import { useRouter } from "expo-router";
 import { useAuthStore } from "@weglue/shared";
 
 export default function WelcomeScreen() {
-  const { session, isLoading, isOnboarded } = useAuthStore();
+  const { session, isLoading, profile } = useAuthStore();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && session) {
-      if (isOnboarded) {
-        router.replace("/(tabs)/home");
-      } else {
-        router.replace("/onboarding/interests");
-      }
+    if (isLoading || !session) return;
+
+    if (!session.user.email_confirmed_at) {
+      // Email not yet confirmed — send back to waiting screen
+      router.replace({
+        pathname: "/auth/verify-email",
+        params: { email: session.user.email ?? "", from: "signup" },
+      });
+      return;
     }
-  }, [isLoading, session, isOnboarded]);
+
+    if (!profile?.avatar_url) {
+      // Confirmed but no profile picture — complete that step first
+      router.replace("/onboarding/profile-pic");
+      return;
+    }
+
+    // Fully onboarded — go to the main app
+    router.replace("/(tabs)/home");
+  }, [isLoading, session, profile]);
 
   if (isLoading) {
     return (
@@ -40,7 +52,7 @@ export default function WelcomeScreen() {
       {/* Logo + Tagline — upper 45% */}
       <View style={styles.hero}>
         <Image
-          source={require("../assets/icon.png")}
+          source={require("../assets/logo.png")}
           style={styles.logo}
           resizeMode="contain"
         />

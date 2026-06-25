@@ -33,8 +33,15 @@ export default function OnboardingSignupScreen() {
     if (!email.trim()) errs.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
       errs.email = "Please enter a valid email.";
-    if (!password) errs.password = "Password is required.";
-    else if (password.length < 8) errs.password = "Password must be at least 8 characters.";
+    if (!password) {
+      errs.password = "Password is required.";
+    } else if (password.length < 8) {
+      errs.password = "Password must be at least 8 characters.";
+    } else if (!/[A-Z]/.test(password)) {
+      errs.password = "Password must include at least 1 capital letter.";
+    } else if (!/[0-9]/.test(password)) {
+      errs.password = "Password must include at least 1 number.";
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -43,7 +50,7 @@ export default function OnboardingSignupScreen() {
     if (!validate()) return;
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
@@ -51,24 +58,33 @@ export default function OnboardingSignupScreen() {
           username: username.trim().replace(/^@/, ""),
           full_name: username.trim().replace(/^@/, ""),
         },
-        emailRedirectTo: "weglue://auth/callback",
+        emailRedirectTo: "https://weglue.app/auth/confirm",
       },
     });
 
     setLoading(false);
 
     if (error) {
-      setErrors({ general: error.message });
+      const msg =
+        error.message && error.message !== "{}" && !error.message.startsWith("{")
+          ? error.message
+          : "Something went wrong. Please try again.";
+      show(msg, "error");
       return;
     }
 
     setPendingUsername(username.trim().replace(/^@/, ""));
-    show("Account created! Check your email to verify.", "success");
 
-    // Small delay so toast is visible before navigating
-    setTimeout(() => {
+    if (data.session) {
+      // Email confirmation is OFF — user is logged in immediately
       router.push("/onboarding/profile-pic");
-    }, 1200);
+    } else {
+      // Email confirmation is ON — send to a waiting screen
+      router.push({
+        pathname: "/auth/verify-email",
+        params: { email: email.trim().toLowerCase(), from: "signup" },
+      });
+    }
   }
 
   return (
@@ -143,13 +159,10 @@ export default function OnboardingSignupScreen() {
               secureTextEntry
               autoComplete="new-password"
             />
-            {!!errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
-
-            {/* General error */}
-            {!!errors.general && (
-              <Text style={[styles.errorText, { textAlign: "center", marginTop: 8 }]}>
-                {errors.general}
-              </Text>
+            {!!errors.password ? (
+              <Text style={styles.errorText}>{errors.password}</Text>
+            ) : (
+              <Text style={styles.errorText}>Min. 8 characters, 1 capital letter, 1 number</Text>
             )}
 
             {/* Microsoft SSO (coming soon) */}
@@ -158,7 +171,12 @@ export default function OnboardingSignupScreen() {
               onPress={() => show("Coming soon!", "info")}
               activeOpacity={0.85}
             >
-              <Text style={styles.msIcon}>⊞</Text>
+              <View style={styles.msLogo}>
+                <View style={[styles.msSquare, { backgroundColor: "#F25022" }]} />
+                <View style={[styles.msSquare, { backgroundColor: "#7FBA00" }]} />
+                <View style={[styles.msSquare, { backgroundColor: "#00A4EF" }]} />
+                <View style={[styles.msSquare, { backgroundColor: "#FFB900" }]} />
+              </View>
               <Text style={styles.secondaryBtnText}>Continue with Microsoft</Text>
             </TouchableOpacity>
 
@@ -260,8 +278,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
-  msIcon: { fontSize: 16 },
+  msLogo: { flexDirection: "row", flexWrap: "wrap", width: 18, height: 18, gap: 1.5, marginRight: 2 },
+  msSquare: { width: 7.5, height: 7.5 },
   secondaryBtnText: { fontSize: 16, fontWeight: "600", color: "#000" },
+  hintText: { fontSize: 11, color: "#5F5D5D", marginTop: 4, marginLeft: 4 },
   tealLink: { fontSize: 12, color: "#0FA6A6", fontWeight: "600" },
   footerText: { fontSize: 12, color: "#5F5D5D" },
 });

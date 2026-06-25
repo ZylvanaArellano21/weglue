@@ -67,7 +67,7 @@ export default function LoginPage() {
         {/* Logo + Brand */}
         <div className="flex flex-col items-center mb-6">
           <div className="w-16 h-16 relative mb-2">
-            <Image src="/icon.png" alt="We Glue" fill style={{ objectFit: "contain" }} />
+            <Image src="/logo.png" alt="We Glue" fill style={{ objectFit: "contain" }} />
           </div>
           <h1 className="text-[30px] font-bold text-black" style={{ fontFamily: "var(--font-zain)" }}>
             We Glue
@@ -141,7 +141,10 @@ export default function LoginPage() {
             onClick={() => showToast("Coming soon!", "info")}
             className="w-full h-[52px] bg-white border border-black/20 rounded-[40px] font-semibold text-base text-black flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
           >
-            <span className="text-base">⊞</span>
+            <span className="grid grid-cols-2 gap-0.5 w-4 h-4 mr-1">
+              <span className="bg-[#F25022]" /><span className="bg-[#7FBA00]" />
+              <span className="bg-[#00A4EF]" /><span className="bg-[#FFB900]" />
+            </span>
             Continue with Microsoft
           </button>
 

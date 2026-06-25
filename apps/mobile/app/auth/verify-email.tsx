@@ -1,0 +1,164 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useAuthStore } from "@weglue/shared";
+import { supabase } from "../../lib/supabase";
+import { useToast } from "../../components/Toast";
+
+export default function VerifyEmailScreen() {
+  const router = useRouter();
+  const { email, from } = useLocalSearchParams<{ email: string; from?: string }>();
+  const { session } = useAuthStore();
+  const { show, ToastComponent } = useToast();
+  const [resending, setResending] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Navigate when the auth store session confirms email (triggered by deep link)
+  useEffect(() => {
+    if (session?.user?.email_confirmed_at) {
+      router.replace("/onboarding/profile-pic");
+    }
+  }, [session]);
+
+  // Poll every 4 seconds: handles same-device confirmation when session becomes active
+  useEffect(() => {
+    pollRef.current = setInterval(async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user?.email_confirmed_at) {
+        clearInterval(pollRef.current!);
+        router.replace("/onboarding/profile-pic");
+      }
+    }, 4000);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
+  }, []);
+
+  async function handleResend() {
+    if (!email || cooldown > 0) return;
+    setResending(true);
+    const { error } = await supabase.auth.resend({ type: "signup", email });
+    setResending(false);
+    if (error) {
+      show("Something went wrong. Please try again.", "error");
+    } else {
+      show("Verification email sent!", "success");
+      startCooldown(60);
+    }
+  }
+
+  function startCooldown(seconds: number) {
+    setCooldown(seconds);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(cooldownRef.current!);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
+
+  const resendLabel = cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email";
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {ToastComponent}
+      <View style={styles.content}>
+        <Text style={styles.emoji}>📧</Text>
+        <Text style={styles.title}>Check your inbox</Text>
+        <Text style={styles.subtitle}>We sent a verification link to</Text>
+        <Text style={styles.email}>{email}</Text>
+        <Text style={styles.instruction}>
+          Tap the link in the email to verify your account. Once verified,
+          you&apos;ll be taken to the next step automatically.
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.resendBtn, cooldown > 0 && styles.resendBtnDisabled]}
+          onPress={handleResend}
+          disabled={resending || cooldown > 0}
+          activeOpacity={0.8}
+        >
+          {resending ? (
+            <ActivityIndicator color="#0FA6A6" />
+          ) : (
+            <Text style={[styles.resendText, cooldown > 0 && styles.resendTextMuted]}>
+              {resendLabel}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => router.replace("/auth/login")}
+          style={{ marginTop: 12 }}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.loginLink}>Already verified? Log in</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#FEFCF0" },
+  content: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+  },
+  emoji: { fontSize: 56, marginBottom: 20 },
+  title: {
+    fontSize: 26,
+    fontFamily: "Zain_700Bold",
+    color: "#000",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  subtitle: { fontSize: 15, color: "#5F5D5D", textAlign: "center" },
+  email: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0FA6A6",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  instruction: {
+    fontSize: 13,
+    color: "#5F5D5D",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 32,
+  },
+  resendBtn: {
+    height: 48,
+    paddingHorizontal: 32,
+    borderRadius: 40,
+    borderWidth: 1.5,
+    borderColor: "#0FA6A6",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 160,
+  },
+  resendBtnDisabled: {
+    borderColor: "#C0C0C0",
+  },
+  resendText: { fontSize: 15, fontWeight: "600", color: "#0FA6A6" },
+  resendTextMuted: { color: "#C0C0C0" },
+  loginLink: { fontSize: 13, color: "#5F5D5D", textDecorationLine: "underline" },
+});
