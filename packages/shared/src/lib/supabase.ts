@@ -5,8 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 function getEnv(key: string, prefixes: string[]): string {
   for (const prefix of prefixes) {
     const value =
-      // @ts-expect-error — dynamic env access
-      typeof process !== "undefined" ? process.env[`${prefix}${key}`] : undefined;
+      typeof process !== "undefined" ? (process.env as Record<string, string | undefined>)[`${prefix}${key}`] : undefined;
     if (value) return value;
   }
   throw new Error(

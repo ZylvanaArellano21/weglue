@@ -53,8 +53,10 @@ export type NotificationType =
   | 'event_rsvp'
   | 'new_event'
   | 'new_message'
-  | 'gluemate';
-export type EntityType = 'event' | 'club' | 'message';
+  | 'gluemate'
+  | 'like'
+  | 'comment';
+export type EntityType = 'event' | 'club' | 'message' | 'post';
 export type RsvpStatus = 'going' | 'cant';
 
 // ---- Table Interfaces -----------------------------------------
@@ -215,6 +217,21 @@ export interface Post {
   created_at: string;
 }
 
+export interface PostLike {
+  id: string;
+  post_id: string;
+  user_id: string;
+  created_at: string;
+}
+
+export interface PostComment {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+}
+
 export interface Conversation {
   id: string;
   type: ConversationType;
@@ -334,6 +351,8 @@ export type Database = {
       event_rsvps:               { Row: EventRsvp;                Insert: Omit<EventRsvp, 'id' | 'created_at'>;                       Update: Partial<Omit<EventRsvp, 'id'>>; };
       saved_events:              { Row: SavedEvent;               Insert: Omit<SavedEvent, 'id' | 'saved_at'>;                        Update: Partial<Omit<SavedEvent, 'id'>>; };
       posts:                     { Row: Post;                     Insert: Omit<Post, 'id' | 'created_at'>;                            Update: Partial<Omit<Post, 'id'>>; };
+      post_likes:                { Row: PostLike;                 Insert: Omit<PostLike, 'id' | 'created_at'>;                        Update: Partial<Omit<PostLike, 'id'>>; };
+      post_comments:             { Row: PostComment;              Insert: Omit<PostComment, 'id' | 'created_at'>;                     Update: Partial<Omit<PostComment, 'id'>>; };
       conversations:             { Row: Conversation;             Insert: Omit<Conversation, 'id' | 'created_at'>;                    Update: Partial<Omit<Conversation, 'id'>>; };
       conversation_participants: { Row: ConversationParticipant;  Insert: Omit<ConversationParticipant, 'id' | 'joined_at'>;          Update: Partial<Omit<ConversationParticipant, 'id'>>; };
       conversation_channels:     { Row: ConversationChannel;      Insert: Omit<ConversationChannel, 'id'>;                            Update: Partial<Omit<ConversationChannel, 'id'>>; };
