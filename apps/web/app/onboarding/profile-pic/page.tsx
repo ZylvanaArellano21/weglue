@@ -83,7 +83,7 @@ export default function WebProfilePicPage() {
       await supabase.from("profiles").update({
         avatar_url: finalAvatarUrl,
         avatar_type: avatarFile ? "photo" : selectedPreset ? "preset" : null,
-        username: pendingUsername || user.email?.split("@")[0] ?? "user",
+        username: pendingUsername || (user.email?.split("@")[0] ?? "user"),
       }).eq("id", user.id);
 
       if (selectedInterests.length > 0) {

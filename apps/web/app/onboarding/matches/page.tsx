@@ -23,7 +23,9 @@ interface Club {
 
 function formatTime(t: string | null): string {
   if (!t) return "";
-  const [h, m] = t.split(":").map(Number);
+  const parts = t.split(":").map(Number);
+  const h = parts[0] ?? 0;
+  const m = parts[1] ?? 0;
   const period = h >= 12 ? "pm" : "am";
   const hour = h > 12 ? h - 12 : h || 12;
   return `${hour}:${String(m).padStart(2, "0")} ${period}`;
