@@ -4,6 +4,32 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import { validateEducationEmail } from "@weglue/shared";
+
+function mapSignUpError(error: { message: string; status?: number; code?: string }): string {
+  const msg = error.message.toLowerCase();
+  const code = (error.code ?? "").toLowerCase();
+
+  if (code === "user_already_exists" || msg.includes("user already registered") || msg.includes("already registered")) {
+    return "An account with this email already exists. Try logging in instead.";
+  }
+  if (code === "weak_password" || (msg.includes("password") && msg.includes("characters"))) {
+    return "Password must be at least 8 characters long.";
+  }
+  if (msg.includes("university") || msg.includes("educational") || msg.includes("school email")) {
+    return "Only university or college email addresses (.edu) are accepted. Please use your school email.";
+  }
+  if (msg.includes("confirmation") || msg.includes("confirm") || (msg.includes("send") && msg.includes("email"))) {
+    return "We couldn't send a confirmation email. Check your email address and try again.";
+  }
+  if (!navigator.onLine || msg.includes("network") || msg.includes("fetch") || msg.includes("connect")) {
+    return "No internet connection. Please check your network and try again.";
+  }
+  if (error.status && error.status >= 500) {
+    return "Our servers hit an issue. Wait a moment and try again. If this keeps happening, contact support.";
+  }
+  return `Something unexpected happened (Error: ${error.message}). Please try again or contact support.`;
+}
 
 export default function SignupPage() {
   const router = useRouter();
@@ -17,16 +43,40 @@ export default function SignupPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
+  function clearError(field: string) {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function validateEmailField(value: string) {
+    if (!value.trim()) return;
+    const result = validateEducationEmail(value.trim());
+    if (!result.valid) {
+      setErrors((prev) => ({ ...prev, email: result.reason! }));
+    } else {
+      clearError("email");
+    }
+  }
+
   function validate() {
     const errs: Record<string, string> = {};
     if (!fullName.trim()) errs.fullName = "Full name is required.";
     if (!username.trim()) errs.username = "Username is required.";
-    if (!email.trim()) errs.email = "Email is required.";
-    else if (!email.toLowerCase().endsWith(".edu"))
-      errs.email = "Must use a .edu email address.";
-    if (!password) errs.password = "Password is required.";
-    else if (password.length < 8)
-      errs.password = "Password must be at least 8 characters.";
+    if (!email.trim()) {
+      errs.email = "Email is required.";
+    } else {
+      const emailCheck = validateEducationEmail(email.trim());
+      if (!emailCheck.valid) errs.email = emailCheck.reason!;
+    }
+    if (!password) {
+      errs.password = "Password is required.";
+    } else if (password.length < 8) {
+      errs.password = "Password must be at least 8 characters long.";
+    }
     if (password !== confirmPassword)
       errs.confirmPassword = "Passwords do not match.";
     setErrors(errs);
@@ -50,7 +100,7 @@ export default function SignupPage() {
     });
     setLoading(false);
     if (error) {
-      setErrors({ general: error.message });
+      setErrors({ general: mapSignUpError(error) });
       return;
     }
     router.push("/auth/avatar");
@@ -74,11 +124,11 @@ export default function SignupPage() {
               type="text"
               placeholder="Full Name"
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              onChange={(e) => { setFullName(e.target.value); clearError("fullName"); }}
               className="w-full bg-white border border-gray-200 rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors"
             />
             {errors.fullName && (
-              <p className="text-red-500 text-xs mt-1 ml-4">{errors.fullName}</p>
+              <p className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>{errors.fullName}</p>
             )}
           </div>
 
@@ -88,11 +138,11 @@ export default function SignupPage() {
               type="text"
               placeholder="@username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => { setUsername(e.target.value); clearError("username"); }}
               className="w-full bg-white border border-gray-200 rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors"
             />
             {errors.username && (
-              <p className="text-red-500 text-xs mt-1 ml-4">{errors.username}</p>
+              <p className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>{errors.username}</p>
             )}
           </div>
 
@@ -102,11 +152,12 @@ export default function SignupPage() {
               type="email"
               placeholder="Email (.edu required)"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-white border border-gray-200 rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors"
+              onChange={(e) => { setEmail(e.target.value); clearError("email"); }}
+              onBlur={(e) => validateEmailField(e.target.value)}
+              className={`w-full bg-white border rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors ${errors.email ? "border-[#F02719]" : "border-gray-200"}`}
             />
             {errors.email && (
-              <p className="text-red-500 text-xs mt-1 ml-4">{errors.email}</p>
+              <p className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>{errors.email}</p>
             )}
           </div>
 
@@ -117,8 +168,8 @@ export default function SignupPage() {
                 type={showPassword ? "text" : "password"}
                 placeholder="Password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors pr-16"
+                onChange={(e) => { setPassword(e.target.value); clearError("password"); }}
+                className={`w-full bg-white border rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors pr-16 ${errors.password ? "border-[#F02719]" : "border-gray-200"}`}
               />
               <button
                 type="button"
@@ -129,7 +180,7 @@ export default function SignupPage() {
               </button>
             </div>
             {errors.password && (
-              <p className="text-red-500 text-xs mt-1 ml-4">{errors.password}</p>
+              <p className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>{errors.password}</p>
             )}
           </div>
 
@@ -140,8 +191,8 @@ export default function SignupPage() {
                 type={showConfirm ? "text" : "password"}
                 placeholder="Confirm Password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors pr-16"
+                onChange={(e) => { setConfirmPassword(e.target.value); clearError("confirmPassword"); }}
+                className={`w-full bg-white border rounded-full px-5 py-4 text-base text-gray-900 outline-none focus:border-teal transition-colors pr-16 ${errors.confirmPassword ? "border-[#F02719]" : "border-gray-200"}`}
               />
               <button
                 type="button"
@@ -152,12 +203,12 @@ export default function SignupPage() {
               </button>
             </div>
             {errors.confirmPassword && (
-              <p className="text-red-500 text-xs mt-1 ml-4">{errors.confirmPassword}</p>
+              <p className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>{errors.confirmPassword}</p>
             )}
           </div>
 
           {errors.general && (
-            <p className="text-red-500 text-sm text-center">{errors.general}</p>
+            <p className="text-sm text-center" style={{ color: "#F02719" }}>{errors.general}</p>
           )}
 
           <button

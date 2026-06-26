@@ -154,7 +154,7 @@ export function validateEducationEmail(email: string): EmailValidationResult {
     return {
       valid: false,
       reason:
-        "Please use your university or college email address to sign up.",
+        "Only university or college email addresses (.edu) are accepted. Please use your school email.",
     };
   }
 
@@ -166,7 +166,7 @@ export function validateEducationEmail(email: string): EmailValidationResult {
     return {
       valid: false,
       reason:
-        "Please use your university or college email address to sign up.",
+        "Only university or college email addresses (.edu) are accepted. Please use your school email.",
     };
   }
 

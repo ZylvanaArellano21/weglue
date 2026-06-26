@@ -15,6 +15,35 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
+import { validateEducationEmail } from "@weglue/shared";
+
+function mapSignInError(error: { message: string; status?: number; code?: string }): string {
+  const msg = error.message.toLowerCase();
+  const code = (error.code ?? "").toLowerCase();
+
+  if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
+    return "You haven't confirmed your email yet. Check your inbox for the confirmation link we sent you.";
+  }
+  if (code === "user_not_found" || msg.includes("user not found")) {
+    return "No account found with this email. Did you mean to sign up?";
+  }
+  if (code === "invalid_credentials" || msg.includes("invalid login credentials") || msg.includes("invalid credentials")) {
+    return "Incorrect password. Try again or use 'Forgot Password' to reset it.";
+  }
+  if (msg.includes("disabled") || code === "user_banned") {
+    return "This account has been disabled. Contact support for help.";
+  }
+  if (error.status === 429 || msg.includes("too many") || msg.includes("rate limit")) {
+    return "Too many failed login attempts. Please wait a few minutes and try again.";
+  }
+  if (error.status === 0 || msg.includes("network") || msg.includes("fetch") || msg.includes("connect")) {
+    return "No internet connection. Please check your network and try again.";
+  }
+  if (error.status && error.status >= 500) {
+    return "Our servers hit an issue. Wait a moment and try again.";
+  }
+  return `Something unexpected happened (Error: ${error.message}). Please try again or contact support.`;
+}
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -23,12 +52,45 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  function clearError(field: string) {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function validateEmailField(value: string) {
+    if (!value.trim()) return;
+    const result = validateEducationEmail(value.trim());
+    if (!result.valid) {
+      setErrors((prev) => ({ ...prev, email: result.reason! }));
+    } else {
+      clearError("email");
+    }
+  }
 
   async function handleLogin() {
-    if (!email.trim() || !password) {
-      show("Please fill in all fields.", "error");
+    const newErrors: Record<string, string> = {};
+
+    if (!email.trim()) {
+      newErrors.email = "Email is required.";
+    } else {
+      const emailCheck = validateEducationEmail(email.trim());
+      if (!emailCheck.valid) newErrors.email = emailCheck.reason!;
+    }
+    if (!password) {
+      newErrors.password = "Password is required.";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
       return;
     }
+
     setLoading(true);
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
@@ -37,11 +99,7 @@ export default function LoginScreen() {
     setLoading(false);
 
     if (error) {
-      if (error.message.toLowerCase().includes("email not confirmed")) {
-        show("Please verify your email before logging in.", "error");
-      } else {
-        show("Invalid email or password.", "error");
-      }
+      setErrors({ general: mapSignInError(error) });
       return;
     }
 
@@ -93,25 +151,29 @@ export default function LoginScreen() {
             {/* School Email */}
             <Text style={styles.label}>School Email</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, !!errors.email && styles.inputError]}
               placeholder="you@school.edu"
               placeholderTextColor="rgba(0,0,0,0.3)"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(v) => { setEmail(v); clearError("email"); clearError("general"); }}
+              onBlur={() => validateEmailField(email)}
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
             />
+            {!!errors.email && (
+              <Text style={styles.fieldError}>{errors.email}</Text>
+            )}
 
             {/* Password */}
             <Text style={[styles.label, { marginTop: 16 }]}>Password</Text>
-            <View style={styles.passwordRow}>
+            <View style={[styles.passwordRow, !!errors.password && styles.inputError]}>
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Enter your password"
                 placeholderTextColor="rgba(0,0,0,0.3)"
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(v) => { setPassword(v); clearError("password"); clearError("general"); }}
                 secureTextEntry={!showPassword}
                 autoComplete="current-password"
               />
@@ -119,10 +181,18 @@ export default function LoginScreen() {
                 <Text style={styles.showToggle}>{showPassword ? "Hide" : "Show"}</Text>
               </TouchableOpacity>
             </View>
+            {!!errors.password && (
+              <Text style={styles.fieldError}>{errors.password}</Text>
+            )}
+
+            {/* General error */}
+            {!!errors.general && (
+              <Text style={styles.generalError}>{errors.general}</Text>
+            )}
 
             {/* Log in button */}
             <TouchableOpacity
-              style={styles.primaryBtn}
+              style={[styles.primaryBtn, { marginTop: errors.password || errors.general ? 16 : 24 }]}
               onPress={handleLogin}
               disabled={loading}
               activeOpacity={0.85}
@@ -209,6 +279,21 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  inputError: {
+    borderColor: "#F02719",
+  },
+  fieldError: {
+    color: "#F02719",
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  generalError: {
+    color: "#F02719",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 12,
+  },
   passwordRow: {
     backgroundColor: "#FEFCF0",
     borderWidth: 1,
@@ -223,7 +308,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 3,
-    marginBottom: 24,
   },
   passwordInput: {
     flex: 1,

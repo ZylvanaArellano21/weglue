@@ -5,16 +5,34 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import { validateEducationEmail } from "@weglue/shared";
 
-function Toast({ message, type }: { message: string; type: "success" | "error" | "info" }) {
-  const bg = type === "error" ? "bg-[#F02719]" : type === "success" ? "bg-[#0FA6A6]" : "bg-gray-800";
-  return (
-    <div
-      className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 ${bg} text-white font-semibold text-sm px-5 py-3 rounded-xl shadow-lg animate-fade-in max-w-sm text-center`}
-    >
-      {message}
-    </div>
-  );
+function mapSignInError(error: { message: string; status?: number; code?: string }): string {
+  const msg = error.message.toLowerCase();
+  const code = (error.code ?? "").toLowerCase();
+
+  if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
+    return "You haven't confirmed your email yet. Check your inbox for the confirmation link we sent you.";
+  }
+  if (code === "user_not_found" || msg.includes("user not found")) {
+    return "No account found with this email. Did you mean to sign up?";
+  }
+  if (code === "invalid_credentials" || msg.includes("invalid login credentials") || msg.includes("invalid credentials")) {
+    return "Incorrect password. Try again or use 'Forgot Password' to reset it.";
+  }
+  if (msg.includes("disabled") || code === "user_banned") {
+    return "This account has been disabled. Contact support for help.";
+  }
+  if (error.status === 429 || msg.includes("too many") || msg.includes("rate limit")) {
+    return "Too many failed login attempts. Please wait a few minutes and try again.";
+  }
+  if (!navigator.onLine || msg.includes("network") || msg.includes("fetch") || msg.includes("connect")) {
+    return "No internet connection. Please check your network and try again.";
+  }
+  if (error.status && error.status >= 500) {
+    return "Our servers hit an issue. Wait a moment and try again.";
+  }
+  return `Something unexpected happened (Error: ${error.message}). Please try again or contact support.`;
 }
 
 export default function LoginPage() {
@@ -23,19 +41,45 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  function showToast(message: string, type: "success" | "error" | "info" = "error") {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+  function clearError(field: string) {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function validateEmailField(value: string) {
+    if (!value.trim()) return;
+    const result = validateEducationEmail(value.trim());
+    if (!result.valid) {
+      setErrors((prev) => ({ ...prev, email: result.reason! }));
+    } else {
+      clearError("email");
+    }
   }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim() || !password) {
-      showToast("Please fill in all fields.", "error");
+
+    const newErrors: Record<string, string> = {};
+    if (!email.trim()) {
+      newErrors.email = "Email is required.";
+    } else {
+      const emailCheck = validateEducationEmail(email.trim());
+      if (!emailCheck.valid) newErrors.email = emailCheck.reason!;
+    }
+    if (!password) {
+      newErrors.password = "Password is required.";
+    }
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
       return;
     }
+
     setLoading(true);
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({
@@ -43,21 +87,18 @@ export default function LoginPage() {
       password,
     });
     setLoading(false);
+
     if (error) {
-      if (error.message.toLowerCase().includes("email not confirmed")) {
-        showToast("Please verify your email before logging in.", "error");
-      } else {
-        showToast("Invalid email or password.", "error");
-      }
+      setErrors({ general: mapSignInError(error) });
       return;
     }
+
     router.push("/home");
     router.refresh();
   }
 
   return (
     <main className="min-h-screen bg-[#FEFCF0] flex items-center justify-center px-4">
-      {toast && <Toast message={toast.message} type={toast.type} />}
       <div className="w-full max-w-sm">
         {/* Back arrow */}
         <Link href="/" className="inline-flex items-center text-black mb-6 hover:opacity-70 transition-opacity">
@@ -82,10 +123,13 @@ export default function LoginPage() {
               type="email"
               placeholder="you@school.edu"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full bg-[#FEFCF0] border border-black/20 rounded-[10px] h-[53px] px-4 text-sm font-semibold text-black placeholder:text-black/30 outline-none focus:border-[#0FA6A6] shadow-[0px_4px_4px_rgba(0,0,0,0.25)] transition-colors"
+              onChange={(e) => { setEmail(e.target.value); clearError("email"); clearError("general"); }}
+              onBlur={(e) => validateEmailField(e.target.value)}
+              className={`w-full bg-[#FEFCF0] border rounded-[10px] h-[53px] px-4 text-sm font-semibold text-black placeholder:text-black/30 outline-none focus:border-[#0FA6A6] shadow-[0px_4px_4px_rgba(0,0,0,0.25)] transition-colors ${errors.email ? "border-[#F02719]" : "border-black/20"}`}
             />
+            {errors.email && (
+              <p className="text-xs mt-1 ml-1" style={{ color: "#F02719" }}>{errors.email}</p>
+            )}
           </div>
 
           {/* Password */}
@@ -96,9 +140,8 @@ export default function LoginPage() {
                 type={showPassword ? "text" : "password"}
                 placeholder="Enter your password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full bg-[#FEFCF0] border border-black/20 rounded-[10px] h-[53px] px-4 pr-16 text-sm font-semibold text-black placeholder:text-black/30 outline-none focus:border-[#0FA6A6] shadow-[0px_4px_4px_rgba(0,0,0,0.25)] transition-colors"
+                onChange={(e) => { setPassword(e.target.value); clearError("password"); clearError("general"); }}
+                className={`w-full bg-[#FEFCF0] border rounded-[10px] h-[53px] px-4 pr-16 text-sm font-semibold text-black placeholder:text-black/30 outline-none focus:border-[#0FA6A6] shadow-[0px_4px_4px_rgba(0,0,0,0.25)] transition-colors ${errors.password ? "border-[#F02719]" : "border-black/20"}`}
               />
               <button
                 type="button"
@@ -108,7 +151,15 @@ export default function LoginPage() {
                 {showPassword ? "Hide" : "Show"}
               </button>
             </div>
+            {errors.password && (
+              <p className="text-xs mt-1 ml-1" style={{ color: "#F02719" }}>{errors.password}</p>
+            )}
           </div>
+
+          {/* General error */}
+          {errors.general && (
+            <p className="text-sm text-center" style={{ color: "#F02719" }}>{errors.general}</p>
+          )}
 
           {/* Log in button */}
           <button
@@ -138,7 +189,7 @@ export default function LoginPage() {
           {/* Microsoft SSO */}
           <button
             type="button"
-            onClick={() => showToast("Coming soon!", "info")}
+            onClick={() => setErrors({ general: "Microsoft SSO coming soon!" })}
             className="w-full h-[52px] bg-white border border-black/20 rounded-[40px] font-semibold text-base text-black flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
           >
             <span className="grid grid-cols-2 gap-0.5 w-4 h-4 mr-1">

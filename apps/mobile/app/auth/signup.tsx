@@ -14,6 +14,31 @@ import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { validateEducationEmail } from "@weglue/shared";
 
+function mapSignUpError(error: { message: string; status?: number; code?: string }): string {
+  const msg = error.message.toLowerCase();
+  const code = (error.code ?? "").toLowerCase();
+
+  if (code === "user_already_exists" || msg.includes("user already registered") || msg.includes("already registered")) {
+    return "An account with this email already exists. Try logging in instead.";
+  }
+  if (code === "weak_password" || msg.includes("password") && msg.includes("characters")) {
+    return "Password must be at least 8 characters long.";
+  }
+  if (msg.includes("university") || msg.includes("educational") || msg.includes("school email")) {
+    return "Only university or college email addresses (.edu) are accepted. Please use your school email.";
+  }
+  if (msg.includes("confirmation") || msg.includes("confirm") || msg.includes("send")) {
+    return "We couldn't send a confirmation email. Check your email address and try again.";
+  }
+  if (error.status === 0 || msg.includes("network") || msg.includes("fetch") || msg.includes("connect")) {
+    return "No internet connection. Please check your network and try again.";
+  }
+  if (error.status && error.status >= 500) {
+    return "Our servers hit an issue. Wait a moment and try again. If this keeps happening, contact support.";
+  }
+  return `Something unexpected happened (Error: ${error.message}). Please try again or contact support.`;
+}
+
 export default function SignupScreen() {
   const router = useRouter();
   const [fullName, setFullName] = useState("");
@@ -26,6 +51,28 @@ export default function SignupScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
+  function clearError(field: string) {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function validateEmailField(value: string) {
+    if (!value.trim()) {
+      setErrors((prev) => ({ ...prev, email: "Email is required." }));
+      return;
+    }
+    const result = validateEducationEmail(value.trim());
+    if (!result.valid) {
+      setErrors((prev) => ({ ...prev, email: result.reason! }));
+    } else {
+      clearError("email");
+    }
+  }
+
   function validate() {
     const errs: Record<string, string> = {};
     if (!fullName.trim()) errs.fullName = "Full name is required.";
@@ -36,9 +83,11 @@ export default function SignupScreen() {
       const emailCheck = validateEducationEmail(email.trim());
       if (!emailCheck.valid) errs.email = emailCheck.reason!;
     }
-    if (!password) errs.password = "Password is required.";
-    else if (password.length < 8)
-      errs.password = "Password must be at least 8 characters.";
+    if (!password) {
+      errs.password = "Password is required.";
+    } else if (password.length < 8) {
+      errs.password = "Password must be at least 8 characters long.";
+    }
     if (password !== confirmPassword)
       errs.confirmPassword = "Passwords do not match.";
     setErrors(errs);
@@ -61,7 +110,7 @@ export default function SignupScreen() {
     });
     setLoading(false);
     if (error) {
-      setErrors({ general: error.message });
+      setErrors({ general: mapSignUpError(error) });
       return;
     }
     if (data.session) {
@@ -107,11 +156,11 @@ export default function SignupScreen() {
                 placeholder="Full Name"
                 placeholderTextColor="#9CA3AF"
                 value={fullName}
-                onChangeText={setFullName}
+                onChangeText={(v) => { setFullName(v); clearError("fullName"); }}
                 autoComplete="name"
               />
               {!!errors.fullName && (
-                <Text className="text-red-500 text-xs mt-1 ml-4">
+                <Text className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>
                   {errors.fullName}
                 </Text>
               )}
@@ -124,12 +173,12 @@ export default function SignupScreen() {
                 placeholder="@username"
                 placeholderTextColor="#9CA3AF"
                 value={username}
-                onChangeText={setUsername}
+                onChangeText={(v) => { setUsername(v); clearError("username"); }}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
               {!!errors.username && (
-                <Text className="text-red-500 text-xs mt-1 ml-4">
+                <Text className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>
                   {errors.username}
                 </Text>
               )}
@@ -142,13 +191,14 @@ export default function SignupScreen() {
                 placeholder="Email (.edu required)"
                 placeholderTextColor="#9CA3AF"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(v) => { setEmail(v); clearError("email"); }}
+                onBlur={() => validateEmailField(email)}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
               />
               {!!errors.email && (
-                <Text className="text-red-500 text-xs mt-1 ml-4">
+                <Text className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>
                   {errors.email}
                 </Text>
               )}
@@ -162,7 +212,7 @@ export default function SignupScreen() {
                   placeholder="Password"
                   placeholderTextColor="#9CA3AF"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(v) => { setPassword(v); clearError("password"); }}
                   secureTextEntry={!showPassword}
                   autoComplete="new-password"
                 />
@@ -173,7 +223,7 @@ export default function SignupScreen() {
                 </TouchableOpacity>
               </View>
               {!!errors.password && (
-                <Text className="text-red-500 text-xs mt-1 ml-4">
+                <Text className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>
                   {errors.password}
                 </Text>
               )}
@@ -187,7 +237,7 @@ export default function SignupScreen() {
                   placeholder="Confirm Password"
                   placeholderTextColor="#9CA3AF"
                   value={confirmPassword}
-                  onChangeText={setConfirmPassword}
+                  onChangeText={(v) => { setConfirmPassword(v); clearError("confirmPassword"); }}
                   secureTextEntry={!showConfirm}
                   autoComplete="new-password"
                 />
@@ -198,7 +248,7 @@ export default function SignupScreen() {
                 </TouchableOpacity>
               </View>
               {!!errors.confirmPassword && (
-                <Text className="text-red-500 text-xs mt-1 ml-4">
+                <Text className="text-xs mt-1 ml-4" style={{ color: "#F02719" }}>
                   {errors.confirmPassword}
                 </Text>
               )}
@@ -206,7 +256,7 @@ export default function SignupScreen() {
 
             {/* General error */}
             {!!errors.general && (
-              <Text className="text-red-500 text-sm text-center mb-4">
+              <Text className="text-sm text-center mb-4" style={{ color: "#F02719" }}>
                 {errors.general}
               </Text>
             )}
