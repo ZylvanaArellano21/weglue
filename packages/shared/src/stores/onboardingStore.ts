@@ -5,6 +5,7 @@ interface OnboardingState {
   selectedActivities: string[];
   matchCount: number;
   pendingUsername: string;
+  pendingEmail: string;
 
   setSelectedInterests: (interests: string[]) => void;
   toggleInterest: (interest: string) => void;
@@ -12,6 +13,7 @@ interface OnboardingState {
   toggleActivity: (activity: string) => void;
   setMatchCount: (count: number) => void;
   setPendingUsername: (username: string) => void;
+  setPendingEmail: (email: string) => void;
   reset: () => void;
 }
 
@@ -20,6 +22,7 @@ const initialState = {
   selectedActivities: [] as string[],
   matchCount: 0,
   pendingUsername: "",
+  pendingEmail: "",
 };
 
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
@@ -48,6 +51,8 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   setMatchCount: (matchCount) => set({ matchCount }),
 
   setPendingUsername: (pendingUsername) => set({ pendingUsername }),
+
+  setPendingEmail: (pendingEmail) => set({ pendingEmail }),
 
   reset: () => set(initialState),
 }));
