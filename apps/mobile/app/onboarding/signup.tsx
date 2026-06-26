@@ -28,6 +28,7 @@ export default function OnboardingSignupScreen() {
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState<{ valid: boolean; reason?: string } | null>(null);
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
@@ -49,6 +50,19 @@ export default function OnboardingSignupScreen() {
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
+  }
+
+  function handleEmailChange(text: string) {
+    setEmail(text);
+    if (!text.includes("@")) {
+      setEmailFeedback(null);
+      return;
+    }
+    const result = validateEducationEmail(text.trim());
+    setEmailFeedback({ valid: result.valid, reason: result.reason });
+    if (result.valid) {
+      setErrors((prev) => { const next = { ...prev }; delete next.email; return next; });
+    }
   }
 
   async function handleNext() {
@@ -141,18 +155,33 @@ export default function OnboardingSignupScreen() {
             {!!errors.username && <Text style={styles.errorText}>{errors.username}</Text>}
 
             {/* School Email */}
-            <Text style={[styles.label, { marginTop: 16 }]}>Lone Star Email</Text>
-            <TextInput
-              style={[styles.input, !!errors.email && styles.inputError]}
-              placeholder="you@school.edu"
-              placeholderTextColor="rgba(0,0,0,0.3)"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-            />
-            {!!errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
+            <Text style={[styles.label, { marginTop: 16 }]}>School Email</Text>
+            <View style={{ position: "relative" }}>
+              <TextInput
+                style={[
+                  styles.input,
+                  (!!errors.email || (emailFeedback !== null && !emailFeedback.valid)) && styles.inputError,
+                  emailFeedback?.valid && styles.inputValid,
+                ]}
+                placeholder="yourname@university.edu"
+                placeholderTextColor="rgba(0,0,0,0.3)"
+                value={email}
+                onChangeText={handleEmailChange}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+              />
+              {emailFeedback?.valid && (
+                <View style={styles.inputCheckmark} pointerEvents="none">
+                  <Text style={{ color: "#0FA6A6", fontSize: 16, fontWeight: "700" }}>✓</Text>
+                </View>
+              )}
+            </View>
+            {(!!errors.email || (emailFeedback !== null && !emailFeedback.valid && !errors.email)) && (
+              <Text style={styles.errorText}>
+                {errors.email || "Please use your university or college email (.edu or equivalent)"}
+              </Text>
+            )}
 
             {/* Password */}
             <Text style={[styles.label, { marginTop: 16 }]}>Password</Text>
@@ -197,9 +226,13 @@ export default function OnboardingSignupScreen() {
 
             {/* Next button */}
             <TouchableOpacity
-              style={[styles.primaryBtn, { marginTop: 16 }, loading && { opacity: 0.7 }]}
+              style={[
+                styles.primaryBtn,
+                { marginTop: 16 },
+                (loading || (emailFeedback !== null && !emailFeedback.valid)) && styles.primaryBtnDisabled,
+              ]}
               onPress={handleNext}
-              disabled={loading}
+              disabled={loading || (emailFeedback !== null && !emailFeedback.valid)}
               activeOpacity={0.85}
             >
               {loading ? (
@@ -268,6 +301,15 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   inputError: { borderColor: "#F02719" },
+  inputValid: { borderColor: "#0FA6A6" },
+  inputCheckmark: {
+    position: "absolute",
+    right: 14,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+  },
+  primaryBtnDisabled: { opacity: 0.5 },
   errorText: { fontSize: 11, color: "#F02719", marginTop: 4, marginLeft: 4 },
   primaryBtn: {
     height: 52,
