@@ -1,4 +1,5 @@
 import { View, Image } from 'react-native';
+import { parsePresetColor } from './Avatar';
 
 interface AvatarItem {
   id: string;
@@ -36,13 +37,19 @@ export function AvatarStack({ avatars, size = 28, overlap = 8, maxCount = 4 }: A
             zIndex: i,
           }}
         >
-          {a.avatar_url ? (
+          {a.avatar_url && !parsePresetColor(a.avatar_url) ? (
             <Image
               source={{ uri: a.avatar_url }}
               style={{ width: size, height: size }}
             />
           ) : (
-            <View style={{ width: size, height: size, backgroundColor: '#0FA6A6' }} />
+            <View
+              style={{
+                width: size,
+                height: size,
+                backgroundColor: parsePresetColor(a.avatar_url) ?? '#0FA6A6',
+              }}
+            />
           )}
         </View>
       ))}

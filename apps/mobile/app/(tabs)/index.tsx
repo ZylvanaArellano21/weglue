@@ -16,6 +16,7 @@ import { useOfficerStore } from '../../store/officerStore';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
 import { getUserOfficerStatus } from '../../services/clubService';
+import { parsePresetColor } from '../../components/shared/Avatar';
 
 type ActiveTab = 'posts' | 'events';
 
@@ -86,32 +87,10 @@ export default function HomeScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
             {/* Avatar */}
             <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8}>
-              {profile?.avatar_url ? (
-                <Image
-                  source={{ uri: profile.avatar_url }}
-                  style={{
-                    width: 46,
-                    height: 46,
-                    borderRadius: 23,
-                    backgroundColor: '#E5E7EB',
-                  }}
-                />
-              ) : (
-                <View
-                  style={{
-                    width: 46,
-                    height: 46,
-                    borderRadius: 23,
-                    backgroundColor: '#0FA6A6',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
-                    {firstName.slice(0, 1).toUpperCase()}
-                  </Text>
-                </View>
-              )}
+              <HeaderAvatar
+                avatarUrl={profile?.avatar_url ?? null}
+                initial={firstName.slice(0, 1).toUpperCase() || '?'}
+              />
             </TouchableOpacity>
 
             <View style={{ flex: 1 }} />
@@ -291,5 +270,65 @@ export default function HomeScreen() {
         </View>
       </SafeAreaView>
     </TouchableWithoutFeedback>
+  );
+}
+
+// ─── HeaderAvatar ─────────────────────────────────────────────────────────────
+// Renders the user's own avatar in the home header, handling preset: color URLs
+// that would crash RCTImageLoader if passed directly to <Image source={{ uri }} />.
+
+interface HeaderAvatarProps {
+  avatarUrl: string | null;
+  initial: string;
+}
+
+function HeaderAvatar({ avatarUrl, initial }: HeaderAvatarProps) {
+  const presetColor = parsePresetColor(avatarUrl);
+
+  const baseStyle = {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+  };
+
+  if (presetColor) {
+    return (
+      <View
+        style={[
+          baseStyle,
+          {
+            backgroundColor: presetColor,
+            alignItems: 'center' as const,
+            justifyContent: 'center' as const,
+          },
+        ]}
+      >
+        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>{initial}</Text>
+      </View>
+    );
+  }
+
+  if (avatarUrl) {
+    return (
+      <Image
+        source={{ uri: avatarUrl }}
+        style={[baseStyle, { backgroundColor: '#E5E7EB' }]}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={[
+        baseStyle,
+        {
+          backgroundColor: '#0FA6A6',
+          alignItems: 'center' as const,
+          justifyContent: 'center' as const,
+        },
+      ]}
+    >
+      <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>{initial}</Text>
+    </View>
   );
 }
