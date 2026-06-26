@@ -245,3 +245,121 @@ export async function getUserOfficerClubs(userId: string): Promise<UserClub[]> {
     avatar_url: m.clubs.avatar_url,
   }));
 }
+
+// ─── Club Management (Officers only) ─────────────────────────────────────────
+
+export interface UpdateClubInput {
+  name?: string;
+  description?: string;
+  avatar_url?: string;
+  banner_url?: string;
+  meeting_day?: string | null;
+  meeting_time_start?: string | null;
+  meeting_time_end?: string | null;
+  meeting_location?: string | null;
+  meeting_building?: string | null;
+  meeting_room?: string | null;
+}
+
+export async function updateClubProfile(
+  clubId: string,
+  data: UpdateClubInput,
+): Promise<void> {
+  const { error } = await supabase
+    .from('clubs')
+    .update(data)
+    .eq('id', clubId);
+
+  if (error) throw error;
+}
+
+export async function addOfficer(
+  clubId: string,
+  userId: string,
+  roleTitle: string,
+  displayName: string,
+): Promise<void> {
+  // Elevate to officer in club_members
+  const { error: memberError } = await supabase
+    .from('club_members')
+    .upsert(
+      { club_id: clubId, user_id: userId, role: 'officer' },
+      { onConflict: 'club_id,user_id' },
+    );
+
+  if (memberError) throw memberError;
+
+  // Upsert into club_officers for display
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', userId)
+    .single();
+
+  const { error: officerError } = await supabase.from('club_officers').upsert(
+    {
+      club_id: clubId,
+      user_id: userId,
+      role_title: roleTitle,
+      display_name: displayName,
+      avatar_url: profile?.avatar_url ?? null,
+    },
+    { onConflict: 'club_id,user_id' },
+  );
+
+  if (officerError) throw officerError;
+}
+
+export async function removeOfficer(clubId: string, userId: string): Promise<void> {
+  // Downgrade to member
+  const { error: memberError } = await supabase
+    .from('club_members')
+    .update({ role: 'member' })
+    .eq('club_id', clubId)
+    .eq('user_id', userId);
+
+  if (memberError) throw memberError;
+
+  // Remove from club_officers display table
+  await supabase
+    .from('club_officers')
+    .delete()
+    .eq('club_id', clubId)
+    .eq('user_id', userId);
+}
+
+export async function deleteClub(clubId: string): Promise<void> {
+  const { error } = await supabase
+    .from('clubs')
+    .update({ is_active: false })
+    .eq('id', clubId);
+
+  if (error) throw error;
+}
+
+export async function uploadClubPhoto(
+  clubId: string,
+  photoUrl: string,
+  uploadedBy: string,
+  caption?: string,
+): Promise<void> {
+  const { error } = await supabase.from('club_photos').insert({
+    club_id: clubId,
+    url: photoUrl,
+    uploaded_by: uploadedBy,
+    source: 'officer_upload',
+    caption: caption ?? null,
+    is_visible: true,
+  });
+
+  if (error) throw error;
+}
+
+export async function deleteClubPhoto(photoId: string): Promise<void> {
+  const { error } = await supabase
+    .from('club_photos')
+    .update({ is_visible: false })
+    .eq('id', photoId);
+
+  if (error) throw error;
+}
