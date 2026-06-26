@@ -78,6 +78,11 @@ export default function VerifyEmailScreen() {
   return (
     <SafeAreaView style={styles.container}>
       {ToastComponent}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backArrow}>‹</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.content}>
         {/* Logo icon */}
         <Image
@@ -117,6 +122,9 @@ export default function VerifyEmailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FEFCF0" },
+  topBar: { paddingHorizontal: 20, paddingTop: 8 },
+  backBtn: { width: 40, height: 40, justifyContent: "center" },
+  backArrow: { fontSize: 30, color: "#000", lineHeight: 36 },
   content: {
     flex: 1,
     alignItems: "center",
