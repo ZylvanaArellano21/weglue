@@ -33,7 +33,7 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
   };
 
   const handlePressClub = () => {
-    router.push({ pathname: '/club/[clubId]', params: { clubId: event.club_id } });
+    router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: event.club_id } });
   };
 
   const handlePressAttendees = () => {

@@ -217,7 +217,7 @@ export default function UserProfileScreen() {
               {profile.club_roles.map((role) => (
                 <TouchableOpacity
                   key={role.club_id}
-                  onPress={() => router.push({ pathname: '/club/[clubId]', params: { clubId: role.club_id } })}
+                  onPress={() => router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: role.club_id } })}
                   activeOpacity={0.7}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
                 >

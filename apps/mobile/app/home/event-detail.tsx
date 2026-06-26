@@ -91,7 +91,7 @@ export default function EventDetailScreen() {
 
   const handlePressClub = () => {
     if (event?.club_id) {
-      router.push({ pathname: '/club/[clubId]', params: { clubId: event.club_id } });
+      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: event.club_id } });
     }
   };
 

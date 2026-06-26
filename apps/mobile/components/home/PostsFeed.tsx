@@ -45,7 +45,7 @@ function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
 
   const handlePressClub = () => {
     if (post.tagged_club) {
-      router.push({ pathname: '/club/[clubId]', params: { clubId: post.tagged_club.id } });
+      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: post.tagged_club.id } });
     }
   };
 
