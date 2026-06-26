@@ -171,13 +171,22 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
             </>
           ) : (
             <>
-              <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6 bg-red-100">
+              <div
+                className="flex items-center justify-center mb-6"
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: "50%",
+                  border: "3px solid #F02719",
+                  backgroundColor: "rgba(240,39,25,0.08)",
+                }}
+              >
                 <svg
-                  width="36"
-                  height="36"
+                  width="32"
+                  height="32"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="#EF4444"
+                  stroke="#F02719"
                   strokeWidth="3"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -188,26 +197,28 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
               </div>
 
               <h1
-                className="font-zain text-2xl font-bold mb-2"
-                style={{ color: "#111" }}
+                className="font-zain text-3xl font-bold mb-2"
+                style={{ color: "#1a1a1a" }}
               >
-                Verification failed
+                Confirmation link expired
               </h1>
-              <p className="text-sm mb-8" style={{ color: "#5F5D5D" }}>
-                {errorMessage ||
-                  "This link may have expired or already been used."}
+              <p className="text-sm mb-10" style={{ color: "#5F5D5D" }}>
+                Please request a new confirmation email
               </p>
 
               <a
-                href="/auth/verify-email"
-                className="w-full h-12 rounded-full font-semibold border-2 text-sm transition-colors hover:bg-teal-50 flex items-center justify-center"
+                href="weglue://signup"
+                className="w-full rounded-full font-semibold text-white text-base py-4 transition-opacity hover:opacity-90 text-center block"
                 style={{
-                  borderColor: "#0FA6A6",
-                  color: "#0FA6A6",
+                  backgroundColor: "#0FA6A6",
+                  maxWidth: 320,
+                  lineHeight: "1.5rem",
+                  paddingTop: "1rem",
+                  paddingBottom: "1rem",
                   textDecoration: "none",
                 }}
               >
-                Resend verification email
+                Back to sign up
               </a>
             </>
           )}
