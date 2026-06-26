@@ -91,7 +91,6 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="home" />
         <Stack.Screen name="profile" />
-        <Stack.Screen name="club" />
       </Stack>
     </QueryClientProvider>
   );
