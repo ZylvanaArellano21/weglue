@@ -1,3 +1,5 @@
+export * from "./validateEducationEmail";
+
 // ─── String utilities ─────────────────────────────────────────────────────────
 
 export function capitalize(str: string): string {

@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { validateEducationEmail } from "@weglue/shared";
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -29,9 +30,12 @@ export default function SignupScreen() {
     const errs: Record<string, string> = {};
     if (!fullName.trim()) errs.fullName = "Full name is required.";
     if (!username.trim()) errs.username = "Username is required.";
-    if (!email.trim()) errs.email = "Email is required.";
-    else if (!email.toLowerCase().endsWith(".edu"))
-      errs.email = "Must use a .edu email address.";
+    if (!email.trim()) {
+      errs.email = "Email is required.";
+    } else {
+      const emailCheck = validateEducationEmail(email.trim());
+      if (!emailCheck.valid) errs.email = emailCheck.reason!;
+    }
     if (!password) errs.password = "Password is required.";
     else if (password.length < 8)
       errs.password = "Password must be at least 8 characters.";

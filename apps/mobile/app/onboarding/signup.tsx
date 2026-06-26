@@ -13,16 +13,18 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
-import { useOnboardingStore } from "@weglue/shared";
+import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 
 export default function OnboardingSignupScreen() {
   const router = useRouter();
-  const { matchCount, setPendingUsername } = useOnboardingStore();
+  const { matchCount, setPendingUsername, setPendingEmail, pendingUsername, pendingEmail } =
+    useOnboardingStore();
   const { show, ToastComponent } = useToast();
 
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
+  // Restore username/email from store so back navigation preserves the form
+  const [username, setUsername] = useState(pendingUsername);
+  const [email, setEmail] = useState(pendingEmail);
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -30,9 +32,12 @@ export default function OnboardingSignupScreen() {
   function validate(): boolean {
     const errs: Record<string, string> = {};
     if (!username.trim()) errs.username = "Username is required.";
-    if (!email.trim()) errs.email = "Email is required.";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
-      errs.email = "Please enter a valid email.";
+    if (!email.trim()) {
+      errs.email = "Email is required.";
+    } else {
+      const emailCheck = validateEducationEmail(email.trim());
+      if (!emailCheck.valid) errs.email = emailCheck.reason!;
+    }
     if (!password) {
       errs.password = "Password is required.";
     } else if (password.length < 8) {
@@ -74,6 +79,7 @@ export default function OnboardingSignupScreen() {
     }
 
     setPendingUsername(username.trim().replace(/^@/, ""));
+    setPendingEmail(email.trim().toLowerCase());
 
     if (data.session) {
       // Email confirmation is OFF — user is logged in immediately
