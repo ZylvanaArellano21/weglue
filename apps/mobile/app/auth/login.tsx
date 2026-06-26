@@ -52,7 +52,7 @@ export default function LoginScreen() {
         .eq("user_id", data.user.id)
         .limit(1);
       if ((interests?.length ?? 0) > 0) {
-        router.replace("/(tabs)/home");
+        router.replace("/(tabs)");
       } else {
         router.replace("/onboarding/interests");
       }

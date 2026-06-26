@@ -1,5 +1,6 @@
 import { Tabs, Redirect } from "expo-router";
 import { ActivityIndicator, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
 
 export default function TabsLayout() {
@@ -13,10 +14,8 @@ export default function TabsLayout() {
     );
   }
 
-  // No session → Welcome screen
   if (!session) return <Redirect href="/" />;
 
-  // Email not confirmed → verification waiting screen
   if (!session.user.email_confirmed_at) {
     return (
       <Redirect
@@ -28,21 +27,63 @@ export default function TabsLayout() {
     );
   }
 
-  // Profile picture not set → must complete that step before accessing the main app
   if (!profile?.avatar_url) return <Redirect href="/onboarding/profile-pic" />;
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: "#FEFCF0", borderTopColor: "#E5E7EB" },
-        tabBarActiveTintColor: "#0FA6A6",
-        tabBarInactiveTintColor: "#9CA3AF",
+        tabBarStyle: {
+          backgroundColor: "#0FA6A6",
+          borderTopWidth: 0,
+          height: 60,
+          paddingBottom: 8,
+          paddingTop: 4,
+        },
+        tabBarActiveTintColor: "#fff",
+        tabBarInactiveTintColor: "rgba(255,255,255,0.6)",
+        tabBarShowLabel: false,
       }}
     >
       <Tabs.Screen
-        name="home"
-        options={{ title: "Home", tabBarLabel: "Home" }}
+        name="index"
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="clubs"
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="search" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="messages"
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="chatbubble-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="calendar"
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar-outline" size={size} color={color} />
+          ),
+        }}
       />
     </Tabs>
   );

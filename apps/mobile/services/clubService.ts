@@ -18,3 +18,230 @@ export async function getUserOfficerStatus(userId: string): Promise<OfficerStatu
     officerClubIds,
   };
 }
+
+export interface ClubGoal {
+  id: string;
+  goal_text: string;
+  display_order: number;
+}
+
+export interface ClubOfficer {
+  id: string;
+  user_id: string | null;
+  display_name: string;
+  role_title: string;
+  avatar_url: string | null;
+}
+
+export interface ClubUpcomingEvent {
+  id: string;
+  title: string;
+  emoji: string | null;
+  cover_image_url: string | null;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  location: string | null;
+}
+
+export interface ClubPhoto {
+  id: string;
+  url: string;
+}
+
+export interface ClubGluemate {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+}
+
+export interface ClubProfileData {
+  id: string;
+  name: string;
+  handle: string;
+  description: string;
+  avatar_url: string | null;
+  banner_url: string | null;
+  meeting_day: string | null;
+  meeting_time_start: string | null;
+  meeting_time_end: string | null;
+  meeting_location: string | null;
+  meeting_building: string | null;
+  meeting_room: string | null;
+  member_count: number;
+  is_member: boolean;
+  goals: ClubGoal[];
+  officers: ClubOfficer[];
+  upcoming_events: ClubUpcomingEvent[];
+  photos: ClubPhoto[];
+  gluemates: ClubGluemate[];
+  gluemates_count: number;
+}
+
+export async function getClubProfile(
+  clubId: string,
+  userId: string,
+): Promise<ClubProfileData | null> {
+  const [
+    { data: club },
+    { count: memberCount },
+    { data: membership },
+    { data: goals },
+    { data: officerRows },
+    { data: eventRows },
+    { data: photoRows },
+  ] = await Promise.all([
+    supabase
+      .from('clubs')
+      .select('id, name, handle, description, avatar_url, banner_url, meeting_day, meeting_time_start, meeting_time_end, meeting_location, meeting_building, meeting_room')
+      .eq('id', clubId)
+      .single(),
+    supabase
+      .from('club_members')
+      .select('id', { count: 'exact', head: true })
+      .eq('club_id', clubId),
+    supabase
+      .from('club_members')
+      .select('id')
+      .eq('club_id', clubId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+    supabase
+      .from('club_goals')
+      .select('id, goal_text, display_order')
+      .eq('club_id', clubId)
+      .order('display_order'),
+    supabase
+      .from('club_officers')
+      .select('id, user_id, display_name, role_title, profiles(avatar_url)')
+      .eq('club_id', clubId),
+    supabase
+      .from('events')
+      .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location')
+      .eq('club_id', clubId)
+      .gte('event_date', new Date().toISOString().split('T')[0])
+      .order('event_date', { ascending: true })
+      .limit(5),
+    supabase
+      .from('club_photos')
+      .select('id, url')
+      .eq('club_id', clubId)
+      .order('created_at', { ascending: false })
+      .limit(9),
+  ]);
+
+  if (!club) return null;
+
+  const gluemates = await getClubGluemates(clubId, userId);
+
+  const officers: ClubOfficer[] = ((officerRows ?? []) as any[]).map((o) => ({
+    id: o.id,
+    user_id: o.user_id,
+    display_name: o.display_name,
+    role_title: o.role_title,
+    avatar_url: o.profiles?.avatar_url ?? null,
+  }));
+
+  return {
+    id: club.id,
+    name: club.name,
+    handle: club.handle,
+    description: club.description,
+    avatar_url: club.avatar_url,
+    banner_url: club.banner_url,
+    meeting_day: club.meeting_day,
+    meeting_time_start: club.meeting_time_start,
+    meeting_time_end: club.meeting_time_end,
+    meeting_location: club.meeting_location,
+    meeting_building: club.meeting_building,
+    meeting_room: club.meeting_room,
+    member_count: memberCount ?? 0,
+    is_member: !!membership,
+    goals: (goals ?? []) as ClubGoal[],
+    officers,
+    upcoming_events: ((eventRows ?? []) as any[]).map((e) => ({
+      id: e.id,
+      title: e.title,
+      emoji: e.emoji,
+      cover_image_url: e.cover_image_url,
+      event_date: e.event_date,
+      start_time: e.start_time,
+      end_time: e.end_time,
+      location: e.location,
+    })),
+    photos: (photoRows ?? []) as ClubPhoto[],
+    gluemates: gluemates.slice(0, 4),
+    gluemates_count: gluemates.length,
+  };
+}
+
+async function getClubGluemates(clubId: string, userId: string): Promise<ClubGluemate[]> {
+  const { data: following } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', userId)
+    .eq('status', 'accepted');
+
+  if (!following || following.length === 0) return [];
+
+  const followingIds = following.map((r: any) => r.following_id);
+
+  const { data: members } = await supabase
+    .from('club_members')
+    .select('user_id, profiles!inner(id, username, avatar_url)')
+    .eq('club_id', clubId)
+    .in('user_id', followingIds);
+
+  return ((members ?? []) as any[]).map((m) => ({
+    id: m.profiles.id,
+    username: m.profiles.username,
+    avatar_url: m.profiles.avatar_url,
+  }));
+}
+
+export async function joinClub(userId: string, clubId: string): Promise<void> {
+  await supabase
+    .from('club_members')
+    .upsert({ user_id: userId, club_id: clubId, role: 'member' }, { onConflict: 'club_id,user_id' });
+}
+
+export async function leaveClub(userId: string, clubId: string): Promise<void> {
+  await supabase
+    .from('club_members')
+    .delete()
+    .eq('user_id', userId)
+    .eq('club_id', clubId);
+}
+
+export interface UserClub {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+}
+
+export async function getUserMemberClubs(userId: string): Promise<UserClub[]> {
+  const { data } = await supabase
+    .from('club_members')
+    .select('clubs!inner(id, name, avatar_url)')
+    .eq('user_id', userId);
+
+  return ((data ?? []) as any[]).map((m) => ({
+    id: m.clubs.id,
+    name: m.clubs.name,
+    avatar_url: m.clubs.avatar_url,
+  }));
+}
+
+export async function getUserOfficerClubs(userId: string): Promise<UserClub[]> {
+  const { data } = await supabase
+    .from('club_members')
+    .select('clubs!inner(id, name, avatar_url)')
+    .eq('user_id', userId)
+    .eq('role', 'officer');
+
+  return ((data ?? []) as any[]).map((m) => ({
+    id: m.clubs.id,
+    name: m.clubs.name,
+    avatar_url: m.clubs.avatar_url,
+  }));
+}

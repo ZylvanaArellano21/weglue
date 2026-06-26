@@ -55,7 +55,7 @@ export default function AuthConfirmedScreen() {
         router.replace("/onboarding/profile-pic");
       } else {
         // Fully set up — go straight to Club Catalog
-        router.replace("/(tabs)/home");
+        router.replace("/(tabs)");
       }
     }
 

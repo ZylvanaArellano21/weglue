@@ -41,7 +41,7 @@ export default function AuthCallback() {
               .limit(1);
 
             if ((interests?.length ?? 0) > 0) {
-              router.replace("/(tabs)/home");
+              router.replace("/(tabs)");
             } else {
               // They just verified — continue onboarding from profile pic
               router.replace("/onboarding/profile-pic");

@@ -34,7 +34,7 @@ export default function WelcomeScreen() {
     }
 
     // Fully onboarded — go to the main app
-    router.replace("/(tabs)/home");
+    router.replace("/(tabs)");
   }, [isLoading, session, profile]);
 
   if (isLoading) {

@@ -50,8 +50,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "We Glue needs access to your photos to set your profile picture.",
-          "cameraPermission": "We Glue needs access to your camera to take a profile picture."
+          "photosPermission": "We Glue needs access to your photo library to share photos in posts, events, and your profile.",
+          "cameraPermission": "We Glue needs access to your camera to take photos for posts, events, and your profile."
         }
       ],
       "expo-font"

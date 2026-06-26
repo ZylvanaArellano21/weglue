@@ -199,7 +199,7 @@ export default function MatchesScreen() {
         <View style={styles.headerRight}>
           <TouchableOpacity
             style={styles.doneBtn}
-            onPress={() => router.replace("/(tabs)/home")}
+            onPress={() => router.replace("/(tabs)")}
           >
             <Text style={styles.doneBtnText}>Done</Text>
           </TouchableOpacity>

@@ -103,7 +103,7 @@ export default function SurveyScreen() {
 
     setOnboarded(true);
     setLoading(false);
-    router.replace("/(tabs)/home");
+    router.replace("/(tabs)");
   }
 
   return (

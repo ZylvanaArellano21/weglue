@@ -277,3 +277,183 @@ export async function createEvent(
 
   return event.id;
 }
+
+// ─── Event Detail ────────────────────────────────────────────────────────────
+
+export interface EventDetail {
+  id: string;
+  club_id: string;
+  title: string;
+  emoji: string | null;
+  description: string | null;
+  cover_image_url: string | null;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  location: string | null;
+  building: string | null;
+  room: string | null;
+  club: { id: string; name: string; avatar_url: string | null };
+  attendee_count: number;
+  attendee_preview: AttendeePreview[];
+  user_rsvp_status: 'going' | 'cant' | null;
+  is_saved: boolean;
+  user_has_joined_club: boolean;
+}
+
+export async function getEventDetail(
+  eventId: string,
+  userId: string,
+): Promise<EventDetail | null> {
+  const [{ data: event }, { data: savedRow }, { data: rsvpRow }] =
+    await Promise.all([
+      supabase
+        .from('events')
+        .select(`
+          id, club_id, title, emoji, description, cover_image_url,
+          event_date, start_time, end_time, location, building, room,
+          clubs!inner(id, name, avatar_url)
+        `)
+        .eq('id', eventId)
+        .single(),
+      supabase
+        .from('saved_events')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      supabase
+        .from('event_rsvps')
+        .select('status')
+        .eq('user_id', userId)
+        .eq('event_id', eventId)
+        .maybeSingle(),
+    ]);
+
+  if (!event) return null;
+
+  const [{ data: goingRsvps }, { data: memberCheck }] = await Promise.all([
+    supabase
+      .from('event_rsvps')
+      .select('user_id, profiles!inner(id, username, avatar_url)')
+      .eq('event_id', eventId)
+      .eq('status', 'going'),
+    supabase
+      .from('club_members')
+      .select('id')
+      .eq('club_id', (event as any).club_id)
+      .eq('user_id', userId)
+      .maybeSingle(),
+  ]);
+
+  const previews: AttendeePreview[] = ((goingRsvps ?? []) as any[])
+    .slice(0, 4)
+    .map((r) => ({
+      id: r.profiles.id,
+      username: r.profiles.username,
+      avatar_url: r.profiles.avatar_url,
+    }));
+
+  return {
+    id: event.id,
+    club_id: (event as any).club_id,
+    title: event.title,
+    emoji: (event as any).emoji,
+    description: event.description,
+    cover_image_url: event.cover_image_url,
+    event_date: event.event_date,
+    start_time: event.start_time,
+    end_time: event.end_time,
+    location: event.location,
+    building: (event as any).building,
+    room: (event as any).room,
+    club: {
+      id: (event as any).clubs.id,
+      name: (event as any).clubs.name,
+      avatar_url: (event as any).clubs.avatar_url,
+    },
+    attendee_count: (goingRsvps ?? []).length,
+    attendee_preview: previews,
+    user_rsvp_status: (rsvpRow?.status as 'going' | 'cant' | null) ?? null,
+    is_saved: !!savedRow,
+    user_has_joined_club: !!memberCheck,
+  };
+}
+
+// ─── Event Attendees ─────────────────────────────────────────────────────────
+
+export interface EventAttendee {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+  is_following: boolean;
+  is_gluemate: boolean;
+}
+
+export async function getEventAttendees(
+  eventId: string,
+  viewerUserId: string,
+  page: number = 0,
+  search: string = '',
+): Promise<{ attendees: EventAttendee[]; total: number }> {
+  const PAGE_SIZE = 20;
+  const offset = page * PAGE_SIZE;
+
+  const { data: goingRsvps } = await supabase
+    .from('event_rsvps')
+    .select('user_id, profiles!inner(id, username, full_name, avatar_url)')
+    .eq('event_id', eventId)
+    .eq('status', 'going');
+
+  if (!goingRsvps || goingRsvps.length === 0) {
+    return { attendees: [], total: 0 };
+  }
+
+  const attendeeIds = (goingRsvps as any[]).map((r) => r.profiles.id);
+
+  const { data: following } = await supabase
+    .from('follows')
+    .select('following_id, status')
+    .eq('follower_id', viewerUserId)
+    .in('following_id', attendeeIds);
+
+  const { data: reverseFollows } = await supabase
+    .from('follows')
+    .select('follower_id')
+    .eq('following_id', viewerUserId)
+    .in('follower_id', attendeeIds)
+    .eq('status', 'accepted');
+
+  const followingMap = new Map(
+    (following ?? []).map((f: any) => [f.following_id, f.status]),
+  );
+  const reverseFollowSet = new Set((reverseFollows ?? []).map((f: any) => f.follower_id));
+
+  let all: EventAttendee[] = (goingRsvps as any[]).map((r) => {
+    const isFollowing = followingMap.get(r.profiles.id) === 'accepted';
+    const isGluemate = isFollowing && reverseFollowSet.has(r.profiles.id);
+    return {
+      id: r.profiles.id,
+      username: r.profiles.username,
+      full_name: r.profiles.full_name,
+      avatar_url: r.profiles.avatar_url,
+      is_following: isFollowing,
+      is_gluemate: isGluemate,
+    };
+  });
+
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    all = all.filter(
+      (a) =>
+        a.username.toLowerCase().includes(q) ||
+        a.full_name.toLowerCase().includes(q),
+    );
+  }
+
+  return {
+    attendees: all.slice(offset, offset + PAGE_SIZE),
+    total: all.length,
+  };
+}
