@@ -12,9 +12,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../../lib/supabase";
 import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
+
+const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
 
 export default function OnboardingSignupScreen() {
   const router = useRouter();
@@ -92,8 +95,10 @@ export default function OnboardingSignupScreen() {
       return;
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
     setPendingUsername(username.trim().replace(/^@/, ""));
-    setPendingEmail(email.trim().toLowerCase());
+    setPendingEmail(normalizedEmail);
+    await AsyncStorage.setItem(PENDING_EMAIL_KEY, normalizedEmail);
 
     if (data.session) {
       // Email confirmation is OFF — user is logged in immediately
@@ -102,7 +107,7 @@ export default function OnboardingSignupScreen() {
       // Email confirmation is ON — send to a waiting screen
       router.push({
         pathname: "/auth/verify-email",
-        params: { email: email.trim().toLowerCase(), from: "signup" },
+        params: { email: normalizedEmail, from: "signup" },
       });
     }
   }

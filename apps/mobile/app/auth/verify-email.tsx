@@ -10,15 +10,22 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useAuthStore } from "@weglue/shared";
+import { useAuthStore, useOnboardingStore } from "@weglue/shared";
 import { supabase } from "../../lib/supabase";
 
 const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
+const RESEND_COOLDOWN_SECONDS = 60;
+const SUCCESS_MESSAGE_DURATION_MS = 5000;
+const RESEND_SUCCESS_MESSAGE =
+  "Confirmation email resent. Check your inbox and spam folder.";
+const RESEND_ERROR_MESSAGE =
+  "We couldn't resend the email. Wait a moment and try again.";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const { email: emailParam, from } = useLocalSearchParams<{ email?: string; from?: string }>();
+  const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
   const { session } = useAuthStore();
+  const { pendingEmail } = useOnboardingStore();
   const [email, setEmail] = useState(emailParam ?? "");
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -29,11 +36,27 @@ export default function VerifyEmailScreen() {
 
   // Load persisted email if not passed as param (e.g. deep link entry)
   useEffect(() => {
-    if (emailParam) return;
+    const paramEmail = emailParam?.trim().toLowerCase();
+    if (paramEmail) {
+      setEmail(paramEmail);
+      AsyncStorage.setItem(PENDING_EMAIL_KEY, paramEmail);
+      return;
+    }
+
     AsyncStorage.getItem(PENDING_EMAIL_KEY).then((stored) => {
-      if (stored) setEmail(stored);
+      const storedEmail = stored?.trim().toLowerCase();
+      const fallbackEmail =
+        storedEmail ||
+        pendingEmail.trim().toLowerCase() ||
+        session?.user?.email?.trim().toLowerCase() ||
+        "";
+
+      if (fallbackEmail) {
+        setEmail(fallbackEmail);
+        AsyncStorage.setItem(PENDING_EMAIL_KEY, fallbackEmail);
+      }
     });
-  }, []);
+  }, [emailParam, pendingEmail, session?.user?.email]);
 
   // Navigate when session confirms email (triggered by deep link or polling)
   useEffect(() => {
@@ -63,24 +86,36 @@ export default function VerifyEmailScreen() {
 
   async function handleResend() {
     if (!email || cooldown > 0 || resending) return;
+    const userEmail = email.trim().toLowerCase();
+    if (!userEmail) return;
+
     setResending(true);
     setResendStatus(null);
     if (feedbackTimeoutRef.current) {
       clearTimeout(feedbackTimeoutRef.current);
       feedbackTimeoutRef.current = null;
     }
-    const { error } = await supabase.auth.resend({ type: "signup", email });
-    setResending(false);
-    if (error) {
-      setResendStatus("error");
-    } else {
+    startCooldown(RESEND_COOLDOWN_SECONDS);
+
+    try {
+      setEmail(userEmail);
+      await AsyncStorage.setItem(PENDING_EMAIL_KEY, userEmail);
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: userEmail,
+      });
+
+      if (error) throw error;
+
       setResendStatus("success");
-      startCooldown(60);
-      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
       feedbackTimeoutRef.current = setTimeout(() => {
         setResendStatus(null);
         feedbackTimeoutRef.current = null;
-      }, 5000);
+      }, SUCCESS_MESSAGE_DURATION_MS);
+    } catch {
+      setResendStatus("error");
+    } finally {
+      setResending(false);
     }
   }
 
@@ -150,12 +185,12 @@ export default function VerifyEmailScreen() {
 
         {resendStatus === "success" && (
           <Text style={styles.feedbackSuccess}>
-            Confirmation email resent. Check your inbox and spam folder.
+            {RESEND_SUCCESS_MESSAGE}
           </Text>
         )}
         {resendStatus === "error" && (
           <Text style={styles.feedbackError}>
-            We couldn't resend the email. Wait a moment and try again.
+            {RESEND_ERROR_MESSAGE}
           </Text>
         )}
       </View>
