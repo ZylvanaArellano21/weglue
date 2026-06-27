@@ -53,19 +53,6 @@ RETURNS BOOLEAN AS $$
   );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
--- Is the current user an officer of the club that owns a channel?
-CREATE OR REPLACE FUNCTION is_channel_club_officer(p_channel_id UUID)
-RETURNS BOOLEAN AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM club_channels cc
-    JOIN club_members cm ON cm.club_id = cc.club_id
-    WHERE cc.id = p_channel_id
-      AND cm.user_id = auth.uid()
-      AND cm.role = 'officer'
-  );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
-
 -- ============================================================
 -- 5. club_channels  (Discord-style sub-channels)
 -- ============================================================
@@ -82,6 +69,19 @@ CREATE TABLE IF NOT EXISTS club_channels (
 CREATE INDEX IF NOT EXISTS idx_club_channels_club_id ON club_channels(club_id);
 
 ALTER TABLE club_channels ENABLE ROW LEVEL SECURITY;
+
+-- Is the current user an officer of the club that owns a channel?
+CREATE OR REPLACE FUNCTION is_channel_club_officer(p_channel_id UUID)
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM club_channels cc
+    JOIN club_members cm ON cm.club_id = cc.club_id
+    WHERE cc.id = p_channel_id
+      AND cm.user_id = auth.uid()
+      AND cm.role = 'officer'
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- Members (and officers) can read channels for their clubs
 CREATE POLICY "club_channels: members can read"
@@ -501,54 +501,63 @@ VALUES (
 ) ON CONFLICT (id) DO NOTHING;
 
 -- Storage policies — public buckets: authenticated officers can write
-CREATE POLICY IF NOT EXISTS "club-covers: public read"
+DROP POLICY IF EXISTS "club-covers: public read" ON storage.objects;
+CREATE POLICY "club-covers: public read"
   ON storage.objects FOR SELECT TO public
   USING (bucket_id = 'club-covers');
 
-CREATE POLICY IF NOT EXISTS "club-covers: officers can upload"
+DROP POLICY IF EXISTS "club-covers: officers can upload" ON storage.objects;
+CREATE POLICY "club-covers: officers can upload"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'club-covers'
     AND is_club_officer((storage.foldername(name))[1]::UUID)
   );
 
-CREATE POLICY IF NOT EXISTS "club-covers: officers can delete"
+DROP POLICY IF EXISTS "club-covers: officers can delete" ON storage.objects;
+CREATE POLICY "club-covers: officers can delete"
   ON storage.objects FOR DELETE TO authenticated
   USING (
     bucket_id = 'club-covers'
     AND is_club_officer((storage.foldername(name))[1]::UUID)
   );
 
-CREATE POLICY IF NOT EXISTS "club-avatars: public read"
+DROP POLICY IF EXISTS "club-avatars: public read" ON storage.objects;
+CREATE POLICY "club-avatars: public read"
   ON storage.objects FOR SELECT TO public
   USING (bucket_id = 'club-avatars');
 
-CREATE POLICY IF NOT EXISTS "club-avatars: officers can upload"
+DROP POLICY IF EXISTS "club-avatars: officers can upload" ON storage.objects;
+CREATE POLICY "club-avatars: officers can upload"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'club-avatars'
     AND is_club_officer((storage.foldername(name))[1]::UUID)
   );
 
-CREATE POLICY IF NOT EXISTS "club-avatars: officers can delete"
+DROP POLICY IF EXISTS "club-avatars: officers can delete" ON storage.objects;
+CREATE POLICY "club-avatars: officers can delete"
   ON storage.objects FOR DELETE TO authenticated
   USING (
     bucket_id = 'club-avatars'
     AND is_club_officer((storage.foldername(name))[1]::UUID)
   );
 
-CREATE POLICY IF NOT EXISTS "club-photos: public read"
+DROP POLICY IF EXISTS "club-photos: public read" ON storage.objects;
+CREATE POLICY "club-photos: public read"
   ON storage.objects FOR SELECT TO public
   USING (bucket_id = 'club-photos');
 
-CREATE POLICY IF NOT EXISTS "club-photos: officers can upload"
+DROP POLICY IF EXISTS "club-photos: officers can upload" ON storage.objects;
+CREATE POLICY "club-photos: officers can upload"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'club-photos'
     AND is_club_officer((storage.foldername(name))[1]::UUID)
   );
 
-CREATE POLICY IF NOT EXISTS "club-photos: officers can delete"
+DROP POLICY IF EXISTS "club-photos: officers can delete" ON storage.objects;
+CREATE POLICY "club-photos: officers can delete"
   ON storage.objects FOR DELETE TO authenticated
   USING (
     bucket_id = 'club-photos'
@@ -557,21 +566,24 @@ CREATE POLICY IF NOT EXISTS "club-photos: officers can delete"
 
 -- Private chat-attachments: only club members can read or write
 -- File paths must be: {club_id}/{channel_id}/{filename}
-CREATE POLICY IF NOT EXISTS "chat-attachments: members can read"
+DROP POLICY IF EXISTS "chat-attachments: members can read" ON storage.objects;
+CREATE POLICY "chat-attachments: members can read"
   ON storage.objects FOR SELECT TO authenticated
   USING (
     bucket_id = 'chat-attachments'
     AND is_club_member((storage.foldername(name))[1]::UUID)
   );
 
-CREATE POLICY IF NOT EXISTS "chat-attachments: members can upload"
+DROP POLICY IF EXISTS "chat-attachments: members can upload" ON storage.objects;
+CREATE POLICY "chat-attachments: members can upload"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'chat-attachments'
     AND is_club_member((storage.foldername(name))[1]::UUID)
   );
 
-CREATE POLICY IF NOT EXISTS "chat-attachments: uploader can delete"
+DROP POLICY IF EXISTS "chat-attachments: uploader can delete" ON storage.objects;
+CREATE POLICY "chat-attachments: uploader can delete"
   ON storage.objects FOR DELETE TO authenticated
   USING (
     bucket_id = 'chat-attachments'
