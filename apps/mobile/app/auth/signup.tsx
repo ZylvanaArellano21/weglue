@@ -114,6 +114,12 @@ export default function SignupScreen() {
       setErrors({ general: mapSignUpError(error) });
       return;
     }
+    // Supabase returns a fake success (no error, no session, identities=[]) when
+    // the email already exists, to prevent user enumeration. Catch it explicitly.
+    if (!data.session && data.user?.identities?.length === 0) {
+      setErrors({ general: "An account with this email already exists. Try logging in instead." });
+      return;
+    }
     if (data.session) {
       router.push("/auth/avatar");
     } else {
