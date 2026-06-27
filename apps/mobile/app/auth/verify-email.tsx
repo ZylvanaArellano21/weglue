@@ -25,6 +25,7 @@ export default function VerifyEmailScreen() {
   const [resendStatus, setResendStatus] = useState<"success" | "error" | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load persisted email if not passed as param (e.g. deep link entry)
   useEffect(() => {
@@ -56,6 +57,7 @@ export default function VerifyEmailScreen() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (cooldownRef.current) clearInterval(cooldownRef.current);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
     };
   }, []);
 
@@ -63,6 +65,10 @@ export default function VerifyEmailScreen() {
     if (!email || cooldown > 0 || resending) return;
     setResending(true);
     setResendStatus(null);
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = null;
+    }
     const { error } = await supabase.auth.resend({ type: "signup", email });
     setResending(false);
     if (error) {
@@ -70,6 +76,11 @@ export default function VerifyEmailScreen() {
     } else {
       setResendStatus("success");
       startCooldown(60);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = setTimeout(() => {
+        setResendStatus(null);
+        feedbackTimeoutRef.current = null;
+      }, 5000);
     }
   }
 
@@ -117,10 +128,10 @@ export default function VerifyEmailScreen() {
         <TouchableOpacity
           style={[
             styles.resendBtn,
-            (resending || cooldown > 0) && styles.resendBtnDisabled,
+            (!email || resending || cooldown > 0) && styles.resendBtnDisabled,
           ]}
           onPress={handleResend}
-          disabled={resending || cooldown > 0}
+          disabled={!email || resending || cooldown > 0}
           activeOpacity={0.85}
         >
           {resending ? (
@@ -139,7 +150,7 @@ export default function VerifyEmailScreen() {
 
         {resendStatus === "success" && (
           <Text style={styles.feedbackSuccess}>
-            Confirmation email resent. Check your inbox.
+            Confirmation email resent. Check your inbox and spam folder.
           </Text>
         )}
         {resendStatus === "error" && (

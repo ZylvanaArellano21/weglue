@@ -39,6 +39,18 @@ importers:
       '@react-native-async-storage/async-storage':
         specifier: ^2.2.0
         version: 2.2.0(react-native@0.81.5(@babel/core@7.29.7)(@react-native-community/cli@13.6.8)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@18.3.31)(react@19.1.0))
+      '@supabase/functions-js':
+        specifier: ^2.108.2
+        version: 2.108.2
+      '@supabase/postgrest-js':
+        specifier: ^2.108.2
+        version: 2.108.2
+      '@supabase/realtime-js':
+        specifier: ^2.108.2
+        version: 2.108.2
+      '@supabase/storage-js':
+        specifier: ^2.108.2
+        version: 2.108.2
       '@supabase/supabase-js':
         specifier: ^2.108.2
         version: 2.108.2
