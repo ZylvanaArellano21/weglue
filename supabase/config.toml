@@ -156,7 +156,7 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+site_url = "https://weglue.app"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
@@ -166,6 +166,7 @@ additional_redirect_urls = [
   "https://weglue.app/auth/confirm",
   "weglue://auth/confirmed",
   "weglue://auth/confirm-email",
+  "weglue://onboarding/profile-pic",
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
@@ -239,17 +240,23 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 600
 
-# Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# Custom SMTP via Resend — sender shows as "We Glue <noreply@weglue.app>"
+# API key is NOT committed; pass as env var: export SUPABASE_AUTH_SMTP_PASS=re_...
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 465
+user = "resend"
+pass = "env(SUPABASE_AUTH_SMTP_PASS)"
+admin_email = "noreply@weglue.app"
+sender_name = "We Glue"
 
-# Uncomment to customize email template
+# Branded confirm-signup email
+[auth.email.template.confirmation]
+subject = "Confirm your We Glue account ✉️"
+content_path = "./supabase/templates/confirm-signup.html"
+
+# Uncomment to customize other templates
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"

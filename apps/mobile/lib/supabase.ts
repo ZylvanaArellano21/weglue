@@ -10,7 +10,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    // Deep links are parsed manually in app/auth/callback.tsx
+    // Tokens from deep links are parsed by useAuthDeepLink hook in _layout.tsx
     detectSessionInUrl: false,
   },
 });

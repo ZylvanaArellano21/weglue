@@ -18,6 +18,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
+import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -40,6 +41,8 @@ export default function RootLayout() {
   });
 
   const { setSession, setProfile, setOnboarded, setLoading } = useAuthStore();
+
+  useAuthDeepLink();
 
   useEffect(() => {
     if (fontsLoaded) SplashScreen.hideAsync();

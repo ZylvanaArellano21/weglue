@@ -1,66 +1,60 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useRouter } from "expo-router";
-import * as Linking from "expo-linking";
 import { supabase } from "../../lib/supabase";
+import { useAuthStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
+
+const SESSION_TIMEOUT_MS = 12_000;
 
 export default function AuthConfirmedScreen() {
   const router = useRouter();
+  const { session } = useAuthStore();
   const { show, ToastComponent } = useToast();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Fallback: if no session is established within SESSION_TIMEOUT_MS,
+  // send the user to login with an error message.
   useEffect(() => {
-    async function handleConfirmed() {
-      const url = await Linking.getInitialURL();
+    timerRef.current = setTimeout(() => {
+      show("Couldn't restore your session. Please log in.", "error");
+      router.replace("/auth/login");
+    }, SESSION_TIMEOUT_MS);
 
-      // Step 1: establish a session from the tokens in the deep link hash
-      if (url) {
-        const fragment = url.split("#")[1] ?? "";
-        const params = new URLSearchParams(fragment);
-        const access_token = params.get("access_token");
-        const refresh_token = params.get("refresh_token");
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
-        if (access_token && refresh_token) {
-          const { error } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
-          });
-          if (error) {
-            show("Session could not be restored. Please log in.", "error");
-            router.replace("/auth/login");
-            return;
-          }
-        }
-      }
+  // Fired by onAuthStateChange in _layout.tsx after useAuthDeepLink
+  // calls supabase.auth.setSession() with the tokens from the deep link.
+  useEffect(() => {
+    if (!session) return;
 
-      // Step 2: confirm a valid session exists
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData.session;
-
-      if (!session?.user?.email_confirmed_at) {
-        show("Email confirmed! Please log in to continue.", "success");
-        router.replace("/auth/login");
-        return;
-      }
-
-      // Step 3: check the profile — avatar_url determines how far along the user is
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("avatar_url")
-        .eq("id", session.user.id)
-        .single();
-
-      if (!profile?.avatar_url) {
-        // Email confirmed but profile not yet complete → Profile Picture screen
-        router.replace("/onboarding/profile-pic");
-      } else {
-        // Fully set up — go straight to Club Catalog
-        router.replace("/(tabs)");
-      }
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
 
-    handleConfirmed();
-  }, []);
+    if (!session.user.email_confirmed_at) {
+      show("Email confirmed! Please log in to continue.", "success");
+      router.replace("/auth/login");
+      return;
+    }
+
+    supabase
+      .from("profiles")
+      .select("avatar_url")
+      .eq("id", session.user.id)
+      .single()
+      .then(({ data }) => {
+        if (!data?.avatar_url) {
+          router.replace("/onboarding/profile-pic");
+        } else {
+          router.replace("/(tabs)");
+        }
+      });
+  }, [session]);
 
   return (
     <View
