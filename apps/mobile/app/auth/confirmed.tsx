@@ -12,12 +12,14 @@ export default function AuthConfirmedScreen() {
   const { session } = useAuthStore();
   const { show, ToastComponent } = useToast();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handledRef = useRef(false);
 
-  // Fallback: if no session is established within SESSION_TIMEOUT_MS,
-  // send the user to login with an error message.
+  // Fallback: if no session arrives within SESSION_TIMEOUT_MS the tokens
+  // couldn't be parsed (bad link, expired, etc.) — send the user to login.
   useEffect(() => {
     timerRef.current = setTimeout(() => {
-      show("Couldn't restore your session. Please log in.", "error");
+      if (handledRef.current) return;
+      show("Couldn't sign you in. Please log in.", "error");
       router.replace("/auth/login");
     }, SESSION_TIMEOUT_MS);
 
@@ -26,20 +28,18 @@ export default function AuthConfirmedScreen() {
     };
   }, []);
 
-  // Fired by onAuthStateChange in _layout.tsx after useAuthDeepLink
-  // calls supabase.auth.setSession() with the tokens from the deep link.
+  // Fired by onAuthStateChange in _layout.tsx once useAuthDeepLink calls
+  // setSession() with the tokens from the deep link fragment.
+  // We do NOT check email_confirmed_at here — it is a DB column, not a JWT
+  // claim, so it is always null right after setSession fires onAuthStateChange.
+  // Valid tokens from the email confirmation flow mean the user is confirmed.
   useEffect(() => {
-    if (!session) return;
+    if (!session || handledRef.current) return;
 
+    handledRef.current = true;
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
-    }
-
-    if (!session.user.email_confirmed_at) {
-      show("Email confirmed! Please log in to continue.", "success");
-      router.replace("/auth/login");
-      return;
     }
 
     supabase
