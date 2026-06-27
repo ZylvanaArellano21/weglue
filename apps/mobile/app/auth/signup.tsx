@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../../lib/supabase";
 import { validateEducationEmail } from "@weglue/shared";
 
@@ -116,9 +117,11 @@ export default function SignupScreen() {
     if (data.session) {
       router.push("/auth/avatar");
     } else {
+      const normalizedEmail = email.trim().toLowerCase();
+      await AsyncStorage.setItem("@weglue/pending_confirmation_email", normalizedEmail);
       router.push({
         pathname: "/auth/verify-email",
-        params: { email: email.trim().toLowerCase(), from: "signup" },
+        params: { email: normalizedEmail, from: "signup" },
       });
     }
   }

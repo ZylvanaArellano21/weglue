@@ -9,33 +9,46 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../../lib/supabase";
-import { useToast } from "../../components/Toast";
+
+const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const { email, from } = useLocalSearchParams<{ email: string; from?: string }>();
+  const { email: emailParam, from } = useLocalSearchParams<{ email?: string; from?: string }>();
   const { session } = useAuthStore();
-  const { show, ToastComponent } = useToast();
+  const [email, setEmail] = useState(emailParam ?? "");
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  const [resendStatus, setResendStatus] = useState<"success" | "error" | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Navigate when the auth store session confirms email (triggered by deep link)
+  // Load persisted email if not passed as param (e.g. deep link entry)
+  useEffect(() => {
+    if (emailParam) return;
+    AsyncStorage.getItem(PENDING_EMAIL_KEY).then((stored) => {
+      if (stored) setEmail(stored);
+    });
+  }, []);
+
+  // Navigate when session confirms email (triggered by deep link or polling)
   useEffect(() => {
     if (session?.user?.email_confirmed_at) {
+      AsyncStorage.removeItem(PENDING_EMAIL_KEY);
       router.replace("/onboarding/profile-pic");
     }
   }, [session]);
 
-  // Poll every 4 seconds: handles same-device confirmation when session becomes active
+  // Poll every 4 seconds to detect same-device confirmation
   useEffect(() => {
     pollRef.current = setInterval(async () => {
       const { data } = await supabase.auth.getSession();
       if (data.session?.user?.email_confirmed_at) {
         clearInterval(pollRef.current!);
+        AsyncStorage.removeItem(PENDING_EMAIL_KEY);
         router.replace("/onboarding/profile-pic");
       }
     }, 4000);
@@ -47,14 +60,15 @@ export default function VerifyEmailScreen() {
   }, []);
 
   async function handleResend() {
-    if (!email || cooldown > 0) return;
+    if (!email || cooldown > 0 || resending) return;
     setResending(true);
+    setResendStatus(null);
     const { error } = await supabase.auth.resend({ type: "signup", email });
     setResending(false);
     if (error) {
-      show("Something went wrong. Please try again.", "error");
+      setResendStatus("error");
     } else {
-      show("Verification email sent!", "success");
+      setResendStatus("success");
       startCooldown(60);
     }
   }
@@ -73,18 +87,17 @@ export default function VerifyEmailScreen() {
     }, 1000);
   }
 
-  const resendLabel = cooldown > 0 ? `Resend in ${cooldown}s` : "Resend Email";
+  const resendLabel =
+    cooldown > 0 ? `Resend Email (${cooldown}s)` : "Resend Email";
 
   return (
     <SafeAreaView style={styles.container}>
-      {ToastComponent}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.content}>
-        {/* Logo icon */}
         <Image
           source={require("../../assets/logo.png")}
           style={styles.logo}
@@ -102,7 +115,10 @@ export default function VerifyEmailScreen() {
         </Text>
 
         <TouchableOpacity
-          style={[styles.resendBtn, (resending || cooldown > 0) && styles.resendBtnDisabled]}
+          style={[
+            styles.resendBtn,
+            (resending || cooldown > 0) && styles.resendBtnDisabled,
+          ]}
           onPress={handleResend}
           disabled={resending || cooldown > 0}
           activeOpacity={0.85}
@@ -110,11 +126,27 @@ export default function VerifyEmailScreen() {
           {resending ? (
             <ActivityIndicator color="#FEFCF0" />
           ) : (
-            <Text style={[styles.resendText, cooldown > 0 && styles.resendTextMuted]}>
+            <Text
+              style={[
+                styles.resendText,
+                cooldown > 0 && styles.resendTextMuted,
+              ]}
+            >
               {resendLabel}
             </Text>
           )}
         </TouchableOpacity>
+
+        {resendStatus === "success" && (
+          <Text style={styles.feedbackSuccess}>
+            Confirmation email resent. Check your inbox.
+          </Text>
+        )}
+        {resendStatus === "error" && (
+          <Text style={styles.feedbackError}>
+            We couldn't resend the email. Wait a moment and try again.
+          </Text>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -178,4 +210,18 @@ const styles = StyleSheet.create({
   },
   resendText: { fontSize: 16, fontWeight: "600", color: "#FEFCF0" },
   resendTextMuted: { color: "#FEFCF0" },
+  feedbackSuccess: {
+    marginTop: 14,
+    fontSize: 13,
+    color: "#0FA6A6",
+    textAlign: "center",
+    fontWeight: "500",
+  },
+  feedbackError: {
+    marginTop: 14,
+    fontSize: 13,
+    color: "#F02719",
+    textAlign: "center",
+    fontWeight: "500",
+  },
 });

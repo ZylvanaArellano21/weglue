@@ -207,7 +207,7 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
               </p>
 
               <a
-                href="weglue://signup"
+                href="weglue://auth/confirm-email"
                 className="w-full rounded-full font-semibold text-white text-base py-4 transition-opacity hover:opacity-90 text-center block"
                 style={{
                   backgroundColor: "#0FA6A6",
