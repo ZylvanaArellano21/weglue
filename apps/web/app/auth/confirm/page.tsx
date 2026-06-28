@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import Image from "next/image";
+import FragmentConfirm from "./FragmentConfirm";
 
 interface PageProps {
   searchParams: { token_hash?: string; type?: string; code?: string };
@@ -78,6 +79,15 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
         @import url('https://fonts.googleapis.com/css2?family=Zain:wght@700&display=swap');
         .font-zain { font-family: 'Zain', serif; }
       `}</style>
+
+      {/*
+        Default-mailer confirmation flow: tokens arrive in the URL fragment,
+        which the server can't read. This client component reads them in the
+        browser and overlays the success screen. Renders null when absent,
+        leaving the server-rendered token_hash / code / expired logic below
+        fully intact.
+      */}
+      <FragmentConfirm />
 
       {/* Auto-redirect to app deep link on success */}
       {deepLinkUrl && (

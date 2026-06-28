@@ -202,7 +202,11 @@ password_requirements = ""
 # rp_origins = ["http://127.0.0.1:3000"]
 
 [auth.rate_limit]
-# Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
+# Emails per hour — ONLY applies when custom SMTP (auth.email.smtp) is enabled.
+# The current setup uses Supabase's built-in default mailer, which enforces its
+# own fixed low cap (~3-4/hr) that cannot be raised; this value stays inert
+# until a custom SMTP provider is re-enabled. The mobile Confirm-Email screen
+# additionally throttles the user with a 60s resend cooldown (no daily/max cap).
 email_sent = 100
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
@@ -240,22 +244,33 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 600
 
-# Custom SMTP via Resend — sender shows as "We Glue <hello@weglue.app>"
-# Resend advises against no-reply senders (hurts deliverability/engagement), so we use hello@.
-# API key is NOT committed; pass as env var: export SUPABASE_AUTH_SMTP_PASS=re_...
+# Custom SMTP is DISABLED — reverted to Supabase's built-in mailer, whose
+# established sending reputation gets past .edu (M365) spam filters that were
+# silently quarantining mail from the new weglue.app domain.
+# NOTE: the built-in mailer is rate-limited (~3-4/hr) and not meant for high
+# volume; revisit a warmed-up custom sender before scaling.
+# Resend creds are kept here (commented) for easy re-enable later.
 [auth.email.smtp]
-enabled = true
-host = "smtp.resend.com"
-port = 465
-user = "resend"
-pass = "env(SUPABASE_AUTH_SMTP_PASS)"
-admin_email = "hello@weglue.app"
-sender_name = "We Glue"
+enabled = false
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(SUPABASE_AUTH_SMTP_PASS)"
+# admin_email = "hello@weglue.app"
+# sender_name = "We Glue"
 
-# Branded confirm-signup email
-[auth.email.template.confirmation]
-subject = "Confirm your We Glue account ✉️"
-content_path = "./supabase/templates/confirm-signup.html"
+# Branded confirm-signup email template.
+# NOTE: Supabase free tier does NOT allow custom email templates while on the
+# built-in (default) mailer — the Management API rejects template edits with
+# "not available for free tier projects using the default email provider".
+# The live project therefore uses Supabase's DEFAULT confirmation template
+# (which sends the {{ .ConfirmationURL }} verify link; the web confirm page
+# reads the returned token fragment client-side). The branded template is kept
+# at templates/confirmation-email.html and will apply once custom SMTP is
+# re-enabled or the project is upgraded to Pro.
+# [auth.email.template.confirmation]
+# subject = "Confirm your We Glue account ✉️"
+# content_path = "./supabase/templates/confirmation-email.html"
 
 # Uncomment to customize other templates
 # [auth.email.template.invite]
