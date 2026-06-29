@@ -104,15 +104,21 @@ export default function LoginScreen() {
     }
 
     if (data?.user) {
-      const { data: interests } = await supabase
-        .from("user_interests")
-        .select("id")
-        .eq("user_id", data.user.id)
-        .limit(1);
-      if ((interests?.length ?? 0) > 0) {
-        router.replace("/(tabs)");
+      // A successful password sign-in means the email is already confirmed
+      // (Supabase rejects unconfirmed users). Route purely on onboarding
+      // progress, which is keyed off avatar_url — set on the final
+      // "profile picture" onboarding step. A confirmed user must NEVER be
+      // sent to the interests/activities survey again.
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("avatar_url")
+        .eq("id", data.user.id)
+        .single();
+
+      if (!profile?.avatar_url) {
+        router.replace("/onboarding/profile-pic");
       } else {
-        router.replace("/onboarding/interests");
+        router.replace("/(tabs)");
       }
     }
   }

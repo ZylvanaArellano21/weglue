@@ -65,8 +65,22 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
       err instanceof Error ? err.message : "Email verification failed.";
   }
 
+  // TEMPORARY: Expo Go URL for development testing.
+  // In Expo Go the production "weglue://" custom scheme does NOT work — deep
+  // links must use the exp:// form. NEXT_PUBLIC_EXPO_DEEP_LINK holds the prefix
+  // up to and including the in-app route (/auth/confirmed); the session tokens
+  // are appended below as the URL fragment. The "/--/" segment is how Expo Go
+  // separates the dev-server (tunnel) address from the in-app deep link path.
+  //   Dev (Expo Go, tunnel): exp://<id>.exp.direct/--/auth/confirmed
+  //
+  // Before App Store submission, REMOVE NEXT_PUBLIC_EXPO_DEEP_LINK (in
+  // .env.local AND in the Vercel project settings) so this falls back to the
+  // production scheme: weglue://auth/confirmed
+  const deepLinkPrefix =
+    process.env.NEXT_PUBLIC_EXPO_DEEP_LINK || "weglue://auth/confirmed";
+
   const deepLinkUrl = sessionTokens
-    ? `weglue://auth/confirmed#access_token=${encodeURIComponent(
+    ? `${deepLinkPrefix}#access_token=${encodeURIComponent(
         sessionTokens.access_token
       )}&refresh_token=${encodeURIComponent(sessionTokens.refresh_token)}`
     : null;

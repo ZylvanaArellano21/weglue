@@ -34,13 +34,15 @@ export default function AuthCallback() {
           } = await supabase.auth.getUser();
 
           if (user) {
-            const { data: interests } = await supabase
-              .from("user_interests")
-              .select("id")
-              .eq("user_id", user.id)
-              .limit(1);
+            // Route on onboarding progress (avatar_url), never on interests —
+            // a confirmed user must never be dropped back into the survey.
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("avatar_url")
+              .eq("id", user.id)
+              .single();
 
-            if ((interests?.length ?? 0) > 0) {
+            if (profile?.avatar_url) {
               router.replace("/(tabs)");
             } else {
               // They just verified — continue onboarding from profile pic

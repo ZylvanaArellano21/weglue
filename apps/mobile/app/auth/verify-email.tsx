@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Image,
   StyleSheet,
   Text,
@@ -33,6 +34,16 @@ export default function VerifyEmailScreen() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards against double navigation when both the AppState refresh and the
+  // session effect detect confirmation at nearly the same time.
+  const confirmedHandledRef = useRef(false);
+
+  function goToProfilePic() {
+    if (confirmedHandledRef.current) return;
+    confirmedHandledRef.current = true;
+    AsyncStorage.removeItem(PENDING_EMAIL_KEY);
+    router.replace("/onboarding/profile-pic");
+  }
 
   // Load persisted email if not passed as param (e.g. deep link entry)
   useEffect(() => {
@@ -61,19 +72,34 @@ export default function VerifyEmailScreen() {
   // Navigate when session confirms email (triggered by deep link or polling)
   useEffect(() => {
     if (session?.user?.email_confirmed_at) {
-      AsyncStorage.removeItem(PENDING_EMAIL_KEY);
-      router.replace("/onboarding/profile-pic");
+      goToProfilePic();
     }
   }, [session]);
 
-  // Poll every 4 seconds to detect same-device confirmation
+  // Refresh the session every time the app returns to the foreground. This is
+  // the primary path for the common "confirmed in the browser, switched back to
+  // the app" flow: getSession() only returns the cached token, so we must force
+  // a refresh to pick up the freshly-set email_confirmed_at. Once confirmed we
+  // jump straight to profile-pic and replace this screen so the back button can
+  // never return to "Confirm your email".
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", async (state) => {
+      if (state !== "active" || confirmedHandledRef.current) return;
+      const { data } = await supabase.auth.refreshSession();
+      if (data.session?.user?.email_confirmed_at) {
+        goToProfilePic();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Poll every 4 seconds as a fallback to detect same-device confirmation
   useEffect(() => {
     pollRef.current = setInterval(async () => {
-      const { data } = await supabase.auth.getSession();
+      const { data } = await supabase.auth.refreshSession();
       if (data.session?.user?.email_confirmed_at) {
         clearInterval(pollRef.current!);
-        AsyncStorage.removeItem(PENDING_EMAIL_KEY);
-        router.replace("/onboarding/profile-pic");
+        goToProfilePic();
       }
     }, 4000);
 
