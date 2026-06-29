@@ -30,62 +30,20 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
     }
   );
 
-  let sessionTokens: { access_token: string; refresh_token: string } | null =
-    null;
-  let errorMessage = "";
+  let success = false;
 
   try {
     if (token_hash && type) {
-      const { data, error } = await supabase.auth.verifyOtp({
+      const { error } = await supabase.auth.verifyOtp({
         token_hash,
         type: type as "signup" | "email",
       });
-      if (error) throw error;
-      if (data.session) {
-        sessionTokens = {
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        };
-      }
+      if (!error) success = true;
     } else if (code) {
-      const { data, error } =
-        await supabase.auth.exchangeCodeForSession(code);
-      if (error) throw error;
-      if (data.session) {
-        sessionTokens = {
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        };
-      }
-    } else {
-      errorMessage = "No valid auth token found in the confirmation URL.";
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (!error) success = true;
     }
-  } catch (err) {
-    errorMessage =
-      err instanceof Error ? err.message : "Email verification failed.";
-  }
-
-  // TEMPORARY: Expo Go URL for development testing.
-  // In Expo Go the production "weglue://" custom scheme does NOT work — deep
-  // links must use the exp:// form. NEXT_PUBLIC_EXPO_DEEP_LINK holds the prefix
-  // up to and including the in-app route (/auth/confirmed); the session tokens
-  // are appended below as the URL fragment. The "/--/" segment is how Expo Go
-  // separates the dev-server (tunnel) address from the in-app deep link path.
-  //   Dev (Expo Go, tunnel): exp://<id>.exp.direct/--/auth/confirmed
-  //
-  // Before App Store submission, REMOVE NEXT_PUBLIC_EXPO_DEEP_LINK (in
-  // .env.local AND in the Vercel project settings) so this falls back to the
-  // production scheme: weglue://auth/confirmed
-  const deepLinkPrefix =
-    process.env.NEXT_PUBLIC_EXPO_DEEP_LINK || "weglue://auth/confirmed";
-
-  const deepLinkUrl = sessionTokens
-    ? `${deepLinkPrefix}#access_token=${encodeURIComponent(
-        sessionTokens.access_token
-      )}&refresh_token=${encodeURIComponent(sessionTokens.refresh_token)}`
-    : null;
-
-  const success = !!deepLinkUrl;
+  } catch {}
 
   return (
     <>
@@ -95,31 +53,11 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
       `}</style>
 
       {/*
-        Default-mailer confirmation flow: tokens arrive in the URL fragment,
-        which the server can't read. This client component reads them in the
-        browser and overlays the success screen. Renders null when absent,
-        leaving the server-rendered token_hash / code / expired logic below
-        fully intact.
+        Default-mailer confirmation flow: tokens arrive in the URL fragment
+        which the server cannot read. This client component reads them in the
+        browser and overlays the success screen. Renders null when absent.
       */}
       <FragmentConfirm />
-
-      {/* Auto-redirect to app deep link on success */}
-      {deepLinkUrl && (
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function() {
-                var deepLink = ${JSON.stringify(deepLinkUrl)};
-                window.location.replace(deepLink);
-                setTimeout(function() {
-                  var el = document.getElementById('fallback-msg');
-                  if (el) el.style.display = 'block';
-                }, 2000);
-              })();
-            `,
-          }}
-        />
-      )}
 
       <main
         style={{ backgroundColor: "#FEFCF0" }}
@@ -170,27 +108,13 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
                 </svg>
               </div>
 
-              <a
-                href={deepLinkUrl}
-                className="w-full rounded-full font-semibold text-white text-base py-4 mb-4 transition-opacity hover:opacity-90 text-center block"
-                style={{
-                  backgroundColor: "#0FA6A6",
-                  maxWidth: 320,
-                  lineHeight: "1.5rem",
-                  paddingTop: "1rem",
-                  paddingBottom: "1rem",
-                  textDecoration: "none",
-                }}
-              >
-                Go back to We Glue
-              </a>
-
               <p
-                id="fallback-msg"
-                className="text-xs mt-2 text-center"
-                style={{ color: "#5F5D5D", display: "none" }}
+                className="text-sm leading-relaxed max-w-[260px]"
+                style={{ color: "#5F5D5D" }}
               >
-                Open the We Glue app on your phone to continue.
+                You can go back to We Glue now and click the{" "}
+                <span style={{ color: "#0FA6A6", fontWeight: 600 }}>Next</span>{" "}
+                button.
               </p>
             </>
           ) : (
@@ -226,24 +150,18 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
               >
                 Confirmation link expired
               </h1>
-              <p className="text-sm mb-10" style={{ color: "#5F5D5D" }}>
+              <p className="text-sm mb-6" style={{ color: "#5F5D5D" }}>
                 Please request a new confirmation email
               </p>
 
-              <a
-                href="weglue://auth/confirm-email"
-                className="w-full rounded-full font-semibold text-white text-base py-4 transition-opacity hover:opacity-90 text-center block"
-                style={{
-                  backgroundColor: "#0FA6A6",
-                  maxWidth: 320,
-                  lineHeight: "1.5rem",
-                  paddingTop: "1rem",
-                  paddingBottom: "1rem",
-                  textDecoration: "none",
-                }}
+              <p
+                className="text-sm leading-relaxed max-w-[260px]"
+                style={{ color: "#5F5D5D" }}
               >
-                Back to sign up
-              </a>
+                Return to We Glue and tap{" "}
+                <span style={{ fontWeight: 600 }}>&ldquo;Resend email&rdquo;</span>{" "}
+                to get a new link.
+              </p>
             </>
           )}
         </div>

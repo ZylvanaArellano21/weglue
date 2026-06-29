@@ -1,11 +1,12 @@
 import { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -28,16 +29,25 @@ export default function ProfilePicScreen() {
   const { show, ToastComponent } = useToast();
 
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
-  const [avatarType, setAvatarType] = useState<"photo" | "camera" | "preset" | null>(null);
+  const [avatarType, setAvatarType] = useState<"photo" | "camera" | "preset" | "text" | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [textInput, setTextInput] = useState("");
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
+  const [photoPermissionDenied, setPhotoPermissionDenied] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function pickFromCamera() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Camera access is required to take a profile photo.");
+
+    if (status === "denied") {
+      setCameraPermissionDenied(true);
+      setPhotoPermissionDenied(false);
       return;
     }
+    if (status !== "granted") return;
+
+    setCameraPermissionDenied(false);
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [1, 1],
@@ -47,15 +57,24 @@ export default function ProfilePicScreen() {
       setAvatarUri(result.assets[0].uri);
       setAvatarType("camera");
       setSelectedPreset(null);
+      setTextInput("");
+      setShowTextInput(false);
     }
   }
 
   async function pickFromLibrary() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Photo library access is required.");
+
+    if (status === "denied") {
+      setPhotoPermissionDenied(true);
+      setCameraPermissionDenied(false);
       return;
     }
+    // status "granted" covers both full access and iOS limited access
+    // (limited = accessPrivileges: "limited" — picker shows only granted photos)
+    if (status !== "granted") return;
+
+    setPhotoPermissionDenied(false);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -66,6 +85,8 @@ export default function ProfilePicScreen() {
       setAvatarUri(result.assets[0].uri);
       setAvatarType("photo");
       setSelectedPreset(null);
+      setTextInput("");
+      setShowTextInput(false);
     }
   }
 
@@ -73,12 +94,23 @@ export default function ProfilePicScreen() {
     setSelectedPreset(color);
     setAvatarUri(null);
     setAvatarType("preset");
+    setTextInput("");
+    setShowTextInput(false);
+  }
+
+  function activateTextInput() {
+    setShowTextInput(true);
+    setAvatarType("text");
+    setAvatarUri(null);
+    setSelectedPreset(null);
   }
 
   function clearAvatar() {
     setAvatarUri(null);
     setAvatarType(null);
     setSelectedPreset(null);
+    setTextInput("");
+    setShowTextInput(false);
   }
 
   async function handleDone() {
@@ -88,7 +120,6 @@ export default function ProfilePicScreen() {
     try {
       let avatarUrl: string | null = null;
 
-      // Upload photo to Supabase storage if selected
       if (avatarUri && (avatarType === "photo" || avatarType === "camera")) {
         const ext = avatarUri.split(".").pop() ?? "jpg";
         const fileName = `${user.id}/avatar.${ext}`;
@@ -109,39 +140,45 @@ export default function ProfilePicScreen() {
         }
       } else if (avatarType === "preset" && selectedPreset) {
         avatarUrl = `preset:${selectedPreset}`;
+      } else if (avatarType === "text" && textInput.trim()) {
+        avatarUrl = `text:${textInput.trim().toUpperCase()}`;
       }
 
-      // Update profile and refresh the store so tab guards see the new avatar_url
-      await supabase.from("profiles").update({
-        avatar_url: avatarUrl,
-        avatar_type: avatarType,
-        username: pendingUsername || (user.email?.split("@")[0] ?? "user"),
-      }).eq("id", user.id);
+      await supabase
+        .from("profiles")
+        .update({
+          avatar_url: avatarUrl,
+          avatar_type: avatarType,
+          username: pendingUsername || (user.email?.split("@")[0] ?? "user"),
+        })
+        .eq("id", user.id);
 
       if (profile) {
         setProfile({ ...profile, avatar_url: avatarUrl });
       }
 
-      // Save interests
       if (selectedInterests.length > 0) {
         const interestRows = selectedInterests.map((interest) => ({
           user_id: user.id,
           interest,
         }));
-        await supabase.from("user_interests").upsert(interestRows, { onConflict: "user_id,interest" });
+        await supabase
+          .from("user_interests")
+          .upsert(interestRows, { onConflict: "user_id,interest" });
       }
 
-      // Save activities
       if (selectedActivities.length > 0) {
         const activityRows = selectedActivities.map((activity) => ({
           user_id: user.id,
           activity,
         }));
-        await supabase.from("user_activities").upsert(activityRows, { onConflict: "user_id,activity" });
+        await supabase
+          .from("user_activities")
+          .upsert(activityRows, { onConflict: "user_id,activity" });
       }
 
       router.replace("/onboarding/matches");
-    } catch (err) {
+    } catch {
       show("Something went wrong. Please try again.", "error");
     } finally {
       setLoading(false);
@@ -150,16 +187,12 @@ export default function ProfilePicScreen() {
 
   const displayName = pendingUsername || user?.email?.split("@")[0] || "there";
 
+  const showingText = avatarType === "text" && textInput.trim().length > 0;
+  const hasSelection = !!(avatarUri || selectedPreset || showingText);
+
   return (
     <SafeAreaView style={styles.container}>
       {ToastComponent}
-
-      {/* Back arrow */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>‹</Text>
-        </TouchableOpacity>
-      </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <Text style={styles.heading}>One last step</Text>
@@ -172,16 +205,26 @@ export default function ProfilePicScreen() {
           <View
             style={[
               styles.avatarCircle,
-              selectedPreset ? { backgroundColor: selectedPreset, borderStyle: "solid" } : {},
+              selectedPreset
+                ? { backgroundColor: selectedPreset, borderStyle: "solid" }
+                : showingText
+                ? { backgroundColor: "#0FA6A6", borderStyle: "solid" }
+                : {},
             ]}
           >
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+            ) : showingText ? (
+              <View style={styles.textAvatarContent}>
+                <Text style={styles.textAvatarPreview}>
+                  {textInput.trim().toUpperCase()}
+                </Text>
+              </View>
             ) : !selectedPreset ? (
               <View style={{ opacity: 0 }} />
             ) : null}
           </View>
-          {(avatarUri || selectedPreset) && (
+          {hasSelection && (
             <TouchableOpacity style={styles.clearBtn} onPress={clearAvatar}>
               <Text style={styles.clearBtnText}>✕</Text>
             </TouchableOpacity>
@@ -205,16 +248,42 @@ export default function ProfilePicScreen() {
             <Text style={styles.addOptionLabel}>Photo</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.addOption}
-            onPress={() => show("Text avatar coming soon!", "info")}
-          >
+          <TouchableOpacity style={styles.addOption} onPress={activateTextInput}>
             <View style={styles.addIcon}>
               <Text style={styles.addIconText}>A+</Text>
             </View>
             <Text style={styles.addOptionLabel}>Text</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Text input — revealed when user taps Text */}
+        {showTextInput && (
+          <TextInput
+            style={styles.textAvatarInput}
+            placeholder="ABC"
+            placeholderTextColor="rgba(0,0,0,0.3)"
+            value={textInput}
+            onChangeText={(v) => setTextInput(v.slice(0, 3).toUpperCase())}
+            maxLength={3}
+            autoFocus
+            autoCapitalize="characters"
+            returnKeyType="done"
+          />
+        )}
+
+        {/* Permission denied inline errors */}
+        {(cameraPermissionDenied || photoPermissionDenied) && (
+          <View style={styles.permissionError}>
+            <Text style={styles.permissionErrorText}>
+              {cameraPermissionDenied
+                ? "Camera access denied."
+                : "Photo library access denied."}{" "}
+            </Text>
+            <TouchableOpacity onPress={() => Linking.openSettings()}>
+              <Text style={styles.openSettingsLink}>Open Settings</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Preset avatars */}
         <Text style={styles.presetLabel}>Or choose a We Glue avatar</Text>
@@ -277,10 +346,7 @@ export default function ProfilePicScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FEFCF0" },
-  topBar: { paddingHorizontal: 20, paddingTop: 8 },
-  backBtn: { width: 40, height: 40, justifyContent: "center" },
-  backArrow: { fontSize: 30, color: "#000", lineHeight: 36 },
-  scroll: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 40, alignItems: "center" },
+  scroll: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40, alignItems: "center" },
   heading: { fontSize: 24, fontWeight: "700", color: "#000", textAlign: "center", marginBottom: 8 },
   subheading: { fontSize: 14, color: "#5F5D5D", textAlign: "center", marginBottom: 24, lineHeight: 20 },
   avatarWrap: { position: "relative", marginBottom: 24 },
@@ -294,6 +360,17 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   avatarImage: { width: "100%", height: "100%" },
+  textAvatarContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  textAvatarPreview: {
+    color: "#fff",
+    fontSize: 44,
+    fontWeight: "700",
+    letterSpacing: 2,
+  },
   clearBtn: {
     position: "absolute",
     top: 0,
@@ -307,7 +384,7 @@ const styles = StyleSheet.create({
   },
   clearBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   addLabel: { fontSize: 14, fontWeight: "600", color: "#000", marginBottom: 16, textAlign: "center" },
-  addRow: { flexDirection: "row", gap: 32, marginBottom: 24 },
+  addRow: { flexDirection: "row", gap: 32, marginBottom: 16 },
   addOption: { alignItems: "center", gap: 6 },
   addIcon: {
     width: 56,
@@ -319,6 +396,35 @@ const styles = StyleSheet.create({
   },
   addIconText: { fontSize: 22 },
   addOptionLabel: { fontSize: 12, color: "#000", fontWeight: "500" },
+  textAvatarInput: {
+    width: 120,
+    height: 48,
+    borderWidth: 1.5,
+    borderColor: "#0FA6A6",
+    borderRadius: 10,
+    textAlign: "center",
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#000",
+    letterSpacing: 4,
+    backgroundColor: "#fff",
+    marginBottom: 16,
+  },
+  permissionError: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginBottom: 12,
+    paddingHorizontal: 16,
+  },
+  permissionErrorText: { fontSize: 12, color: "#F02719" },
+  openSettingsLink: {
+    fontSize: 12,
+    color: "#0FA6A6",
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
   presetLabel: { fontSize: 14, fontWeight: "600", color: "#000", marginBottom: 16, textAlign: "center" },
   presets: { flexDirection: "row", gap: 12 },
   presetCircle: {

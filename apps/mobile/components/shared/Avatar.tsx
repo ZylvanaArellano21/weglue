@@ -6,15 +6,15 @@ interface AvatarProps {
   username?: string;
 }
 
-/**
- * Returns the hex color when avatar_url is a preset color (e.g. "preset:#2196F3"),
- * or null if the URI is a regular image URL.
- */
 export function parsePresetColor(uri: string | null | undefined): string | null {
   if (!uri) return null;
-  if (uri.startsWith('preset:')) {
-    return uri.slice('preset:'.length);
-  }
+  if (uri.startsWith('preset:')) return uri.slice('preset:'.length);
+  return null;
+}
+
+export function parseTextAvatar(uri: string | null | undefined): string | null {
+  if (!uri) return null;
+  if (uri.startsWith('text:')) return uri.slice('text:'.length);
   return null;
 }
 
@@ -24,6 +24,34 @@ export function Avatar({ uri, size = 40, username }: AvatarProps) {
     : '?';
 
   const presetColor = parsePresetColor(uri);
+  const textContent = parseTextAvatar(uri);
+
+  if (textContent) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#0FA6A6',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text
+          style={{
+            color: '#fff',
+            fontSize: size * 0.35,
+            fontWeight: '700',
+          }}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+        >
+          {textContent}
+        </Text>
+      </View>
+    );
+  }
 
   // Preset color avatar — render a solid colored circle
   if (presetColor) {

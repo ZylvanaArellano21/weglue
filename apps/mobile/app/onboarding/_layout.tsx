@@ -6,7 +6,7 @@ export default function OnboardingLayout() {
       <Stack.Screen name="interests" />
       <Stack.Screen name="activities" />
       <Stack.Screen name="signup" />
-      <Stack.Screen name="profile-pic" />
+      <Stack.Screen name="profile-pic" options={{ gestureEnabled: false }} />
       <Stack.Screen name="matches" />
       <Stack.Screen name="club-preview" />
     </Stack>
