@@ -17,77 +17,53 @@ import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
 import { validateEducationEmail } from "@weglue/shared";
 
-function mapSignInError(error: { message: string; status?: number; code?: string }): string {
-  const msg = error.message.toLowerCase();
-  const code = (error.code ?? "").toLowerCase();
-
-  if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
-    return "You haven't confirmed your email yet. Check your inbox for the confirmation link we sent you.";
-  }
-  if (code === "user_not_found" || msg.includes("user not found")) {
-    return "No account found with this email. Did you mean to sign up?";
-  }
-  if (code === "invalid_credentials" || msg.includes("invalid login credentials") || msg.includes("invalid credentials")) {
-    return "Incorrect password. Try again or use 'Forgot Password' to reset it.";
-  }
-  if (msg.includes("disabled") || code === "user_banned") {
-    return "This account has been disabled. Contact support for help.";
-  }
-  if (error.status === 429 || msg.includes("too many") || msg.includes("rate limit")) {
-    return "Too many failed login attempts. Please wait a few minutes and try again.";
-  }
-  if (error.status === 0 || msg.includes("network") || msg.includes("fetch") || msg.includes("connect")) {
-    return "No internet connection. Please check your network and try again.";
-  }
-  if (error.status && error.status >= 500) {
-    return "Our servers hit an issue. Wait a moment and try again.";
-  }
-  return `Something unexpected happened (Error: ${error.message}). Please try again or contact support.`;
-}
-
 export default function LoginScreen() {
   const router = useRouter();
   const { show, ToastComponent } = useToast();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  function clearError(field: string) {
-    setErrors((prev) => {
-      if (!prev[field]) return prev;
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState(false);
+  const [invalidCredentials, setInvalidCredentials] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+
+  function clearAllErrors() {
+    setFieldErrors({});
+    setUnconfirmedEmail(false);
+    setInvalidCredentials(false);
+    setResendSuccess(false);
   }
 
-  function validateEmailField(value: string) {
-    if (!value.trim()) return;
-    const result = validateEducationEmail(value.trim());
-    if (!result.valid) {
-      setErrors((prev) => ({ ...prev, email: result.reason! }));
-    } else {
-      clearError("email");
-    }
+  function handleEmailChange(v: string) {
+    setEmail(v);
+    clearAllErrors();
+  }
+
+  function handlePasswordChange(v: string) {
+    setPassword(v);
+    clearAllErrors();
   }
 
   async function handleLogin() {
-    const newErrors: Record<string, string> = {};
+    const newFieldErrors: { email?: string; password?: string } = {};
 
     if (!email.trim()) {
-      newErrors.email = "Email is required.";
+      newFieldErrors.email = "Email is required.";
     } else {
       const emailCheck = validateEducationEmail(email.trim());
-      if (!emailCheck.valid) newErrors.email = emailCheck.reason!;
+      if (!emailCheck.valid) newFieldErrors.email = emailCheck.reason!;
     }
     if (!password) {
-      newErrors.password = "Password is required.";
+      newFieldErrors.password = "Password is required.";
     }
 
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+    if (Object.keys(newFieldErrors).length > 0) {
+      setFieldErrors(newFieldErrors);
       return;
     }
 
@@ -99,28 +75,52 @@ export default function LoginScreen() {
     setLoading(false);
 
     if (error) {
-      setErrors({ general: mapSignInError(error) });
+      const msg = error.message.toLowerCase();
+      const code = (error.code ?? "").toLowerCase();
+
+      if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
+        setUnconfirmedEmail(true);
+        return;
+      }
+
+      if (
+        code === "invalid_credentials" ||
+        code === "user_not_found" ||
+        msg.includes("invalid login credentials") ||
+        msg.includes("invalid credentials") ||
+        msg.includes("user not found")
+      ) {
+        setInvalidCredentials(true);
+        return;
+      }
+
+      show("Something went wrong. Please try again.", "error");
       return;
     }
 
     if (data?.user) {
-      // A successful password sign-in means the email is already confirmed
-      // (Supabase rejects unconfirmed users). Route purely on onboarding
-      // progress, which is keyed off avatar_url — set on the final
-      // "profile picture" onboarding step. A confirmed user must NEVER be
-      // sent to the interests/activities survey again.
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("avatar_url")
-        .eq("id", data.user.id)
-        .single();
-
-      if (!profile?.avatar_url) {
-        router.replace("/onboarding/profile-pic");
-      } else {
-        router.replace("/(tabs)");
-      }
+      router.replace("/(tabs)");
     }
+  }
+
+  async function handleResend() {
+    if (resendLoading) return;
+    setResendLoading(true);
+    setResendSuccess(false);
+
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim().toLowerCase(),
+    });
+
+    setResendLoading(false);
+
+    if (error) {
+      show("Something went wrong. Try again.", "error");
+      return;
+    }
+
+    setResendSuccess(true);
   }
 
   return (
@@ -135,14 +135,12 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Back arrow */}
           <View style={styles.topBar}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
               <Text style={styles.backArrow}>‹</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Logo + Brand */}
           <View style={styles.brand}>
             <Image
               source={require("../../assets/logo.png")}
@@ -152,34 +150,30 @@ export default function LoginScreen() {
             <Text style={styles.brandName}>We Glue</Text>
           </View>
 
-          {/* Form */}
           <View style={styles.form}>
-            {/* School Email */}
             <Text style={styles.label}>School Email</Text>
             <TextInput
-              style={[styles.input, !!errors.email && styles.inputError]}
+              style={[styles.input, !!fieldErrors.email && styles.inputError]}
               placeholder="you@school.edu"
               placeholderTextColor="rgba(0,0,0,0.3)"
               value={email}
-              onChangeText={(v) => { setEmail(v); clearError("email"); clearError("general"); }}
-              onBlur={() => validateEmailField(email)}
+              onChangeText={handleEmailChange}
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
             />
-            {!!errors.email && (
-              <Text style={styles.fieldError}>{errors.email}</Text>
+            {!!fieldErrors.email && (
+              <Text style={styles.fieldError}>{fieldErrors.email}</Text>
             )}
 
-            {/* Password */}
             <Text style={[styles.label, { marginTop: 16 }]}>Password</Text>
-            <View style={[styles.passwordRow, !!errors.password && styles.inputError]}>
+            <View style={[styles.passwordRow, !!fieldErrors.password && styles.inputError]}>
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Enter your password"
                 placeholderTextColor="rgba(0,0,0,0.3)"
                 value={password}
-                onChangeText={(v) => { setPassword(v); clearError("password"); clearError("general"); }}
+                onChangeText={handlePasswordChange}
                 secureTextEntry={!showPassword}
                 autoComplete="current-password"
               />
@@ -187,18 +181,42 @@ export default function LoginScreen() {
                 <Text style={styles.showToggle}>{showPassword ? "Hide" : "Show"}</Text>
               </TouchableOpacity>
             </View>
-            {!!errors.password && (
-              <Text style={styles.fieldError}>{errors.password}</Text>
+            {!!fieldErrors.password && (
+              <Text style={styles.fieldError}>{fieldErrors.password}</Text>
             )}
 
-            {/* General error */}
-            {!!errors.general && (
-              <Text style={styles.generalError}>{errors.general}</Text>
+            {invalidCredentials && (
+              <Text style={styles.generalError}>
+                Incorrect email or password. Try again or tap "Forgot Password?" to reset.
+              </Text>
             )}
 
-            {/* Log in button */}
+            {unconfirmedEmail && (
+              <View style={styles.unconfirmedBox}>
+                <Text style={styles.unconfirmedText}>
+                  You haven't confirmed your email yet. Check your inbox for the verification link.
+                </Text>
+                {resendSuccess ? (
+                  <Text style={styles.resendSuccessText}>Email resent! Check your inbox.</Text>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.resendBtn}
+                    onPress={handleResend}
+                    disabled={resendLoading}
+                    activeOpacity={0.85}
+                  >
+                    {resendLoading ? (
+                      <ActivityIndicator color="#0FA6A6" />
+                    ) : (
+                      <Text style={styles.resendBtnText}>Resend Confirmation Email</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
             <TouchableOpacity
-              style={[styles.primaryBtn, { marginTop: errors.password || errors.general ? 16 : 24 }]}
+              style={[styles.primaryBtn, { marginTop: 24 }]}
               onPress={handleLogin}
               disabled={loading}
               activeOpacity={0.85}
@@ -210,19 +228,24 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Forgot password */}
-            <TouchableOpacity style={{ alignSelf: "center", marginBottom: 24 }}>
+            <TouchableOpacity
+              style={{ alignSelf: "center", marginBottom: 24 }}
+              onPress={() =>
+                router.push({
+                  pathname: "/auth/forgot-password",
+                  params: { prefillEmail: email },
+                })
+              }
+            >
               <Text style={styles.tealLink}>Forgot Password?</Text>
             </TouchableOpacity>
 
-            {/* Divider */}
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>or</Text>
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Microsoft SSO (coming soon) */}
             <TouchableOpacity
               style={styles.secondaryBtn}
               onPress={() => show("Coming soon!", "info")}
@@ -237,7 +260,6 @@ export default function LoginScreen() {
               <Text style={styles.secondaryBtnText}>Continue with Microsoft</Text>
             </TouchableOpacity>
 
-            {/* Create account link */}
             <TouchableOpacity
               onPress={() => router.replace("/onboarding/interests")}
               style={{ alignSelf: "center", marginTop: 20 }}
@@ -263,12 +285,7 @@ const styles = StyleSheet.create({
   logo: { width: 70, height: 64, marginBottom: 4 },
   brandName: { fontSize: 30, fontFamily: "Zain_700Bold", color: "#000" },
   form: { paddingHorizontal: 24, paddingBottom: 40 },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#000",
-    marginBottom: 6,
-  },
+  label: { fontSize: 14, fontWeight: "600", color: "#000", marginBottom: 6 },
   input: {
     backgroundColor: "#FEFCF0",
     borderWidth: 1,
@@ -285,20 +302,40 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  inputError: {
-    borderColor: "#F02719",
-  },
-  fieldError: {
-    color: "#F02719",
-    fontSize: 12,
-    marginTop: 4,
-    marginLeft: 4,
-  },
+  inputError: { borderColor: "#F02719" },
+  fieldError: { color: "#F02719", fontSize: 12, marginTop: 4, marginLeft: 4 },
   generalError: {
     color: "#F02719",
     fontSize: 13,
     textAlign: "center",
     marginTop: 12,
+  },
+  unconfirmedBox: {
+    backgroundColor: "#FFF8E7",
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#F0C040",
+  },
+  unconfirmedText: {
+    fontSize: 13,
+    color: "#5F5D5D",
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  resendBtn: {
+    backgroundColor: "#0FA6A6",
+    borderRadius: 30,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  resendBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  resendSuccessText: {
+    fontSize: 13,
+    color: "#0FA6A6",
+    fontWeight: "600",
+    textAlign: "center",
   },
   passwordRow: {
     backgroundColor: "#FEFCF0",
@@ -315,12 +352,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  passwordInput: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#000",
-  },
+  passwordInput: { flex: 1, fontSize: 14, fontWeight: "600", color: "#000" },
   showToggle: { fontSize: 12, color: "#5F5D5D", fontWeight: "500" },
   primaryBtn: {
     height: 52,

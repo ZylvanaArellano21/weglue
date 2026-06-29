@@ -164,7 +164,7 @@ export default function ProfilePicScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <Text style={styles.heading}>One last step</Text>
         <Text style={styles.subheading}>
-          Add a profile picture so your friends can recognize your
+          Add a profile picture so your friends can recognize you
         </Text>
 
         {/* Avatar preview circle */}

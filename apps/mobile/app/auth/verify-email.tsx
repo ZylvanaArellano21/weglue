@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useAuthStore, useOnboardingStore } from "@weglue/shared";
+import { useOnboardingStore } from "@weglue/shared";
 import { supabase } from "../../lib/supabase";
 
 const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
@@ -25,27 +25,17 @@ const RESEND_ERROR_MESSAGE =
 export default function VerifyEmailScreen() {
   const router = useRouter();
   const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
-  const { session } = useAuthStore();
   const { pendingEmail } = useOnboardingStore();
+
   const [email, setEmail] = useState(emailParam ?? "");
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [resendStatus, setResendStatus] = useState<"success" | "error" | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Guards against double navigation when both the AppState refresh and the
-  // session effect detect confirmation at nearly the same time.
-  const confirmedHandledRef = useRef(false);
 
-  function goToProfilePic() {
-    if (confirmedHandledRef.current) return;
-    confirmedHandledRef.current = true;
-    AsyncStorage.removeItem(PENDING_EMAIL_KEY);
-    router.replace("/onboarding/profile-pic");
-  }
-
-  // Load persisted email if not passed as param (e.g. deep link entry)
+  // Load persisted email if not passed as param
   useEffect(() => {
     const paramEmail = emailParam?.trim().toLowerCase();
     if (paramEmail) {
@@ -57,54 +47,24 @@ export default function VerifyEmailScreen() {
     AsyncStorage.getItem(PENDING_EMAIL_KEY).then((stored) => {
       const storedEmail = stored?.trim().toLowerCase();
       const fallbackEmail =
-        storedEmail ||
-        pendingEmail.trim().toLowerCase() ||
-        session?.user?.email?.trim().toLowerCase() ||
-        "";
+        storedEmail || pendingEmail.trim().toLowerCase() || "";
 
       if (fallbackEmail) {
         setEmail(fallbackEmail);
         AsyncStorage.setItem(PENDING_EMAIL_KEY, fallbackEmail);
       }
     });
-  }, [emailParam, pendingEmail, session?.user?.email]);
+  }, [emailParam, pendingEmail]);
 
-  // Navigate when session confirms email (triggered by deep link or polling)
-  useEffect(() => {
-    if (session?.user?.email_confirmed_at) {
-      goToProfilePic();
-    }
-  }, [session]);
-
-  // Refresh the session every time the app returns to the foreground. This is
-  // the primary path for the common "confirmed in the browser, switched back to
-  // the app" flow: getSession() only returns the cached token, so we must force
-  // a refresh to pick up the freshly-set email_confirmed_at. Once confirmed we
-  // jump straight to profile-pic and replace this screen so the back button can
-  // never return to "Confirm your email".
+  // Refresh session when app returns to foreground so the auth store
+  // stays current — but do NOT auto-navigate. The user taps "Next" when ready.
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (state) => {
-      if (state !== "active" || confirmedHandledRef.current) return;
-      const { data } = await supabase.auth.refreshSession();
-      if (data.session?.user?.email_confirmed_at) {
-        goToProfilePic();
-      }
+      if (state !== "active") return;
+      await supabase.auth.refreshSession();
     });
-    return () => sub.remove();
-  }, []);
-
-  // Poll every 4 seconds as a fallback to detect same-device confirmation
-  useEffect(() => {
-    pollRef.current = setInterval(async () => {
-      const { data } = await supabase.auth.refreshSession();
-      if (data.session?.user?.email_confirmed_at) {
-        clearInterval(pollRef.current!);
-        goToProfilePic();
-      }
-    }, 4000);
-
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      sub.remove();
       if (cooldownRef.current) clearInterval(cooldownRef.current);
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
     };
@@ -164,11 +124,23 @@ export default function VerifyEmailScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header row */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
+        <View style={styles.nextRow}>
+          <Text style={styles.alreadyText}>Already verified it?</Text>
+          <TouchableOpacity
+            style={styles.nextBtn}
+            onPress={() => router.replace("/onboarding/profile-pic")}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.nextBtnText}>Next</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
       <View style={styles.content}>
         <Image
           source={require("../../assets/logo.png")}
@@ -210,14 +182,10 @@ export default function VerifyEmailScreen() {
         </TouchableOpacity>
 
         {resendStatus === "success" && (
-          <Text style={styles.feedbackSuccess}>
-            {RESEND_SUCCESS_MESSAGE}
-          </Text>
+          <Text style={styles.feedbackSuccess}>{RESEND_SUCCESS_MESSAGE}</Text>
         )}
         {resendStatus === "error" && (
-          <Text style={styles.feedbackError}>
-            {RESEND_ERROR_MESSAGE}
-          </Text>
+          <Text style={styles.feedbackError}>{RESEND_ERROR_MESSAGE}</Text>
         )}
       </View>
     </SafeAreaView>
@@ -226,20 +194,31 @@ export default function VerifyEmailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FEFCF0" },
-  topBar: { paddingHorizontal: 20, paddingTop: 8 },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
   backBtn: { width: 40, height: 40, justifyContent: "center" },
   backArrow: { fontSize: 30, color: "#000", lineHeight: 36 },
+  nextRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  alreadyText: { fontSize: 13, color: "#5F5D5D", fontWeight: "500" },
+  nextBtn: {
+    backgroundColor: "#0FA6A6",
+    borderRadius: 30,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  nextBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   content: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,
   },
-  logo: {
-    width: 80,
-    height: 72,
-    marginBottom: 28,
-  },
+  logo: { width: 80, height: 72, marginBottom: 28 },
   title: {
     fontSize: 28,
     fontFamily: "Zain_700Bold",
@@ -275,11 +254,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  resendBtnDisabled: {
-    backgroundColor: "#CCCCCC",
-    shadowOpacity: 0,
-    elevation: 0,
-  },
+  resendBtnDisabled: { backgroundColor: "#CCCCCC", shadowOpacity: 0, elevation: 0 },
   resendText: { fontSize: 16, fontWeight: "600", color: "#FEFCF0" },
   resendTextMuted: { color: "#FEFCF0" },
   feedbackSuccess: {

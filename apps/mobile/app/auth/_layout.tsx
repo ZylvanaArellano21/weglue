@@ -10,6 +10,11 @@ export default function AuthLayout() {
       <Stack.Screen name="confirmed" options={{ animation: "none" }} />
       <Stack.Screen name="avatar" />
       <Stack.Screen name="survey" />
+      <Stack.Screen name="forgot-password" />
+      <Stack.Screen
+        name="forgot-password-success"
+        options={{ gestureEnabled: false }}
+      />
     </Stack>
   );
 }

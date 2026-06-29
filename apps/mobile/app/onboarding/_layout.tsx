@@ -8,6 +8,7 @@ export default function OnboardingLayout() {
       <Stack.Screen name="signup" />
       <Stack.Screen name="profile-pic" />
       <Stack.Screen name="matches" />
+      <Stack.Screen name="club-preview" />
     </Stack>
   );
 }

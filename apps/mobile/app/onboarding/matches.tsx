@@ -14,6 +14,7 @@ import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore, useOnboardingStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
+import { MOCK_CLUBS } from "../../data/mockClubs";
 
 interface Club {
   id: string;
@@ -247,7 +248,10 @@ export default function MatchesScreen() {
                     <ClubCard
                       club={club}
                       onJoin={() => handleJoin(club)}
-                      onPress={() => {}}
+                      onPress={() => {
+                    const mockIndex = clubs.indexOf(club) % MOCK_CLUBS.length;
+                    router.push(`/onboarding/club-preview/${MOCK_CLUBS[mockIndex].id}`);
+                  }}
                     />
                   </View>
                 ))}
@@ -265,7 +269,10 @@ export default function MatchesScreen() {
                     <ClubCard
                       club={club}
                       onJoin={() => handleJoin(club)}
-                      onPress={() => {}}
+                      onPress={() => {
+                    const mockIndex = clubs.indexOf(club) % MOCK_CLUBS.length;
+                    router.push(`/onboarding/club-preview/${MOCK_CLUBS[mockIndex].id}`);
+                  }}
                     />
                   </View>
                 ))}
