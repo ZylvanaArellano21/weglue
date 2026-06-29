@@ -8,10 +8,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
 
 export default function ForgotPasswordSuccessScreen() {
+  const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
 
   const [resendLoading, setResendLoading] = useState(false);
@@ -41,6 +42,11 @@ export default function ForgotPasswordSuccessScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Back arrow */}
+      <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <Text style={styles.backArrow}>‹</Text>
+      </TouchableOpacity>
+
       <View style={styles.content}>
         <Image
           source={require("../../assets/logo.png")}
@@ -48,52 +54,41 @@ export default function ForgotPasswordSuccessScreen() {
           resizeMode="contain"
         />
 
+        <Text style={styles.title}>Check your email</Text>
+        <Text style={styles.tagline}>Connection starts with you</Text>
+
         {/* Check circle */}
         <View style={styles.checkCircle}>
           <Text style={styles.checkMark}>✓</Text>
         </View>
 
-        <Text style={styles.title}>Check your inbox</Text>
-        <Text style={styles.subtitle}>
-          We sent a password reset link to
-        </Text>
+        <Text style={styles.bodyText}>We sent a password reset link to</Text>
         <Text style={styles.email}>{email}</Text>
-        <Text style={styles.instruction}>
-          Open the link in the email to set a new password. If you don't see it,
-          check your spam folder.
+        <Text style={styles.bodyText}>
+          Open the link to set a new password, then come back and log in.
+        </Text>
+        <Text style={styles.closeHint}>
+          You can close this screen and return to We Glue anytime.
         </Text>
 
-        {resendSuccess ? (
-          <Text style={styles.resendSuccessText}>Reset link resent! Check your inbox.</Text>
-        ) : resendError ? (
-          <View style={styles.resendErrorWrap}>
-            <Text style={styles.resendErrorText}>{resendError}</Text>
-            <TouchableOpacity
-              style={styles.resendBtn}
-              onPress={handleResend}
-              disabled={resendLoading}
-              activeOpacity={0.85}
-            >
-              {resendLoading ? (
-                <ActivityIndicator color="#0FA6A6" />
-              ) : (
-                <Text style={styles.resendBtnText}>Try Again</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.resendBtn}
-            onPress={handleResend}
-            disabled={resendLoading}
-            activeOpacity={0.85}
-          >
-            {resendLoading ? (
-              <ActivityIndicator color="#0FA6A6" />
-            ) : (
-              <Text style={styles.resendBtnText}>Resend Link</Text>
-            )}
-          </TouchableOpacity>
+        {/* Resend row */}
+        <View style={styles.resendRow}>
+          {resendLoading ? (
+            <Text style={styles.resendLoadingText}>Sending...</Text>
+          ) : resendSuccess ? (
+            <Text style={styles.resendSuccessText}>Email resent! Check your inbox.</Text>
+          ) : (
+            <Text style={styles.resendPrompt}>
+              Didn't get it?{" "}
+              <Text style={styles.resendLink} onPress={handleResend}>
+                Resend
+              </Text>
+            </Text>
+          )}
+        </View>
+
+        {resendError !== null && !resendSuccess && !resendLoading && (
+          <Text style={styles.resendErrorText}>{resendError}</Text>
         )}
       </View>
     </SafeAreaView>
@@ -102,60 +97,93 @@ export default function ForgotPasswordSuccessScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FEFCF0" },
+  backBtn: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    width: 40,
+    height: 48,
+    justifyContent: "center",
+  },
+  backArrow: { fontSize: 30, color: "#000", lineHeight: 36 },
   content: {
     flex: 1,
     alignItems: "center",
-    justifyContent: "center",
     paddingHorizontal: 32,
+    paddingTop: 16,
   },
-  logo: { width: 80, height: 72, marginBottom: 24 },
+  logo: { width: 80, height: 72, marginTop: 16, marginBottom: 24 },
+  title: {
+    fontSize: 26,
+    fontFamily: "Zain_700Bold",
+    color: "#1a1a1a",
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  tagline: {
+    fontSize: 13,
+    color: "#9CA3AF",
+    marginBottom: 32,
+    textAlign: "center",
+  },
   checkCircle: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: "#0FA6A6",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 28,
+    marginBottom: 32,
   },
   checkMark: { fontSize: 32, color: "#0FA6A6", fontWeight: "700" },
-  title: {
-    fontSize: 28,
-    fontFamily: "Zain_700Bold",
-    color: "#1a1a1a",
-    marginBottom: 12,
+  bodyText: {
+    fontSize: 13,
+    color: "#4B5563",
     textAlign: "center",
+    lineHeight: 20,
   },
-  subtitle: { fontSize: 15, color: "#5F5D5D", textAlign: "center" },
   email: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     color: "#0FA6A6",
     textAlign: "center",
-    marginBottom: 12,
+    marginVertical: 4,
   },
-  instruction: {
-    fontSize: 13,
-    color: "#5F5D5D",
+  closeHint: {
+    fontSize: 12,
+    color: "#9CA3AF",
     textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 32,
+    marginTop: 12,
+    lineHeight: 18,
   },
-  resendBtn: {
-    borderWidth: 1.5,
-    borderColor: "#0FA6A6",
-    borderRadius: 40,
-    paddingHorizontal: 32,
-    paddingVertical: 12,
+  resendRow: {
+    marginTop: 16,
+    alignItems: "center",
   },
-  resendBtnText: { color: "#0FA6A6", fontSize: 14, fontWeight: "600" },
-  resendSuccessText: {
-    fontSize: 14,
+  resendPrompt: {
+    fontSize: 13,
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  resendLink: {
     color: "#0FA6A6",
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
+  resendLoadingText: {
+    fontSize: 13,
+    color: "#9CA3AF",
+  },
+  resendSuccessText: {
+    fontSize: 13,
+    color: "#16A34A",
     fontWeight: "600",
     textAlign: "center",
   },
-  resendErrorWrap: { alignItems: "center", gap: 10 },
-  resendErrorText: { fontSize: 13, color: "#F02719", textAlign: "center" },
+  resendErrorText: {
+    fontSize: 12,
+    color: "#F02719",
+    textAlign: "center",
+    marginTop: 6,
+  },
 });

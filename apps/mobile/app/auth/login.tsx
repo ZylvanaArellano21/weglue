@@ -185,36 +185,6 @@ export default function LoginScreen() {
               <Text style={styles.fieldError}>{fieldErrors.password}</Text>
             )}
 
-            {invalidCredentials && (
-              <Text style={styles.generalError}>
-                Incorrect email or password. Try again or tap "Forgot Password?" to reset.
-              </Text>
-            )}
-
-            {unconfirmedEmail && (
-              <View style={styles.unconfirmedBox}>
-                <Text style={styles.unconfirmedText}>
-                  You haven't confirmed your email yet. Check your inbox for the verification link.
-                </Text>
-                {resendSuccess ? (
-                  <Text style={styles.resendSuccessText}>Email resent! Check your inbox.</Text>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.resendBtn}
-                    onPress={handleResend}
-                    disabled={resendLoading}
-                    activeOpacity={0.85}
-                  >
-                    {resendLoading ? (
-                      <ActivityIndicator color="#0FA6A6" />
-                    ) : (
-                      <Text style={styles.resendBtnText}>Resend Confirmation Email</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-
             <TouchableOpacity
               style={[styles.primaryBtn, { marginTop: 24 }]}
               onPress={handleLogin}
@@ -227,6 +197,29 @@ export default function LoginScreen() {
                 <Text style={styles.primaryBtnText}>Log in</Text>
               )}
             </TouchableOpacity>
+
+            {invalidCredentials && (
+              <Text style={styles.generalError}>
+                No account found with these credentials. Double-check your email and password.
+              </Text>
+            )}
+
+            {unconfirmedEmail && (
+              <View style={styles.unconfirmedBox}>
+                <Text style={styles.unconfirmedText}>
+                  You haven't confirmed your email yet. Check your inbox.
+                </Text>
+                {resendSuccess ? (
+                  <Text style={styles.resendSuccessText}>Email sent! Check your inbox.</Text>
+                ) : resendLoading ? (
+                  <Text style={styles.resendLoadingText}>Sending...</Text>
+                ) : (
+                  <TouchableOpacity onPress={handleResend} activeOpacity={0.75}>
+                    <Text style={styles.resendLink}>Resend confirmation email</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
             <TouchableOpacity
               style={{ alignSelf: "center", marginBottom: 24 }}
@@ -307,35 +300,34 @@ const styles = StyleSheet.create({
   generalError: {
     color: "#F02719",
     fontSize: 13,
-    textAlign: "center",
-    marginTop: 12,
+    marginTop: 10,
+    marginBottom: 4,
+    lineHeight: 18,
   },
   unconfirmedBox: {
-    backgroundColor: "#FFF8E7",
-    borderRadius: 10,
-    padding: 14,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: "#F0C040",
+    marginTop: 10,
+    marginBottom: 4,
   },
   unconfirmedText: {
     fontSize: 13,
-    color: "#5F5D5D",
+    color: "#F02719",
     lineHeight: 18,
-    marginBottom: 10,
+    marginBottom: 6,
   },
-  resendBtn: {
-    backgroundColor: "#0FA6A6",
-    borderRadius: 30,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  resendBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  resendSuccessText: {
+  resendLink: {
     fontSize: 13,
     color: "#0FA6A6",
     fontWeight: "600",
-    textAlign: "center",
+    textDecorationLine: "underline",
+  },
+  resendLoadingText: {
+    fontSize: 13,
+    color: "#9CA3AF",
+  },
+  resendSuccessText: {
+    fontSize: 13,
+    color: "#16A34A",
+    fontWeight: "600",
   },
   passwordRow: {
     backgroundColor: "#FEFCF0",
@@ -353,7 +345,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   passwordInput: { flex: 1, fontSize: 14, fontWeight: "600", color: "#000" },
-  showToggle: { fontSize: 12, color: "#5F5D5D", fontWeight: "500" },
+  showToggle: { fontSize: 12, color: "#0FA6A6", fontWeight: "600" },
   primaryBtn: {
     height: 52,
     backgroundColor: "#0FA6A6",
@@ -368,7 +360,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   primaryBtnText: { color: "#FEFCF0", fontSize: 16, fontWeight: "600" },
-  tealLink: { fontSize: 14, color: "#0FA6A6", fontWeight: "600" },
+  tealLink: { fontSize: 14, color: "#0FA6A6", fontWeight: "600", textDecorationLine: "underline" },
   divider: { flexDirection: "row", alignItems: "center", marginBottom: 24 },
   dividerLine: { flex: 1, height: 1, backgroundColor: "rgba(0,0,0,0.12)" },
   dividerText: { marginHorizontal: 12, fontSize: 12, color: "#5F5D5D" },

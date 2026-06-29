@@ -85,9 +85,9 @@ export default function ForgotPasswordScreen() {
           </View>
 
           <View style={styles.form}>
-            <Text style={styles.title}>Forgot your password?</Text>
+            <Text style={styles.title}>Reset your password</Text>
             <Text style={styles.subtitle}>
-              Enter your school email and we'll send you a link to reset your password.
+              We'll send a reset link to your school email. Check your inbox after tapping send.
             </Text>
 
             <Text style={styles.label}>School Email</Text>
@@ -139,16 +139,15 @@ const styles = StyleSheet.create({
   brandName: { fontSize: 30, fontFamily: "Zain_700Bold", color: "#000" },
   form: { paddingHorizontal: 24, paddingBottom: 40 },
   title: {
-    fontSize: 24,
-    fontWeight: "700",
+    fontSize: 26,
+    fontFamily: "Zain_700Bold",
     color: "#000",
     marginBottom: 8,
-    textAlign: "center",
+    marginTop: 40,
   },
   subtitle: {
     fontSize: 14,
     color: "#5F5D5D",
-    textAlign: "center",
     lineHeight: 20,
     marginBottom: 28,
   },

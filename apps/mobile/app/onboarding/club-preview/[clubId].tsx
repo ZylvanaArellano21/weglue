@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Dimensions,
   Image,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,20 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { MOCK_CLUBS } from "../../../data/mockClubs";
+
+const SCREEN_WIDTH = Dimensions.get("window").width;
+const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 16) / 3;
+
+// Static calendar data for display
+const CALENDAR_DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+const CALENDAR_WEEKS = [
+  [null, null, 1, 2, 3, 4, 5],
+  [6, 7, 8, 9, 10, 11, 12],
+  [13, 14, 15, 16, 17, 18, 19],
+  [20, 21, 22, 23, 24, 25, 26],
+  [27, 28, 29, 30, 31, null, null],
+];
+const CALENDAR_HIGHLIGHT = 15;
 
 export default function ClubPreviewScreen() {
   const router = useRouter();
@@ -87,7 +102,9 @@ export default function ClubPreviewScreen() {
           <Text style={styles.aboutText}>{club.about}</Text>
           {club.keyBenefits.map((b, i) => (
             <View key={i} style={styles.benefitRow}>
-              <Text style={styles.benefitCheck}>☑</Text>
+              <View style={styles.benefitCheckWrap}>
+                <Text style={styles.benefitCheck}>✓</Text>
+              </View>
               <Text style={styles.benefitText}>{b}</Text>
             </View>
           ))}
@@ -155,8 +172,51 @@ export default function ClubPreviewScreen() {
                 }
                 activeOpacity={0.85}
               >
-                <Image source={{ uri: url }} style={styles.gridPhoto} />
+                <Image source={{ uri: url }} style={[styles.gridPhoto, { width: PHOTO_SIZE, height: PHOTO_SIZE }]} />
               </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Calendar */}
+          <Text style={styles.sectionTitle}>Calendar</Text>
+          <View style={styles.calendarCard}>
+            <View style={styles.calendarHeader}>
+              <TouchableOpacity style={styles.calendarArrow}>
+                <Text style={styles.calendarArrowText}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.calendarMonth}>May 2023</Text>
+              <TouchableOpacity style={styles.calendarArrow}>
+                <Text style={styles.calendarArrowText}>›</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.calendarDaysRow}>
+              {CALENDAR_DAYS.map((d) => (
+                <Text key={d} style={styles.calendarDayLabel}>{d}</Text>
+              ))}
+            </View>
+            {CALENDAR_WEEKS.map((week, wi) => (
+              <View key={wi} style={styles.calendarWeekRow}>
+                {week.map((day, di) => (
+                  <View
+                    key={di}
+                    style={[
+                      styles.calendarCell,
+                      day === CALENDAR_HIGHLIGHT && styles.calendarCellHighlight,
+                    ]}
+                  >
+                    {day !== null && (
+                      <Text
+                        style={[
+                          styles.calendarDayNum,
+                          day === CALENDAR_HIGHLIGHT && styles.calendarDayNumHighlight,
+                        ]}
+                      >
+                        {day}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
             ))}
           </View>
 
@@ -266,7 +326,16 @@ const styles = StyleSheet.create({
   },
   aboutText: { fontSize: 14, color: MUTED, lineHeight: 20, marginBottom: 10 },
   benefitRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 6 },
-  benefitCheck: { fontSize: 16, color: TEAL },
+  benefitCheckWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 3,
+    backgroundColor: TEAL,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  benefitCheck: { fontSize: 11, color: "#fff", fontWeight: "700" },
   benefitText: { flex: 1, fontSize: 13, color: INK, lineHeight: 18 },
   scheduleCard: {
     backgroundColor: "#fff",
@@ -303,7 +372,60 @@ const styles = StyleSheet.create({
   eventMeta: { fontSize: 11, color: MUTED },
   eventChevron: { fontSize: 22, color: MUTED, paddingRight: 10 },
   photoGrid: { flexDirection: "row", gap: 8, marginBottom: 8 },
-  gridPhoto: { width: 104, height: 104, borderRadius: 8 },
+  gridPhoto: { borderRadius: 8 },
+  calendarCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  calendarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  calendarArrow: { padding: 4 },
+  calendarArrowText: { fontSize: 20, color: MUTED },
+  calendarMonth: { fontSize: 13, fontWeight: "700", color: INK },
+  calendarDaysRow: {
+    flexDirection: "row",
+    marginBottom: 4,
+  },
+  calendarDayLabel: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 11,
+    color: MUTED,
+    fontWeight: "600",
+  },
+  calendarWeekRow: {
+    flexDirection: "row",
+    marginBottom: 2,
+  },
+  calendarCell: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    height: 28,
+    borderRadius: 14,
+  },
+  calendarCellHighlight: {
+    backgroundColor: TEAL,
+  },
+  calendarDayNum: {
+    fontSize: 12,
+    color: INK,
+  },
+  calendarDayNumHighlight: {
+    color: "#fff",
+    fontWeight: "700",
+  },
   officerCard: {
     flexDirection: "row",
     alignItems: "center",

@@ -16,6 +16,7 @@ interface MockMessage {
   time: string;
   isOwn: boolean;
   senderAvatar?: string;
+  senderName?: string;
   dateLabel?: string;
 }
 
@@ -27,6 +28,7 @@ const MOCK_MESSAGES: MockMessage[] = [
     time: "3:51 PM",
     isOwn: false,
     senderAvatar: "https://picsum.photos/seed/chat-s1/40/40",
+    senderName: "Josefina",
   },
   {
     id: "3",
@@ -34,6 +36,7 @@ const MOCK_MESSAGES: MockMessage[] = [
     time: "3:51 PM",
     isOwn: false,
     senderAvatar: "https://picsum.photos/seed/chat-s2/40/40",
+    senderName: "Iniesta",
   },
   {
     id: "4",
@@ -41,6 +44,7 @@ const MOCK_MESSAGES: MockMessage[] = [
     time: "3:51 PM",
     isOwn: false,
     senderAvatar: "https://picsum.photos/seed/chat-s3/40/40",
+    senderName: "Marcus",
   },
   {
     id: "5",
@@ -55,6 +59,7 @@ const MOCK_MESSAGES: MockMessage[] = [
     time: "3:51 PM",
     isOwn: false,
     senderAvatar: "https://picsum.photos/seed/chat-s1/40/40",
+    senderName: "Josefina",
   },
   {
     id: "7",
@@ -62,6 +67,7 @@ const MOCK_MESSAGES: MockMessage[] = [
     time: "3:51 PM",
     isOwn: false,
     senderAvatar: "https://picsum.photos/seed/chat-s2/40/40",
+    senderName: "Iniesta",
   },
 ];
 
@@ -118,6 +124,9 @@ export default function ChatPreviewScreen() {
                   style={styles.senderAvatar}
                 />
                 <View>
+                  {msg.senderName && (
+                    <Text style={styles.senderName}>{msg.senderName}</Text>
+                  )}
                   <View style={styles.otherBubble}>
                     <Text style={styles.otherBubbleText}>{msg.text}</Text>
                   </View>
@@ -210,6 +219,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   otherBubbleText: { color: INK, fontSize: 14, lineHeight: 19 },
+  senderName: { fontSize: 11, color: TEAL, fontWeight: "600", marginBottom: 2, marginLeft: 4 },
   timeOther: { fontSize: 10, color: MUTED, marginTop: 2, marginLeft: 4 },
   joinCta: {
     flexDirection: "row",
