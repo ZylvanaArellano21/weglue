@@ -59,44 +59,30 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
       */}
       <FragmentConfirm />
 
-      <main
-        style={{ backgroundColor: "#FEFCF0" }}
-        className="min-h-screen flex items-center justify-center px-4"
-      >
-        <div className="w-full max-w-sm flex flex-col items-center text-center">
+      <main className="min-h-screen bg-[#FEFCF0] flex items-center justify-center px-6">
+        <div className="max-w-[400px] mx-auto text-center">
           <Image
             src="/logo.png"
             alt="We Glue"
             width={100}
             height={90}
-            className="mb-6"
+            className="mb-6 mx-auto"
             priority
           />
 
           {success ? (
             <>
-              <h1
-                className="font-zain text-3xl font-bold mb-2"
-                style={{ color: "#1a1a1a" }}
-              >
+              <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
                 Your email has been confirmed
               </h1>
-              <p className="text-sm mb-10" style={{ color: "#5F5D5D" }}>
+              <p className="text-sm text-gray-400 mb-8">
                 Connection starts with you
               </p>
 
-              <div
-                className="flex items-center justify-center mb-10"
-                style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: "50%",
-                  border: "3px solid #0FA6A6",
-                }}
-              >
+              <div className="w-20 h-20 rounded-full border-2 border-[#0FA6A6] flex items-center justify-center mx-auto mb-8">
                 <svg
-                  width="32"
-                  height="32"
+                  width="40"
+                  height="40"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="#0FA6A6"
@@ -108,30 +94,18 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
                 </svg>
               </div>
 
-              <p
-                className="text-sm leading-relaxed max-w-[260px]"
-                style={{ color: "#5F5D5D" }}
-              >
+              <p className="text-sm text-gray-600 leading-relaxed">
                 You can go back to We Glue now and click the{" "}
-                <span style={{ color: "#0FA6A6", fontWeight: 600 }}>Next</span>{" "}
+                <span className="text-[#0FA6A6] font-semibold">&ldquo;Next&rdquo;</span>{" "}
                 button.
               </p>
             </>
           ) : (
             <>
-              <div
-                className="flex items-center justify-center mb-6"
-                style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: "50%",
-                  border: "3px solid #F02719",
-                  backgroundColor: "rgba(240,39,25,0.08)",
-                }}
-              >
+              <div className="w-20 h-20 rounded-full border-2 border-[#F02719] bg-red-50 flex items-center justify-center mx-auto mb-6">
                 <svg
-                  width="32"
-                  height="32"
+                  width="40"
+                  height="40"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="#F02719"
@@ -144,22 +118,16 @@ export default async function AuthConfirmPage({ searchParams }: PageProps) {
                 </svg>
               </div>
 
-              <h1
-                className="font-zain text-3xl font-bold mb-2"
-                style={{ color: "#1a1a1a" }}
-              >
+              <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
                 Confirmation link expired
               </h1>
-              <p className="text-sm mb-6" style={{ color: "#5F5D5D" }}>
+              <p className="text-sm text-gray-400 mb-6">
                 Please request a new confirmation email
               </p>
 
-              <p
-                className="text-sm leading-relaxed max-w-[260px]"
-                style={{ color: "#5F5D5D" }}
-              >
+              <p className="text-sm text-gray-600 leading-relaxed">
                 Return to We Glue and tap{" "}
-                <span style={{ fontWeight: 600 }}>&ldquo;Resend email&rdquo;</span>{" "}
+                <span className="font-semibold">&ldquo;Resend email&rdquo;</span>{" "}
                 to get a new link.
               </p>
             </>

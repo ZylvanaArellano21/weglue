@@ -3,11 +3,6 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 
-const TEAL = "#0FA6A6";
-const CREAM = "#FEFCF0";
-const INK = "#1a1a1a";
-const MUTED = "#5F5D5D";
-
 export default function FragmentConfirm() {
   const [hasTokens, setHasTokens] = useState(false);
 
@@ -23,42 +18,31 @@ export default function FragmentConfirm() {
   if (!hasTokens) return null;
 
   return (
-    <main
-      style={{ backgroundColor: CREAM }}
-      className="fixed inset-0 z-50 flex items-center justify-center px-4"
-    >
-      <div className="w-full max-w-sm flex flex-col items-center text-center">
+    <main className="fixed inset-0 z-50 bg-[#FEFCF0] flex items-center justify-center px-6">
+      <div className="max-w-[400px] mx-auto text-center">
         <Image
           src="/logo.png"
           alt="We Glue"
           width={100}
           height={90}
-          className="mb-6"
+          className="mb-6 mx-auto"
           priority
         />
 
-        <h1 className="font-zain text-3xl font-bold mb-2" style={{ color: INK }}>
+        <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
           Your email has been confirmed
         </h1>
-        <p className="text-sm mb-10" style={{ color: MUTED }}>
+        <p className="text-sm text-gray-400 mb-8">
           Connection starts with you
         </p>
 
-        <div
-          className="flex items-center justify-center mb-10"
-          style={{
-            width: 64,
-            height: 64,
-            borderRadius: "50%",
-            border: `3px solid ${TEAL}`,
-          }}
-        >
+        <div className="w-20 h-20 rounded-full border-2 border-[#0FA6A6] flex items-center justify-center mx-auto mb-8">
           <svg
-            width="32"
-            height="32"
+            width="40"
+            height="40"
             viewBox="0 0 24 24"
             fill="none"
-            stroke={TEAL}
+            stroke="#0FA6A6"
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -67,9 +51,10 @@ export default function FragmentConfirm() {
           </svg>
         </div>
 
-        <p className="text-sm leading-relaxed max-w-[260px]" style={{ color: MUTED }}>
+        <p className="text-sm text-gray-600 leading-relaxed">
           You can go back to We Glue now and click the{" "}
-          <span style={{ color: TEAL, fontWeight: 600 }}>Next</span> button.
+          <span className="text-[#0FA6A6] font-semibold">&ldquo;Next&rdquo;</span>{" "}
+          button.
         </p>
       </div>
     </main>

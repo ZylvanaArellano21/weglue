@@ -12,15 +12,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore, useOnboardingStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 
-const PRESET_COLORS = [
-  "#4CAF50", "#9C27B0", "#E91E63", "#2196F3", "#FF9800",
-  "#F44336", "#FFEB3B", "#000000", "#00BCD4", "#795548",
-];
+const AVATAR_EMOJIS = ["🦁", "🐼", "🦊", "🐸", "🐺", "🐨", "🐯", "🦄", "🐻", "🐮"];
 
 export default function ProfilePicScreen() {
   const router = useRouter();
@@ -30,7 +28,7 @@ export default function ProfilePicScreen() {
 
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [avatarType, setAvatarType] = useState<"photo" | "camera" | "preset" | "text" | null>(null);
-  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [selectedAvatarEmoji, setSelectedAvatarEmoji] = useState<string | null>(null);
   const [textInput, setTextInput] = useState("");
   const [showTextInput, setShowTextInput] = useState(false);
   const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
@@ -56,7 +54,7 @@ export default function ProfilePicScreen() {
     if (!result.canceled && result.assets[0]) {
       setAvatarUri(result.assets[0].uri);
       setAvatarType("camera");
-      setSelectedPreset(null);
+      setSelectedAvatarEmoji(null);
       setTextInput("");
       setShowTextInput(false);
     }
@@ -70,8 +68,6 @@ export default function ProfilePicScreen() {
       setCameraPermissionDenied(false);
       return;
     }
-    // status "granted" covers both full access and iOS limited access
-    // (limited = accessPrivileges: "limited" — picker shows only granted photos)
     if (status !== "granted") return;
 
     setPhotoPermissionDenied(false);
@@ -84,17 +80,17 @@ export default function ProfilePicScreen() {
     if (!result.canceled && result.assets[0]) {
       setAvatarUri(result.assets[0].uri);
       setAvatarType("photo");
-      setSelectedPreset(null);
+      setSelectedAvatarEmoji(null);
       setTextInput("");
       setShowTextInput(false);
     }
   }
 
-  function selectPreset(color: string) {
-    setSelectedPreset(color);
+  function selectAvatarEmoji(emoji: string) {
+    setSelectedAvatarEmoji(emoji);
     setAvatarUri(null);
-    setAvatarType("preset");
-    setTextInput("");
+    setAvatarType("text");
+    setTextInput(emoji);
     setShowTextInput(false);
   }
 
@@ -102,13 +98,14 @@ export default function ProfilePicScreen() {
     setShowTextInput(true);
     setAvatarType("text");
     setAvatarUri(null);
-    setSelectedPreset(null);
+    setSelectedAvatarEmoji(null);
+    setTextInput("");
   }
 
   function clearAvatar() {
     setAvatarUri(null);
     setAvatarType(null);
-    setSelectedPreset(null);
+    setSelectedAvatarEmoji(null);
     setTextInput("");
     setShowTextInput(false);
   }
@@ -138,10 +135,8 @@ export default function ProfilePicScreen() {
           const { data } = supabase.storage.from("avatars").getPublicUrl(fileName);
           avatarUrl = data.publicUrl;
         }
-      } else if (avatarType === "preset" && selectedPreset) {
-        avatarUrl = `preset:${selectedPreset}`;
       } else if (avatarType === "text" && textInput.trim()) {
-        avatarUrl = `text:${textInput.trim().toUpperCase()}`;
+        avatarUrl = `text:${textInput.trim()}`;
       }
 
       await supabase
@@ -188,7 +183,7 @@ export default function ProfilePicScreen() {
   const displayName = pendingUsername || user?.email?.split("@")[0] || "there";
 
   const showingText = avatarType === "text" && textInput.trim().length > 0;
-  const hasSelection = !!(avatarUri || selectedPreset || showingText);
+  const hasSelection = !!(avatarUri || showingText);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -205,23 +200,15 @@ export default function ProfilePicScreen() {
           <View
             style={[
               styles.avatarCircle,
-              selectedPreset
-                ? { backgroundColor: selectedPreset, borderStyle: "solid" }
-                : showingText
-                ? { backgroundColor: "#0FA6A6", borderStyle: "solid" }
-                : {},
+              showingText ? { backgroundColor: "#0FA6A6", borderStyle: "solid", borderColor: "#0FA6A6" } : {},
             ]}
           >
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
             ) : showingText ? (
               <View style={styles.textAvatarContent}>
-                <Text style={styles.textAvatarPreview}>
-                  {textInput.trim().toUpperCase()}
-                </Text>
+                <Text style={styles.textAvatarPreview}>{textInput.trim()}</Text>
               </View>
-            ) : !selectedPreset ? (
-              <View style={{ opacity: 0 }} />
             ) : null}
           </View>
           {hasSelection && (
@@ -236,14 +223,14 @@ export default function ProfilePicScreen() {
         <View style={styles.addRow}>
           <TouchableOpacity style={styles.addOption} onPress={pickFromCamera}>
             <View style={styles.addIcon}>
-              <Text style={styles.addIconText}>📷</Text>
+              <Ionicons name="camera-outline" size={24} color="#fff" />
             </View>
             <Text style={styles.addOptionLabel}>Camera</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.addOption} onPress={pickFromLibrary}>
             <View style={styles.addIcon}>
-              <Text style={styles.addIconText}>🖼️</Text>
+              <Ionicons name="image-outline" size={24} color="#fff" />
             </View>
             <Text style={styles.addOptionLabel}>Photo</Text>
           </TouchableOpacity>
@@ -260,7 +247,7 @@ export default function ProfilePicScreen() {
         {showTextInput && (
           <TextInput
             style={styles.textAvatarInput}
-            placeholder="ABC"
+            placeholder="e.g. ZA"
             placeholderTextColor="rgba(0,0,0,0.3)"
             value={textInput}
             onChangeText={(v) => setTextInput(v.slice(0, 3).toUpperCase())}
@@ -285,33 +272,37 @@ export default function ProfilePicScreen() {
           </View>
         )}
 
-        {/* Preset avatars */}
+        {/* We Glue avatar grid */}
         <Text style={styles.presetLabel}>Or choose a We Glue avatar</Text>
-        <View style={styles.presets}>
-          {PRESET_COLORS.slice(0, 5).map((color) => (
-            <TouchableOpacity
-              key={color}
-              onPress={() => selectPreset(color)}
-              style={[
-                styles.presetCircle,
-                { backgroundColor: color },
-                selectedPreset === color && styles.presetSelected,
-              ]}
-            />
-          ))}
-        </View>
-        <View style={[styles.presets, { marginTop: 12 }]}>
-          {PRESET_COLORS.slice(5).map((color) => (
-            <TouchableOpacity
-              key={color}
-              onPress={() => selectPreset(color)}
-              style={[
-                styles.presetCircle,
-                { backgroundColor: color },
-                selectedPreset === color && styles.presetSelected,
-              ]}
-            />
-          ))}
+        <View style={styles.avatarGrid}>
+          <View style={styles.avatarRow}>
+            {AVATAR_EMOJIS.slice(0, 5).map((emoji) => (
+              <TouchableOpacity
+                key={emoji}
+                onPress={() => selectAvatarEmoji(emoji)}
+                style={[
+                  styles.avatarGridCircle,
+                  selectedAvatarEmoji === emoji && styles.avatarGridSelected,
+                ]}
+              >
+                <Text style={styles.avatarGridEmoji}>{emoji}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={[styles.avatarRow, { marginTop: 12 }]}>
+            {AVATAR_EMOJIS.slice(5).map((emoji) => (
+              <TouchableOpacity
+                key={emoji}
+                onPress={() => selectAvatarEmoji(emoji)}
+                style={[
+                  styles.avatarGridCircle,
+                  selectedAvatarEmoji === emoji && styles.avatarGridSelected,
+                ]}
+              >
+                <Text style={styles.avatarGridEmoji}>{emoji}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {/* Welcome banner */}
@@ -328,7 +319,7 @@ export default function ProfilePicScreen() {
       {/* Done button */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
+          style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
           onPress={handleDone}
           disabled={loading}
           activeOpacity={0.85}
@@ -346,18 +337,20 @@ export default function ProfilePicScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FEFCF0" },
-  scroll: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40, alignItems: "center" },
-  heading: { fontSize: 24, fontWeight: "700", color: "#000", textAlign: "center", marginBottom: 8 },
-  subheading: { fontSize: 14, color: "#5F5D5D", textAlign: "center", marginBottom: 24, lineHeight: 20 },
+  scroll: { paddingHorizontal: 24, paddingTop: 48, paddingBottom: 40, alignItems: "center" },
+  heading: { fontSize: 24, fontWeight: "700", color: "#111827", textAlign: "center", marginBottom: 6 },
+  subheading: { fontSize: 14, color: "#6B7280", textAlign: "center", marginBottom: 32, lineHeight: 20 },
   avatarWrap: { position: "relative", marginBottom: 24 },
   avatarCircle: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     borderWidth: 2,
-    borderColor: "rgba(0,0,0,0.25)",
+    borderColor: "#D1D5DB",
     borderStyle: "dashed",
     overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarImage: { width: "100%", height: "100%" },
   textAvatarContent: {
@@ -367,35 +360,34 @@ const styles = StyleSheet.create({
   },
   textAvatarPreview: {
     color: "#fff",
-    fontSize: 44,
+    fontSize: 42,
     fontWeight: "700",
-    letterSpacing: 2,
   },
   clearBtn: {
     position: "absolute",
-    top: 0,
-    right: -4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    top: -2,
+    right: -8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#9CA3AF",
     alignItems: "center",
     justifyContent: "center",
   },
-  clearBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-  addLabel: { fontSize: 14, fontWeight: "600", color: "#000", marginBottom: 16, textAlign: "center" },
-  addRow: { flexDirection: "row", gap: 32, marginBottom: 16 },
+  clearBtnText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  addLabel: { fontSize: 14, fontWeight: "500", color: "#4B5563", marginBottom: 12, textAlign: "center" },
+  addRow: { flexDirection: "row", gap: 24, marginBottom: 16 },
   addOption: { alignItems: "center", gap: 6 },
   addIcon: {
-    width: 56,
-    height: 56,
+    width: 52,
+    height: 52,
     borderRadius: 12,
     backgroundColor: "#0FA6A6",
     alignItems: "center",
     justifyContent: "center",
   },
-  addIconText: { fontSize: 22 },
-  addOptionLabel: { fontSize: 12, color: "#000", fontWeight: "500" },
+  addIconText: { fontSize: 18, fontWeight: "700", color: "#fff" },
+  addOptionLabel: { fontSize: 12, color: "#4B5563", fontWeight: "500" },
   textAvatarInput: {
     width: 120,
     height: 48,
@@ -403,7 +395,7 @@ const styles = StyleSheet.create({
     borderColor: "#0FA6A6",
     borderRadius: 10,
     textAlign: "center",
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "700",
     color: "#000",
     letterSpacing: 4,
@@ -411,40 +403,45 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   permissionError: {
-    flexDirection: "row",
+    flexDirection: "column",
     alignItems: "center",
-    flexWrap: "wrap",
-    justifyContent: "center",
     marginBottom: 12,
     paddingHorizontal: 16,
   },
-  permissionErrorText: { fontSize: 12, color: "#F02719" },
+  permissionErrorText: { fontSize: 12, color: "#F02719", textAlign: "center" },
   openSettingsLink: {
     fontSize: 12,
     color: "#0FA6A6",
     fontWeight: "600",
-    textDecorationLine: "underline",
+    marginTop: 4,
   },
-  presetLabel: { fontSize: 14, fontWeight: "600", color: "#000", marginBottom: 16, textAlign: "center" },
-  presets: { flexDirection: "row", gap: 12 },
-  presetCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  presetLabel: { fontSize: 14, fontWeight: "500", color: "#374151", marginBottom: 12, textAlign: "center", marginTop: 24 },
+  avatarGrid: { alignItems: "center" },
+  avatarRow: { flexDirection: "row", gap: 10 },
+  avatarGridCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#EEF9F9",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
-  presetSelected: {
-    borderWidth: 3,
+  avatarGridSelected: {
+    borderWidth: 2,
     borderColor: "#0FA6A6",
   },
+  avatarGridEmoji: { fontSize: 28 },
   welcomeBanner: {
-    marginTop: 28,
-    backgroundColor: "#0FA6A6",
+    marginTop: 24,
+    marginHorizontal: 4,
+    backgroundColor: "#EEF9F9",
     borderRadius: 12,
     padding: 16,
     width: "100%",
   },
-  welcomeTitle: { fontSize: 15, fontWeight: "700", color: "#fff", marginBottom: 4 },
-  welcomeBody: { fontSize: 13, color: "#fff", lineHeight: 18 },
+  welcomeTitle: { fontSize: 14, fontWeight: "700", color: "#1F2937", marginBottom: 4 },
+  welcomeBody: { fontSize: 12, color: "#4B5563", lineHeight: 18 },
   footer: {
     position: "absolute",
     bottom: 0,
@@ -463,7 +460,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 4,
   },
