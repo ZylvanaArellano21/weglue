@@ -102,9 +102,9 @@ export default function InterestsRerouteScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.heading}>Update your interests</Text>
+        <Text style={styles.heading}>What are your interests?</Text>
         <Text style={styles.subheading}>
-          Change what excites you and we'll re-match you to clubs that fit.
+          Select everything that excites you. We will match you to clubs that fit.
         </Text>
 
         <View style={styles.chips}>
@@ -146,7 +146,7 @@ export default function InterestsRerouteScreen() {
           {saving ? (
             <ActivityIndicator color="#FEFCF0" />
           ) : (
-            <Text style={styles.primaryBtnText}>Update clubs</Text>
+            <Text style={styles.primaryBtnText}>Next</Text>
           )}
         </TouchableOpacity>
       </View>

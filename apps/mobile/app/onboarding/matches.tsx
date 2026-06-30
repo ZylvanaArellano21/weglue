@@ -329,7 +329,10 @@ export default function MatchesScreen() {
             }
             activeOpacity={0.7}
           >
-            <Text style={styles.doesntMatch}>Doesn't match your interests? Click here</Text>
+            <Text>
+              <Text style={styles.doesntMatchLabel}>Doesn't match your interests? </Text>
+              <Text style={styles.clickHere}>Click here</Text>
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       )}
@@ -416,5 +419,6 @@ const styles = StyleSheet.create({
   joinBtnText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   joinBtnTextJoined: { color: "#0FA6A6" },
   emptyText: { textAlign: "center", color: "#5F5D5D", marginTop: 40, fontSize: 14 },
-  doesntMatch: { fontSize: 13, color: "#0FA6A6", fontWeight: "500", textDecorationLine: "underline" },
+  doesntMatchLabel: { fontSize: 13, color: "#000", fontWeight: "500" },
+  clickHere: { fontSize: 13, color: "#0FA6A6", fontWeight: "500", textDecorationLine: "underline" },
 });
