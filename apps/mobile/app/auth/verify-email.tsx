@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -31,6 +31,7 @@ export default function VerifyEmailScreen() {
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [resendStatus, setResendStatus] = useState<"success" | "error" | null>(null);
+  const [isVerified, setIsVerified] = useState(false);
 
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,19 +57,32 @@ export default function VerifyEmailScreen() {
     });
   }, [emailParam, pendingEmail]);
 
-  // Refresh session when app returns to foreground so the auth store
-  // stays current — but do NOT auto-navigate. The user taps "Next" when ready.
+  const checkVerification = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user.email_confirmed_at) {
+      setIsVerified(true);
+    }
+  }, []);
+
+  // Check on mount in case they return to this screen after already verifying
+  useEffect(() => {
+    checkVerification();
+  }, [checkVerification]);
+
+  // On foreground return: refresh session then check verification — this is
+  // what enables the Next button automatically after they tap the email link.
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (state) => {
       if (state !== "active") return;
       await supabase.auth.refreshSession();
+      await checkVerification();
     });
     return () => {
       sub.remove();
       if (cooldownRef.current) clearInterval(cooldownRef.current);
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
     };
-  }, []);
+  }, [checkVerification]);
 
   async function handleResend() {
     if (!email || cooldown > 0 || resending) return;
@@ -132,8 +146,9 @@ export default function VerifyEmailScreen() {
         <View style={styles.nextRow}>
           <Text style={styles.alreadyText}>Already verified it?</Text>
           <TouchableOpacity
-            style={styles.nextBtn}
+            style={[styles.nextBtn, !isVerified && styles.nextBtnDisabled]}
             onPress={() => router.replace("/onboarding/profile-pic")}
+            disabled={!isVerified}
             activeOpacity={0.85}
           >
             <Text style={styles.nextBtnText}>Next</Text>
@@ -211,6 +226,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
+  nextBtnDisabled: { backgroundColor: "#CCCCCC" },
   nextBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   content: {
     flex: 1,

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   Image,
   Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,6 +36,13 @@ export default function ProfilePicScreen() {
   const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
   const [photoPermissionDenied, setPhotoPermissionDenied] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Block Android hardware back — this is a one-way forward step.
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
+  }, []);
 
   async function pickFromCamera() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -111,7 +120,10 @@ export default function ProfilePicScreen() {
   }
 
   async function handleDone() {
-    if (!user) return;
+    if (!user) {
+      show("Session expired. Please log in again.", "error");
+      return;
+    }
     setLoading(true);
 
     try {

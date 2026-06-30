@@ -15,12 +15,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
-import { validateEducationEmail, useAuthStore, type Profile } from "@weglue/shared";
+import { validateEducationEmail, useAuthStore } from "@weglue/shared";
 
 export default function LoginScreen() {
   const router = useRouter();
   const { show, ToastComponent } = useToast();
-  const { profile, setProfile } = useAuthStore();
+  useAuthStore();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -100,25 +100,11 @@ export default function LoginScreen() {
     }
 
     if (data?.user) {
-      // Ensure profile has an avatar_url so the (tabs) guard passes.
-      // Users who signed up but skipped profile-pic get a default preset.
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("id, username, full_name, avatar_url, major, bio, is_seed, created_at, updated_at")
-        .eq("id", data.user.id)
-        .single();
-
-      if (prof && !prof.avatar_url) {
-        await supabase
-          .from("profiles")
-          .update({ avatar_url: "preset:#0FA6A6", avatar_type: "preset" })
-          .eq("id", data.user.id);
-        setProfile({ ...(prof as Profile), avatar_url: "preset:#0FA6A6" });
-      } else if (prof) {
-        setProfile(prof as Profile);
-      }
-
-      router.replace("/(tabs)");
+      // Route to "/" — the index guard handles navigation to (tabs) once the
+      // onAuthStateChange in _layout.tsx has synced the profile. This avoids
+      // the race where (tabs)/_layout evaluates before isLoading is set to true
+      // by the SIGNED_IN event, causing a flash of the profile-pic screen.
+      router.replace("/");
     }
   }
 
@@ -130,12 +116,20 @@ export default function LoginScreen() {
     const { error } = await supabase.auth.resend({
       type: "signup",
       email: email.trim().toLowerCase(),
+      options: { emailRedirectTo: "weglue://auth/confirmed" },
     });
 
     setResendLoading(false);
 
     if (error) {
-      show("Something went wrong. Try again.", "error");
+      const msg = error.message.toLowerCase();
+      if (msg.includes("rate") || msg.includes("too many") || msg.includes("limit")) {
+        show("You've requested this recently. Please wait a moment and try again.", "error");
+      } else if (msg.includes("not found") || msg.includes("user not found")) {
+        show("No account found for this email. Please sign up first.", "error");
+      } else {
+        show("Couldn't send verification email. Please try again.", "error");
+      }
       return;
     }
 

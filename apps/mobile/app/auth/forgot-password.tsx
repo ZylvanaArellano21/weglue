@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -15,48 +15,155 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
 
+type EmailState = "idle" | "not_found" | "unverified" | "verified";
+
+const RESEND_COOLDOWN_SECONDS = 60;
+
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { prefillEmail } = useLocalSearchParams<{ prefillEmail?: string }>();
 
   const [email, setEmail] = useState(prefillEmail ?? "");
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [emailState, setEmailState] = useState<EmailState>("idle");
+  const [sent, setSent] = useState(false);
+
+  // State B: Verify Now cooldown
+  const [verifyCooldown, setVerifyCooldown] = useState(0);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifySuccess, setVerifySuccess] = useState(false);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function startCooldown() {
+    setVerifyCooldown(RESEND_COOLDOWN_SECONDS);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setVerifyCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(cooldownRef.current!);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
+
+  function handleEmailChange(v: string) {
+    setEmail(v);
+    setEmailState("idle");
+    setSent(false);
+    setVerifySuccess(false);
+  }
 
   async function handleSubmit() {
     const trimmed = email.trim().toLowerCase();
 
     if (!trimmed) {
-      setErrorMessage("Please enter your school email.");
+      setEmailState("not_found");
       return;
     }
 
     if (!trimmed.includes(".edu")) {
-      setErrorMessage("Please use your school (.edu) email address.");
+      setEmailState("not_found");
       return;
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-      redirectTo: "https://weglue.app/auth/reset-password",
+
+    // Probe: signInWithPassword with an invalid password reveals account state
+    // without triggering any side effects visible to the user.
+    const { error: probeError } = await supabase.auth.signInWithPassword({
+      email: trimmed,
+      password: `__probe_${Date.now()}__`,
     });
+
+    setLoading(false);
+
+    if (!probeError) {
+      // Extremely unlikely (would need a valid password match), treat as verified
+      setEmailState("verified");
+      await sendResetLink(trimmed);
+      return;
+    }
+
+    const probeCode = (probeError.code ?? "").toLowerCase();
+    const probeMsg = probeError.message.toLowerCase();
+
+    if (probeCode === "email_not_confirmed" || probeMsg.includes("email not confirmed")) {
+      // State B: user exists but is unverified
+      setEmailState("unverified");
+      return;
+    }
+
+    if (
+      probeCode === "user_not_found" ||
+      probeMsg.includes("user not found") ||
+      probeMsg.includes("no user found")
+    ) {
+      // State A: no account for this email
+      setEmailState("not_found");
+      return;
+    }
+
+    // invalid_credentials = user exists with wrong password = verified → State C
+    setEmailState("verified");
+    await sendResetLink(trimmed);
+  }
+
+  async function sendResetLink(trimmed: string) {
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(trimmed);
     setLoading(false);
 
     if (error) {
       const msg = error.message.toLowerCase();
-      if (msg.includes("user not found") || msg.includes("no user found") || msg.includes("not found")) {
-        setErrorMessage("No account found with that email. Double-check and try again.");
-      } else {
-        setErrorMessage("Something went wrong. Please try again.");
+      if (msg.includes("rate") || msg.includes("too many")) {
+        // Stay on screen with a specific rate-limit message handled below
+        setSent(false);
+        setEmailState("idle");
+        return;
       }
+      setEmailState("idle");
       return;
     }
 
+    setSent(true);
     router.replace({
       pathname: "/auth/forgot-password-success",
       params: { email: trimmed },
     });
   }
+
+  async function handleVerifyNow() {
+    if (verifyLoading || verifyCooldown > 0) return;
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) return;
+
+    setVerifyLoading(true);
+    setVerifySuccess(false);
+
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: trimmed,
+      options: { emailRedirectTo: "weglue://auth/confirmed" },
+    });
+
+    setVerifyLoading(false);
+
+    if (!error) {
+      setVerifySuccess(true);
+      startCooldown();
+    }
+    // Even on error (e.g. already sent), start cooldown to prevent spam
+    if (error) {
+      startCooldown();
+    }
+  }
+
+  const isButtonDisabled =
+    loading || emailState === "not_found" || emailState === "unverified" || sent;
+
+  const showError = emailState === "not_found" || emailState === "unverified";
 
   return (
     <SafeAreaView style={styles.container}>
@@ -92,28 +199,63 @@ export default function ForgotPasswordScreen() {
 
             <Text style={styles.label}>School Email</Text>
             <TextInput
-              style={[styles.input, !!errorMessage && styles.inputError]}
+              style={[styles.input, showError && styles.inputError]}
               placeholder="you@school.edu"
               placeholderTextColor="rgba(0,0,0,0.3)"
               value={email}
-              onChangeText={(v) => {
-                setEmail(v);
-                setErrorMessage(null);
-              }}
+              onChangeText={handleEmailChange}
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
               autoFocus
             />
 
-            {!!errorMessage && (
-              <Text style={styles.errorText}>{errorMessage}</Text>
+            {emailState === "not_found" && (
+              <Text style={styles.errorText}>
+                This email isn't associated with any account. Please create one.
+              </Text>
+            )}
+
+            {emailState === "unverified" && (
+              <View>
+                <Text style={styles.errorText}>
+                  This email hasn't been verified yet. Please verify it first.
+                </Text>
+
+                {verifySuccess && (
+                  <Text style={styles.verifySuccessText}>
+                    Verification email sent! Check your inbox.
+                  </Text>
+                )}
+
+                <TouchableOpacity
+                  style={[
+                    styles.verifyNowBtn,
+                    (verifyLoading || verifyCooldown > 0) && styles.verifyNowBtnDisabled,
+                  ]}
+                  onPress={handleVerifyNow}
+                  disabled={verifyLoading || verifyCooldown > 0}
+                  activeOpacity={0.85}
+                >
+                  {verifyLoading ? (
+                    <ActivityIndicator color="#FEFCF0" size="small" />
+                  ) : (
+                    <Text style={styles.verifyNowBtnText}>
+                      {verifyCooldown > 0
+                        ? `Resend (${verifyCooldown}s)`
+                        : verifySuccess
+                        ? "Resend Verification Email"
+                        : "Verify Now"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             )}
 
             <TouchableOpacity
-              style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
+              style={[styles.primaryBtn, isButtonDisabled && { opacity: 0.45 }]}
               onPress={handleSubmit}
-              disabled={loading}
+              disabled={isButtonDisabled}
               activeOpacity={0.85}
             >
               {loading ? (
@@ -173,9 +315,26 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#F02719",
     fontSize: 13,
-    marginBottom: 16,
+    marginBottom: 12,
+    marginLeft: 4,
+    lineHeight: 18,
+  },
+  verifySuccessText: {
+    color: "#16A34A",
+    fontSize: 13,
+    marginBottom: 8,
     marginLeft: 4,
   },
+  verifyNowBtn: {
+    height: 44,
+    backgroundColor: "#0FA6A6",
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  verifyNowBtnDisabled: { backgroundColor: "#CCCCCC" },
+  verifyNowBtnText: { color: "#FEFCF0", fontSize: 14, fontWeight: "600" },
   primaryBtn: {
     height: 52,
     backgroundColor: "#0FA6A6",
