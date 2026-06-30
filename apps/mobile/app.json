@@ -40,6 +40,18 @@
         },
         {
           "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "weglue.app",
+              "pathPrefix": "/auth/confirm"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        },
+        {
+          "action": "VIEW",
           "data": [
             {
               "scheme": "weglue",

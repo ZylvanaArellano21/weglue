@@ -13,14 +13,13 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useOnboardingStore } from "@weglue/shared";
 import { supabase } from "../../lib/supabase";
+import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
 
 const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
-const RESEND_COOLDOWN_SECONDS = 60;
 const SUCCESS_MESSAGE_DURATION_MS = 5000;
 const RESEND_SUCCESS_MESSAGE =
   "Confirmation email resent. Check your inbox and spam folder.";
-const RESEND_ERROR_MESSAGE =
-  "We couldn't resend the email. Wait a moment and try again.";
+const RESEND_ERROR_MESSAGE = `We couldn't resend the email. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`;
 
 export default function VerifyEmailScreen() {
   const router = useRouter();

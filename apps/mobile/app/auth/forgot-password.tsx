@@ -14,10 +14,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
 
 type EmailState = "idle" | "not_found" | "unverified" | "verified";
-
-const RESEND_COOLDOWN_SECONDS = 60;
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -27,11 +26,13 @@ export default function ForgotPasswordScreen() {
   const [loading, setLoading] = useState(false);
   const [emailState, setEmailState] = useState<EmailState>("idle");
   const [sent, setSent] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // State B: Verify Now cooldown
   const [verifyCooldown, setVerifyCooldown] = useState(0);
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifySuccess, setVerifySuccess] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function startCooldown() {
@@ -53,10 +54,13 @@ export default function ForgotPasswordScreen() {
     setEmailState("idle");
     setSent(false);
     setVerifySuccess(false);
+    setVerifyError(null);
+    setSubmitError(null);
   }
 
   async function handleSubmit() {
     const trimmed = email.trim().toLowerCase();
+    setSubmitError(null);
 
     if (!trimmed) {
       setEmailState("not_found");
@@ -112,17 +116,21 @@ export default function ForgotPasswordScreen() {
 
   async function sendResetLink(trimmed: string) {
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmed);
+    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
+      redirectTo: "https://weglue.app/auth/reset-password",
+    });
     setLoading(false);
 
     if (error) {
       const msg = error.message.toLowerCase();
       if (msg.includes("rate") || msg.includes("too many")) {
-        // Stay on screen with a specific rate-limit message handled below
-        setSent(false);
+        setSubmitError(
+          `Rate limited. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`
+        );
         setEmailState("idle");
         return;
       }
+      setSubmitError("Something went wrong. Please try again.");
       setEmailState("idle");
       return;
     }
@@ -141,6 +149,7 @@ export default function ForgotPasswordScreen() {
 
     setVerifyLoading(true);
     setVerifySuccess(false);
+    setVerifyError(null);
 
     const { error } = await supabase.auth.resend({
       type: "signup",
@@ -149,21 +158,21 @@ export default function ForgotPasswordScreen() {
     });
 
     setVerifyLoading(false);
+    startCooldown();
 
-    if (!error) {
-      setVerifySuccess(true);
-      startCooldown();
-    }
-    // Even on error (e.g. already sent), start cooldown to prevent spam
     if (error) {
-      startCooldown();
+      setVerifyError(
+        `Couldn't send. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`
+      );
+    } else {
+      setVerifySuccess(true);
     }
   }
 
   const isButtonDisabled =
     loading || emailState === "not_found" || emailState === "unverified" || sent;
 
-  const showError = emailState === "not_found" || emailState === "unverified";
+  const showEmailError = emailState === "not_found" || emailState === "unverified";
 
   return (
     <SafeAreaView style={styles.container}>
@@ -199,7 +208,7 @@ export default function ForgotPasswordScreen() {
 
             <Text style={styles.label}>School Email</Text>
             <TextInput
-              style={[styles.input, showError && styles.inputError]}
+              style={[styles.input, showEmailError && styles.inputError]}
               placeholder="you@school.edu"
               placeholderTextColor="rgba(0,0,0,0.3)"
               value={email}
@@ -228,6 +237,10 @@ export default function ForgotPasswordScreen() {
                   </Text>
                 )}
 
+                {verifyError && (
+                  <Text style={styles.errorText}>{verifyError}</Text>
+                )}
+
                 <TouchableOpacity
                   style={[
                     styles.verifyNowBtn,
@@ -250,6 +263,10 @@ export default function ForgotPasswordScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+            )}
+
+            {!!submitError && (
+              <Text style={styles.errorText}>{submitError}</Text>
             )}
 
             <TouchableOpacity

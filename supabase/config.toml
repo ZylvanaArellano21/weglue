@@ -164,6 +164,7 @@ additional_redirect_urls = [
   "https://127.0.0.1:3000",
   "http://localhost:3000",
   "https://weglue.app/auth/confirm",
+  "https://weglue.app/auth/reset-password",
   "weglue://auth/confirmed",
   "weglue://auth/confirm-email",
   "weglue://onboarding/profile-pic",
