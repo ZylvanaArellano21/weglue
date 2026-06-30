@@ -5,7 +5,7 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: "/.well-known/apple-app-site-association",
+        source: "/.well-known/:path*",
         headers: [{ key: "Content-Type", value: "application/json" }],
       },
     ];

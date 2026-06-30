@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.weglue.app",
+    "sha256_cert_fingerprints": [
+      "BB:B9:CA:51:E9:09:FE:AC:ED:E6:C9:8D:47:13:3D:BD:34:D5:27:F3:32:9B:47:5D:76:88:60:E2:4E:54:02:7D"
+    ]
+  }
+}]
