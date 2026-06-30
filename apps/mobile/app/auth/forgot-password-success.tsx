@@ -33,8 +33,7 @@ export default function ForgotPasswordSuccessScreen() {
     setResendError(null);
 
     const { error } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase(),
-      { redirectTo: "https://weglue.app/auth/reset-password" }
+      email.trim().toLowerCase()
     );
 
     setResendLoading(false);

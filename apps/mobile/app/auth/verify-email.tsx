@@ -58,6 +58,10 @@ export default function VerifyEmailScreen() {
   }, [emailParam, pendingEmail]);
 
   const checkVerification = useCallback(async () => {
+    // refreshSession fetches current state from Supabase servers — necessary
+    // for cold-start after the user verified in a browser while the app was
+    // closed, so the locally cached session's email_confirmed_at is stale.
+    await supabase.auth.refreshSession();
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user.email_confirmed_at) {
       setIsVerified(true);
@@ -103,6 +107,7 @@ export default function VerifyEmailScreen() {
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: userEmail,
+        options: { emailRedirectTo: "weglue://auth/confirmed" },
       });
 
       if (error) throw error;

@@ -15,12 +15,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
-import { validateEducationEmail, useAuthStore } from "@weglue/shared";
+import { validateEducationEmail } from "@weglue/shared";
 
 export default function LoginScreen() {
   const router = useRouter();
   const { show, ToastComponent } = useToast();
-  useAuthStore();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

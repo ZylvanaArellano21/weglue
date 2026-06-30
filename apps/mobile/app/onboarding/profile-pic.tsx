@@ -120,7 +120,14 @@ export default function ProfilePicScreen() {
   }
 
   async function handleDone() {
-    if (!user) {
+    // user should always be set by this point, but if a render beat the store
+    // update, fall back to a direct Supabase call rather than failing silently.
+    let resolvedUser = user;
+    if (!resolvedUser) {
+      const { data } = await supabase.auth.getUser();
+      resolvedUser = data.user;
+    }
+    if (!resolvedUser) {
       show("Session expired. Please log in again.", "error");
       return;
     }
@@ -131,7 +138,7 @@ export default function ProfilePicScreen() {
 
       if (avatarUri && (avatarType === "photo" || avatarType === "camera")) {
         const ext = avatarUri.split(".").pop() ?? "jpg";
-        const fileName = `${user.id}/avatar.${ext}`;
+        const fileName = `${resolvedUser.id}/avatar.${ext}`;
         const response = await fetch(avatarUri);
         const blob = await response.blob();
         const arrayBuffer = await new Response(blob).arrayBuffer();
@@ -159,9 +166,9 @@ export default function ProfilePicScreen() {
         .update({
           avatar_url: avatarUrl,
           avatar_type: avatarType,
-          username: pendingUsername || (user.email?.split("@")[0] ?? "user"),
+          username: pendingUsername || (resolvedUser.email?.split("@")[0] ?? "user"),
         })
-        .eq("id", user.id);
+        .eq("id", resolvedUser.id);
 
       if (updateError) {
         show("Could not save your profile. Please try again.", "error");
@@ -173,13 +180,13 @@ export default function ProfilePicScreen() {
       const { data: freshProfile } = await supabase
         .from("profiles")
         .select("*")
-        .eq("id", user.id)
+        .eq("id", resolvedUser.id)
         .single();
       if (freshProfile) setProfile(freshProfile as Profile);
 
       if (selectedInterests.length > 0) {
         const interestRows = selectedInterests.map((interest) => ({
-          user_id: user.id,
+          user_id: resolvedUser.id,
           interest,
         }));
         await supabase
@@ -189,7 +196,7 @@ export default function ProfilePicScreen() {
 
       if (selectedActivities.length > 0) {
         const activityRows = selectedActivities.map((activity) => ({
-          user_id: user.id,
+          user_id: resolvedUser.id,
           activity,
         }));
         await supabase

@@ -79,13 +79,16 @@ export default function RootLayout() {
   }, []);
 
   async function syncProfile(userId: string) {
-    const [profileResult, interestsResult] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", userId).single(),
-      supabase.from("user_interests").select("id").eq("user_id", userId).limit(1),
-    ]);
-    if (profileResult.data) setProfile(profileResult.data);
-    setOnboarded((interestsResult.data?.length ?? 0) > 0);
-    setLoading(false);
+    try {
+      const [profileResult, interestsResult] = await Promise.all([
+        supabase.from("profiles").select("*").eq("id", userId).single(),
+        supabase.from("user_interests").select("id").eq("user_id", userId).limit(1),
+      ]);
+      if (profileResult.data) setProfile(profileResult.data);
+      setOnboarded((interestsResult.data?.length ?? 0) > 0);
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (!fontsLoaded) return null;
