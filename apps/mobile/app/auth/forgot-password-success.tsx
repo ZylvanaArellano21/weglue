@@ -1,7 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   Image,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -14,6 +16,12 @@ import { supabase } from "../../lib/supabase";
 export default function ForgotPasswordSuccessScreen() {
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
+  }, []);
 
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);

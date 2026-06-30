@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore, useOnboardingStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
@@ -93,15 +95,32 @@ export default function MatchesScreen() {
   const { user } = useAuthStore();
   const { selectedInterests } = useOnboardingStore();
   const { show, ToastComponent } = useToast();
+  const { viewAll: viewAllParam } = useLocalSearchParams<{ viewAll?: string }>();
 
   const [clubs, setClubs] = useState<Club[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showAll, setShowAll] = useState(false);
 
+  // Block Android hardware back — navigation is explicit only (Done button or back arrow).
   useEffect(() => {
-    loadClubs();
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
   }, []);
+
+  // Restore "view all" state when returning from interests-reroute.
+  useEffect(() => {
+    if (viewAllParam === "1") setShowAll(true);
+  }, [viewAllParam]);
+
+  // Reload clubs on every focus so match scores reflect any interest changes
+  // made on the interests-reroute screen.
+  useFocusEffect(
+    useCallback(() => {
+      loadClubs();
+    }, [])
+  );
 
   async function loadClubs() {
     setLoading(true);
@@ -156,27 +175,42 @@ export default function MatchesScreen() {
       show("Please log in to join clubs.", "error");
       return;
     }
-    if (club.joined) return;
 
-    const { error } = await supabase.from("club_members").insert({
-      club_id: club.id,
-      user_id: user.id,
-      role: "member",
-    });
-
-    if (error) {
-      show("Could not join club. Try again.", "error");
-      return;
+    if (club.joined) {
+      const { error } = await supabase
+        .from("club_members")
+        .delete()
+        .eq("club_id", club.id)
+        .eq("user_id", user.id);
+      if (error) {
+        show("Could not leave club. Try again.", "error");
+        return;
+      }
+      setClubs((prev) =>
+        prev.map((c) =>
+          c.id === club.id
+            ? { ...c, joined: false, member_count: Math.max(0, c.member_count - 1) }
+            : c
+        )
+      );
+    } else {
+      const { error } = await supabase.from("club_members").insert({
+        club_id: club.id,
+        user_id: user.id,
+        role: "member",
+      });
+      if (error) {
+        show("Could not join club. Try again.", "error");
+        return;
+      }
+      setClubs((prev) =>
+        prev.map((c) =>
+          c.id === club.id
+            ? { ...c, joined: true, member_count: c.member_count + 1 }
+            : c
+        )
+      );
     }
-
-    setClubs((prev) =>
-      prev.map((c) =>
-        c.id === club.id
-          ? { ...c, joined: true, member_count: c.member_count + 1 }
-          : c
-      )
-    );
-    show(`${club.name} joined! 🎉`, "success");
   }
 
   const filtered = clubs.filter((c) =>
@@ -194,7 +228,7 @@ export default function MatchesScreen() {
 
       {/* Header row */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.replace("/onboarding/profile-pic")} style={styles.backBtn}>
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
         <View style={styles.headerRight}>
@@ -285,7 +319,16 @@ export default function MatchesScreen() {
           )}
 
           {/* Footer link */}
-          <TouchableOpacity style={{ alignSelf: "center", marginTop: 16 }}>
+          <TouchableOpacity
+            style={{ alignSelf: "center", marginTop: 16 }}
+            onPress={() =>
+              router.push({
+                pathname: "/onboarding/interests-reroute",
+                params: { returnTo: showAll ? "matches-view-all" : "matches" },
+              })
+            }
+            activeOpacity={0.7}
+          >
             <Text style={styles.doesntMatch}>Doesn't match your interests? Click here</Text>
           </TouchableOpacity>
         </ScrollView>

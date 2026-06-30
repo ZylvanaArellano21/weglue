@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
+  BackHandler,
   Image,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -86,6 +88,12 @@ export default function VerifyEmailScreen() {
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
     };
   }, [checkVerification]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
+  }, []);
 
   async function handleResend() {
     if (!email || cooldown > 0 || resending) return;

@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -21,6 +22,12 @@ type EmailState = "idle" | "not_found" | "unverified" | "verified";
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { prefillEmail } = useLocalSearchParams<{ prefillEmail?: string }>();
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
+  }, []);
 
   const [email, setEmail] = useState(prefillEmail ?? "");
   const [loading, setLoading] = useState(false);
