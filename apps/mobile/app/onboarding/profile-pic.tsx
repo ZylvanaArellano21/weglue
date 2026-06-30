@@ -15,7 +15,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
-import { useAuthStore, useOnboardingStore } from "@weglue/shared";
+import { useAuthStore, useOnboardingStore, type Profile } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 
 const AVATAR_EMOJIS = ["🦁", "🐼", "🦊", "🐸", "🐺", "🐨", "🐯", "🦄", "🐻", "🐮"];
@@ -131,15 +131,18 @@ export default function ProfilePicScreen() {
             upsert: true,
           });
 
-        if (!uploadError) {
-          const { data } = supabase.storage.from("avatars").getPublicUrl(fileName);
-          avatarUrl = data.publicUrl;
+        if (uploadError) {
+          show("Could not upload photo. Choose a different one or pick an avatar.", "error");
+          return;
         }
+
+        const { data } = supabase.storage.from("avatars").getPublicUrl(fileName);
+        avatarUrl = data.publicUrl;
       } else if (avatarType === "text" && textInput.trim()) {
         avatarUrl = `text:${textInput.trim()}`;
       }
 
-      await supabase
+      const { error: updateError } = await supabase
         .from("profiles")
         .update({
           avatar_url: avatarUrl,
@@ -148,9 +151,19 @@ export default function ProfilePicScreen() {
         })
         .eq("id", user.id);
 
-      if (profile) {
-        setProfile({ ...profile, avatar_url: avatarUrl });
+      if (updateError) {
+        show("Could not save your profile. Please try again.", "error");
+        return;
       }
+
+      // Re-fetch so the store always reflects what's in the DB regardless of
+      // whether profile was null in the store (race with syncProfile on new signup).
+      const { data: freshProfile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+      if (freshProfile) setProfile(freshProfile as Profile);
 
       if (selectedInterests.length > 0) {
         const interestRows = selectedInterests.map((interest) => ({
@@ -319,9 +332,9 @@ export default function ProfilePicScreen() {
       {/* Done button */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
+          style={[styles.primaryBtn, (!hasSelection || loading) && { opacity: 0.45 }]}
           onPress={handleDone}
-          disabled={loading}
+          disabled={!hasSelection || loading}
           activeOpacity={0.85}
         >
           {loading ? (
