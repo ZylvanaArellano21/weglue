@@ -59,7 +59,12 @@ export default function RootLayout() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // For an explicit login (SIGNED_IN), set isLoading=true before syncing the
+      // profile so the navigation guard in index.tsx never evaluates with a partial
+      // state (session set, profile still null). Without this, the guard briefly
+      // routes to the profile-pic screen before syncProfile resolves — the flash.
+      if (event === "SIGNED_IN") setLoading(true);
       setSession(session);
       if (session) {
         await syncProfile(session.user.id);
