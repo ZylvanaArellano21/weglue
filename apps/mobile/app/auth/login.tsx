@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -16,6 +16,7 @@ import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
 import { validateEducationEmail } from "@weglue/shared";
+import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -31,6 +32,22 @@ export default function LoginScreen() {
   const [invalidCredentials, setInvalidCredentials] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const resendCooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function startResendCooldown() {
+    setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    if (resendCooldownRef.current) clearInterval(resendCooldownRef.current);
+    resendCooldownRef.current = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(resendCooldownRef.current!);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
 
   function clearAllErrors() {
     setFieldErrors({});
@@ -108,7 +125,7 @@ export default function LoginScreen() {
   }
 
   async function handleResend() {
-    if (resendLoading) return;
+    if (resendLoading || resendCooldown > 0) return;
     setResendLoading(true);
     setResendSuccess(false);
 
@@ -119,15 +136,14 @@ export default function LoginScreen() {
     });
 
     setResendLoading(false);
+    startResendCooldown();
 
     if (error) {
       const msg = error.message.toLowerCase();
-      if (msg.includes("rate") || msg.includes("too many") || msg.includes("limit")) {
-        show("You've requested this recently. Please wait a moment and try again.", "error");
-      } else if (msg.includes("not found") || msg.includes("user not found")) {
+      if (msg.includes("not found") || msg.includes("user not found")) {
         show("No account found for this email. Please sign up first.", "error");
       } else {
-        show("Couldn't send verification email. Please try again.", "error");
+        show(`Couldn't send verification email. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`, "error");
       }
       return;
     }
@@ -224,6 +240,8 @@ export default function LoginScreen() {
                     <Text style={styles.resendSuccessText}>Email sent!</Text>
                   ) : resendLoading ? (
                     <Text style={styles.resendLoadingText}>Sending…</Text>
+                  ) : resendCooldown > 0 ? (
+                    <Text style={styles.resendLoadingText}>Resend in {resendCooldown}s</Text>
                   ) : (
                     <Text style={styles.resendLink} onPress={handleResend}>
                       Verify now

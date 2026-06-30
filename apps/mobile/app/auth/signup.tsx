@@ -35,7 +35,7 @@ function mapSignUpError(error: { message: string; status?: number; code?: string
     return "No internet connection. Please check your network and try again.";
   }
   if (error.status && error.status >= 500) {
-    return "Our servers hit an issue. Wait a moment and try again. If this keeps happening, contact support.";
+    return "Signup failed due to a server error. Please try again.";
   }
   return `Something unexpected happened (Error: ${error.message}). Please try again or contact support.`;
 }
