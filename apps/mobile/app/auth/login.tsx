@@ -226,17 +226,17 @@ export default function LoginScreen() {
             {unconfirmedEmail && (
               <View style={styles.unconfirmedBox}>
                 <Text style={styles.unconfirmedText}>
-                  You haven't confirmed your email yet. Check your inbox.
+                  You haven't verified this email.{" "}
+                  {resendSuccess ? (
+                    <Text style={styles.resendSuccessText}>Email sent!</Text>
+                  ) : resendLoading ? (
+                    <Text style={styles.resendLoadingText}>Sending…</Text>
+                  ) : (
+                    <Text style={styles.resendLink} onPress={handleResend}>
+                      Verify now
+                    </Text>
+                  )}
                 </Text>
-                {resendSuccess ? (
-                  <Text style={styles.resendSuccessText}>Email sent! Check your inbox.</Text>
-                ) : resendLoading ? (
-                  <Text style={styles.resendLoadingText}>Sending...</Text>
-                ) : (
-                  <TouchableOpacity onPress={handleResend} activeOpacity={0.75}>
-                    <Text style={styles.resendLink}>Resend confirmation email</Text>
-                  </TouchableOpacity>
-                )}
               </View>
             )}
 

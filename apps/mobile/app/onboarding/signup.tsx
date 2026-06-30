@@ -57,28 +57,44 @@ export default function OnboardingSignupScreen() {
 
   function handleEmailChange(text: string) {
     setEmail(text);
+    // Always clear the server-side "already taken" error when the user edits the field
+    if (errors.email) setErrors((prev) => { const next = { ...prev }; delete next.email; return next; });
     if (!text.includes("@")) {
       setEmailFeedback(null);
       return;
     }
     const result = validateEducationEmail(text.trim());
     setEmailFeedback({ valid: result.valid, reason: result.reason });
-    if (result.valid) {
-      setErrors((prev) => { const next = { ...prev }; delete next.email; return next; });
-    }
   }
 
   async function handleNext() {
     if (!validate()) return;
     setLoading(true);
 
+    const cleanUsername = username.trim().replace(/^@/, "");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check username uniqueness before calling signUp so we can show an
+    // inline field error rather than a generic toast.
+    const { data: existingUser } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("username", cleanUsername)
+      .maybeSingle();
+
+    if (existingUser) {
+      setErrors((prev) => ({ ...prev, username: "This username is already taken." }));
+      setLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       password,
       options: {
         data: {
-          username: username.trim().replace(/^@/, ""),
-          full_name: username.trim().replace(/^@/, ""),
+          username: cleanUsername,
+          full_name: cleanUsername,
         },
         emailRedirectTo: "https://weglue.app/auth/confirm",
       },
@@ -87,16 +103,28 @@ export default function OnboardingSignupScreen() {
     setLoading(false);
 
     if (error) {
-      const msg =
-        error.message && error.message !== "{}" && !error.message.startsWith("{")
-          ? error.message
-          : "Something went wrong. Please try again.";
-      show(msg, "error");
+      const msg = (error.code ?? "").toLowerCase();
+      const body = error.message.toLowerCase();
+      if (msg === "user_already_exists" || body.includes("already registered") || body.includes("already exists")) {
+        setErrors((prev) => ({ ...prev, email: "This email is already taken." }));
+      } else {
+        const displayMsg =
+          error.message && error.message !== "{}" && !error.message.startsWith("{")
+            ? error.message
+            : "Something went wrong. Please try again.";
+        show(displayMsg, "error");
+      }
       return;
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-    setPendingUsername(username.trim().replace(/^@/, ""));
+    // Supabase returns a fake success (no error, identities=[]) when the email
+    // already exists, to avoid user enumeration. Detect it explicitly.
+    if (!data.session && data.user?.identities?.length === 0) {
+      setErrors((prev) => ({ ...prev, email: "This email is already taken." }));
+      return;
+    }
+
+    setPendingUsername(cleanUsername);
     setPendingEmail(normalizedEmail);
     await AsyncStorage.setItem(PENDING_EMAIL_KEY, normalizedEmail);
 
@@ -153,7 +181,10 @@ export default function OnboardingSignupScreen() {
               placeholder=""
               placeholderTextColor="rgba(0,0,0,0.3)"
               value={username}
-              onChangeText={setUsername}
+              onChangeText={(v) => {
+                setUsername(v);
+                if (errors.username) setErrors((prev) => { const next = { ...prev }; delete next.username; return next; });
+              }}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -234,10 +265,10 @@ export default function OnboardingSignupScreen() {
               style={[
                 styles.primaryBtn,
                 { marginTop: 16 },
-                (loading || (emailFeedback !== null && !emailFeedback.valid)) && styles.primaryBtnDisabled,
+                (loading || (emailFeedback !== null && !emailFeedback.valid) || Object.keys(errors).length > 0) && styles.primaryBtnDisabled,
               ]}
               onPress={handleNext}
-              disabled={loading || (emailFeedback !== null && !emailFeedback.valid)}
+              disabled={loading || (emailFeedback !== null && !emailFeedback.valid) || Object.keys(errors).length > 0}
               activeOpacity={0.85}
             >
               {loading ? (
