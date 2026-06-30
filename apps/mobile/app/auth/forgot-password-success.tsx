@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -18,9 +18,16 @@ export default function ForgotPasswordSuccessScreen() {
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
   const [resendError, setResendError] = useState<string | null>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function handleResend() {
     if (resendLoading || !email) return;
+
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+      successTimerRef.current = null;
+    }
+
     setResendLoading(true);
     setResendSuccess(false);
     setResendError(null);
@@ -38,6 +45,11 @@ export default function ForgotPasswordSuccessScreen() {
     }
 
     setResendSuccess(true);
+    // Reset after 5 s so the user can resend again if needed
+    successTimerRef.current = setTimeout(() => {
+      setResendSuccess(false);
+      successTimerRef.current = null;
+    }, 5000);
   }
 
   return (
@@ -78,12 +90,12 @@ export default function ForgotPasswordSuccessScreen() {
           ) : resendSuccess ? (
             <Text style={styles.resendSuccessText}>Email resent! Check your inbox.</Text>
           ) : (
-            <Text style={styles.resendPrompt}>
-              Didn't get it?{" "}
-              <Text style={styles.resendLink} onPress={handleResend}>
-                Resend
-              </Text>
-            </Text>
+            <View style={styles.resendPromptRow}>
+              <Text style={styles.resendPrompt}>Didn't get it? </Text>
+              <TouchableOpacity onPress={handleResend} activeOpacity={0.7}>
+                <Text style={styles.resendLink}>Resend</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -160,10 +172,13 @@ const styles = StyleSheet.create({
     marginTop: 16,
     alignItems: "center",
   },
+  resendPromptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   resendPrompt: {
     fontSize: 13,
     color: "#6B7280",
-    textAlign: "center",
   },
   resendLink: {
     color: "#0FA6A6",
