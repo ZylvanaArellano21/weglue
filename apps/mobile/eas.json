@@ -1,4 +1,5 @@
 {
+  "_comment": "Run all EAS commands from apps/mobile/, not from the monorepo root. Running eas build from the root reads the wrong app.json and produces a malformed build.",
   "cli": {
     "version": ">= 16.0.0"
   },
