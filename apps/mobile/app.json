@@ -17,7 +17,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.weglue.app",
-      "associatedDomains": ["applinks:weglue.app"]
+      "associatedDomains": [
+        "applinks:weglue.app"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -36,7 +38,10 @@
               "pathPrefix": "/event"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         },
         {
           "action": "VIEW",
@@ -48,7 +53,10 @@
               "pathPrefix": "/auth/confirm"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         },
         {
           "action": "VIEW",
@@ -59,7 +67,10 @@
               "pathPrefix": "/confirm-email"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         },
         {
           "action": "VIEW",
@@ -70,7 +81,10 @@
               "pathPrefix": "/confirmed"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         },
         {
           "action": "VIEW",
@@ -81,8 +95,14 @@
               "pathPrefix": "/profile-pic"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
+      ],
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -104,6 +124,12 @@
     "experiments": {
       "typedRoutes": true
     },
-    "scheme": "weglue"
+    "scheme": "weglue",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e9ee8bc0-92ad-4802-8ce0-35735bb8ad47"
+      }
+    }
   }
 }
