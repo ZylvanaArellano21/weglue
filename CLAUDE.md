@@ -35,3 +35,15 @@ When fully done with all tasks, OR when needing to ask a question or get permiss
 afplay /System/Library/Sounds/Glass.aiff
 ```
 And confirm at the end of every completed session: "I have read, understood, and completed all 7 requirements."
+
+## 8. Triple-Check Before Done — MANDATORY
+Every single time all tasks in a chat are finished, you MUST triple-check that:
+- Everything is working correctly
+- Everything is looking good visually
+- Every change and new addition works perfectly
+
+**If anything is broken, missed, or wrong — fix it immediately. Do not declare done until it is fixed.**
+
+**If you had to fix something after the triple-check, run the triple-check again from the start.**
+
+Do NOT say "done", "finished", "completed", or any equivalent until a full clean triple-check passes with zero issues. No exceptions.
