@@ -412,69 +412,116 @@ export default function ClubEventDetailScreen() {
             </View>
 
             {/* ── RSVP Section ──────────────────────────── */}
-            <Text
-              style={{
-                fontSize: 14,
-                fontWeight: '600',
-                color: '#374151',
-                fontFamily: 'Inter_600SemiBold',
-                marginBottom: 12,
-              }}
-            >
-              Are you coming?
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <TouchableOpacity
-                onPress={() => handleRsvp('going')}
-                disabled={isRsvping}
-                activeOpacity={0.8}
-                style={{
-                  flex: 1,
-                  paddingVertical: 13,
-                  borderRadius: 14,
-                  backgroundColor: event.user_rsvp_status === 'going' ? '#0FA6A6' : 'transparent',
-                  borderWidth: 1.5,
-                  borderColor: event.user_rsvp_status === 'going' ? '#0FA6A6' : '#D1D5DB',
-                  alignItems: 'center',
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 15,
-                    fontWeight: '600',
-                    color: event.user_rsvp_status === 'going' ? '#fff' : '#374151',
-                    fontFamily: 'Inter_600SemiBold',
-                  }}
-                >
-                  Going
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => handleRsvp('cant')}
-                disabled={isRsvping}
-                activeOpacity={0.8}
-                style={{
-                  flex: 1,
-                  paddingVertical: 13,
-                  borderRadius: 14,
-                  backgroundColor: event.user_rsvp_status === 'cant' ? '#0FA6A6' : 'transparent',
-                  borderWidth: 1.5,
-                  borderColor: event.user_rsvp_status === 'cant' ? '#0FA6A6' : '#D1D5DB',
-                  alignItems: 'center',
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 15,
-                    fontWeight: '600',
-                    color: event.user_rsvp_status === 'cant' ? '#fff' : '#374151',
-                    fontFamily: 'Inter_600SemiBold',
-                  }}
-                >
-                  Can't
-                </Text>
-              </TouchableOpacity>
-            </View>
+            {(() => {
+              const isRestricted =
+                event.visibility === 'members' || event.visibility === 'specific';
+              const rsvpBlocked = isRestricted && !event.user_has_joined_club;
+
+              return (
+                <>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: '600',
+                      color: '#374151',
+                      fontFamily: 'Inter_600SemiBold',
+                      marginBottom: 12,
+                    }}
+                  >
+                    Are you coming?
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <TouchableOpacity
+                      onPress={() => !rsvpBlocked && handleRsvp('going')}
+                      disabled={isRsvping || rsvpBlocked}
+                      activeOpacity={rsvpBlocked ? 1 : 0.8}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 13,
+                        borderRadius: 14,
+                        backgroundColor: rsvpBlocked
+                          ? '#F3F4F6'
+                          : event.user_rsvp_status === 'going'
+                          ? '#0FA6A6'
+                          : 'transparent',
+                        borderWidth: 1.5,
+                        borderColor: rsvpBlocked
+                          ? '#E5E7EB'
+                          : event.user_rsvp_status === 'going'
+                          ? '#0FA6A6'
+                          : '#D1D5DB',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          fontWeight: '600',
+                          color: rsvpBlocked
+                            ? '#9CA3AF'
+                            : event.user_rsvp_status === 'going'
+                            ? '#fff'
+                            : '#374151',
+                          fontFamily: 'Inter_600SemiBold',
+                        }}
+                      >
+                        Going
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => !rsvpBlocked && handleRsvp('cant')}
+                      disabled={isRsvping || rsvpBlocked}
+                      activeOpacity={rsvpBlocked ? 1 : 0.8}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 13,
+                        borderRadius: 14,
+                        backgroundColor: rsvpBlocked
+                          ? '#F3F4F6'
+                          : event.user_rsvp_status === 'cant'
+                          ? '#0FA6A6'
+                          : 'transparent',
+                        borderWidth: 1.5,
+                        borderColor: rsvpBlocked
+                          ? '#E5E7EB'
+                          : event.user_rsvp_status === 'cant'
+                          ? '#0FA6A6'
+                          : '#D1D5DB',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          fontWeight: '600',
+                          color: rsvpBlocked
+                            ? '#9CA3AF'
+                            : event.user_rsvp_status === 'cant'
+                            ? '#fff'
+                            : '#374151',
+                          fontFamily: 'Inter_600SemiBold',
+                        }}
+                      >
+                        Can't
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {rsvpBlocked && (
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        color: '#9CA3AF',
+                        fontFamily: 'Inter_400Regular',
+                        textAlign: 'center',
+                        marginTop: 10,
+                      }}
+                    >
+                      Join the club to RSVP
+                    </Text>
+                  )}
+                </>
+              );
+            })()}
           </View>
         </ScrollView>
       )}

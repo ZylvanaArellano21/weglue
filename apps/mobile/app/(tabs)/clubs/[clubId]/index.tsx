@@ -177,6 +177,7 @@ function MiniCalendar({ eventDates }: { eventDates: string[] }) {
 // ─── Upcoming Event Row ───────────────────────────────────────────────────────
 function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId: string }) {
   const router = useRouter();
+  const isRestricted = event.visibility === 'members' || event.visibility === 'specific';
 
   return (
     <TouchableOpacity
@@ -207,6 +208,23 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
         ) : (
           <View style={{ width: 70, height: 70, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' }}>
             <Ionicons name="calendar-outline" size={24} color="#9CA3AF" />
+          </View>
+        )}
+        {isRestricted && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: 4,
+              left: 4,
+              backgroundColor: '#EF4444',
+              borderRadius: 6,
+              paddingHorizontal: 5,
+              paddingVertical: 2,
+            }}
+          >
+            <Text style={{ fontSize: 8, color: '#fff', fontFamily: 'Inter_700Bold' }}>
+              MEMBERS ONLY
+            </Text>
           </View>
         )}
       </View>

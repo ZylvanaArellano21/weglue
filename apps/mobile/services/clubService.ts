@@ -42,6 +42,17 @@ export interface ClubUpcomingEvent {
   start_time: string;
   end_time: string;
   location: string | null;
+  visibility: 'everyone' | 'members' | 'specific';
+}
+
+export async function getAllClubs(): Promise<UserClub[]> {
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('id, name, avatar_url')
+    .order('name');
+
+  if (error) throw error;
+  return (data ?? []) as UserClub[];
 }
 
 export interface ClubPhoto {
@@ -117,7 +128,7 @@ export async function getClubProfile(
       .eq('club_id', clubId),
     supabase
       .from('events')
-      .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location')
+      .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location, visibility')
       .eq('club_id', clubId)
       .gte('event_date', new Date().toISOString().split('T')[0])
       .order('event_date', { ascending: true })
@@ -168,6 +179,7 @@ export async function getClubProfile(
       start_time: e.start_time,
       end_time: e.end_time,
       location: e.location,
+      visibility: e.visibility as 'everyone' | 'members' | 'specific',
     })),
     photos: (photoRows ?? []) as ClubPhoto[],
     gluemates: gluemates.slice(0, 4),
@@ -353,6 +365,30 @@ export async function uploadClubPhoto(
   });
 
   if (error) throw error;
+}
+
+export interface AppUser {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+}
+
+export async function searchAllUsers(query: string): Promise<AppUser[]> {
+  const q = query.trim();
+  let req = supabase
+    .from('profiles')
+    .select('id, username, full_name, avatar_url')
+    .order('username')
+    .limit(50);
+
+  if (q) {
+    req = req.or(`username.ilike.%${q}%,full_name.ilike.%${q}%`);
+  }
+
+  const { data, error } = await req;
+  if (error) throw error;
+  return (data ?? []) as AppUser[];
 }
 
 export async function deleteClubPhoto(photoId: string): Promise<void> {

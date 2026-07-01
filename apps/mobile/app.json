@@ -100,7 +100,7 @@
             "DEFAULT"
           ]
         }
-      ],
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -116,7 +116,8 @@
           "cameraPermission": "We Glue needs access to your camera to take photos for posts, events, and your profile."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

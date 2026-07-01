@@ -134,7 +134,7 @@ export async function createPost(
   userId: string,
   imageUri: string,
   caption?: string,
-  clubId?: string,
+  clubIds?: string[],
 ): Promise<string> {
   const compressedUri = await compressImage(imageUri);
 
@@ -155,11 +155,13 @@ export async function createPost(
     .from('posts')
     .getPublicUrl(uploadData.path);
 
+  const primaryClubId = clubIds && clubIds.length > 0 ? clubIds[0] : null;
+
   const { data: post, error } = await supabase
     .from('posts')
     .insert({
       author_id: userId,
-      club_id: clubId ?? null,
+      club_id: primaryClubId,
       post_type: 'picture',
       image_url: publicUrl,
       caption: caption ?? null,
@@ -168,6 +170,14 @@ export async function createPost(
     .single();
 
   if (error || !post) throw error ?? new Error('Failed to create post');
+
+  if (clubIds && clubIds.length > 1) {
+    const additionalTags = clubIds.slice(1).map((cid) => ({
+      post_id: post.id,
+      club_id: cid,
+    }));
+    await supabase.from('post_club_tags').insert(additionalTags);
+  }
 
   return post.id;
 }

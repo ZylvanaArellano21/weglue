@@ -68,7 +68,7 @@ export async function getHomeEventsFeed(userId: string): Promise<HomeEventsFeedS
     .from('events')
     .select(`
       id, title, description, cover_image_url, event_date, start_time, end_time,
-      location, building, room, club_id,
+      location, building, room, club_id, visibility, specific_user_ids,
       clubs!inner(id, name, avatar_url),
       event_interests(interest),
       event_activities(activity)
@@ -107,9 +107,16 @@ export async function getHomeEventsFeed(userId: string): Promise<HomeEventsFeedS
   const tier3: HomeFeedEvent[] = [];
 
   for (const e of rawEvents as any[]) {
+    const visibility = e.visibility as 'everyone' | 'members' | 'specific';
+    const specificIds: string[] = e.specific_user_ids ?? [];
+    const isInJoinedClub = joinedClubIds.has(e.club_id);
+
+    // Visibility gate: hide events that shouldn't appear on this user's feed
+    if (visibility === 'members' && !isInJoinedClub) continue;
+    if (visibility === 'specific' && !specificIds.includes(userId)) continue;
+
     const activityTags: string[] = (e.event_activities ?? []).map((a: any) => a.activity);
     const interestTags: string[] = (e.event_interests ?? []).map((i: any) => i.interest);
-    const isInJoinedClub = joinedClubIds.has(e.club_id);
 
     const event: HomeFeedEvent = {
       id: e.id,
@@ -221,6 +228,7 @@ export interface CreateEventInput {
   building?: string;
   room?: string;
   visibility: 'everyone' | 'members' | 'specific';
+  specific_user_ids?: string[];
   interest_tags?: string[];
   activity_tags?: string[];
 }
@@ -257,6 +265,9 @@ export async function createEvent(
       building: eventData.building ?? null,
       room: eventData.room ?? null,
       visibility: eventData.visibility,
+      specific_user_ids: eventData.specific_user_ids?.length
+        ? eventData.specific_user_ids
+        : null,
     })
     .select('id')
     .single();
@@ -293,6 +304,7 @@ export interface EventDetail {
   location: string | null;
   building: string | null;
   room: string | null;
+  visibility: 'everyone' | 'members' | 'specific';
   club: { id: string; name: string; avatar_url: string | null };
   attendee_count: number;
   attendee_preview: AttendeePreview[];
@@ -311,7 +323,7 @@ export async function getEventDetail(
         .from('events')
         .select(`
           id, club_id, title, emoji, description, cover_image_url,
-          event_date, start_time, end_time, location, building, room,
+          event_date, start_time, end_time, location, building, room, visibility,
           clubs!inner(id, name, avatar_url)
         `)
         .eq('id', eventId)
@@ -372,6 +384,7 @@ export async function getEventDetail(
       name: (event as any).clubs.name,
       avatar_url: (event as any).clubs.avatar_url,
     },
+    visibility: ((event as any).visibility ?? 'everyone') as 'everyone' | 'members' | 'specific',
     attendee_count: (goingRsvps ?? []).length,
     attendee_preview: previews,
     user_rsvp_status: (rsvpRow?.status as 'going' | 'cant' | null) ?? null,
