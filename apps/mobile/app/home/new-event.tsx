@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -22,7 +21,8 @@ import { createEvent } from '../../services/eventService';
 import { getAllClubs, searchAllUsers, AppUser, UserClub } from '../../services/clubService';
 import { useToast } from '../../components/Toast';
 import { supabase } from '../../lib/supabase';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { SearchBottomSheet } from '../../components/shared/SearchBottomSheet';
 
 type Visibility = 'everyone' | 'members' | 'specific';
 
@@ -52,6 +52,7 @@ export default function NewEventScreen() {
   const { session } = useAuthStore();
   const userId = session?.user.id;
   const { show, ToastComponent } = useToast();
+  const queryClient = useQueryClient();
 
   // Club selection
   const [selectedClub, setSelectedClub] = useState<UserClub | null>(null);
@@ -109,7 +110,7 @@ export default function NewEventScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      aspect: [16, 9],
+      aspect: [4, 5],
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
@@ -141,18 +142,8 @@ export default function NewEventScreen() {
     }
   }, [userId]);
 
-  const openUserSelector = async () => {
-    setUserSearch('');
+  const openUserSelector = () => {
     setUserSelectorVisible(true);
-    setSearchingUsers(true);
-    try {
-      const results = await searchAllUsers('');
-      setUserSearchResults(results.filter((u) => u.id !== userId));
-    } catch {
-      // silent
-    } finally {
-      setSearchingUsers(false);
-    }
   };
 
   const toggleUser = (user: AppUser) => {
@@ -194,6 +185,7 @@ export default function NewEventScreen() {
         specific_user_ids:
           visibility === 'specific' ? specificUsers.map((u) => u.id) : undefined,
       });
+      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
       show('Event posted! 🎉');
       setTimeout(() => router.replace('/(tabs)'), 1000);
     } catch (err: unknown) {
@@ -298,8 +290,8 @@ export default function NewEventScreen() {
           >
             <View
               style={{
-                width: 120,
-                height: 120,
+                width: '100%',
+                aspectRatio: 4 / 5,
                 backgroundColor: '#E5E7EB',
                 borderRadius: 12,
                 overflow: 'hidden',
@@ -314,7 +306,7 @@ export default function NewEventScreen() {
                   resizeMode="cover"
                 />
               ) : (
-                <Ionicons name="image-outline" size={42} color="#9CA3AF" />
+                <Ionicons name="image-outline" size={56} color="#9CA3AF" />
               )}
               {uploading && (
                 <View
@@ -334,11 +326,11 @@ export default function NewEventScreen() {
                 <View
                   style={{
                     position: 'absolute',
-                    top: 8,
-                    right: 8,
-                    width: 28,
-                    height: 28,
-                    borderRadius: 14,
+                    top: 12,
+                    right: 12,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
                     borderWidth: 2,
                     borderColor: '#0FA6A6',
                     alignItems: 'center',
@@ -346,7 +338,7 @@ export default function NewEventScreen() {
                     backgroundColor: '#FEFCF0',
                   }}
                 >
-                  <Ionicons name="add" size={18} color="#0FA6A6" />
+                  <Ionicons name="add" size={20} color="#0FA6A6" />
                 </View>
               )}
             </View>
@@ -782,293 +774,84 @@ export default function NewEventScreen() {
         </Modal>
       )}
 
-      {/* Club Selector Modal */}
-      <Modal
+      {/* Select Club — keyboard-safe bottom sheet */}
+      <SearchBottomSheet<UserClub>
         visible={clubSelectorVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setClubSelectorVisible(false)}
-      >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
-          <SafeAreaView
+        title="Select Club"
+        searchPlaceholder="Search clubs..."
+        data={filteredClubs}
+        keyExtractor={(c) => c.id}
+        onSearch={(q) => setClubSearch(q)}
+        onSelect={(club) => {
+          setSelectedClub(club);
+          setClubSelectorVisible(false);
+        }}
+        onClose={() => setClubSelectorVisible(false)}
+        loading={loadingClubs}
+        emptyText="No clubs found."
+        renderItem={(club, isSelected) => (
+          <View
             style={{
-              backgroundColor: '#FEFCF0',
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
-              maxHeight: '75%',
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 14,
+              paddingHorizontal: 12,
+              borderRadius: 12,
+              backgroundColor: isSelected ? 'rgba(15,166,166,0.08)' : '#fff',
+              marginBottom: 8,
+              borderWidth: 1,
+              borderColor: isSelected ? '#0FA6A6' : '#E5E7EB',
             }}
-            edges={['bottom']}
           >
-            <View style={{ padding: 20 }}>
-              <Text
-                style={{
-                  fontSize: 16,
-                  fontWeight: '700',
-                  color: '#111827',
-                  fontFamily: 'Zain_700Bold',
-                  textAlign: 'center',
-                  marginBottom: 14,
-                }}
-              >
-                Select Club
-              </Text>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  backgroundColor: '#fff',
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: '#E5E7EB',
-                  paddingHorizontal: 12,
-                  gap: 8,
-                }}
-              >
-                <Ionicons name="search-outline" size={18} color="#9CA3AF" />
-                <TextInput
-                  value={clubSearch}
-                  onChangeText={setClubSearch}
-                  placeholder="Search clubs..."
-                  placeholderTextColor="#9CA3AF"
-                  style={{
-                    flex: 1,
-                    paddingVertical: 12,
-                    fontSize: 14,
-                    color: '#111827',
-                    fontFamily: 'Inter_400Regular',
-                  }}
-                  autoFocus
-                />
-              </View>
-            </View>
+            <Text style={{ flex: 1, fontSize: 15, color: '#111827', fontFamily: 'Inter_500Medium' }}>
+              @{club.name}
+            </Text>
+            {isSelected && <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />}
+          </View>
+        )}
+      />
 
-            {loadingClubs ? (
-              <View style={{ padding: 20, alignItems: 'center' }}>
-                <ActivityIndicator color="#0FA6A6" />
-              </View>
-            ) : (
-              <FlatList
-                data={filteredClubs}
-                keyExtractor={(item) => item.id}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
-                ListEmptyComponent={
-                  <Text
-                    style={{
-                      color: '#9CA3AF',
-                      textAlign: 'center',
-                      fontFamily: 'Inter_400Regular',
-                      paddingVertical: 20,
-                    }}
-                  >
-                    No clubs found.
-                  </Text>
-                }
-                renderItem={({ item: club }) => (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSelectedClub(club);
-                      setClubSelectorVisible(false);
-                    }}
-                    activeOpacity={0.7}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingVertical: 14,
-                      paddingHorizontal: 12,
-                      borderRadius: 12,
-                      backgroundColor:
-                        selectedClub?.id === club.id ? 'rgba(15,166,166,0.08)' : '#fff',
-                      marginBottom: 8,
-                      borderWidth: 1,
-                      borderColor: selectedClub?.id === club.id ? '#0FA6A6' : '#E5E7EB',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        flex: 1,
-                        fontSize: 15,
-                        color: '#111827',
-                        fontFamily: 'Inter_500Medium',
-                      }}
-                    >
-                      @{club.name}
-                    </Text>
-                    {selectedClub?.id === club.id && (
-                      <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />
-                    )}
-                  </TouchableOpacity>
-                )}
-              />
-            )}
-          </SafeAreaView>
-        </View>
-      </Modal>
-
-      {/* User Selector Modal */}
-      <Modal
+      {/* Add People — keyboard-safe bottom sheet, multi-select */}
+      <SearchBottomSheet<AppUser>
         visible={userSelectorVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setUserSelectorVisible(false)}
-      >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
-          <SafeAreaView
+        title="Add People"
+        searchPlaceholder="Search by name or username..."
+        data={userSearchResults}
+        keyExtractor={(u) => u.id}
+        onSearch={handleUserSearch}
+        onSelect={toggleUser}
+        onClose={() => setUserSelectorVisible(false)}
+        loading={searchingUsers}
+        emptyText="No users found."
+        multiSelect
+        selectedItems={specificUsers}
+        renderItem={(user, isSelected) => (
+          <View
             style={{
-              backgroundColor: '#FEFCF0',
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
-              maxHeight: '80%',
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 12,
+              paddingHorizontal: 12,
+              borderRadius: 12,
+              backgroundColor: isSelected ? 'rgba(15,166,166,0.08)' : '#fff',
+              marginBottom: 8,
+              borderWidth: 1,
+              borderColor: isSelected ? '#0FA6A6' : '#E5E7EB',
+              gap: 10,
             }}
-            edges={['bottom']}
           >
-            <View style={{ padding: 20 }}>
-              <Text
-                style={{
-                  fontSize: 16,
-                  fontWeight: '700',
-                  color: '#111827',
-                  fontFamily: 'Zain_700Bold',
-                  textAlign: 'center',
-                  marginBottom: 14,
-                }}
-              >
-                Add People
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_600SemiBold' }}>
+                {user.full_name}
               </Text>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  backgroundColor: '#fff',
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: '#E5E7EB',
-                  paddingHorizontal: 12,
-                  gap: 8,
-                }}
-              >
-                <Ionicons name="search-outline" size={18} color="#9CA3AF" />
-                <TextInput
-                  value={userSearch}
-                  onChangeText={handleUserSearch}
-                  placeholder="Search by name or username..."
-                  placeholderTextColor="#9CA3AF"
-                  style={{
-                    flex: 1,
-                    paddingVertical: 12,
-                    fontSize: 14,
-                    color: '#111827',
-                    fontFamily: 'Inter_400Regular',
-                  }}
-                  autoFocus
-                />
-              </View>
+              <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
+                @{user.username}
+              </Text>
             </View>
-
-            {searchingUsers ? (
-              <View style={{ padding: 20, alignItems: 'center' }}>
-                <ActivityIndicator color="#0FA6A6" />
-              </View>
-            ) : (
-              <FlatList
-                data={userSearchResults}
-                keyExtractor={(item) => item.id}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
-                ListEmptyComponent={
-                  <Text
-                    style={{
-                      color: '#9CA3AF',
-                      textAlign: 'center',
-                      fontFamily: 'Inter_400Regular',
-                      paddingVertical: 20,
-                    }}
-                  >
-                    No users found.
-                  </Text>
-                }
-                renderItem={({ item: user }) => {
-                  const isSelected = specificUsers.some((u) => u.id === user.id);
-                  return (
-                    <TouchableOpacity
-                      onPress={() => toggleUser(user)}
-                      activeOpacity={0.7}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingVertical: 12,
-                        paddingHorizontal: 12,
-                        borderRadius: 12,
-                        backgroundColor: isSelected ? 'rgba(15,166,166,0.08)' : '#fff',
-                        marginBottom: 8,
-                        borderWidth: 1,
-                        borderColor: isSelected ? '#0FA6A6' : '#E5E7EB',
-                        gap: 10,
-                      }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={{
-                            fontSize: 14,
-                            color: '#111827',
-                            fontFamily: 'Inter_600SemiBold',
-                          }}
-                        >
-                          {user.full_name}
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 12,
-                            color: '#6B7280',
-                            fontFamily: 'Inter_400Regular',
-                          }}
-                        >
-                          @{user.username}
-                        </Text>
-                      </View>
-                      {isSelected && (
-                        <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />
-                      )}
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            )}
-
-            <View
-              style={{
-                paddingHorizontal: 20,
-                paddingBottom: 16,
-                paddingTop: 8,
-                borderTopWidth: 1,
-                borderTopColor: '#E5E7EB',
-              }}
-            >
-              <TouchableOpacity
-                onPress={() => setUserSelectorVisible(false)}
-                activeOpacity={0.85}
-                style={{
-                  backgroundColor: '#0FA6A6',
-                  borderRadius: 14,
-                  paddingVertical: 14,
-                  alignItems: 'center',
-                }}
-              >
-                <Text
-                  style={{
-                    color: '#fff',
-                    fontSize: 15,
-                    fontWeight: '700',
-                    fontFamily: 'Inter_700Bold',
-                  }}
-                >
-                  Done{specificUsers.length > 0 ? ` (${specificUsers.length})` : ''}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
-        </View>
-      </Modal>
+            {isSelected && <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />}
+          </View>
+        )}
+      />
     </SafeAreaView>
   );
 }

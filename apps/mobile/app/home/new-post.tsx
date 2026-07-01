@@ -9,8 +9,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Modal,
-  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,6 +19,7 @@ import { createPost } from '../../services/postService';
 import { getAllClubs, UserClub } from '../../services/clubService';
 import { useToast } from '../../components/Toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { SearchBottomSheet } from '../../components/shared/SearchBottomSheet';
 
 export default function NewPostScreen() {
   const router = useRouter();
@@ -358,169 +357,42 @@ export default function NewPostScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Club search modal */}
-      <Modal
+      {/* Tag a Club — keyboard-safe bottom sheet, multi-select */}
+      <SearchBottomSheet<UserClub>
         visible={clubSelectorVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setClubSelectorVisible(false)}
-      >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
-          <SafeAreaView
+        title="Tag a Club"
+        searchPlaceholder="Search clubs..."
+        data={filteredClubs}
+        keyExtractor={(c) => c.id}
+        onSearch={(q) => setClubSearch(q)}
+        onSelect={toggleClub}
+        onClose={() => setClubSelectorVisible(false)}
+        loading={loadingClubs}
+        emptyText="No clubs found."
+        multiSelect
+        selectedItems={selectedClubs}
+        renderItem={(club, isSelected) => (
+          <View
             style={{
-              backgroundColor: '#FEFCF0',
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
-              maxHeight: '75%',
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 14,
+              paddingHorizontal: 12,
+              borderRadius: 12,
+              backgroundColor: isSelected ? 'rgba(15,166,166,0.08)' : '#fff',
+              marginBottom: 8,
+              borderWidth: 1,
+              borderColor: isSelected ? '#0FA6A6' : '#E5E7EB',
+              gap: 10,
             }}
-            edges={['bottom']}
           >
-            <View style={{ padding: 20 }}>
-              <Text
-                style={{
-                  fontSize: 16,
-                  fontWeight: '700',
-                  color: '#111827',
-                  fontFamily: 'Zain_700Bold',
-                  textAlign: 'center',
-                  marginBottom: 14,
-                }}
-              >
-                Tag a Club
-              </Text>
-
-              {/* Search input */}
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  backgroundColor: '#fff',
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: '#E5E7EB',
-                  paddingHorizontal: 12,
-                  marginBottom: 12,
-                  gap: 8,
-                }}
-              >
-                <Ionicons name="search-outline" size={18} color="#9CA3AF" />
-                <TextInput
-                  value={clubSearch}
-                  onChangeText={setClubSearch}
-                  placeholder="Search clubs..."
-                  placeholderTextColor="#9CA3AF"
-                  style={{
-                    flex: 1,
-                    paddingVertical: 12,
-                    fontSize: 14,
-                    color: '#111827',
-                    fontFamily: 'Inter_400Regular',
-                  }}
-                  autoFocus
-                />
-                {clubSearch.length > 0 && (
-                  <TouchableOpacity onPress={() => setClubSearch('')} activeOpacity={0.7}>
-                    <Ionicons name="close-circle" size={18} color="#9CA3AF" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {loadingClubs ? (
-              <View style={{ padding: 20, alignItems: 'center' }}>
-                <ActivityIndicator color="#0FA6A6" />
-              </View>
-            ) : (
-              <FlatList
-                data={filteredClubs}
-                keyExtractor={(item) => item.id}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
-                ListEmptyComponent={
-                  <Text
-                    style={{
-                      color: '#9CA3AF',
-                      textAlign: 'center',
-                      fontFamily: 'Inter_400Regular',
-                      paddingVertical: 20,
-                    }}
-                  >
-                    No clubs found.
-                  </Text>
-                }
-                renderItem={({ item: club }) => {
-                  const isSelected = selectedClubs.some((c) => c.id === club.id);
-                  return (
-                    <TouchableOpacity
-                      onPress={() => toggleClub(club)}
-                      activeOpacity={0.7}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingVertical: 14,
-                        paddingHorizontal: 12,
-                        borderRadius: 12,
-                        backgroundColor: isSelected ? 'rgba(15,166,166,0.08)' : '#fff',
-                        marginBottom: 8,
-                        borderWidth: 1,
-                        borderColor: isSelected ? '#0FA6A6' : '#E5E7EB',
-                        gap: 10,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          flex: 1,
-                          fontSize: 15,
-                          color: '#111827',
-                          fontFamily: 'Inter_500Medium',
-                        }}
-                      >
-                        {club.name}
-                      </Text>
-                      {isSelected && (
-                        <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />
-                      )}
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            )}
-
-            {/* Done button */}
-            <View
-              style={{
-                paddingHorizontal: 20,
-                paddingBottom: 16,
-                paddingTop: 8,
-                borderTopWidth: 1,
-                borderTopColor: '#E5E7EB',
-              }}
-            >
-              <TouchableOpacity
-                onPress={() => setClubSelectorVisible(false)}
-                activeOpacity={0.85}
-                style={{
-                  backgroundColor: '#0FA6A6',
-                  borderRadius: 14,
-                  paddingVertical: 14,
-                  alignItems: 'center',
-                }}
-              >
-                <Text
-                  style={{
-                    color: '#fff',
-                    fontSize: 15,
-                    fontWeight: '700',
-                    fontFamily: 'Inter_700Bold',
-                  }}
-                >
-                  Done{selectedClubs.length > 0 ? ` (${selectedClubs.length})` : ''}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
-        </View>
-      </Modal>
+            <Text style={{ flex: 1, fontSize: 15, color: '#111827', fontFamily: 'Inter_500Medium' }}>
+              {club.name}
+            </Text>
+            {isSelected && <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />}
+          </View>
+        )}
+      />
     </SafeAreaView>
   );
 }

@@ -119,7 +119,7 @@ function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
       {post.image_url ? (
         <Image
           source={{ uri: post.image_url }}
-          style={{ width: '100%', height: 220 }}
+          style={{ width: '100%', aspectRatio: 4 / 5 }}
           resizeMode="cover"
         />
       ) : null}

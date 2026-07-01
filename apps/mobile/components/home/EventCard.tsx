@@ -93,14 +93,14 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
           {event.cover_image_url ? (
             <Image
               source={{ uri: event.cover_image_url }}
-              style={{ width: '100%', height: 180 }}
+              style={{ width: '100%', aspectRatio: 4 / 5 }}
               resizeMode="cover"
             />
           ) : (
             <View
               style={{
                 width: '100%',
-                height: 180,
+                aspectRatio: 4 / 5,
                 backgroundColor: '#E5E7EB',
                 alignItems: 'center',
                 justifyContent: 'center',
