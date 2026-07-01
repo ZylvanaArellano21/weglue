@@ -5,7 +5,7 @@ import { createClient } from "../../lib/supabase/server";
 
 export const metadata = { title: "Dashboard" };
 
-export default async function DashboardPage() {
+export default async function DashboardPage(): Promise<JSX.Element> {
   const supabase = createClient();
   const {
     data: { user },

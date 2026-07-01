@@ -7,7 +7,7 @@ interface PageProps {
   searchParams: { token_hash?: string; type?: string; code?: string };
 }
 
-export default async function AuthConfirmPage({ searchParams }: PageProps) {
+export default async function AuthConfirmPage({ searchParams }: PageProps): Promise<JSX.Element> {
   const { token_hash, type, code } = searchParams;
 
   const cookieStore = cookies();

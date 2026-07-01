@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   description: "We Glue — your campus community, all in one place.",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }): JSX.Element {
   return (
     <html lang="en" className={inter.variable}>
       <body className="bg-cream text-gray-900 antialiased font-inter">
