@@ -40,6 +40,7 @@ export function AvatarStack({ avatars, size = 28, overlap = 8, maxCount = 4 }: A
           {a.avatar_url && !parsePresetColor(a.avatar_url) ? (
             <Image
               source={{ uri: a.avatar_url }}
+              resizeMode="cover"
               style={{ width: size, height: size }}
             />
           ) : (

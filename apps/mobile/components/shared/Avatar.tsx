@@ -84,6 +84,7 @@ export function Avatar({ uri, size = 40, username }: AvatarProps) {
     return (
       <Image
         source={{ uri }}
+        resizeMode="cover"
         style={{
           width: size,
           height: size,

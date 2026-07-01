@@ -63,6 +63,7 @@ export default function NewEventScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [imageCoverMode, setImageCoverMode] = useState<'cover' | 'contain'>('cover');
 
   // Text fields
   const [title, setTitle] = useState('');
@@ -303,7 +304,7 @@ export default function NewEventScreen() {
                 <Image
                   source={{ uri: imageUri }}
                   style={{ width: '100%', height: '100%' }}
-                  resizeMode="cover"
+                  resizeMode={imageCoverMode}
                 />
               ) : (
                 <Ionicons name="image-outline" size={56} color="#9CA3AF" />
@@ -322,24 +323,47 @@ export default function NewEventScreen() {
                   <ActivityIndicator color="#fff" />
                 </View>
               )}
-              {!imageUri && (
-                <View
+              {/* (+) button — always visible top right */}
+              <View
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  width: 28,
+                  height: 28,
+                  borderRadius: 14,
+                  backgroundColor: '#0FA6A6',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="add" size={18} color="#fff" />
+              </View>
+              {/* Resize toggle — bottom left, only when image selected */}
+              {imageUri && (
+                <TouchableOpacity
+                  onPress={() =>
+                    setImageCoverMode((prev) => (prev === 'cover' ? 'contain' : 'cover'))
+                  }
+                  activeOpacity={0.8}
                   style={{
                     position: 'absolute',
-                    top: 12,
-                    right: 12,
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    borderWidth: 2,
-                    borderColor: '#0FA6A6',
+                    bottom: 10,
+                    left: 10,
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    backgroundColor: 'rgba(255,255,255,0.92)',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: '#FEFCF0',
                   }}
                 >
-                  <Ionicons name="add" size={20} color="#0FA6A6" />
-                </View>
+                  <Ionicons
+                    name={imageCoverMode === 'cover' ? 'scan-outline' : 'contract-outline'}
+                    size={16}
+                    color="#6B7280"
+                  />
+                </TouchableOpacity>
               )}
             </View>
           </TouchableOpacity>

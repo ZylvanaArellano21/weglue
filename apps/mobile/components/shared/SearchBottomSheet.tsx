@@ -24,6 +24,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -47,6 +48,8 @@ export interface SearchBottomSheetProps<T> {
   onDone?: () => void;
   loading?: boolean;
   emptyText?: string;
+  /** Optional: provide to render selected chips above the list in multiSelect mode */
+  chipLabelExtractor?: (item: T) => string;
 }
 
 export function SearchBottomSheet<T>({
@@ -64,8 +67,10 @@ export function SearchBottomSheet<T>({
   onDone,
   loading = false,
   emptyText = 'No results found.',
+  chipLabelExtractor,
 }: SearchBottomSheetProps<T>) {
   const [query, setQuery] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
   const keyboardOffset = useRef(new Animated.Value(0)).current;
 
   // Reset search query each time sheet opens
@@ -132,6 +137,8 @@ export function SearchBottomSheet<T>({
     [selectedItems, keyExtractor, onSelect, renderItem],
   );
 
+  const showChips = multiSelect && selectedItems.length > 0 && !!chipLabelExtractor;
+
   return (
     <Modal
       visible={visible}
@@ -150,20 +157,29 @@ export function SearchBottomSheet<T>({
         />
 
         {/* Sheet rises above keyboard */}
-        <Animated.View style={{ marginBottom: keyboardOffset }}>
+        <Animated.View
+          style={{
+            marginBottom: keyboardOffset,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.12,
+            shadowRadius: 16,
+            elevation: 24,
+          }}
+        >
           <SafeAreaView
             style={{
               backgroundColor: '#FEFCF0',
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
               maxHeight: '85%',
             }}
             edges={['bottom']}
           >
             {/* Drag handle */}
-            <View style={{ alignItems: 'center', paddingTop: 10 }}>
+            <View style={{ alignItems: 'center', paddingTop: 8, marginBottom: 2 }}>
               <View
-                style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB' }}
+                style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB' }}
               />
             </View>
 
@@ -173,7 +189,7 @@ export function SearchBottomSheet<T>({
                 fontSize: 16,
                 fontWeight: '700',
                 color: '#111827',
-                fontFamily: 'Zain_700Bold',
+                fontFamily: 'Inter_700Bold',
                 textAlign: 'center',
                 marginTop: 10,
                 marginBottom: 14,
@@ -183,17 +199,17 @@ export function SearchBottomSheet<T>({
               {title}
             </Text>
 
-            {/* Search input — always visible, always focused */}
-            <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
+            {/* Search input */}
+            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
               <View
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
                   backgroundColor: '#fff',
-                  borderRadius: 12,
+                  borderRadius: 24,
                   borderWidth: 1,
-                  borderColor: '#E5E7EB',
-                  paddingHorizontal: 12,
+                  borderColor: inputFocused ? '#0FA6A6' : '#E5E7EB',
+                  paddingHorizontal: 14,
                   gap: 8,
                 }}
               >
@@ -204,6 +220,8 @@ export function SearchBottomSheet<T>({
                   placeholder={searchPlaceholder}
                   placeholderTextColor="#9CA3AF"
                   autoFocus
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
                   style={{
                     flex: 1,
                     paddingVertical: 12,
@@ -224,6 +242,55 @@ export function SearchBottomSheet<T>({
               </View>
             </View>
 
+            {/* Selected chips — horizontal scrollable row, multiSelect only */}
+            {showChips && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{
+                  paddingHorizontal: 16,
+                  paddingBottom: 10,
+                  gap: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                style={{ flexShrink: 0 }}
+              >
+                {selectedItems.map((item) => (
+                  <View
+                    key={keyExtractor(item)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: '#0FA6A6',
+                      borderRadius: 9999,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      gap: 4,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#fff',
+                        fontSize: 13,
+                        fontFamily: 'Inter_500Medium',
+                      }}
+                      numberOfLines={1}
+                    >
+                      {chipLabelExtractor!(item)}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => onSelect(item)}
+                      hitSlop={{ top: 4, left: 4, right: 4, bottom: 4 }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="close" size={12} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
             {/* Results list — scrollable, independent of keyboard */}
             {loading ? (
               <View style={{ padding: 24, alignItems: 'center' }}>
@@ -235,7 +302,10 @@ export function SearchBottomSheet<T>({
                 keyExtractor={keyExtractor}
                 renderItem={listRender}
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}
+                contentContainerStyle={{ paddingBottom: 12 }}
+                ItemSeparatorComponent={() => (
+                  <View style={{ height: 1, backgroundColor: '#F3F4F6', marginHorizontal: 16 }} />
+                )}
                 ListEmptyComponent={
                   <Text
                     style={{
@@ -255,7 +325,7 @@ export function SearchBottomSheet<T>({
             {multiSelect && (
               <View
                 style={{
-                  paddingHorizontal: 20,
+                  paddingHorizontal: 16,
                   paddingBottom: 16,
                   paddingTop: 8,
                   borderTopWidth: 1,
@@ -267,15 +337,16 @@ export function SearchBottomSheet<T>({
                   activeOpacity={0.85}
                   style={{
                     backgroundColor: '#0FA6A6',
-                    borderRadius: 14,
-                    paddingVertical: 14,
+                    borderRadius: 9999,
+                    height: 52,
                     alignItems: 'center',
+                    justifyContent: 'center',
                   }}
                 >
                   <Text
                     style={{
                       color: '#fff',
-                      fontSize: 15,
+                      fontSize: 16,
                       fontWeight: '700',
                       fontFamily: 'Inter_700Bold',
                     }}
