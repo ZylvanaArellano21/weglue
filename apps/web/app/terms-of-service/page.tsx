@@ -5,7 +5,7 @@ export const metadata = {
   title: "Terms of Service",
 };
 
-export default function TermsOfServicePage() {
+export default function TermsOfServicePage(): JSX.Element {
   return (
     <main className="min-h-screen bg-[#FEFCF0] px-6 py-12 max-w-2xl mx-auto">
       <Link href="/" className="flex items-center gap-2 mb-8">

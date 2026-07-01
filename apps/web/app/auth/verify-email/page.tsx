@@ -91,7 +91,7 @@ function VerifyEmailContent() {
   );
 }
 
-export default function VerifyEmailPage() {
+export default function VerifyEmailPage(): JSX.Element {
   return (
     <Suspense
       fallback={

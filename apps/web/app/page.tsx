@@ -130,7 +130,7 @@ const FEATURES = [
   },
 ];
 
-export default function LandingPage() {
+export default function LandingPage(): JSX.Element {
   return (
     <div className="min-h-screen bg-[#FEFCF0]">
       <NavBar />

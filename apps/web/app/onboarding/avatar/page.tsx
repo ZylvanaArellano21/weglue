@@ -34,7 +34,7 @@ function LegalFooter() {
   );
 }
 
-export default function AvatarPage() {
+export default function AvatarPage(): JSX.Element {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
