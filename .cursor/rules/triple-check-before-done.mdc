@@ -1,0 +1,38 @@
+---
+description: Triple-check all work before declaring done — verify, fix, repeat
+alwaysApply: true
+---
+
+# Triple-Check Before Done
+
+Before saying "done", "finished", or any equivalent, you MUST complete all three passes below. Do not skip any step even if you feel confident.
+
+## Pass 1 — Completeness Check
+- Every task listed in the user's prompt is addressed
+- No item was silently skipped or partially done
+- No file that should have been touched was left unchanged
+
+## Pass 2 — Correctness Check
+- Re-read every file you modified (use Read tool) and verify:
+  - The change matches the spec exactly (colors, sizes, fonts, layout)
+  - No syntax errors, unclosed tags, or broken JSX
+  - No duplicate or conflicting style properties
+  - New logic/imports compile and do not break existing behavior
+  - Linter errors you introduced are fixed (pre-existing errors are OK to leave)
+
+## Pass 3 — Integration Check
+- Changes in one file don't break neighboring files
+- Data contracts / prop types are still satisfied
+- Navigation and state logic are untouched (styling-only tasks)
+- Git diff makes sense — only the intended files changed
+
+## Fix Loop
+If Pass 1, 2, or 3 reveals any issue:
+1. Fix it immediately — do not mention it and move on
+2. Run all three passes again from Pass 1
+3. Only declare "done" after a full clean triple-check with zero issues
+
+## Hard Rules
+- NEVER say "done" or "I have completed all tasks" before finishing all three passes
+- If you had to make a fix after Pass 1 or later, restart the triple-check from Pass 1
+- This rule applies to every chat, every task, no exceptions
