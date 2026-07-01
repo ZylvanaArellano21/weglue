@@ -18,13 +18,14 @@ Build this app like a senior engineer launching a worldwide product. Always keep
 - Growth, professionalism, store submission readiness
 - Apply this thinking to every line of code, every answer, every suggestion.
 
-## 5. Triple sync — GitHub + Supabase + weglue folder
-Every change, element, table, code, color — anything added or modified — must be saved in:
+## 5. Four-way sync — GitHub + Supabase + Vercel + weglue folder
+Every change, element, table, code, color, environment variable, deployment — anything added or modified — must be saved in:
 - GitHub (committed and pushed)
 - Supabase (schema, RLS, data)
+- Vercel (deploy changes, sync env vars, keep project config up to date)
 - The weglue local folder
 
-All three must be in perfect sync with the actual app at all times.
+All four must be in perfect sync with the actual app at all times.
 
 ## 6. Ask before starting if anything is unclear
 If there are any questions before beginning a task, ask them first. Do not guess.

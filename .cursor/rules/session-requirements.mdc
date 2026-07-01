@@ -23,13 +23,14 @@ Build as a professional engineer shipping a worldwide app for millions of users.
 - Worldwide audience support (i18n readiness, accessibility, legal compliance)
 - Professional code quality, security, and maintainability
 
-## 5. Three-Way Sync (GitHub + Supabase + weglue folder)
-Every change — code, schema, colors, data logic, user flow — must be saved and synced across:
+## 5. Four-Way Sync (GitHub + Supabase + Vercel + weglue folder)
+Every change — code, schema, colors, data logic, user flow, environment variables, deployments — must be saved and synced across:
 - **GitHub**: commit to the branch where changes were made
 - **Supabase**: apply schema/data changes via migrations
+- **Vercel**: deploy any backend, frontend, or env var changes; keep project config, environment variables, and deployments in sync
 - **weglue folder**: local files always reflect the actual app state
 
-All three must be in perfect sync at all times.
+All four must be in perfect sync at all times.
 
 ## 6. Ask Questions Before Starting
 If there are any blockers or decisions that require the user's input, surface them before beginning work — not mid-implementation.
