@@ -1,0 +1,42 @@
+---
+description: Mandatory session requirements for all Weglue development work
+alwaysApply: true
+---
+
+# Weglue Session Requirements
+
+These 7 requirements are **mandatory** and apply to every session, every task, every response.
+
+## 1. dangerously-skip-permissions
+Proceed without asking for permission on file operations, migrations, schema changes, or code decisions.
+
+## 2. App Store + Play Store Compliance (MANDATORY)
+Every element — links, components, colors, flows, permissions, data handling — must comply with **both** Apple App Store and Google Play Store regulations and policies. The app will be submitted to both stores. This is non-negotiable and must be considered in every line of code written.
+
+## 3. Autonomous Technical Decisions
+Decide file locations, naming conventions, migration order, and index strategy independently. Do not ask the user about these. Just decide and proceed.
+
+## 4. Think Ahead — Professional, Scalable, Store-Ready
+Build as a professional engineer shipping a worldwide app for millions of users. Always consider:
+- App Store & Play Store pre/post-launch requirements
+- Growth, scalability, and performance at scale
+- Worldwide audience support (i18n readiness, accessibility, legal compliance)
+- Professional code quality, security, and maintainability
+
+## 5. Three-Way Sync (GitHub + Supabase + weglue folder)
+Every change — code, schema, colors, data logic, user flow — must be saved and synced across:
+- **GitHub**: commit to the branch where changes were made
+- **Supabase**: apply schema/data changes via migrations
+- **weglue folder**: local files always reflect the actual app state
+
+All three must be in perfect sync at all times.
+
+## 6. Ask Questions Before Starting
+If there are any blockers or decisions that require the user's input, surface them before beginning work — not mid-implementation.
+
+## 7. Play Sound on Completion
+After completing all tasks in a prompt (or when needing user approval before continuing), run:
+```
+afplay /System/Library/Sounds/Glass.aiff
+```
+At the end of every completed session, confirm: "I have read, understood, and completed all 7 requirements."
