@@ -214,16 +214,16 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
           <View
             style={{
               position: 'absolute',
-              bottom: 4,
+              top: 4,
               left: 4,
-              backgroundColor: '#EF4444',
-              borderRadius: 6,
-              paddingHorizontal: 5,
-              paddingVertical: 2,
+              backgroundColor: '#F02719',
+              borderRadius: 10,
+              paddingHorizontal: 6,
+              paddingVertical: 3,
             }}
           >
-            <Text style={{ fontSize: 8, color: '#fff', fontFamily: 'Inter_700Bold' }}>
-              MEMBERS ONLY
+            <Text style={{ fontSize: 10, color: '#fff', fontFamily: 'Inter_700Bold' }}>
+              Members Only
             </Text>
           </View>
         )}

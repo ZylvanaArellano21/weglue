@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Share,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -51,6 +52,10 @@ export default function ClubEventDetailScreen() {
 
   const [joiningClub, setJoiningClub] = useState(false);
 
+  // Spring animation that fires once when RSVP buttons transition from locked → enabled
+  const rsvpEnableAnim = useRef(new Animated.Value(1)).current;
+  const prevJoinedRef = useRef<boolean | undefined>(undefined);
+
   const { data: event, isLoading } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);
   const { mutate: toggleSave, isPending: isSaving } = useSaveEventMutation(userId, eventId);
@@ -61,6 +66,17 @@ export default function ClubEventDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['eventDetail', eventId, userId] });
     },
   });
+
+  useEffect(() => {
+    const joined = event?.user_has_joined_club;
+    if (prevJoinedRef.current === false && joined === true) {
+      Animated.sequence([
+        Animated.spring(rsvpEnableAnim, { toValue: 1.05, useNativeDriver: true, friction: 4, tension: 120 }),
+        Animated.spring(rsvpEnableAnim, { toValue: 1.0, useNativeDriver: true, friction: 4, tension: 120 }),
+      ]).start();
+    }
+    prevJoinedRef.current = joined;
+  }, [event?.user_has_joined_club]);
 
   const handleRsvp = (status: 'going' | 'cant') => {
     rsvp(status, {
@@ -430,7 +446,9 @@ export default function ClubEventDetailScreen() {
                   >
                     Are you coming?
                   </Text>
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <Animated.View
+                    style={{ flexDirection: 'row', gap: 12, transform: [{ scale: rsvpEnableAnim }] }}
+                  >
                     <TouchableOpacity
                       onPress={() => !rsvpBlocked && handleRsvp('going')}
                       disabled={isRsvping || rsvpBlocked}
@@ -440,16 +458,12 @@ export default function ClubEventDetailScreen() {
                         paddingVertical: 13,
                         borderRadius: 14,
                         backgroundColor: rsvpBlocked
-                          ? '#F3F4F6'
+                          ? '#D1D5DB'
                           : event.user_rsvp_status === 'going'
                           ? '#0FA6A6'
                           : 'transparent',
-                        borderWidth: 1.5,
-                        borderColor: rsvpBlocked
-                          ? '#E5E7EB'
-                          : event.user_rsvp_status === 'going'
-                          ? '#0FA6A6'
-                          : '#D1D5DB',
+                        borderWidth: rsvpBlocked ? 0 : 1.5,
+                        borderColor: event.user_rsvp_status === 'going' ? '#0FA6A6' : '#D1D5DB',
                         alignItems: 'center',
                       }}
                     >
@@ -477,16 +491,12 @@ export default function ClubEventDetailScreen() {
                         paddingVertical: 13,
                         borderRadius: 14,
                         backgroundColor: rsvpBlocked
-                          ? '#F3F4F6'
+                          ? '#D1D5DB'
                           : event.user_rsvp_status === 'cant'
                           ? '#0FA6A6'
                           : 'transparent',
-                        borderWidth: 1.5,
-                        borderColor: rsvpBlocked
-                          ? '#E5E7EB'
-                          : event.user_rsvp_status === 'cant'
-                          ? '#0FA6A6'
-                          : '#D1D5DB',
+                        borderWidth: rsvpBlocked ? 0 : 1.5,
+                        borderColor: event.user_rsvp_status === 'cant' ? '#0FA6A6' : '#D1D5DB',
                         alignItems: 'center',
                       }}
                     >
@@ -505,11 +515,11 @@ export default function ClubEventDetailScreen() {
                         Can't
                       </Text>
                     </TouchableOpacity>
-                  </View>
+                  </Animated.View>
                   {rsvpBlocked && (
                     <Text
                       style={{
-                        fontSize: 13,
+                        fontSize: 12,
                         color: '#9CA3AF',
                         fontFamily: 'Inter_400Regular',
                         textAlign: 'center',

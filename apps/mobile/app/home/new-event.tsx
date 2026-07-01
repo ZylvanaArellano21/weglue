@@ -298,8 +298,8 @@ export default function NewEventScreen() {
           >
             <View
               style={{
-                width: '100%',
-                height: 160,
+                width: 120,
+                height: 120,
                 backgroundColor: '#E5E7EB',
                 borderRadius: 12,
                 overflow: 'hidden',
@@ -353,10 +353,10 @@ export default function NewEventScreen() {
           </TouchableOpacity>
 
           {/* Event name */}
-          <Text style={labelStyle}>Name of the event...</Text>
           <TextInput
             value={title}
             onChangeText={setTitle}
+            placeholder="Name of the event..."
             style={inputStyle}
             placeholderTextColor="#9CA3AF"
             maxLength={120}
@@ -364,35 +364,85 @@ export default function NewEventScreen() {
           />
 
           {/* About */}
-          <Text style={labelStyle}>About:</Text>
           <TextInput
             value={about}
             onChangeText={setAbout}
+            placeholder="About this event..."
             style={[inputStyle, { height: 100, textAlignVertical: 'top', paddingTop: 12 }]}
             placeholderTextColor="#9CA3AF"
             multiline
             maxLength={1000}
           />
 
-          {/* Date */}
-          <Text style={labelStyle}>Date:</Text>
-          <TouchableOpacity
-            onPress={() => setShowDatePicker(true)}
-            activeOpacity={0.7}
-            style={[inputStyle, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}
-          >
-            <Ionicons name="calendar-outline" size={18} color={eventDate ? '#111827' : '#9CA3AF'} />
-            <Text
-              style={{
-                fontSize: 14,
-                color: eventDate ? '#111827' : '#9CA3AF',
-                fontFamily: 'Inter_400Regular',
-                flex: 1,
-              }}
-            >
-              {eventDate ? formatDate(eventDate) : 'Select date...'}
-            </Text>
-          </TouchableOpacity>
+          {/* Date + Time — two-column row */}
+          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
+            {/* Date column */}
+            <View style={{ flex: 1 }}>
+              <Text style={[labelStyle, { fontSize: 12 }]}>Date:</Text>
+              <TouchableOpacity
+                onPress={() => setShowDatePicker(true)}
+                activeOpacity={0.7}
+                style={[inputStyle, { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 0 }]}
+              >
+                <Ionicons name="calendar-outline" size={16} color={eventDate ? '#111827' : '#9CA3AF'} />
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: eventDate ? '#111827' : '#9CA3AF',
+                    fontFamily: 'Inter_400Regular',
+                    flex: 1,
+                  }}
+                  numberOfLines={1}
+                >
+                  {eventDate ? formatDate(eventDate) : 'Select...'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Time column */}
+            <View style={{ flex: 1 }}>
+              <Text style={[labelStyle, { fontSize: 12 }]}>Time:</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setTempTime(startTime ?? new Date());
+                    setShowTimePicker('start');
+                  }}
+                  activeOpacity={0.7}
+                  style={[inputStyle, { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 0 }]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color: startTime ? '#111827' : '#9CA3AF',
+                      fontFamily: 'Inter_400Regular',
+                    }}
+                  >
+                    {startTime ? formatTime(startTime) : '--:--'}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={{ fontSize: 14, color: '#9CA3AF' }}>-</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setTempTime(endTime ?? new Date());
+                    setShowTimePicker('end');
+                  }}
+                  activeOpacity={0.7}
+                  style={[inputStyle, { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 0 }]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color: endTime ? '#111827' : '#9CA3AF',
+                      fontFamily: 'Inter_400Regular',
+                    }}
+                  >
+                    {endTime ? formatTime(endTime) : '--:--'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
 
           {/* Android date picker (shows immediately when showDatePicker=true) */}
           {Platform.OS === 'android' && showDatePicker && (
@@ -403,70 +453,6 @@ export default function NewEventScreen() {
               onChange={onDateChange}
             />
           )}
-
-          {/* Time row */}
-          <Text style={labelStyle}>Time:</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <TouchableOpacity
-              onPress={() => {
-                setTempTime(startTime ?? new Date());
-                setShowTimePicker('start');
-              }}
-              activeOpacity={0.7}
-              style={[
-                inputStyle,
-                {
-                  flex: 1,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  marginBottom: 0,
-                },
-              ]}
-            >
-              <Ionicons name="time-outline" size={16} color={startTime ? '#111827' : '#9CA3AF'} />
-              <Text
-                style={{
-                  fontSize: 14,
-                  color: startTime ? '#111827' : '#9CA3AF',
-                  fontFamily: 'Inter_400Regular',
-                }}
-              >
-                {startTime ? formatTime(startTime) : 'Start'}
-              </Text>
-            </TouchableOpacity>
-
-            <Text style={{ fontSize: 16, color: '#9CA3AF' }}>–</Text>
-
-            <TouchableOpacity
-              onPress={() => {
-                setTempTime(endTime ?? new Date());
-                setShowTimePicker('end');
-              }}
-              activeOpacity={0.7}
-              style={[
-                inputStyle,
-                {
-                  flex: 1,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  marginBottom: 0,
-                },
-              ]}
-            >
-              <Ionicons name="time-outline" size={16} color={endTime ? '#111827' : '#9CA3AF'} />
-              <Text
-                style={{
-                  fontSize: 14,
-                  color: endTime ? '#111827' : '#9CA3AF',
-                  fontFamily: 'Inter_400Regular',
-                }}
-              >
-                {endTime ? formatTime(endTime) : 'End'}
-              </Text>
-            </TouchableOpacity>
-          </View>
 
           {/* Android time picker */}
           {Platform.OS === 'android' && showTimePicker !== null && (
@@ -485,6 +471,8 @@ export default function NewEventScreen() {
               <TextInput
                 value={building}
                 onChangeText={setBuilding}
+                placeholder="Building"
+                placeholderTextColor="#9CA3AF"
                 style={inputStyle}
                 returnKeyType="next"
               />
@@ -494,6 +482,8 @@ export default function NewEventScreen() {
               <TextInput
                 value={room}
                 onChangeText={setRoom}
+                placeholder="Room"
+                placeholderTextColor="#9CA3AF"
                 style={inputStyle}
                 returnKeyType="done"
               />
@@ -593,19 +583,17 @@ export default function NewEventScreen() {
                               style={{
                                 flexDirection: 'row',
                                 alignItems: 'center',
-                                backgroundColor: 'rgba(15,166,166,0.1)',
+                                backgroundColor: '#0FA6A6',
                                 borderRadius: 20,
                                 paddingHorizontal: 10,
                                 paddingVertical: 5,
-                                borderWidth: 1,
-                                borderColor: '#0FA6A6',
                                 gap: 5,
                               }}
                             >
                               <Text
                                 style={{
                                   fontSize: 12,
-                                  color: '#0FA6A6',
+                                  color: '#fff',
                                   fontFamily: 'Inter_500Medium',
                                 }}
                               >
@@ -620,7 +608,7 @@ export default function NewEventScreen() {
                                 hitSlop={{ top: 6, left: 6, right: 6, bottom: 6 }}
                                 activeOpacity={0.7}
                               >
-                                <Ionicons name="close-circle" size={14} color="#0FA6A6" />
+                                <Ionicons name="close-circle" size={14} color="#fff" />
                               </TouchableOpacity>
                             </View>
                           ))}
@@ -680,7 +668,7 @@ export default function NewEventScreen() {
             activeOpacity={0.85}
             style={{
               backgroundColor: submitting || !allRequiredFilled ? '#9CA3AF' : '#0FA6A6',
-              borderRadius: 16,
+              borderRadius: 28,
               paddingVertical: 16,
               alignItems: 'center',
             }}
@@ -693,7 +681,7 @@ export default function NewEventScreen() {
                   color: '#fff',
                   fontSize: 16,
                   fontWeight: '700',
-                  fontFamily: 'Inter_700Bold',
+                  fontFamily: 'Zain_700Bold',
                 }}
               >
                 Post it

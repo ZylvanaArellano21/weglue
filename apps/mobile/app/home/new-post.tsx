@@ -268,16 +268,14 @@ export default function NewPostScreen() {
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    backgroundColor: 'rgba(15,166,166,0.1)',
+                    backgroundColor: '#0FA6A6',
                     borderRadius: 20,
                     paddingHorizontal: 12,
                     paddingVertical: 6,
-                    borderWidth: 1,
-                    borderColor: '#0FA6A6',
                     gap: 6,
                   }}
                 >
-                  <Text style={{ fontSize: 13, color: '#0FA6A6', fontFamily: 'Inter_500Medium' }}>
+                  <Text style={{ fontSize: 13, color: '#fff', fontFamily: 'Inter_500Medium' }}>
                     {club.name}
                   </Text>
                   <TouchableOpacity
@@ -285,7 +283,7 @@ export default function NewPostScreen() {
                     hitSlop={{ top: 6, left: 6, right: 6, bottom: 6 }}
                     activeOpacity={0.7}
                   >
-                    <Ionicons name="close-circle" size={16} color="#0FA6A6" />
+                    <Ionicons name="close-circle" size={16} color="#fff" />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -337,7 +335,7 @@ export default function NewPostScreen() {
             activeOpacity={0.85}
             style={{
               backgroundColor: submitting || !imageUri ? '#9CA3AF' : '#0FA6A6',
-              borderRadius: 16,
+              borderRadius: 28,
               paddingVertical: 16,
               alignItems: 'center',
             }}
@@ -350,7 +348,7 @@ export default function NewPostScreen() {
                   color: '#fff',
                   fontSize: 16,
                   fontWeight: '700',
-                  fontFamily: 'Inter_700Bold',
+                  fontFamily: 'Zain_700Bold',
                 }}
               >
                 Post
