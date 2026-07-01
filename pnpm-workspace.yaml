@@ -1,11 +1,3 @@
 packages:
   - 'apps/*'
   - 'packages/*'
-
-# Force all metro-* packages to the version Expo SDK 51 requires (0.80.x).
-# nativewind@4.2 pulls react-native-reanimated@4 → metro@0.84 which has a
-# strict "exports" field that Node ≥20 enforces, breaking Metro's internal
-# require() calls. Pinning to 0.80.x eliminates the version conflict.
-overrides:
-  '@types/react': '^18.3.3'
-  '@types/react-dom': '^18.3.0'
