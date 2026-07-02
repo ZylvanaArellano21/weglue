@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text, Image, TouchableOpacity, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ function formatTime(timeStr: string): string {
 
 export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: EventCardTodayProps) {
   const router = useRouter();
+  const [imageError, setImageError] = useState(false);
 
   const handlePressEvent = () => {
     router.push({ pathname: '/home/event-detail', params: { eventId: event.id } });
@@ -88,11 +90,15 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
       {/* Event Image */}
       <Pressable onPress={handlePressEvent}>
         <View style={{ position: 'relative' }}>
-          {event.cover_image_url ? (
+          {event.cover_image_url && !imageError ? (
             <Image
               source={{ uri: event.cover_image_url }}
               style={{ width: '100%', aspectRatio: 4 / 5 }}
               resizeMode="cover"
+              onError={(e) => {
+                console.warn('[EventCardToday] Image failed to load:', event.cover_image_url, e.nativeEvent.error);
+                setImageError(true);
+              }}
             />
           ) : (
             <View
@@ -194,7 +200,7 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
         </View>
 
         {/* Location in red */}
-        {event.location ? (
+        {(event.location || event.building) ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
             <Ionicons name="location-outline" size={14} color="#F02719" />
             <Text
@@ -205,7 +211,7 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
               }}
               numberOfLines={1}
             >
-              {event.location}
+              {event.location ?? `Building ${event.building}, Room ${event.room}`}
             </Text>
           </View>
         ) : null}

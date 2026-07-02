@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 
-export type EventTier = 'your_clubs' | 'recommended' | 'other';
+export type EventTier = 'your_clubs' | 'recommended';
 
 export interface AttendeePreview {
   id: string;
@@ -102,9 +102,9 @@ export async function getHomeEventsFeed(userId: string): Promise<HomeEventsFeedS
     }
   }
 
-  const tier1: HomeFeedEvent[] = [];
-  const tier2: HomeFeedEvent[] = [];
-  const tier3: HomeFeedEvent[] = [];
+  const yourClubs: HomeFeedEvent[] = [];
+  const recommendedMatched: HomeFeedEvent[] = [];
+  const recommendedOther: HomeFeedEvent[] = [];
 
   for (const e of rawEvents as any[]) {
     const visibility = e.visibility as 'everyone' | 'members' | 'specific';
@@ -143,27 +143,29 @@ export async function getHomeEventsFeed(userId: string): Promise<HomeEventsFeedS
       is_saved: savedSet.has(e.id),
       is_today: e.event_date === today,
       user_has_joined_club: isInJoinedClub,
-      tier: 'other',
+      tier: isInJoinedClub ? 'your_clubs' : 'recommended',
     };
 
     if (isInJoinedClub) {
-      tier1.push({ ...event, tier: 'your_clubs' });
+      yourClubs.push(event);
     } else {
       const hasOverlap =
         activityTags.some((t) => userActivitySet.has(t)) ||
         interestTags.some((t) => userInterestSet.has(t));
       if (hasOverlap) {
-        tier2.push({ ...event, tier: 'recommended' });
+        recommendedMatched.push(event);
       } else {
-        tier3.push({ ...event, tier: 'other' });
+        recommendedOther.push(event);
       }
     }
   }
 
+  // Interest-matched events float to the top of "Recommended for You"
+  const recommended = [...recommendedMatched, ...recommendedOther];
+
   const sections: HomeEventsFeedSection[] = [];
-  if (tier1.length > 0) sections.push({ label: 'Your Clubs', data: tier1 });
-  if (tier2.length > 0) sections.push({ label: 'Recommended for You', data: tier2 });
-  if (tier3.length > 0) sections.push({ label: 'Other Events', data: tier3 });
+  if (yourClubs.length > 0) sections.push({ label: 'Your Clubs', data: yourClubs });
+  if (recommended.length > 0) sections.push({ label: 'Recommended for You', data: recommended });
 
   return sections;
 }
