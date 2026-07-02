@@ -1,366 +1,1358 @@
-// ============================================================
-// We Glue – Database Types
-// Auto-mirrors 001_initial_schema.sql
-// ============================================================
-
-// ---- Enums / Literals -----------------------------------------
-
-export type InterestOption =
-  | 'Finance & Business'
-  | 'Social Events'
-  | 'Music'
-  | 'Fashion'
-  | 'Art & Culture'
-  | 'Social Justice & Activism'
-  | 'Numbers & Economics'
-  | 'Gaming'
-  | 'Health & Wellness'
-  | 'Environment'
-  | 'Sports & Athletics'
-  | 'Community Service'
-  | 'Crafts'
-  | 'Religion'
-  | 'Technology and Computer'
-  | 'Film & Media'
-  | 'Photography'
-  | 'Strategy and Critical Thinking'
-  | 'Writing'
-  | 'Theater'
-  | 'Travel & Languages'
-  | 'Debate & Politics';
-
-export type ActivityOption =
-  | 'Projects'
-  | 'Volunteering'
-  | 'Workshops'
-  | 'Campus Fairs'
-  | 'Trips'
-  | 'Study Groups'
-  | 'Networking'
-  | 'Tournaments'
-  | 'Social Events'
-  | 'Campus Tours';
-
-export type FollowStatus = 'pending' | 'accepted';
-export type ClubRole = 'member' | 'officer';
-export type EventVisibility = 'everyone' | 'members' | 'specific';
-export type PostType = 'picture' | 'event';
-export type ConversationType = 'direct' | 'group' | 'club_group' | 'officer_chat';
-export type MessageType = 'text' | 'image' | 'poll';
-export type NotificationType =
-  | 'follow_request'
-  | 'follow_accepted'
-  | 'event_rsvp'
-  | 'new_event'
-  | 'new_message'
-  | 'gluemate'
-  | 'like'
-  | 'comment';
-export type EntityType = 'event' | 'club' | 'message' | 'post';
-export type RsvpStatus = 'going' | 'cant';
-
-// ---- Table Interfaces -----------------------------------------
-
-export interface Profile {
-  id: string;
-  username: string;
-  full_name: string;
-  avatar_url: string | null;
-  major: string | null;
-  bio: string | null;
-  is_seed: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface UserInterest {
-  id: string;
-  user_id: string;
-  interest: InterestOption;
-}
-
-export interface UserActivity {
-  id: string;
-  user_id: string;
-  activity: ActivityOption;
-}
-
-export interface UserPrivacy {
-  id: string;
-  user_id: string;
-  is_private: boolean;
-  hide_interests: boolean;
-  hide_events: boolean;
-}
-
-export interface Follow {
-  id: string;
-  follower_id: string;
-  following_id: string;
-  status: FollowStatus;
-  created_at: string;
-}
-
-export interface Club {
-  id: string;
-  name: string;
-  handle: string;
-  description: string;
-  avatar_url: string | null;
-  banner_url: string | null;
-  meeting_day: string | null;
-  meeting_time_start: string | null; // HH:MM:SS
-  meeting_time_end: string | null;   // HH:MM:SS
-  meeting_location: string | null;
-  meeting_building: string | null;
-  meeting_room: string | null;
-  is_seed: boolean;
-  claimed: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ClubGoal {
-  id: string;
-  club_id: string;
-  goal_text: string;
-  display_order: number;
-}
-
-export interface ClubInterest {
-  id: string;
-  club_id: string;
-  interest: InterestOption;
-}
-
-export interface ClubMember {
-  id: string;
-  club_id: string;
-  user_id: string;
-  role: ClubRole;
-  joined_at: string;
-}
-
-export interface ClubOfficer {
-  id: string;
-  club_id: string;
-  user_id: string | null;
-  display_name: string;
-  role_title: string;
-  avatar_url: string | null;
-  display_order: number;
-}
-
-export interface ClubPhoto {
-  id: string;
-  club_id: string;
-  url: string;
-  uploaded_by: string | null;
-  created_at: string;
-}
-
-export interface Event {
-  id: string;
-  club_id: string;
-  created_by: string;
-  title: string;
-  emoji: string | null;
-  description: string | null;
-  cover_image_url: string | null;
-  event_date: string; // YYYY-MM-DD
-  start_time: string; // HH:MM:SS
-  end_time: string;   // HH:MM:SS
-  location: string | null;
-  building: string | null;
-  room: string | null;
-  visibility: EventVisibility;
-  is_seed: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EventInterest {
-  id: string;
-  event_id: string;
-  interest: string;
-}
-
-export interface EventActivity {
-  id: string;
-  event_id: string;
-  activity: string;
-}
-
-export interface EventRsvp {
-  id: string;
-  event_id: string;
-  user_id: string;
-  status: RsvpStatus;
-  created_at: string;
-}
-
-export interface SavedEvent {
-  id: string;
-  user_id: string;
-  event_id: string;
-  saved_at: string;
-}
-
-export interface Post {
-  id: string;
-  author_id: string;
-  club_id: string | null;
-  post_type: PostType;
-  image_url: string | null;
-  caption: string | null;
-  linked_event_id: string | null;
-  created_at: string;
-}
-
-export interface PostLike {
-  id: string;
-  post_id: string;
-  user_id: string;
-  created_at: string;
-}
-
-export interface PostComment {
-  id: string;
-  post_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-}
-
-export interface Conversation {
-  id: string;
-  type: ConversationType;
-  club_id: string | null;
-  name: string | null;
-  avatar_url: string | null;
-  created_at: string;
-}
-
-export interface ConversationParticipant {
-  id: string;
-  conversation_id: string;
-  user_id: string;
-  joined_at: string;
-}
-
-export interface ConversationChannel {
-  id: string;
-  conversation_id: string;
-  name: string;
-  display_order: number;
-}
-
-export interface Message {
-  id: string;
-  conversation_id: string;
-  channel_id: string | null;
-  sender_id: string;
-  content: string | null;
-  message_type: MessageType;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Poll {
-  id: string;
-  message_id: string;
-  question: string;
-  allow_multiple: boolean;
-  start_at: string | null;
-  end_at: string | null;
-}
-
-export interface PollOption {
-  id: string;
-  poll_id: string;
-  option_text: string;
-  display_order: number;
-}
-
-export interface PollVote {
-  id: string;
-  poll_id: string;
-  option_id: string;
-  user_id: string;
-}
-
-export interface Notification {
-  id: string;
-  user_id: string;
-  type: NotificationType;
-  actor_id: string | null;
-  entity_id: string | null;
-  entity_type: EntityType | null;
-  read: boolean;
-  created_at: string;
-}
-
-// ---- Helper / Joined Types ------------------------------------
-
-/** Whether two users have a mutual accepted follow (Gluemate status). */
-export interface GluemateStatus {
-  user_id: string;
-  other_user_id: string;
-  /** true when both directions of the follow exist with status='accepted' */
-  is_gluemate: boolean;
-  /** follow from user → other */
-  outgoing_follow: Follow | null;
-  /** follow from other → user */
-  incoming_follow: Follow | null;
-}
-
-/** Event row joined with its hosting club's name and avatar. */
-export interface EventWithClub extends Event {
-  club: Pick<Club, 'id' | 'name' | 'handle' | 'avatar_url'>;
-}
-
-/** Club row with a computed member count. */
-export interface ClubWithMemberCount extends Club {
-  member_count: number;
-}
-
-/** Union discriminated type for home feed items. */
-export type FeedItem =
-  | ({ feed_type: 'post' } & Post)
-  | ({ feed_type: 'event' } & EventWithClub);
-
-// ---- Supabase Database shape (for typed client) ---------------
+npm warn Unknown project config "minimum-release-age". This will stop working in the next major version of npm.
+npm warn Unknown project config "confirm-module-purge". This will stop working in the next major version of npm.
+npm warn Unknown project config "public-hoist-pattern". This will stop working in the next major version of npm.
+WARN: config section [inbucket] is deprecated. Please use [local_smtp] instead.
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
-      profiles:                  { Row: Profile;                  Insert: Omit<Profile, 'created_at' | 'updated_at'>;                  Update: Partial<Omit<Profile, 'id'>>; };
-      user_interests:            { Row: UserInterest;             Insert: Omit<UserInterest, 'id'>;                                     Update: Partial<Omit<UserInterest, 'id'>>; };
-      user_activities:           { Row: UserActivity;             Insert: Omit<UserActivity, 'id'>;                                     Update: Partial<Omit<UserActivity, 'id'>>; };
-      user_privacy:              { Row: UserPrivacy;              Insert: Omit<UserPrivacy, 'id'>;                                      Update: Partial<Omit<UserPrivacy, 'id'>>; };
-      follows:                   { Row: Follow;                   Insert: Omit<Follow, 'id' | 'created_at'>;                           Update: Partial<Omit<Follow, 'id'>>; };
-      clubs:                     { Row: Club;                     Insert: Omit<Club, 'id' | 'created_at' | 'updated_at'>;              Update: Partial<Omit<Club, 'id'>>; };
-      club_goals:                { Row: ClubGoal;                 Insert: Omit<ClubGoal, 'id'>;                                        Update: Partial<Omit<ClubGoal, 'id'>>; };
-      club_interests:            { Row: ClubInterest;             Insert: Omit<ClubInterest, 'id'>;                                    Update: Partial<Omit<ClubInterest, 'id'>>; };
-      club_members:              { Row: ClubMember;               Insert: Omit<ClubMember, 'id' | 'joined_at'>;                       Update: Partial<Omit<ClubMember, 'id'>>; };
-      club_officers:             { Row: ClubOfficer;              Insert: Omit<ClubOfficer, 'id'>;                                     Update: Partial<Omit<ClubOfficer, 'id'>>; };
-      club_photos:               { Row: ClubPhoto;                Insert: Omit<ClubPhoto, 'id' | 'created_at'>;                       Update: Partial<Omit<ClubPhoto, 'id'>>; };
-      events:                    { Row: Event;                    Insert: Omit<Event, 'id' | 'created_at' | 'updated_at'>;             Update: Partial<Omit<Event, 'id'>>; };
-      event_interests:           { Row: EventInterest;            Insert: Omit<EventInterest, 'id'>;                                   Update: Partial<Omit<EventInterest, 'id'>>; };
-      event_activities:          { Row: EventActivity;            Insert: Omit<EventActivity, 'id'>;                                   Update: Partial<Omit<EventActivity, 'id'>>; };
-      event_rsvps:               { Row: EventRsvp;                Insert: Omit<EventRsvp, 'id' | 'created_at'>;                       Update: Partial<Omit<EventRsvp, 'id'>>; };
-      saved_events:              { Row: SavedEvent;               Insert: Omit<SavedEvent, 'id' | 'saved_at'>;                        Update: Partial<Omit<SavedEvent, 'id'>>; };
-      posts:                     { Row: Post;                     Insert: Omit<Post, 'id' | 'created_at'>;                            Update: Partial<Omit<Post, 'id'>>; };
-      post_likes:                { Row: PostLike;                 Insert: Omit<PostLike, 'id' | 'created_at'>;                        Update: Partial<Omit<PostLike, 'id'>>; };
-      post_comments:             { Row: PostComment;              Insert: Omit<PostComment, 'id' | 'created_at'>;                     Update: Partial<Omit<PostComment, 'id'>>; };
-      conversations:             { Row: Conversation;             Insert: Omit<Conversation, 'id' | 'created_at'>;                    Update: Partial<Omit<Conversation, 'id'>>; };
-      conversation_participants: { Row: ConversationParticipant;  Insert: Omit<ConversationParticipant, 'id' | 'joined_at'>;          Update: Partial<Omit<ConversationParticipant, 'id'>>; };
-      conversation_channels:     { Row: ConversationChannel;      Insert: Omit<ConversationChannel, 'id'>;                            Update: Partial<Omit<ConversationChannel, 'id'>>; };
-      messages:                  { Row: Message;                  Insert: Omit<Message, 'id' | 'created_at' | 'updated_at'>;         Update: Partial<Omit<Message, 'id'>>; };
-      polls:                     { Row: Poll;                     Insert: Omit<Poll, 'id'>;                                           Update: Partial<Omit<Poll, 'id'>>; };
-      poll_options:              { Row: PollOption;               Insert: Omit<PollOption, 'id'>;                                     Update: Partial<Omit<PollOption, 'id'>>; };
-      poll_votes:                { Row: PollVote;                 Insert: Omit<PollVote, 'id'>;                                       Update: Partial<Omit<PollVote, 'id'>>; };
-      notifications:             { Row: Notification;             Insert: Omit<Notification, 'id' | 'created_at'>;                   Update: Partial<Omit<Notification, 'id'>>; };
-    };
-  };
-};
+      club_goals: {
+        Row: {
+          club_id: string
+          display_order: number
+          goal_text: string
+          id: string
+        }
+        Insert: {
+          club_id: string
+          display_order?: number
+          goal_text: string
+          id?: string
+        }
+        Update: {
+          club_id?: string
+          display_order?: number
+          goal_text?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_goals_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      club_interests: {
+        Row: {
+          club_id: string
+          id: string
+          interest: string
+        }
+        Insert: {
+          club_id: string
+          id?: string
+          interest: string
+        }
+        Update: {
+          club_id?: string
+          id?: string
+          interest?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_interests_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      club_members: {
+        Row: {
+          club_id: string
+          id: string
+          joined_at: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          club_id: string
+          id?: string
+          joined_at?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          club_id?: string
+          id?: string
+          joined_at?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_members_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      club_officers: {
+        Row: {
+          avatar_url: string | null
+          club_id: string
+          display_name: string
+          display_order: number
+          id: string
+          role_title: string
+          user_id: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          club_id: string
+          display_name: string
+          display_order?: number
+          id?: string
+          role_title: string
+          user_id?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          club_id?: string
+          display_name?: string
+          display_order?: number
+          id?: string
+          role_title?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_officers_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_officers_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      club_photos: {
+        Row: {
+          caption: string | null
+          club_id: string
+          created_at: string
+          id: string
+          is_visible: boolean
+          post_id: string | null
+          source: string | null
+          uploaded_by: string | null
+          url: string
+        }
+        Insert: {
+          caption?: string | null
+          club_id: string
+          created_at?: string
+          id?: string
+          is_visible?: boolean
+          post_id?: string | null
+          source?: string | null
+          uploaded_by?: string | null
+          url: string
+        }
+        Update: {
+          caption?: string | null
+          club_id?: string
+          created_at?: string
+          id?: string
+          is_visible?: boolean
+          post_id?: string | null
+          source?: string | null
+          uploaded_by?: string | null
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_photos_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_photos_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_photos_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clubs: {
+        Row: {
+          avatar_url: string | null
+          banner_url: string | null
+          claimed: boolean
+          cover_image_url: string | null
+          created_at: string
+          description: string
+          handle: string
+          id: string
+          inactivity_warned_at: string | null
+          is_active: boolean
+          is_seed: boolean
+          last_activity_at: string | null
+          meeting_building: string | null
+          meeting_day: string | null
+          meeting_location: string | null
+          meeting_room: string | null
+          meeting_time_end: string | null
+          meeting_time_start: string | null
+          member_count: number
+          name: string
+          university: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          banner_url?: string | null
+          claimed?: boolean
+          cover_image_url?: string | null
+          created_at?: string
+          description: string
+          handle: string
+          id?: string
+          inactivity_warned_at?: string | null
+          is_active?: boolean
+          is_seed?: boolean
+          last_activity_at?: string | null
+          meeting_building?: string | null
+          meeting_day?: string | null
+          meeting_location?: string | null
+          meeting_room?: string | null
+          meeting_time_end?: string | null
+          meeting_time_start?: string | null
+          member_count?: number
+          name: string
+          university?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          banner_url?: string | null
+          claimed?: boolean
+          cover_image_url?: string | null
+          created_at?: string
+          description?: string
+          handle?: string
+          id?: string
+          inactivity_warned_at?: string | null
+          is_active?: boolean
+          is_seed?: boolean
+          last_activity_at?: string | null
+          meeting_building?: string | null
+          meeting_day?: string | null
+          meeting_location?: string | null
+          meeting_room?: string | null
+          meeting_time_end?: string | null
+          meeting_time_start?: string | null
+          member_count?: number
+          name?: string
+          university?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      conversation_channels: {
+        Row: {
+          conversation_id: string
+          created_by: string | null
+          display_order: number
+          id: string
+          is_default: boolean
+          is_restricted: boolean
+          name: string
+        }
+        Insert: {
+          conversation_id: string
+          created_by?: string | null
+          display_order?: number
+          id?: string
+          is_default?: boolean
+          is_restricted?: boolean
+          name: string
+        }
+        Update: {
+          conversation_id?: string
+          created_by?: string | null
+          display_order?: number
+          id?: string
+          is_default?: boolean
+          is_restricted?: boolean
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_channels_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_channels_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversation_participants: {
+        Row: {
+          conversation_id: string
+          id: string
+          joined_at: string
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          id?: string
+          joined_at?: string
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          id?: string
+          joined_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_participants_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_participants_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversations: {
+        Row: {
+          avatar_url: string | null
+          club_id: string | null
+          created_at: string
+          id: string
+          name: string | null
+          type: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          club_id?: string | null
+          created_at?: string
+          id?: string
+          name?: string | null
+          type: string
+        }
+        Update: {
+          avatar_url?: string | null
+          club_id?: string | null
+          created_at?: string
+          id?: string
+          name?: string | null
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_activities: {
+        Row: {
+          activity: string
+          event_id: string
+          id: string
+        }
+        Insert: {
+          activity: string
+          event_id: string
+          id?: string
+        }
+        Update: {
+          activity?: string
+          event_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_activities_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_interests: {
+        Row: {
+          event_id: string
+          id: string
+          interest: string
+        }
+        Insert: {
+          event_id: string
+          id?: string
+          interest: string
+        }
+        Update: {
+          event_id?: string
+          id?: string
+          interest?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_interests_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_rsvps: {
+        Row: {
+          created_at: string
+          event_id: string
+          id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          id?: string
+          status: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_rsvps_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_rsvps_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      events: {
+        Row: {
+          building: string | null
+          club_id: string
+          cover_image_url: string | null
+          created_at: string
+          created_by: string
+          description: string | null
+          emoji: string | null
+          end_time: string
+          event_date: string
+          id: string
+          is_seed: boolean
+          location: string | null
+          room: string | null
+          specific_user_ids: string[] | null
+          start_time: string
+          title: string
+          updated_at: string
+          visibility: string
+        }
+        Insert: {
+          building?: string | null
+          club_id: string
+          cover_image_url?: string | null
+          created_at?: string
+          created_by: string
+          description?: string | null
+          emoji?: string | null
+          end_time: string
+          event_date: string
+          id?: string
+          is_seed?: boolean
+          location?: string | null
+          room?: string | null
+          specific_user_ids?: string[] | null
+          start_time: string
+          title: string
+          updated_at?: string
+          visibility?: string
+        }
+        Update: {
+          building?: string | null
+          club_id?: string
+          cover_image_url?: string | null
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          emoji?: string | null
+          end_time?: string
+          event_date?: string
+          id?: string
+          is_seed?: boolean
+          location?: string | null
+          room?: string | null
+          specific_user_ids?: string[] | null
+          start_time?: string
+          title?: string
+          updated_at?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      follows: {
+        Row: {
+          created_at: string
+          follower_id: string
+          following_id: string
+          id: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          follower_id: string
+          following_id: string
+          id?: string
+          status: string
+        }
+        Update: {
+          created_at?: string
+          follower_id?: string
+          following_id?: string
+          id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "follows_follower_id_fkey"
+            columns: ["follower_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follows_following_id_fkey"
+            columns: ["following_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          attachment_url: string | null
+          channel_id: string | null
+          content: string | null
+          conversation_id: string
+          created_at: string
+          id: string
+          message_type: string
+          sender_id: string
+          updated_at: string
+        }
+        Insert: {
+          attachment_url?: string | null
+          channel_id?: string | null
+          content?: string | null
+          conversation_id: string
+          created_at?: string
+          id?: string
+          message_type?: string
+          sender_id: string
+          updated_at?: string
+        }
+        Update: {
+          attachment_url?: string | null
+          channel_id?: string | null
+          content?: string | null
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          message_type?: string
+          sender_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "conversation_channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          id: string
+          read: boolean
+          type: string
+          user_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          read?: boolean
+          type: string
+          user_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          read?: boolean
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      poll_options: {
+        Row: {
+          display_order: number
+          id: string
+          option_text: string
+          poll_id: string
+        }
+        Insert: {
+          display_order: number
+          id?: string
+          option_text: string
+          poll_id: string
+        }
+        Update: {
+          display_order?: number
+          id?: string
+          option_text?: string
+          poll_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "poll_options_poll_id_fkey"
+            columns: ["poll_id"]
+            isOneToOne: false
+            referencedRelation: "polls"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      poll_votes: {
+        Row: {
+          id: string
+          option_id: string
+          poll_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          option_id: string
+          poll_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          option_id?: string
+          poll_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "poll_votes_option_id_fkey"
+            columns: ["option_id"]
+            isOneToOne: false
+            referencedRelation: "poll_options"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "poll_votes_poll_id_fkey"
+            columns: ["poll_id"]
+            isOneToOne: false
+            referencedRelation: "polls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "poll_votes_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      polls: {
+        Row: {
+          allow_multiple: boolean
+          end_at: string | null
+          id: string
+          message_id: string
+          question: string
+          start_at: string | null
+        }
+        Insert: {
+          allow_multiple?: boolean
+          end_at?: string | null
+          id?: string
+          message_id: string
+          question: string
+          start_at?: string | null
+        }
+        Update: {
+          allow_multiple?: boolean
+          end_at?: string | null
+          id?: string
+          message_id?: string
+          question?: string
+          start_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "polls_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_club_tags: {
+        Row: {
+          club_id: string
+          created_at: string
+          id: string
+          post_id: string
+        }
+        Insert: {
+          club_id: string
+          created_at?: string
+          id?: string
+          post_id: string
+        }
+        Update: {
+          club_id?: string
+          created_at?: string
+          id?: string
+          post_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_club_tags_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_club_tags_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_comments: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          post_id: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          post_id: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          post_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_comments_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_comments_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_likes: {
+        Row: {
+          created_at: string
+          id: string
+          post_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          post_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          post_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_likes_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_likes_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      posts: {
+        Row: {
+          author_id: string
+          caption: string | null
+          club_id: string | null
+          created_at: string
+          id: string
+          image_url: string | null
+          linked_event_id: string | null
+          post_type: string
+        }
+        Insert: {
+          author_id: string
+          caption?: string | null
+          club_id?: string | null
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          linked_event_id?: string | null
+          post_type: string
+        }
+        Update: {
+          author_id?: string
+          caption?: string | null
+          club_id?: string | null
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          linked_event_id?: string | null
+          post_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "posts_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "posts_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "posts_linked_event_id_fkey"
+            columns: ["linked_event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          agreed_at: string | null
+          agreed_to_terms: boolean
+          avatar_type: string | null
+          avatar_url: string | null
+          bio: string | null
+          created_at: string
+          email_verified: boolean
+          full_name: string
+          id: string
+          is_seed: boolean
+          major: string | null
+          onboarding_complete: boolean
+          university: string | null
+          updated_at: string
+          username: string
+          year: string | null
+        }
+        Insert: {
+          agreed_at?: string | null
+          agreed_to_terms?: boolean
+          avatar_type?: string | null
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string
+          email_verified?: boolean
+          full_name: string
+          id: string
+          is_seed?: boolean
+          major?: string | null
+          onboarding_complete?: boolean
+          university?: string | null
+          updated_at?: string
+          username: string
+          year?: string | null
+        }
+        Update: {
+          agreed_at?: string | null
+          agreed_to_terms?: boolean
+          avatar_type?: string | null
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string
+          email_verified?: boolean
+          full_name?: string
+          id?: string
+          is_seed?: boolean
+          major?: string | null
+          onboarding_complete?: boolean
+          university?: string | null
+          updated_at?: string
+          username?: string
+          year?: string | null
+        }
+        Relationships: []
+      }
+      saved_events: {
+        Row: {
+          event_id: string
+          id: string
+          saved_at: string
+          user_id: string
+        }
+        Insert: {
+          event_id: string
+          id?: string
+          saved_at?: string
+          user_id: string
+        }
+        Update: {
+          event_id?: string
+          id?: string
+          saved_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saved_events_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "saved_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_activities: {
+        Row: {
+          activity: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          activity: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          activity?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_activities_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_interests: {
+        Row: {
+          id: string
+          interest: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          interest: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          interest?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_interests_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_privacy: {
+        Row: {
+          hide_events: boolean
+          hide_interests: boolean
+          id: string
+          is_private: boolean
+          user_id: string
+        }
+        Insert: {
+          hide_events?: boolean
+          hide_interests?: boolean
+          id?: string
+          is_private?: boolean
+          user_id: string
+        }
+        Update: {
+          hide_events?: boolean
+          hide_interests?: boolean
+          id?: string
+          is_private?: boolean
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_privacy_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      before_user_created: { Args: { event: Json }; Returns: Json }
+      cast_poll_vote: {
+        Args: { p_option_id: string; p_poll_id: string }
+        Returns: undefined
+      }
+      check_club_inactivity: { Args: never; Returns: undefined }
+      get_or_create_direct_chat: {
+        Args: { other_user_id: string }
+        Returns: string
+      }
+      is_channel_club_officer: {
+        Args: { p_channel_id: string }
+        Returns: boolean
+      }
+      is_club_member: { Args: { p_club_id: string }; Returns: boolean }
+      is_club_officer: { Args: { p_club_id: string }; Returns: boolean }
+      is_conversation_participant: {
+        Args: { p_conv_id: string }
+        Returns: boolean
+      }
+      is_educational_email: { Args: { email: string }; Returns: boolean }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
+}
+
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
+export type TablesInsert<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
+
+export type TablesUpdate<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
+
+export type Enums<
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
+  public: {
+    Enums: {},
+  },
+} as const

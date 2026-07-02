@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useClubChannels, useChannelMessages, useSendMessage } from '../../../../../hooks/useClubChannels';
+import { useClubChannels, useChannelMessages, useSendMessage, useClubConversationId } from '../../../../../hooks/useClubChannels';
 import { useClubProfile } from '../../../../../hooks/useClubProfile';
 import { useRealtimeMessages } from '../../../../../hooks/useRealtimeChannel';
 import { useOfficerStore } from '../../../../../store/officerStore';
@@ -813,8 +813,9 @@ export default function ChannelChatScreen() {
 
   const { data: club } = useClubProfile(clubId, userId);
   const { data: channels } = useClubChannels(clubId);
+  const { data: conversationId } = useClubConversationId(clubId);
   const { data: messagesPage, isLoading } = useChannelMessages(activeChannelId);
-  const { mutate: send, isPending: sending } = useSendMessage(activeChannelId!, clubId!, userId);
+  const { mutate: send, isPending: sending } = useSendMessage(conversationId ?? '', activeChannelId!, userId);
 
   // Resolve active channel info from channels list when it loads
   useEffect(() => {
@@ -830,7 +831,7 @@ export default function ChannelChatScreen() {
 
   useRealtimeMessages({
     channelId: activeChannelId!,
-    clubId: clubId!,
+    conversationId: conversationId ?? '',
     onNewMessage: handleNewMessage,
   });
 
@@ -854,13 +855,11 @@ export default function ChannelChatScreen() {
     endDate?: string;
   }) {
     await sendPoll(userId, activeChannelId!, clubId!, {
-      club_id: clubId!,
-      channel_id: activeChannelId,
       question: input.question,
       allow_multiple: input.allowMultiple,
       options: input.options,
-      start_date: input.startDate,
-      end_date: input.endDate,
+      start_at: input.startDate,
+      end_at: input.endDate,
     });
     queryClient.invalidateQueries({ queryKey: ['channelMessages', activeChannelId] });
     show('Poll sent 📊');

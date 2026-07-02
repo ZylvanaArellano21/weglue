@@ -6,6 +6,7 @@ import {
   deleteMessage,
   createChannel,
   deleteChannel,
+  getClubConversationId,
   type CreateChannelInput,
   type Attachment,
 } from '../services/channelService';
@@ -19,6 +20,15 @@ export function useClubChannels(clubId: string | undefined) {
   });
 }
 
+export function useClubConversationId(clubId: string | undefined) {
+  return useQuery({
+    queryKey: ['clubConversationId', clubId],
+    queryFn: () => getClubConversationId(clubId!),
+    enabled: !!clubId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useChannelMessages(channelId: string | undefined, cursor?: string) {
   return useQuery({
     queryKey: ['channelMessages', channelId, cursor],
@@ -28,7 +38,11 @@ export function useChannelMessages(channelId: string | undefined, cursor?: strin
   });
 }
 
-export function useSendMessage(channelId: string, clubId: string, senderId: string) {
+export function useSendMessage(
+  conversationId: string,
+  channelId: string,
+  senderId: string,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -37,7 +51,7 @@ export function useSendMessage(channelId: string, clubId: string, senderId: stri
     }: {
       content: string;
       attachment?: Attachment;
-    }) => sendMessage(channelId, clubId, senderId, content, attachment),
+    }) => sendMessage(conversationId, channelId, senderId, content, attachment),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['channelMessages', channelId] });
     },

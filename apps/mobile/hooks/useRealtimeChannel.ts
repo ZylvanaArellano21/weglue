@@ -2,9 +2,11 @@ import { useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
+// ─── Channel messages (System 1: messages table) ──────────────────────────────
+
 export interface RealtimeChannelOptions {
   channelId: string;
-  clubId: string;
+  conversationId: string;
   onNewMessage?: (payload: any) => void;
 }
 
@@ -12,16 +14,16 @@ export function useRealtimeMessages(options: RealtimeChannelOptions): void {
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   useEffect(() => {
-    if (!options.channelId || !options.clubId) return;
+    if (!options.channelId || !options.conversationId) return;
 
     const channel = supabase
-      .channel(`channel_messages:${options.channelId}`)
+      .channel(`messages:channel:${options.channelId}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'channel_messages',
+          table: 'messages',
           filter: `channel_id=eq.${options.channelId}`,
         },
         (payload) => {
@@ -35,8 +37,10 @@ export function useRealtimeMessages(options: RealtimeChannelOptions): void {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [options.channelId, options.clubId]);
+  }, [options.channelId, options.conversationId]);
 }
+
+// ─── Poll votes (System 1: poll_votes table) ──────────────────────────────────
 
 export interface RealtimePollOptions {
   pollId: string;
@@ -50,13 +54,13 @@ export function useRealtimePollVotes(options: RealtimePollOptions): void {
     if (!options.pollId) return;
 
     const channel = supabase
-      .channel(`club_poll_votes:${options.pollId}`)
+      .channel(`poll_votes:${options.pollId}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'club_poll_votes',
+          table: 'poll_votes',
           filter: `poll_id=eq.${options.pollId}`,
         },
         (payload) => {
@@ -72,6 +76,8 @@ export function useRealtimePollVotes(options: RealtimePollOptions): void {
     };
   }, [options.pollId]);
 }
+
+// ─── Event RSVPs ──────────────────────────────────────────────────────────────
 
 export interface RealtimeRsvpOptions {
   eventId: string;
@@ -108,6 +114,8 @@ export function useRealtimeEventRsvps(options: RealtimeRsvpOptions): void {
   }, [options.eventId]);
 }
 
+// ─── Club members ─────────────────────────────────────────────────────────────
+
 export interface RealtimeMemberOptions {
   clubId: string;
   onMemberChange?: (payload: any) => void;
@@ -141,4 +149,50 @@ export function useRealtimeClubMembers(options: RealtimeMemberOptions): void {
       supabase.removeChannel(channel);
     };
   }, [options.clubId]);
+}
+
+// ─── Direct / group conversation messages ─────────────────────────────────────
+
+export interface RealtimeConvOptions {
+  conversationId: string;
+  onNewMessage?: (payload: any) => void;
+  onDeleteMessage?: (payload: any) => void;
+}
+
+export function useRealtimeConversation(options: RealtimeConvOptions): void {
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  useEffect(() => {
+    if (!options.conversationId) return;
+
+    const channel = supabase
+      .channel(`messages:conv:${options.conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${options.conversationId}`,
+        },
+        (payload) => options.onNewMessage?.(payload.new),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${options.conversationId}`,
+        },
+        (payload) => options.onDeleteMessage?.(payload.old),
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [options.conversationId]);
 }
