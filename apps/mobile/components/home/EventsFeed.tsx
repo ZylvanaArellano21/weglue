@@ -128,13 +128,13 @@ export function EventsFeed() {
   const renderItem: ListRenderItem<FeedItem> = ({ item }) => {
     if (item.type === 'section_header') {
       return (
-        <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 }}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
           <Text
             style={{
-              fontSize: 17,
-              fontWeight: '700',
-              color: '#111827',
-              fontFamily: 'Zain_700Bold',
+              fontSize: 15,
+              fontWeight: '600',
+              color: '#000000',
+              fontFamily: 'Inter_600SemiBold',
             }}
           >
             {item.label}

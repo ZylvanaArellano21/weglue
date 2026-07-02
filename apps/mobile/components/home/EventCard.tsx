@@ -45,9 +45,9 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
   return (
     <View
       style={{
-        backgroundColor: '#fff',
-        borderRadius: 16,
-        marginHorizontal: 16,
+        backgroundColor: '#FEFFF8',
+        borderRadius: 10,
+        marginHorizontal: 20,
         marginBottom: 16,
         overflow: 'hidden',
         shadowColor: '#000',
@@ -63,7 +63,8 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
           flexDirection: 'row',
           alignItems: 'center',
           paddingHorizontal: 12,
-          paddingVertical: 10,
+          paddingTop: 10,
+          paddingBottom: 8,
           gap: 8,
         }}
       >
@@ -73,9 +74,9 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
         <TouchableOpacity onPress={handlePressClub} style={{ flex: 1 }} activeOpacity={0.7}>
           <Text
             style={{
-              fontSize: 14,
+              fontSize: 15,
               fontWeight: '600',
-              color: '#111827',
+              color: '#5F5D5D',
               fontFamily: 'Inter_600SemiBold',
             }}
             numberOfLines={1}
@@ -95,7 +96,7 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
           {event.cover_image_url && !imageError ? (
             <Image
               source={{ uri: event.cover_image_url }}
-              style={{ width: '100%', aspectRatio: 4 / 5 }}
+              style={{ width: '100%', aspectRatio: 3 / 2 }}
               resizeMode="cover"
               onError={(e) => {
                 console.warn('[EventCard] Image failed to load:', event.cover_image_url, e.nativeEvent.error);
@@ -106,7 +107,7 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
             <View
               style={{
                 width: '100%',
-                aspectRatio: 4 / 5,
+                aspectRatio: 3 / 2,
                 backgroundColor: '#E5E7EB',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -123,9 +124,9 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
               position: 'absolute',
               top: 10,
               right: 10,
-              backgroundColor: 'rgba(255,255,255,0.9)',
-              borderRadius: 8,
-              padding: 6,
+              backgroundColor: 'rgba(254,255,248,0.92)',
+              borderRadius: 999,
+              padding: 4,
               shadowColor: '#000',
               shadowOffset: { width: 0, height: 1 },
               shadowOpacity: 0.15,
@@ -147,10 +148,10 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
         <TouchableOpacity onPress={handlePressEvent} activeOpacity={0.8}>
           <Text
             style={{
-              fontSize: 16,
-              fontWeight: '700',
-              color: '#111827',
-              fontFamily: 'Zain_700Bold',
+              fontSize: 18,
+              fontWeight: '600',
+              color: '#000000',
+              fontFamily: 'Inter_600SemiBold',
               marginBottom: 4,
             }}
             numberOfLines={2}
@@ -163,8 +164,8 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
         {event.description ? (
           <Text
             style={{
-              fontSize: 13,
-              color: '#6B7280',
+              fontSize: 12,
+              color: '#5F5D5D',
               fontFamily: 'Inter_400Regular',
               marginBottom: 8,
             }}
@@ -174,40 +175,30 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
           </Text>
         ) : null}
 
-        {/* Date & Time */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-          <Ionicons name="calendar-outline" size={14} color="#6B7280" />
+        {/* Date & Time — combined under one icon */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
+          <Ionicons name="calendar-outline" size={17} color="#0A0A0A" style={{ marginTop: 1 }} />
           <Text
             style={{
-              fontSize: 13,
-              color: '#374151',
-              fontFamily: 'Inter_400Regular',
+              fontSize: 12,
+              color: '#5F5D5D',
+              fontFamily: 'Inter_500Medium',
+              lineHeight: 18,
             }}
           >
-            {formatDate(event.event_date)}
-          </Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, paddingLeft: 20 }}>
-          <Text
-            style={{
-              fontSize: 13,
-              color: '#374151',
-              fontFamily: 'Inter_400Regular',
-            }}
-          >
-            {formatTime(event.start_time)} - {formatTime(event.end_time)}
+            {formatDate(event.event_date)}{'\n'}{formatTime(event.start_time)} - {formatTime(event.end_time)}
           </Text>
         </View>
 
         {/* Location */}
         {(event.location || event.building) ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-            <Ionicons name="location-outline" size={14} color="#6B7280" />
+            <Ionicons name="location-outline" size={16} color="#000000" />
             <Text
               style={{
-                fontSize: 13,
-                color: '#374151',
-                fontFamily: 'Inter_400Regular',
+                fontSize: 12,
+                color: '#5F5D5D',
+                fontFamily: 'Inter_500Medium',
               }}
               numberOfLines={1}
             >
@@ -218,7 +209,7 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
 
         {/* Attendees Row */}
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {event.attendee_preview.length > 0 && (
+          {event.attendee_preview.length > 0 ? (
             <TouchableOpacity onPress={handlePressAttendees} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <AvatarStack
                 avatars={event.attendee_preview}
@@ -227,18 +218,17 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
               />
               <Text
                 style={{
-                  fontSize: 13,
-                  color: '#374151',
+                  fontSize: 12,
+                  color: '#000000',
                   fontFamily: 'Inter_400Regular',
                 }}
               >
                 {event.attendee_count} going
               </Text>
             </TouchableOpacity>
-          )}
-          {event.attendee_preview.length === 0 && (
+          ) : (
             <TouchableOpacity onPress={handlePressAttendees} activeOpacity={0.7}>
-              <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_400Regular' }}>
+              <Text style={{ fontSize: 12, color: '#000000', fontFamily: 'Inter_400Regular' }}>
                 {event.attendee_count} going
               </Text>
             </TouchableOpacity>
@@ -249,15 +239,15 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
             activeOpacity={0.8}
             style={{
               backgroundColor: '#0FA6A6',
-              borderRadius: 20,
-              paddingHorizontal: 18,
-              paddingVertical: 8,
+              borderRadius: 15,
+              paddingHorizontal: 20,
+              paddingVertical: 7,
             }}
           >
             <Text
               style={{
                 color: '#fff',
-                fontSize: 13,
+                fontSize: 12,
                 fontWeight: '600',
                 fontFamily: 'Inter_600SemiBold',
               }}

@@ -38,8 +38,8 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: "#0FA6A6",
           borderTopWidth: 0,
-          height: 60 + insets.bottom,
-          paddingBottom: insets.bottom + 4,
+          height: 67 + insets.bottom,
+          paddingBottom: insets.bottom,
           paddingTop: 4,
         },
         tabBarActiveTintColor: "#fff",

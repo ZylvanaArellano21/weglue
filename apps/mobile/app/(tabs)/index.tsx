@@ -81,7 +81,7 @@ export default function HomeScreen() {
 
   return (
     <TouchableWithoutFeedback onPress={closeDropdown}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FDFBEF' }}>
         {/* Header */}
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
@@ -136,11 +136,11 @@ export default function HomeScreen() {
           {/* Welcome text */}
           <Text
             style={{
-              fontSize: 26,
-              fontWeight: '800',
-              color: '#111827',
-              fontFamily: 'Zain_800ExtraBold',
-              marginTop: 12,
+              fontSize: 24,
+              fontWeight: '700',
+              color: '#000000',
+              fontFamily: 'Inter_700Bold',
+              marginTop: 8,
               marginBottom: 4,
             }}
           >
@@ -286,9 +286,9 @@ function HeaderAvatar({ avatarUrl, initial }: HeaderAvatarProps) {
   const presetColor = parsePresetColor(avatarUrl);
 
   const baseStyle = {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 63,
+    height: 63,
+    borderRadius: 31.5,
   };
 
   if (presetColor) {

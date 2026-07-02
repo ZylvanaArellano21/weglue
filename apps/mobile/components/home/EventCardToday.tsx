@@ -21,6 +21,7 @@ function formatTime(timeStr: string): string {
   return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+
 export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: EventCardTodayProps) {
   const router = useRouter();
   const [imageError, setImageError] = useState(false);
@@ -40,12 +41,11 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
   return (
     <View
       style={{
-        backgroundColor: '#fff',
-        borderRadius: 16,
-        marginHorizontal: 16,
+        backgroundColor: '#FEFFF8',
+        borderRadius: 10,
+        marginHorizontal: 20,
         marginBottom: 16,
         overflow: 'hidden',
-        // Teal glow border
         borderWidth: 2,
         borderColor: '#0FA6A6',
         shadowColor: '#0FA6A6',
@@ -61,7 +61,8 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
           flexDirection: 'row',
           alignItems: 'center',
           paddingHorizontal: 12,
-          paddingVertical: 10,
+          paddingTop: 10,
+          paddingBottom: 8,
           gap: 8,
         }}
       >
@@ -71,9 +72,9 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
         <TouchableOpacity onPress={handlePressClub} style={{ flex: 1 }} activeOpacity={0.7}>
           <Text
             style={{
-              fontSize: 14,
+              fontSize: 15,
               fontWeight: '600',
-              color: '#111827',
+              color: '#5F5D5D',
               fontFamily: 'Inter_600SemiBold',
             }}
             numberOfLines={1}
@@ -93,7 +94,7 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
           {event.cover_image_url && !imageError ? (
             <Image
               source={{ uri: event.cover_image_url }}
-              style={{ width: '100%', aspectRatio: 4 / 5 }}
+              style={{ width: '100%', aspectRatio: 3 / 2 }}
               resizeMode="cover"
               onError={(e) => {
                 console.warn('[EventCardToday] Image failed to load:', event.cover_image_url, e.nativeEvent.error);
@@ -104,7 +105,7 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
             <View
               style={{
                 width: '100%',
-                aspectRatio: 4 / 5,
+                aspectRatio: 3 / 2,
                 backgroundColor: '#E5E7EB',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -121,9 +122,9 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
               position: 'absolute',
               top: 10,
               right: 10,
-              backgroundColor: 'rgba(255,255,255,0.9)',
-              borderRadius: 8,
-              padding: 6,
+              backgroundColor: 'rgba(254,255,248,0.92)',
+              borderRadius: 999,
+              padding: 4,
               shadowColor: '#000',
               shadowOffset: { width: 0, height: 1 },
               shadowOpacity: 0.15,
@@ -145,10 +146,10 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
         <TouchableOpacity onPress={handlePressEvent} activeOpacity={0.8}>
           <Text
             style={{
-              fontSize: 16,
-              fontWeight: '700',
-              color: '#111827',
-              fontFamily: 'Zain_700Bold',
+              fontSize: 18,
+              fontWeight: '600',
+              color: '#000000',
+              fontFamily: 'Inter_600SemiBold',
               marginBottom: 4,
             }}
             numberOfLines={2}
@@ -161,8 +162,8 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
         {event.description ? (
           <Text
             style={{
-              fontSize: 13,
-              color: '#6B7280',
+              fontSize: 12,
+              color: '#5F5D5D',
               fontFamily: 'Inter_400Regular',
               marginBottom: 8,
             }}
@@ -173,41 +174,30 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
         ) : null}
 
         {/* "Today!" date row — in red */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <Ionicons name="calendar-outline" size={14} color="#F02719" />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
+          <Ionicons name="calendar-outline" size={17} color="#F02719" style={{ marginTop: 1 }} />
           <Text
             style={{
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: '700',
               color: '#F02719',
               fontFamily: 'Inter_700Bold',
+              lineHeight: 18,
             }}
           >
-            Today!
-          </Text>
-        </View>
-        {/* Time in red */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, paddingLeft: 20 }}>
-          <Text
-            style={{
-              fontSize: 13,
-              color: '#F02719',
-              fontFamily: 'Inter_400Regular',
-            }}
-          >
-            {formatTime(event.start_time)} - {formatTime(event.end_time)}
+            {'Today!\n'}{formatTime(event.start_time)} - {formatTime(event.end_time)}
           </Text>
         </View>
 
         {/* Location in red */}
         {(event.location || event.building) ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-            <Ionicons name="location-outline" size={14} color="#F02719" />
+            <Ionicons name="location-outline" size={16} color="#F02719" />
             <Text
               style={{
-                fontSize: 13,
+                fontSize: 12,
                 color: '#F02719',
-                fontFamily: 'Inter_400Regular',
+                fontFamily: 'Inter_500Medium',
               }}
               numberOfLines={1}
             >
@@ -221,13 +211,13 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
           {event.attendee_preview.length > 0 ? (
             <TouchableOpacity onPress={handlePressAttendees} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <AvatarStack avatars={event.attendee_preview} size={26} overlap={8} />
-              <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_400Regular' }}>
+              <Text style={{ fontSize: 12, color: '#000000', fontFamily: 'Inter_400Regular' }}>
                 {event.attendee_count} going
               </Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity onPress={handlePressAttendees} activeOpacity={0.7}>
-              <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_400Regular' }}>
+              <Text style={{ fontSize: 12, color: '#000000', fontFamily: 'Inter_400Regular' }}>
                 {event.attendee_count} going
               </Text>
             </TouchableOpacity>
@@ -238,12 +228,12 @@ export function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: Even
             activeOpacity={0.8}
             style={{
               backgroundColor: '#0FA6A6',
-              borderRadius: 20,
-              paddingHorizontal: 18,
-              paddingVertical: 8,
+              borderRadius: 15,
+              paddingHorizontal: 20,
+              paddingVertical: 7,
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
               RSVP
             </Text>
           </TouchableOpacity>
