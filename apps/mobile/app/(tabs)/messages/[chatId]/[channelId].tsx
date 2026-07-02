@@ -6,22 +6,39 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannelMessages, useSendMessage, useDeleteMessage, useClubConversationId } from '../../../../hooks/useClubChannels';
+import {
+  useChannelMessages,
+  useSendMessage,
+  useDeleteMessage,
+  useClubConversationId,
+} from '../../../../hooks/useClubChannels';
 import { useRealtimeMessages } from '../../../../hooks/useRealtimeChannel';
 import { useChatDetails } from '../../../../hooks/useChats';
 import { MessageBubble } from '../../../../components/chat/MessageBubble';
 import { PollMessage } from '../../../../components/chat/PollMessage';
 import { ChatInput } from '../../../../components/chat/ChatInput';
 import { ConfirmationModal } from '../../../../components/chat/ConfirmationModal';
+import { ChannelDrawer } from '../../../../components/chat/ChannelDrawer';
+import {
+  DateDivider,
+  formatChatDateDivider,
+  isSameChatDay,
+} from '../../../../components/chat/DateDivider';
+import { Avatar } from '../../../../components/shared/Avatar';
 import { sendPoll } from '../../../../services/clubPollService';
 import { useOfficerStore } from '../../../../store/officerStore';
 import { supabase } from '../../../../lib/supabase';
+import { recordChannelVisit } from '../../../../lib/chatNavigation';
+import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
 export default function ChannelThread() {
   const { chatId, channelId, jumpToMessageId } =
@@ -35,18 +52,24 @@ export default function ChannelThread() {
   const clubId = chatDetails?.club_id ?? undefined;
   const { data: conversationId } = useClubConversationId(clubId);
 
-  const isOfficer = useOfficerStore((s) => clubId ? s.officerClubIds.includes(clubId) : false);
+  const isOfficer = useOfficerStore((s) => (clubId ? s.officerClubIds.includes(clubId) : false));
 
-  // Channel metadata from the channel list (we need is_restricted + name)
   const [channelName, setChannelName] = useState('');
   const [isRestricted, setIsRestricted] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeChannelId, setActiveChannelId] = useState(channelId ?? '');
+
+  // Fix 8: record which channel is active so index.tsx can skip the picker next visit
+  useEffect(() => {
+    if (activeChannelId) recordChannelVisit(chatId, activeChannelId);
+  }, [activeChannelId, chatId]);
 
   useEffect(() => {
-    if (!channelId) return;
+    if (!activeChannelId) return;
     supabase
       .from('conversation_channels')
       .select('name, is_restricted')
-      .eq('id', channelId)
+      .eq('id', activeChannelId)
       .single()
       .then(({ data }) => {
         if (data) {
@@ -54,25 +77,27 @@ export default function ChannelThread() {
           setIsRestricted(data.is_restricted);
         }
       });
+  }, [activeChannelId]);
+
+  useEffect(() => {
+    if (channelId) setActiveChannelId(channelId);
   }, [channelId]);
 
-  // ── Messages ─────────────────────────────────────────────────────────────
-  const { data: messagesPage, isLoading } = useChannelMessages(channelId);
-  const { mutate: send } = useSendMessage(conversationId ?? '', channelId, userId);
-  const { mutate: deleteMsg } = useDeleteMessage(channelId);
+  const { data: messagesPage, isLoading } = useChannelMessages(activeChannelId);
+  const { mutate: send } = useSendMessage(conversationId ?? '', activeChannelId, userId);
+  const { mutate: deleteMsg } = useDeleteMessage(activeChannelId);
 
-  // Realtime subscription
   useRealtimeMessages({
-    channelId,
+    channelId: activeChannelId,
     conversationId: conversationId ?? '',
     onNewMessage: () => {
-      queryClient.invalidateQueries({ queryKey: ['channelMessages', channelId] });
+      queryClient.invalidateQueries({ queryKey: ['channelMessages', activeChannelId] });
     },
   });
 
-  // ── Jump-to-message ──────────────────────────────────────────────────────
   const flatListRef = useRef<FlatList>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const messages = [...(messagesPage?.messages ?? [])].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
@@ -88,23 +113,26 @@ export default function ChannelThread() {
     }
   }, [jumpToMessageId, messages.length]);
 
-  // ── Delete confirmation ──────────────────────────────────────────────────
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-
   const handleConfirmDelete = useCallback(() => {
     if (!deleteTarget) return;
     deleteMsg(deleteTarget);
     setDeleteTarget(null);
   }, [deleteTarget, deleteMsg]);
 
-  // ── Send handlers ────────────────────────────────────────────────────────
-  async function handleSend({ content, attachmentUrl, attachmentType }: {
+  async function handleSend({
+    content,
+    attachmentUrl,
+    attachmentType,
+  }: {
     content: string;
     attachmentUrl?: string;
     attachmentType?: 'image' | 'file';
   }) {
     if (!conversationId) throw new Error('Conversation not ready');
-    send({ content, attachment: attachmentUrl ? { url: attachmentUrl, type: attachmentType ?? 'file' } : undefined });
+    send({
+      content,
+      attachment: attachmentUrl ? { url: attachmentUrl, type: attachmentType ?? 'file' } : undefined,
+    });
   }
 
   async function handleSendPoll(payload: {
@@ -115,21 +143,33 @@ export default function ChannelThread() {
     endAt?: string;
   }) {
     if (!clubId) return;
-    await sendPoll(userId, channelId, clubId, {
+    await sendPoll(userId, activeChannelId, clubId, {
       question: payload.question,
       allow_multiple: payload.allowMultiple,
       options: payload.options,
       start_at: payload.startAt,
       end_at: payload.endAt,
     });
-    queryClient.invalidateQueries({ queryKey: ['channelMessages', channelId] });
+    queryClient.invalidateQueries({ queryKey: ['channelMessages', activeChannelId] });
   }
+
+  function handleSelectChannel(id: string, name: string) {
+    setActiveChannelId(id);
+    setChannelName(name);
+    router.setParams({ channelId: id } as any);
+  }
+
+  function handleAddChannel() {
+    Alert.alert('Add Channel', 'Channel creation is handled by club officers.');
+  }
+
+  const displayName = chatDetails?.name ?? 'Group Chat';
 
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.center}>
-          <ActivityIndicator color="#0FA6A6" />
+          <ActivityIndicator color={chatColors.teal} />
         </View>
       </SafeAreaView>
     );
@@ -137,87 +177,107 @@ export default function ChannelThread() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+          <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerHash}>#</Text>
-          <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
-          {isRestricted && (
-            <View style={styles.officerBadge}>
-              <Text style={styles.officerBadgeText}>Officers</Text>
-            </View>
-          )}
-        </View>
         <TouchableOpacity
-          onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
-          style={styles.infoBtn}
+          style={styles.headerCenter}
+          onPress={() => router.push(`/(tabs)/messages/${chatId}/info?channelId=${activeChannelId}` as any)}
+          activeOpacity={0.7}
         >
-          <Ionicons name="information-circle-outline" size={22} color="#0FA6A6" />
+          <Avatar uri={chatDetails?.avatar_url} size={chatSizes.avatarHeader} username={displayName} />
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {displayName}
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color={chatColors.textMuted} />
         </TouchableOpacity>
       </View>
 
-      {/* Message thread */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        onScrollToIndexFailed={() => {}}
-        renderItem={({ item, index }) => {
-          const prev = messages[index - 1];
-          const showSenderInfo = !prev || prev.sender_id !== item.sender_id;
-          const isOwn = item.sender_id === userId;
-          const highlighted = item.id === highlightedId;
+      <TouchableOpacity style={styles.channelBar} onPress={() => setDrawerOpen(true)} activeOpacity={0.8}>
+        <Ionicons name="menu" size={18} color={chatColors.text} />
+        <Text style={styles.channelLabel}>#{channelName}</Text>
+      </TouchableOpacity>
 
-          return (
-            <View style={highlighted && styles.highlightedRow}>
-              <MessageBubble
-                id={item.id}
-                senderId={item.sender_id}
-                senderUsername={item.sender.username}
-                senderAvatarUrl={item.sender.avatar_url}
-                content={item.content}
-                attachmentUrl={item.attachment_url}
-                messageType={item.message_type}
-                createdAt={item.created_at}
-                isOwn={isOwn}
-                showSenderInfo={showSenderInfo}
-                onLongPress={(msgId) => {
-                  if (isOwn || isOfficer) setDeleteTarget(msgId);
-                }}
-                pollSlot={
-                  item.message_type === 'poll' ? (
-                    <PollMessage
-                      pollId={item.poll_id ?? ''}
-                      messageId={item.id}
-                      userId={userId}
-                      isOwn={isOwn}
-                    />
-                  ) : undefined
-                }
-              />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          onScrollToIndexFailed={() => {}}
+          renderItem={({ item, index }) => {
+            const prev = messages[index - 1];
+            const showSenderInfo = !prev || prev.sender_id !== item.sender_id;
+            const showDateDivider = !prev || !isSameChatDay(prev.created_at, item.created_at);
+            const isOwn = item.sender_id === userId;
+            const highlighted = item.id === highlightedId;
+
+            return (
+              <View>
+                {showDateDivider && <DateDivider label={formatChatDateDivider(item.created_at)} />}
+                <View style={highlighted ? styles.highlightedRow : undefined}>
+                  <MessageBubble
+                    id={item.id}
+                    senderId={item.sender_id}
+                    senderUsername={item.sender.username}
+                    senderAvatarUrl={item.sender.avatar_url}
+                    content={item.content}
+                    attachmentUrl={item.attachment_url}
+                    messageType={item.message_type}
+                    createdAt={item.created_at}
+                    isOwn={isOwn}
+                    showSenderInfo={showSenderInfo}
+                    onLongPress={(msgId) => {
+                      if (isOwn || isOfficer) setDeleteTarget(msgId);
+                    }}
+                    pollSlot={
+                      item.message_type === 'poll' ? (
+                        <PollMessage
+                          pollId={item.poll_id ?? ''}
+                          messageId={item.id}
+                          userId={userId}
+                          isOwn={isOwn}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </View>
+              </View>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyText}>No messages in #{channelName} yet</Text>
             </View>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No messages in #{channelName} yet</Text>
-          </View>
-        }
-      />
+          }
+        />
 
-      {/* Input bar (respects is_restricted + isOfficer) */}
-      <ChatInput
-        isRestricted={isRestricted}
-        isOfficer={isOfficer}
-        onSend={handleSend}
-        onSendPoll={isOfficer ? handleSendPoll : undefined}
-      />
+        <ChatInput
+          mode="group"
+          isRestricted={isRestricted}
+          isOfficer={isOfficer}
+          onSend={handleSend}
+          onSendPoll={isOfficer ? handleSendPoll : undefined}
+        />
+      </KeyboardAvoidingView>
 
-      {/* Delete confirmation */}
+      {clubId && (
+        <ChannelDrawer
+          visible={drawerOpen}
+          clubId={clubId}
+          activeChannelId={activeChannelId}
+          isOfficer={isOfficer}
+          onSelectChannel={handleSelectChannel}
+          onClose={() => setDrawerOpen(false)}
+          onAddChannel={handleAddChannel}
+        />
+      )}
+
       <ConfirmationModal
         visible={!!deleteTarget}
         title="Delete message?"
@@ -232,47 +292,44 @@ export default function ChannelThread() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FEFCF0' },
+  container: { flex: 1, backgroundColor: chatColors.bg },
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: chatColors.border,
+    backgroundColor: chatColors.bg,
   },
-  backBtn: { padding: 4, marginRight: 8 },
+  backBtn: { padding: 4, marginRight: 4 },
   headerCenter: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-  },
-  headerHash: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 18,
-    color: '#6B7280',
+    justifyContent: 'center',
+    gap: 8,
   },
   headerTitle: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 17,
-    color: '#1A1A1A',
-    flex: 1,
+    ...chatTypography.chatTitle,
+    flexShrink: 1,
   },
-  officerBadge: {
-    backgroundColor: '#FEF3C7',
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+  channelBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: chatColors.border,
+    backgroundColor: chatColors.bg,
   },
-  officerBadgeText: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 10,
-    color: '#92400E',
+  channelLabel: {
+    ...chatTypography.channelName,
   },
-  infoBtn: { padding: 4 },
-  list: { padding: 8, flexGrow: 1 },
+  list: { paddingVertical: 8, flexGrow: 1 },
   empty: {
     flex: 1,
     alignItems: 'center',
@@ -280,12 +337,12 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyText: {
-    fontFamily: 'Zain_400Regular',
+    fontFamily: chatFonts.regular,
     fontSize: 14,
-    color: '#9CA3AF',
+    color: chatColors.textMuted,
   },
   highlightedRow: {
-    backgroundColor: '#0FA6A615',
+    backgroundColor: 'rgba(15,166,166,0.08)',
     borderRadius: 8,
   },
 });

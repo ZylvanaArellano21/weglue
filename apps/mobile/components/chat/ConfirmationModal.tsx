@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, Modal, StyleSheet } from 'react-native';
+import { chatColors, chatFonts, chatShadow } from './chatTheme';
 
 interface Props {
   visible: boolean;
@@ -11,11 +12,6 @@ interface Props {
   onCancel: () => void;
 }
 
-/**
- * Reusable confirmation modal.
- * Used for leaving a group chat AND deleting a direct chat —
- * not two separate implementations.
- */
 export function ConfirmationModal({
   visible,
   title,
@@ -41,9 +37,7 @@ export function ConfirmationModal({
               onPress={onConfirm}
               activeOpacity={0.7}
             >
-              <Text style={[styles.confirmLabel, destructive && styles.destructiveLabel]}>
-                {confirmLabel}
-              </Text>
+              <Text style={styles.confirmLabel}>{confirmLabel}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -62,21 +56,22 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    backgroundColor: '#FEFCF0',
+    backgroundColor: chatColors.bg,
     borderRadius: 20,
     padding: 24,
+    ...chatShadow,
   },
   title: {
-    fontFamily: 'Zain_700Bold',
+    fontFamily: chatFonts.semiBold,
     fontSize: 18,
-    color: '#1A1A1A',
+    color: chatColors.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   message: {
-    fontFamily: 'Zain_400Regular',
+    fontFamily: chatFonts.regular,
     fontSize: 15,
-    color: '#4B5563',
+    color: chatColors.textMuted,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 24,
@@ -87,33 +82,32 @@ const styles = StyleSheet.create({
   },
   cancelBtn: {
     flex: 1,
-    borderWidth: 1.5,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: chatColors.border,
+    borderRadius: 40,
     paddingVertical: 12,
     alignItems: 'center',
+    backgroundColor: chatColors.bg,
   },
   cancelLabel: {
-    fontFamily: 'Zain_700Bold',
+    fontFamily: chatFonts.semiBold,
     fontSize: 15,
-    color: '#4B5563',
+    color: chatColors.text,
   },
   confirmBtn: {
     flex: 1,
-    backgroundColor: '#0FA6A6',
-    borderRadius: 12,
+    backgroundColor: chatColors.teal,
+    borderRadius: 40,
     paddingVertical: 12,
     alignItems: 'center',
+    ...chatShadow,
   },
   destructiveBtn: {
-    backgroundColor: '#EF4444',
+    backgroundColor: '#C62828',
   },
   confirmLabel: {
-    fontFamily: 'Zain_700Bold',
+    fontFamily: chatFonts.semiBold,
     fontSize: 15,
-    color: '#fff',
-  },
-  destructiveLabel: {
-    color: '#fff',
+    color: chatColors.cream,
   },
 });

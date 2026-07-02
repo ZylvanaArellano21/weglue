@@ -1,20 +1,20 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Avatar } from '../shared/Avatar';
+import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { Avatar, parsePresetColor } from '../shared/Avatar';
 import type { ChatPreview } from '../../services/chatService';
+import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from './chatTheme';
 
 interface Props {
   chat: ChatPreview;
   currentUserId: string;
   onPress: () => void;
+  channelTags?: string[];
 }
 
 function formatTime(isoString: string | null): string {
   if (!isoString) return '';
   const date = new Date(isoString);
   const now = new Date();
-  const diffDays = Math.floor(
-    (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24),
-  );
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
   if (diffDays === 0) {
     const h = date.getHours();
     const m = date.getMinutes();
@@ -29,34 +29,48 @@ function formatTime(isoString: string | null): string {
 function lastMessagePreview(chat: ChatPreview): string {
   if (!chat.last_message) return 'No messages yet';
   const prefix = chat.last_sender_username ? `${chat.last_sender_username}: ` : '';
-  const text = chat.last_message.length > 60
-    ? chat.last_message.slice(0, 60) + '…'
-    : chat.last_message;
+  const text =
+    chat.last_message.length > 60 ? chat.last_message.slice(0, 60) + '…' : chat.last_message;
   return prefix + text;
 }
 
-export function ChatListItem({ chat, currentUserId: _currentUserId, onPress }: Props) {
+export function ChatListItem({ chat, onPress, channelTags = [] }: Props) {
   const isGroup = chat.type !== 'direct';
   const displayName = chat.name ?? 'Unknown Chat';
+  const preset = parsePresetColor(chat.avatar_url);
 
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.avatarWrap}>
-        <Avatar
-          uri={chat.avatar_url}
-          size={48}
-          username={displayName}
-        />
-        {isGroup && (
-          <View style={styles.groupBadge} />
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
+      <View style={styles.imageWrap}>
+        {preset ? (
+          <View style={[styles.groupImage, { backgroundColor: preset }]} />
+        ) : chat.avatar_url ? (
+          <Image source={{ uri: chat.avatar_url }} style={styles.groupImage} />
+        ) : (
+          <View style={styles.groupImageFallback}>
+            <Avatar uri={null} size={44} username={displayName} />
+          </View>
         )}
       </View>
 
       <View style={styles.content}>
         <View style={styles.topRow}>
-          <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
+          <Text style={styles.name} numberOfLines={1}>
+            {displayName}
+          </Text>
           <Text style={styles.time}>{formatTime(chat.last_message_at)}</Text>
         </View>
+
+        {isGroup && channelTags.length > 0 && (
+          <View style={styles.tagsRow}>
+            {channelTags.map((tag) => (
+              <View key={tag} style={styles.tag}>
+                <Text style={styles.tagText}># {tag}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={styles.bottomRow}>
           <Text style={styles.preview} numberOfLines={1}>
             {lastMessagePreview(chat)}
@@ -74,74 +88,120 @@ export function ChatListItem({ chat, currentUserId: _currentUserId, onPress }: P
   );
 }
 
+/** Simple row for suggested people (Single filter empty state) */
+export function SuggestedPersonRow({
+  username,
+  avatarUrl,
+  onPress,
+}: {
+  username: string;
+  avatarUrl: string | null;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.suggestedRow} onPress={onPress} activeOpacity={0.7}>
+      <Avatar uri={avatarUrl} size={chatSizes.avatarSuggested} username={username} />
+      <Text style={chatTypography.rowName}>{username}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  row: {
+  card: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FEFCF0',
+    alignItems: 'flex-start',
+    marginHorizontal: 12,
+    marginVertical: 6,
+    padding: 12,
+    backgroundColor: chatColors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: chatColors.border,
+    ...chatShadow,
   },
-  avatarWrap: {
-    position: 'relative',
+  imageWrap: {
     marginRight: 12,
   },
-  groupBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#0FA6A6',
-    borderWidth: 2,
-    borderColor: '#FEFCF0',
+  groupImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+  },
+  groupImageFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     flex: 1,
+    minWidth: 0,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 3,
+    marginBottom: 4,
   },
   name: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 15,
-    color: '#1A1A1A',
+    fontFamily: chatFonts.semiBold,
+    fontSize: 14,
+    color: chatColors.text,
     flex: 1,
     marginRight: 8,
   },
   time: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 12,
-    color: '#9CA3AF',
+    ...chatTypography.timestamp,
+  },
+  tagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  tag: {
+    backgroundColor: chatColors.tagBg,
+    borderRadius: 40,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  tagText: {
+    fontFamily: chatFonts.regular,
+    fontSize: 10,
+    color: chatColors.tagText,
   },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
   },
   preview: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 13,
-    color: '#6B7280',
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
+    color: chatColors.textMuted,
     flex: 1,
     marginRight: 8,
   },
   badge: {
-    backgroundColor: '#0FA6A6',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    backgroundColor: chatColors.teal,
+    borderRadius: chatSizes.unreadBadge / 2,
+    minWidth: chatSizes.unreadBadge,
+    height: chatSizes.unreadBadge,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
   badgeText: {
-    fontFamily: 'Zain_700Bold',
+    fontFamily: chatFonts.semiBold,
     fontSize: 11,
-    color: '#fff',
+    color: chatColors.cream,
+  },
+  suggestedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 23,
+    paddingVertical: 10,
   },
 });

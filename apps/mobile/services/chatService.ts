@@ -8,6 +8,7 @@ export interface ChatParticipant {
   avatar_url: string | null;
   full_name: string | null;
   joined_at: string;
+  role: string;
 }
 
 export interface ChatPreview {
@@ -20,6 +21,7 @@ export interface ChatPreview {
   last_message_at: string | null;
   last_sender_username: string | null;
   unread_count: number;
+  channel_names: string[];
 }
 
 export interface ChatDetails {
@@ -54,14 +56,14 @@ export interface DirectMessagesPage {
 
 // ─── Chat List ────────────────────────────────────────────────────────────────
 
-/** Returns all conversations the current user is part of, with last-message preview. */
 export async function getMyChats(userId: string): Promise<ChatPreview[]> {
   const { data, error } = await supabase
     .from('conversation_participants')
     .select(
-      `conversation_id,
+      `conversation_id, last_read_at, joined_at,
        conversations!inner(
          id, type, name, avatar_url, club_id,
+         conversation_channels(name),
          messages(id, content, message_type, created_at, profiles!sender_id(username))
        )`,
     )
@@ -76,12 +78,18 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
     const conv = row.conversations;
     const msgs: any[] = conv.messages ?? [];
 
-    // Sort messages to get the most recent
     msgs.sort(
       (a: any, b: any) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
     const lastMsg = msgs[0] ?? null;
+
+    const lastReadAt: string | null = row.last_read_at ?? row.joined_at ?? null;
+    const unreadCount = lastReadAt
+      ? msgs.filter((m: any) => new Date(m.created_at) > new Date(lastReadAt)).length
+      : msgs.length;
+
+    const channels: any[] = conv.conversation_channels ?? [];
 
     return {
       id: conv.id,
@@ -92,7 +100,8 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       last_message: lastMsg?.content ?? null,
       last_message_at: lastMsg?.created_at ?? null,
       last_sender_username: lastMsg?.profiles?.username ?? null,
-      unread_count: 0,
+      unread_count: unreadCount,
+      channel_names: channels.map((c: any) => c.name),
     } as ChatPreview;
   });
 }
@@ -114,12 +123,34 @@ export async function getChatDetails(conversationId: string): Promise<ChatDetail
 
   if (!conv) return null;
 
+  const rolesMap = new Map<string, string>();
+  if ((conv as any).club_id) {
+    const [{ data: members }, { data: officers }] = await Promise.all([
+      supabase
+        .from('club_members')
+        .select('user_id, role')
+        .eq('club_id', (conv as any).club_id),
+      supabase
+        .from('club_officers')
+        .select('user_id, role_title')
+        .eq('club_id', (conv as any).club_id),
+    ]);
+    for (const m of (members ?? []) as any[]) {
+      rolesMap.set(m.user_id, m.role === 'officer' ? 'Officer' : 'Member');
+    }
+    // club_officers.role_title overrides generic "Officer" with specific title (President, VP, etc.)
+    for (const o of (officers ?? []) as any[]) {
+      rolesMap.set(o.user_id, o.role_title);
+    }
+  }
+
   const parts: ChatParticipant[] = ((participants ?? []) as any[]).map((p) => ({
     user_id: p.user_id,
     username: p.profiles?.username ?? '',
     avatar_url: p.profiles?.avatar_url ?? null,
     full_name: p.profiles?.full_name ?? null,
     joined_at: p.joined_at,
+    role: rolesMap.get(p.user_id) ?? 'Member',
   }));
 
   return {
@@ -130,7 +161,6 @@ export async function getChatDetails(conversationId: string): Promise<ChatDetail
 
 // ─── Direct Messages ──────────────────────────────────────────────────────────
 
-/** Creates or finds a DM conversation with another user. Returns the conversation id. */
 export async function getOrCreateDirectChat(otherUserId: string): Promise<string> {
   const { data, error } = await supabase.rpc('get_or_create_direct_chat', {
     other_user_id: otherUserId,
@@ -202,12 +232,16 @@ export async function sendDirectMessage(
   if (error) throw error;
 }
 
+// ─── Mark Read ────────────────────────────────────────────────────────────────
+
+export async function markConversationRead(conversationId: string): Promise<void> {
+  await supabase.rpc('mark_conversation_read', {
+    p_conversation_id: conversationId,
+  });
+}
+
 // ─── Non-member preview ───────────────────────────────────────────────────────
 
-/**
- * Returns the 15 most recent messages in a club_group conversation
- * for a user who is NOT a member. RLS enforces the limit server-side.
- */
 export async function getNonMemberPreview(conversationId: string): Promise<DirectMessageThread[]> {
   const { data, error } = await supabase
     .from('messages')
@@ -258,10 +292,6 @@ export interface SearchResults {
   chats: ChatResult[];
 }
 
-/**
- * Top-level Message tab search.
- * Returns two separate labeled sections: People and Chats.
- */
 export async function searchChats(
   userId: string,
   query: string,
@@ -270,7 +300,6 @@ export async function searchChats(
   if (!q) return { people: [], chats: [] };
 
   const [{ data: people }, { data: chats }] = await Promise.all([
-    // People: search profiles the user has a DM with or that are in the same club
     supabase
       .from('profiles')
       .select('id, username, full_name, avatar_url')
@@ -278,7 +307,6 @@ export async function searchChats(
       .neq('id', userId)
       .limit(20),
 
-    // Chats: search group chats the user is a participant of
     supabase
       .from('conversation_participants')
       .select('conversations!inner(id, name, type, club_id, avatar_url)')
@@ -309,9 +337,54 @@ export async function searchChats(
   return { people: peopleResults, chats: chatResults };
 }
 
+/** Returns up to 20 suggested people from clubs the user shares with others. */
+export async function getSuggestedPeople(userId: string): Promise<PeopleResult[]> {
+  const { data: memberships } = await supabase
+    .from('club_members')
+    .select('club_id')
+    .eq('user_id', userId);
+
+  if (!memberships || memberships.length === 0) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, username, full_name, avatar_url')
+      .neq('id', userId)
+      .limit(10);
+    return ((data ?? []) as any[]).map((p) => ({
+      user_id: p.id,
+      username: p.username,
+      full_name: p.full_name,
+      avatar_url: p.avatar_url,
+    }));
+  }
+
+  const clubIds = (memberships as any[]).map((m) => m.club_id);
+
+  const { data } = await supabase
+    .from('club_members')
+    .select('user_id, profiles!user_id(id, username, full_name, avatar_url)')
+    .in('club_id', clubIds)
+    .neq('user_id', userId)
+    .limit(40);
+
+  const seen = new Set<string>();
+  const result: PeopleResult[] = [];
+  for (const row of (data ?? []) as any[]) {
+    if (!seen.has(row.user_id)) {
+      seen.add(row.user_id);
+      result.push({
+        user_id: row.user_id,
+        username: row.profiles?.username ?? '',
+        full_name: row.profiles?.full_name ?? null,
+        avatar_url: row.profiles?.avatar_url ?? null,
+      });
+    }
+  }
+  return result.slice(0, 20);
+}
+
 // ─── Membership check ─────────────────────────────────────────────────────────
 
-/** Returns true if the given user is a participant in the conversation. */
 export async function isConversationMember(
   conversationId: string,
   userId: string,
@@ -324,7 +397,6 @@ export async function isConversationMember(
   return (count ?? 0) > 0;
 }
 
-/** Returns the club_group conversation id for a club (read-only, no membership needed). */
 export async function getClubGroupConversationId(clubId: string): Promise<string | null> {
   const { data } = await supabase
     .from('conversations')

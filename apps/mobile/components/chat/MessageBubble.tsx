@@ -1,6 +1,7 @@
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
+import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from './chatTheme';
 
 interface Props {
   id: string;
@@ -38,129 +39,125 @@ export function MessageBubble({
   onLongPress,
   pollSlot,
 }: Props) {
+  const isPoll = messageType === 'poll' && pollSlot;
+
   return (
-    <TouchableOpacity
-      onLongPress={() => onLongPress?.(id)}
-      activeOpacity={0.85}
-      style={[styles.wrapper, isOwn && styles.wrapperOwn]}
-    >
-      {/* Avatar — shown for others when first message in group */}
+    <View style={[styles.row, isOwn && styles.rowOwn]}>
       {!isOwn && (
         <View style={styles.avatarCol}>
           {showSenderInfo ? (
-            <Avatar uri={senderAvatarUrl} size={32} username={senderUsername} />
+            <Avatar uri={senderAvatarUrl} size={chatSizes.avatarMessage} username={senderUsername} />
           ) : (
-            <View style={{ width: 32 }} />
+            <View style={{ width: chatSizes.avatarMessage }} />
           )}
         </View>
       )}
 
-      <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther]}>
-        {showSenderInfo && !isOwn && (
-          <Text style={styles.senderName}>{senderUsername}</Text>
+      <View style={[styles.col, isOwn && styles.colOwn]}>
+        {isPoll ? (
+          <TouchableOpacity onLongPress={() => onLongPress?.(id)} activeOpacity={0.9}>
+            {pollSlot}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onLongPress={() => onLongPress?.(id)}
+            activeOpacity={0.88}
+            style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther]}
+          >
+            {messageType === 'image' && attachmentUrl && (
+              <Image source={{ uri: attachmentUrl }} style={styles.image} resizeMode="cover" />
+            )}
+
+            {messageType === 'file' && attachmentUrl && (
+              <View style={styles.fileRow}>
+                <Ionicons
+                  name="document-outline"
+                  size={18}
+                  color={isOwn ? chatColors.cream : chatColors.teal}
+                />
+                <Text
+                  style={[isOwn ? chatTypography.bubbleSent : chatTypography.bubbleReceived, styles.fileLabel]}
+                  numberOfLines={1}
+                >
+                  {content ?? 'File'}
+                </Text>
+              </View>
+            )}
+
+            {messageType === 'text' && content ? (
+              <Text style={isOwn ? chatTypography.bubbleSent : chatTypography.bubbleReceived}>
+                {content}
+              </Text>
+            ) : null}
+
+            {messageType === 'image' && content ? (
+              <Text
+                style={[
+                  isOwn ? chatTypography.bubbleSent : chatTypography.bubbleReceived,
+                  { marginTop: 4 },
+                ]}
+              >
+                {content}
+              </Text>
+            ) : null}
+          </TouchableOpacity>
         )}
 
-        {/* Poll slot rendered inline */}
-        {messageType === 'poll' && pollSlot}
-
-        {/* Image attachment */}
-        {messageType === 'image' && attachmentUrl && (
-          <Image
-            source={{ uri: attachmentUrl }}
-            style={styles.image}
-            resizeMode="cover"
-          />
-        )}
-
-        {/* File attachment */}
-        {messageType === 'file' && attachmentUrl && (
-          <View style={styles.fileRow}>
-            <Ionicons name="document-outline" size={20} color={isOwn ? '#fff' : '#374151'} />
-            <Text style={[styles.fileLabel, isOwn && styles.textOwn]} numberOfLines={1}>
-              {content ?? 'File'}
-            </Text>
-          </View>
-        )}
-
-        {/* Text content */}
-        {messageType === 'text' && content ? (
-          <Text style={[styles.text, isOwn && styles.textOwn]}>{content}</Text>
-        ) : null}
-
-        {/* Caption under image */}
-        {messageType === 'image' && content ? (
-          <Text style={[styles.text, isOwn && styles.textOwn, { marginTop: 4 }]}>
-            {content}
-          </Text>
-        ) : null}
-
-        <Text style={[styles.time, isOwn && styles.timeOwn]}>
+        <Text style={[chatTypography.timestamp, isOwn ? styles.timeOwn : styles.timeOther]}>
           {formatTime(createdAt)}
         </Text>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
+  row: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    marginVertical: 2,
-    paddingHorizontal: 12,
+    marginVertical: 4,
+    paddingHorizontal: 15,
   },
-  wrapperOwn: {
+  rowOwn: {
     flexDirection: 'row-reverse',
   },
   avatarCol: {
     marginRight: 8,
-    marginBottom: 4,
+    marginBottom: 14,
+  },
+  col: {
+    maxWidth: '78%',
+    alignItems: 'flex-start',
+  },
+  colOwn: {
+    alignItems: 'flex-end',
   },
   bubble: {
-    maxWidth: '75%',
-    borderRadius: 18,
+    borderRadius: chatSizes.bubbleRadius,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 8,
+    minHeight: 34,
+    justifyContent: 'center',
+    ...chatShadow,
   },
   bubbleOwn: {
-    backgroundColor: '#0FA6A6',
-    borderBottomRightRadius: 4,
+    backgroundColor: chatColors.teal,
   },
   bubbleOther: {
-    backgroundColor: '#fff',
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  senderName: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 12,
-    color: '#0FA6A6',
-    marginBottom: 3,
-  },
-  text: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 15,
-    color: '#1A1A1A',
-    lineHeight: 21,
-  },
-  textOwn: {
-    color: '#fff',
-  },
-  time: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginTop: 4,
-    alignSelf: 'flex-end',
+    backgroundColor: chatColors.bg,
   },
   timeOwn: {
-    color: 'rgba(255,255,255,0.7)',
+    marginTop: 3,
+    alignSelf: 'flex-end',
+  },
+  timeOther: {
+    marginTop: 3,
+    alignSelf: 'flex-start',
   },
   image: {
     width: 200,
     height: 150,
-    borderRadius: 12,
+    borderRadius: 16,
   },
   fileRow: {
     flexDirection: 'row',
@@ -168,9 +165,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   fileLabel: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 14,
-    color: '#374151',
     flex: 1,
   },
 });

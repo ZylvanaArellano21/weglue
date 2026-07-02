@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,24 +6,31 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useChatDetails, useConversationMembership, useNonMemberPreview } from '../../../../hooks/useChats';
+import { useChatDetails, useConversationMembership, useNonMemberPreview, useDirectMessages } from '../../../../hooks/useChats';
 import { useClubChannels } from '../../../../hooks/useClubChannels';
 import { useRealtimeDirectMessages, useRealtimeParticipants } from '../../../../hooks/useRealtimeMessages';
-import { useDirectMessages, useSendDirectMessage } from '../../../../hooks/useChats';
 import { useQueryClient } from '@tanstack/react-query';
 import { NonMemberPreview } from '../../../../components/chat/NonMemberPreview';
 import { MessageBubble } from '../../../../components/chat/MessageBubble';
-import { PollMessage } from '../../../../components/chat/PollMessage';
 import { ChatInput } from '../../../../components/chat/ChatInput';
 import { ConfirmationModal } from '../../../../components/chat/ConfirmationModal';
-import { sendDirectMessage } from '../../../../services/chatService';
-import { sendPoll } from '../../../../services/clubPollService';
+import {
+  DateDivider,
+  formatChatDateDivider,
+  isSameChatDay,
+} from '../../../../components/chat/DateDivider';
+import { Avatar } from '../../../../components/shared/Avatar';
+import { sendDirectMessage, markConversationRead } from '../../../../services/chatService';
+import { getLastVisitedChannel } from '../../../../lib/chatNavigation';
 import { supabase } from '../../../../lib/supabase';
+import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
 export default function ChatRoom() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
@@ -31,14 +38,15 @@ export default function ChatRoom() {
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
   const queryClient = useQueryClient();
+  const listRef = useRef<FlatList>(null);
 
   const { data: chatDetails, isLoading: detailsLoading } = useChatDetails(chatId);
   const { data: isMember, refetch: refetchMembership } = useConversationMembership(chatId, userId);
 
   const isDirect = chatDetails?.type === 'direct';
-  const isGroupWithChannels = chatDetails?.type === 'club_group' || chatDetails?.type === 'officer_chat';
+  const isGroupWithChannels =
+    chatDetails?.type === 'club_group' || chatDetails?.type === 'officer_chat';
 
-  // ── Membership upgrade: when user joins club, update immediately ─────────
   const handleJoined = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['conversationMember', chatId, userId] });
     queryClient.invalidateQueries({ queryKey: ['myChats', userId] });
@@ -47,23 +55,30 @@ export default function ChatRoom() {
 
   useRealtimeParticipants(chatId, userId, handleJoined);
 
-  // ── For group chats: redirect to channels ─────────────────────────────────
   const { data: channels } = useClubChannels(
     isGroupWithChannels && chatDetails?.club_id ? chatDetails.club_id : undefined,
   );
 
-  // ── For DMs: show full thread ─────────────────────────────────────────────
-  const { data: dmPage } = useDirectMessages(isDirect ? chatId : undefined);
-  const { mutate: sendDM } = useSendDirectMessage(chatId, userId);
+  // Fix 8: auto-navigate to last-visited or default channel, bypassing the channel picker
+  useEffect(() => {
+    if (!isGroupWithChannels || !isMember || !channels || channels.length === 0) return;
+    const saved = getLastVisitedChannel(chatId);
+    const target = (saved && channels.find((c) => c.id === saved))
+      ? saved
+      : (channels.find((c) => c.is_default) ?? channels[0])?.id;
+    if (target) {
+      router.replace(`/(tabs)/messages/${chatId}/${target}` as any);
+    }
+  }, [isGroupWithChannels, isMember, channels, chatId]);
 
+  const { data: dmPage } = useDirectMessages(isDirect ? chatId : undefined);
   useRealtimeDirectMessages(isDirect ? chatId : undefined);
 
-  // ── Non-member preview ────────────────────────────────────────────────────
   const { data: previewMessages } = useNonMemberPreview(
     !isMember && isGroupWithChannels ? chatId : undefined,
   );
 
-  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   async function handleLeave() {
     if (!chatDetails?.club_id) return;
@@ -75,40 +90,45 @@ export default function ChatRoom() {
     router.back();
   }
 
-  async function handleDelete() {
-    // Delete a DM conversation (removes all messages visible to this user)
-    await supabase.from('conversation_participants').delete()
-      .eq('conversation_id', chatId)
-      .eq('user_id', userId);
-    router.back();
-  }
+  const messages = [...(dmPage?.messages ?? [])].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
 
-  // ── Loading ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isDirect && messages.length > 0) {
+      listRef.current?.scrollToEnd({ animated: false });
+      // Mark as read when DM messages are visible
+      void markConversationRead(chatId);
+    }
+  }, [isDirect, messages.length, chatId]);
+
   if (detailsLoading || !chatDetails) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.center}>
-          <ActivityIndicator color="#0FA6A6" />
+          <ActivityIndicator color={chatColors.teal} />
         </View>
       </SafeAreaView>
     );
   }
 
-  const displayName = chatDetails.name
-    ?? (isDirect
+  const displayName =
+    chatDetails.name ??
+    (isDirect
       ? chatDetails.participants.find((p) => p.user_id !== userId)?.username
-      : 'Chat')
-    ?? 'Chat';
+      : 'Chat') ??
+    'Chat';
 
-  // ── Non-member group chat preview ─────────────────────────────────────────
   if (!isMember && isGroupWithChannels) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+            <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle} numberOfLines={1}>{displayName}</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {displayName}
+          </Text>
           <View style={{ width: 36 }} />
         </View>
         <NonMemberPreview
@@ -120,77 +140,33 @@ export default function ChatRoom() {
     );
   }
 
-  // ── Group chat: show channel list ─────────────────────────────────────────
   if (isGroupWithChannels) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+            <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle} numberOfLines={1}>{displayName}</Text>
-          <TouchableOpacity
-            onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
-            style={styles.infoBtn}
-          >
-            <Ionicons name="information-circle-outline" size={24} color="#0FA6A6" />
-          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Avatar uri={chatDetails.avatar_url} size={chatSizes.avatarHeader} username={displayName} />
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {displayName}
+            </Text>
+          </View>
         </View>
-
-        <FlatList
-          data={channels ?? []}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.channelList}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.channelRow}
-              onPress={() =>
-                router.push(`/(tabs)/messages/${chatId}/${item.id}` as any)
-              }
-              activeOpacity={0.7}
-            >
-              <View style={styles.channelIcon}>
-                <Text style={styles.channelHashtag}>#</Text>
-              </View>
-              <View style={styles.channelInfo}>
-                <Text style={styles.channelName}>{item.name}</Text>
-                {item.is_restricted && (
-                  <View style={styles.officersTag}>
-                    <Text style={styles.officersTagText}>Officers only</Text>
-                  </View>
-                )}
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
-            </TouchableOpacity>
-          )}
-          ListFooterComponent={
-            <TouchableOpacity
-              style={styles.leaveRow}
-              onPress={() => setConfirmLeave(true)}
-            >
-              <Ionicons name="exit-outline" size={18} color="#EF4444" />
-              <Text style={styles.leaveLabel}>Leave group</Text>
-            </TouchableOpacity>
-          }
-        />
-
-        <ConfirmationModal
-          visible={confirmLeave}
-          title="Leave group?"
-          message={`Are you sure you want to leave ${displayName}? You'll lose access to all messages.`}
-          confirmLabel="Leave"
-          destructive
-          onConfirm={handleLeave}
-          onCancel={() => setConfirmLeave(false)}
-        />
+        {/* Spinner while auto-redirect fires in useEffect; shows "No channels" if club has none */}
+        {!channels || channels.length > 0 ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={chatColors.teal} />
+          </View>
+        ) : (
+          <View style={styles.center}>
+            <Text style={styles.emptyText}>No channels yet</Text>
+          </View>
+        )}
       </SafeAreaView>
     );
   }
-
-  // ── Direct message thread ─────────────────────────────────────────────────
-  const messages = [...(dmPage?.messages ?? [])].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
 
   const otherUser = chatDetails.participants.find((p) => p.user_id !== userId);
 
@@ -198,138 +174,113 @@ export default function ChatRoom() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+          <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.headerUser}
-          onPress={() => otherUser && router.push(`/profile/${otherUser.user_id}`)}
+          style={styles.headerCenter}
+          onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
           activeOpacity={0.7}
         >
+          <Avatar
+            uri={otherUser?.avatar_url}
+            size={chatSizes.avatarHeader}
+            username={otherUser?.username ?? displayName}
+          />
           <Text style={styles.headerTitle} numberOfLines={1}>
             {otherUser?.username ?? displayName}
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.infoBtn}
-          onPress={() => setConfirmLeave(true)}
-        >
-          <Ionicons name="trash-outline" size={20} color="#EF4444" />
+          <Ionicons name="chevron-forward" size={18} color={chatColors.textMuted} />
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={messages}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.messageList}
-        renderItem={({ item, index }) => {
-          const prev = messages[index - 1];
-          const showSenderInfo = !prev || prev.sender_id !== item.sender_id;
-          const isOwn = item.sender_id === userId;
-          return (
-            <MessageBubble
-              id={item.id}
-              senderId={item.sender_id}
-              senderUsername={item.sender.username}
-              senderAvatarUrl={item.sender.avatar_url}
-              content={item.content}
-              attachmentUrl={item.attachment_url}
-              messageType={item.message_type}
-              createdAt={item.created_at}
-              isOwn={isOwn}
-              showSenderInfo={showSenderInfo}
-              pollSlot={
-                item.message_type === 'poll' && item.poll_id ? (
-                  <PollMessage
-                    pollId={item.poll_id}
-                    messageId={item.id}
-                    userId={userId}
-                    isOwn={isOwn}
-                  />
-                ) : undefined
-              }
-            />
-          );
-        }}
-      />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.messageList}
+          renderItem={({ item, index }) => {
+            const prev = messages[index - 1];
+            const showSenderInfo = !prev || prev.sender_id !== item.sender_id;
+            const showDateDivider = !prev || !isSameChatDay(prev.created_at, item.created_at);
+            const isOwn = item.sender_id === userId;
+            return (
+              <View>
+                {showDateDivider && <DateDivider label={formatChatDateDivider(item.created_at)} />}
+                <MessageBubble
+                  id={item.id}
+                  senderId={item.sender_id}
+                  senderUsername={item.sender.username}
+                  senderAvatarUrl={item.sender.avatar_url}
+                  content={item.content}
+                  attachmentUrl={item.attachment_url}
+                  messageType={item.message_type}
+                  createdAt={item.created_at}
+                  isOwn={isOwn}
+                  showSenderInfo={showSenderInfo}
+                />
+              </View>
+            );
+          }}
+        />
 
-      <ChatInput
-        onSend={async ({ content, attachmentUrl, attachmentType }) => {
-          await sendDirectMessage(chatId, userId, content, attachmentUrl, attachmentType);
-          queryClient.invalidateQueries({ queryKey: ['directMessages', chatId] });
-        }}
-      />
-
-      <ConfirmationModal
-        visible={confirmLeave}
-        title="Delete conversation?"
-        message="This will remove you from this conversation. The other person can still see their messages."
-        confirmLabel="Delete"
-        destructive
-        onConfirm={handleDelete}
-        onCancel={() => setConfirmLeave(false)}
-      />
+        <ChatInput
+          mode="direct"
+          onSend={async ({ content, attachmentUrl, attachmentType }) => {
+            await sendDirectMessage(chatId, userId, content, attachmentUrl, attachmentType);
+            queryClient.invalidateQueries({ queryKey: ['directMessages', chatId] });
+          }}
+        />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FEFCF0' },
+  container: { flex: 1, backgroundColor: chatColors.bg },
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: chatColors.border,
   },
-  backBtn: { padding: 4, marginRight: 8 },
-  headerUser: { flex: 1 },
-  headerTitle: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 17,
-    color: '#1A1A1A',
+  backBtn: { padding: 4, marginRight: 4 },
+  headerCenter: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
-  infoBtn: { padding: 4 },
+  headerTitle: {
+    ...chatTypography.chatTitle,
+    flexShrink: 1,
+  },
   channelList: { paddingVertical: 8 },
   channelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    gap: 12,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: chatColors.border,
   },
-  channelIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
+  channelHash: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 14,
+    color: chatColors.teal,
   },
-  channelHashtag: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 18,
-    color: '#6B7280',
-  },
-  channelInfo: { flex: 1, gap: 3 },
   channelName: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 15,
-    color: '#1A1A1A',
-  },
-  officersTag: {
-    backgroundColor: '#FEF3C7',
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    alignSelf: 'flex-start',
-  },
-  officersTagText: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 10,
-    color: '#92400E',
+    ...chatTypography.channelName,
+    flex: 1,
   },
   leaveRow: {
     flexDirection: 'row',
@@ -338,13 +289,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
   },
   leaveLabel: {
-    fontFamily: 'Zain_400Regular',
+    fontFamily: chatFonts.regular,
     fontSize: 15,
-    color: '#EF4444',
+    color: '#C62828',
   },
-  messageList: { padding: 8, flexGrow: 1 },
+  messageList: { paddingVertical: 8, flexGrow: 1 },
+  emptyText: {
+    fontFamily: chatFonts.regular,
+    fontSize: 14,
+    color: chatColors.textMuted,
+  },
 });

@@ -5,8 +5,10 @@ import {
   getDirectMessages,
   sendDirectMessage,
   searchChats,
+  getSuggestedPeople,
   getNonMemberPreview,
   isConversationMember,
+  markConversationRead,
 } from '../services/chatService';
 
 export function useMyChats(userId: string | undefined) {
@@ -82,5 +84,21 @@ export function useChatSearch(userId: string | undefined, query: string) {
     queryFn: () => searchChats(userId!, query),
     enabled: !!userId && query.trim().length > 0,
     staleTime: 30 * 1000,
+  });
+}
+
+export function useSuggestedPeople(userId: string | undefined) {
+  return useQuery({
+    queryKey: ['suggestedPeople', userId],
+    queryFn: () => getSuggestedPeople(userId!),
+    enabled: !!userId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useMarkConversationRead(conversationId: string | undefined) {
+  return useMutation({
+    mutationFn: () => markConversationRead(conversationId!),
+    onSuccess: () => {},
   });
 }

@@ -1,12 +1,22 @@
 import { router } from 'expo-router';
 import { getOrCreateDirectChat, getClubGroupConversationId } from '../services/chatService';
 
+// Module-level map persists across navigations within an app session.
+// Tracks the last channel the user was in per conversation.
+const lastVisitedChannelMap = new Map<string, string>();
+
+export function recordChannelVisit(conversationId: string, channelId: string): void {
+  lastVisitedChannelMap.set(conversationId, channelId);
+}
+
+export function getLastVisitedChannel(conversationId: string): string | undefined {
+  return lastVisitedChannelMap.get(conversationId);
+}
+
 /**
  * Opens a chat by conversation id.
- * For group chats (club_group): navigates to the channel picker.
- * For direct chats: navigates directly to the DM thread.
- *
- * Used by every entry point in the app — do not duplicate this logic per screen.
+ * Group chats: auto-navigate to last-visited or default channel (bypasses channel picker).
+ * Direct chats: navigates directly to the DM thread.
  */
 export function openChat(chatId: string): void {
   router.push(`/(tabs)/messages/${chatId}` as any);
@@ -15,9 +25,6 @@ export function openChat(chatId: string): void {
 /**
  * Opens (or creates) a 1:1 DM with the given user.
  * Creates the conversation server-side if it doesn't exist yet.
- * Navigates directly into the DM thread — does NOT route through the chat list.
- *
- * Used by: profile pages, club member lists, attendee lists, anywhere a message icon appears.
  */
 export async function openDirectChatWith(otherUserId: string): Promise<void> {
   const conversationId = await getOrCreateDirectChat(otherUserId);
@@ -26,7 +33,6 @@ export async function openDirectChatWith(otherUserId: string): Promise<void> {
 
 /**
  * Opens the club_group conversation for a given club.
- * Used by: club profile, club header, anywhere a group chat icon appears.
  */
 export async function openClubChat(clubId: string): Promise<void> {
   const conversationId = await getClubGroupConversationId(clubId);
@@ -36,7 +42,6 @@ export async function openClubChat(clubId: string): Promise<void> {
 
 /**
  * Jumps to a specific message within a channel thread.
- * Used by: poll history in group chat info, any future "jump to message" feature.
  */
 export function jumpToMessage(chatId: string, channelId: string, messageId: string): void {
   router.push({

@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet, FlatList } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Avatar } from '../shared/Avatar';
+import { MessageBubble } from './MessageBubble';
 import type { DirectMessageThread } from '../../services/chatService';
+import { chatColors, chatFonts, chatShadow } from './chatTheme';
 
 interface Props {
   messages: DirectMessageThread[];
@@ -10,61 +10,40 @@ interface Props {
   joining?: boolean;
 }
 
-function formatTime(isoString: string): string {
-  const date = new Date(isoString);
-  const h = date.getHours();
-  const m = date.getMinutes();
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
-}
-
 /**
- * Read-only 15-message preview for non-members of a club group chat.
- * Replaces the input bar with a "Join the club" CTA.
- * No pagination — this is intentionally limited to 15 messages.
+ * Read-only preview for non-members. No input bar; sticky Join CTA at bottom.
  */
-export function NonMemberPreview({ messages, chatName, onJoin, joining = false }: Props) {
+export function NonMemberPreview({ messages, onJoin, joining = false }: Props) {
   const sorted = [...messages].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
 
   return (
     <View style={styles.container}>
-      {/* Preview header */}
-      <View style={styles.previewBanner}>
-        <Ionicons name="lock-closed-outline" size={14} color="#6B7280" />
-        <Text style={styles.previewBannerText}>
-          Showing {messages.length} recent message{messages.length !== 1 ? 's' : ''} — join to see more
-        </Text>
-      </View>
-
-      {/* Messages list (read-only, no scroll-up past 15) */}
       <FlatList
         data={sorted}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
-        scrollEnabled
-        renderItem={({ item }) => (
-          <View style={styles.row}>
-            <Avatar uri={item.sender.avatar_url} size={32} username={item.sender.username} />
-            <View style={styles.bubble}>
-              <Text style={styles.sender}>{item.sender.username}</Text>
-              {item.message_type === 'text' && (
-                <Text style={styles.content}>{item.content}</Text>
-              )}
-              {item.message_type === 'image' && (
-                <Text style={styles.contentMuted}>[Photo]</Text>
-              )}
-              {item.message_type === 'poll' && (
-                <Text style={styles.contentMuted}>[Poll] Join to vote</Text>
-              )}
-              {item.message_type === 'file' && (
-                <Text style={styles.contentMuted}>[File]</Text>
-              )}
-              <Text style={styles.time}>{formatTime(item.created_at)}</Text>
-            </View>
-          </View>
-        )}
+        scrollEnabled={sorted.length > 0}
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item, index }) => {
+          const prev = sorted[index - 1];
+          const showSenderInfo = !prev || prev.sender_id !== item.sender_id;
+          return (
+            <MessageBubble
+              id={item.id}
+              senderId={item.sender_id}
+              senderUsername={item.sender.username}
+              senderAvatarUrl={item.sender.avatar_url}
+              content={item.content}
+              attachmentUrl={item.attachment_url}
+              messageType={item.message_type}
+              createdAt={item.created_at}
+              isOwn={false}
+              showSenderInfo={showSenderInfo}
+            />
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyText}>No messages yet</Text>
@@ -72,25 +51,16 @@ export function NonMemberPreview({ messages, chatName, onJoin, joining = false }
         }
       />
 
-      {/* Join CTA */}
-      <View style={styles.ctaContainer}>
-        <View style={styles.ctaCard}>
-          <Ionicons name="people-outline" size={28} color="#0FA6A6" />
-          <Text style={styles.ctaTitle}>Join {chatName}</Text>
-          <Text style={styles.ctaBody}>
-            Join the club to participate in discussions, vote on polls, and see the full message history.
-          </Text>
-          <TouchableOpacity
-            style={[styles.joinBtn, joining && styles.joinBtnDisabled]}
-            onPress={onJoin}
-            disabled={joining}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.joinBtnLabel}>
-              {joining ? 'Joining…' : 'Join the club'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.ctaBar}>
+        <Text style={styles.ctaQuestion}>Do you want to chat?</Text>
+        <TouchableOpacity
+          style={[styles.joinBtn, joining && styles.joinBtnDisabled]}
+          onPress={onJoin}
+          disabled={joining}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.joinLabel}>{joining ? 'Joining…' : 'Join the club'}</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -99,65 +69,12 @@ export function NonMemberPreview({ messages, chatName, onJoin, joining = false }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FEFCF0',
-  },
-  previewBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#F9FAFB',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  previewBannerText: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 12,
-    color: '#6B7280',
+    backgroundColor: chatColors.bg,
   },
   list: {
-    padding: 12,
+    paddingVertical: 12,
     flexGrow: 1,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    marginBottom: 12,
-  },
-  bubble: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  sender: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 12,
-    color: '#0FA6A6',
-    marginBottom: 3,
-  },
-  content: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 14,
-    color: '#374151',
-    lineHeight: 20,
-  },
-  contentMuted: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 14,
-    color: '#9CA3AF',
-    fontStyle: 'italic',
-  },
-  time: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginTop: 4,
-    alignSelf: 'flex-end',
+    paddingBottom: 8,
   },
   empty: {
     flex: 1,
@@ -166,53 +83,41 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   emptyText: {
-    fontFamily: 'Zain_400Regular',
+    fontFamily: chatFonts.regular,
     fontSize: 14,
-    color: '#9CA3AF',
+    color: chatColors.textMuted,
   },
-  ctaContainer: {
-    padding: 16,
-    backgroundColor: '#FEFCF0',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  ctaCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
+  ctaBar: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    gap: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: chatColors.bg,
+    borderTopWidth: 1,
+    borderTopColor: chatColors.border,
   },
-  ctaTitle: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 17,
-    color: '#1A1A1A',
-    textAlign: 'center',
-  },
-  ctaBody: {
-    fontFamily: 'Zain_400Regular',
+  ctaQuestion: {
+    fontFamily: chatFonts.semiBold,
     fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 20,
+    color: chatColors.text,
+    flex: 1,
+    marginRight: 12,
   },
   joinBtn: {
-    backgroundColor: '#0FA6A6',
-    borderRadius: 14,
-    paddingHorizontal: 32,
-    paddingVertical: 13,
-    marginTop: 4,
-    width: '100%',
-    alignItems: 'center',
+    backgroundColor: chatColors.teal,
+    borderRadius: 40,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    ...chatShadow,
   },
   joinBtnDisabled: {
     opacity: 0.6,
   },
-  joinBtnLabel: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 15,
-    color: '#fff',
+  joinLabel: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 12,
+    color: chatColors.cream,
+    letterSpacing: 0.38,
   },
 });

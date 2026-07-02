@@ -1,9 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   FlatList,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -15,7 +14,11 @@ import { useAuthStore } from '@weglue/shared';
 import { openChat, openDirectChatWith } from '../../../lib/chatNavigation';
 import { useMyChats, useChatSearch } from '../../../hooks/useChats';
 import { ChatListItem } from '../../../components/chat/ChatListItem';
+import { ChatSearchBar } from '../../../components/chat/ChatSearchBar';
+import { FilterPills, type ChatFilter } from '../../../components/chat/FilterPills';
+import { GroupEmptyState } from '../../../components/chat/GroupEmptyState';
 import { Avatar } from '../../../components/shared/Avatar';
+import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
 
 export default function MessagesIndex() {
   const router = useRouter();
@@ -23,7 +26,8 @@ export default function MessagesIndex() {
   const userId = user?.id ?? '';
 
   const [query, setQuery] = useState('');
-  const [searching, setSearching] = useState(false);
+  const [filter, setFilter] = useState<ChatFilter>('single');
+  const searching = query.trim().length > 0;
 
   const { data: chats, isLoading: chatsLoading } = useMyChats(userId);
   const { data: searchResults, isLoading: searchLoading } = useChatSearch(
@@ -31,70 +35,33 @@ export default function MessagesIndex() {
     searching ? query : '',
   );
 
-  const handlePressChat = useCallback(
-    (chatId: string) => { openChat(chatId); },
-    [],
+  const directChats = useMemo(
+    () => (chats ?? []).filter((c) => c.type === 'direct'),
+    [chats],
+  );
+  const groupChats = useMemo(
+    () =>
+      (chats ?? []).filter((c) =>
+        ['club_group', 'officer_chat', 'group'].includes(c.type),
+      ),
+    [chats],
   );
 
-  const handlePressUser = useCallback(
-    async (otherUserId: string) => {
-      await openDirectChatWith(otherUserId);
-    },
-    [],
-  );
+  const filteredChats = filter === 'single' ? directChats : groupChats;
 
-  // ── Chat list (default view) ─────────────────────────────────────────────
+  const handlePressChat = useCallback((chatId: string) => {
+    openChat(chatId);
+  }, []);
 
-  function renderChatList() {
-    if (chatsLoading) {
-      return (
-        <View style={styles.center}>
-          <ActivityIndicator color="#0FA6A6" />
-        </View>
-      );
-    }
+  const handlePressUser = useCallback(async (otherUserId: string) => {
+    await openDirectChatWith(otherUserId);
+  }, []);
 
-    if (!chats || chats.length === 0) {
-      return (
-        <View style={styles.center}>
-          <Ionicons name="chatbubbles-outline" size={48} color="#D1D5DB" />
-          <Text style={styles.emptyTitle}>No conversations yet</Text>
-          <Text style={styles.emptyBody}>
-            Message someone from their profile or join a club to start chatting.
-          </Text>
-        </View>
-      );
-    }
-
-    const sorted = [...chats].sort((a, b) => {
-      const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-      const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
-      return tb - ta;
-    });
-
-    return (
-      <FlatList
-        data={sorted}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <ChatListItem
-            chat={item}
-            currentUserId={userId}
-            onPress={() => handlePressChat(item.id)}
-          />
-        )}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
-      />
-    );
-  }
-
-  // ── Search results ───────────────────────────────────────────────────────
-
-  function renderSearchResults() {
+  function renderGlobalSearch() {
     if (searchLoading) {
       return (
         <View style={styles.center}>
-          <ActivityIndicator color="#0FA6A6" />
+          <ActivityIndicator color={chatColors.teal} />
         </View>
       );
     }
@@ -113,14 +80,12 @@ export default function MessagesIndex() {
     return (
       <FlatList
         data={[
-          ...(people.length > 0 ? [{ _section: 'People' }] : []),
+          ...(people.length > 0 ? [{ _section: 'People' as const }] : []),
           ...people.map((p) => ({ ...p, _type: 'person' as const })),
-          ...(chatsResult.length > 0 ? [{ _section: 'Chats' }] : []),
+          ...(chatsResult.length > 0 ? [{ _section: 'Chats' as const }] : []),
           ...chatsResult.map((c) => ({ ...c, _type: 'chat' as const })),
         ]}
-        keyExtractor={(item: any) =>
-          item._section ?? item.user_id ?? item.id
-        }
+        keyExtractor={(item: any) => item._section ?? item.user_id ?? item.id}
         renderItem={({ item }: { item: any }) => {
           if (item._section) {
             return <Text style={styles.sectionHeader}>{item._section}</Text>;
@@ -132,14 +97,11 @@ export default function MessagesIndex() {
                 onPress={() => handlePressUser(item.user_id)}
                 activeOpacity={0.7}
               >
-                <Avatar uri={item.avatar_url} size={40} username={item.username} />
+                <Avatar uri={item.avatar_url} size={chatSizes.avatarSuggested} username={item.username} />
                 <View style={styles.searchRowText}>
                   <Text style={styles.searchName}>{item.username}</Text>
-                  {item.full_name && (
-                    <Text style={styles.searchSub}>{item.full_name}</Text>
-                  )}
+                  {item.full_name && <Text style={styles.searchSub}>{item.full_name}</Text>}
                 </View>
-                <Ionicons name="chatbubble-outline" size={18} color="#9CA3AF" />
               </TouchableOpacity>
             );
           }
@@ -150,14 +112,13 @@ export default function MessagesIndex() {
                 onPress={() => handlePressChat(item.id)}
                 activeOpacity={0.7}
               >
-                <Avatar uri={item.avatar_url} size={40} username={item.name ?? 'Chat'} />
+                <Avatar uri={item.avatar_url} size={chatSizes.avatarSuggested} username={item.name ?? 'Chat'} />
                 <View style={styles.searchRowText}>
                   <Text style={styles.searchName}>{item.name ?? 'Unnamed chat'}</Text>
                   <Text style={styles.searchSub}>
                     {item.type === 'officer_chat' ? 'Officer chat' : 'Group chat'}
                   </Text>
                 </View>
-                <Ionicons name="people-outline" size={18} color="#9CA3AF" />
               </TouchableOpacity>
             );
           }
@@ -167,46 +128,84 @@ export default function MessagesIndex() {
     );
   }
 
+  function renderSingleEmpty() {
+    return (
+      <View style={styles.suggestedWrap}>
+        <Text style={styles.suggestedHeader}>Suggested</Text>
+        <Text style={styles.suggestedHint}>
+          Search above to find people, or browse clubs to meet members.
+        </Text>
+      </View>
+    );
+  }
+
+  function renderChatList() {
+    if (chatsLoading) {
+      return (
+        <View style={styles.center}>
+          <ActivityIndicator color={chatColors.teal} />
+        </View>
+      );
+    }
+
+    if (filter === 'group' && groupChats.length === 0) {
+      return (
+        <GroupEmptyState
+          onBrowseClubs={() => router.push('/(tabs)/clubs' as any)}
+          onNewGroupChat={() => router.push('/(tabs)/messages/add-people' as any)}
+        />
+      );
+    }
+
+    if (filter === 'single' && directChats.length === 0) {
+      return renderSingleEmpty();
+    }
+
+    const sorted = [...filteredChats].sort((a, b) => {
+      const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return tb - ta;
+    });
+
+    return (
+      <FlatList
+        data={sorted}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        renderItem={({ item }) => (
+          <ChatListItem
+            chat={item}
+            currentUserId={userId}
+            onPress={() => handlePressChat(item.id)}
+          />
+        )}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
-        <TouchableOpacity
-          onPress={() => router.push('/profile' as any)}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="create-outline" size={22} color="#0FA6A6" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Search bar */}
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={16} color="#9CA3AF" style={{ marginLeft: 4 }} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search people and chats…"
-          placeholderTextColor="#9CA3AF"
+      <View style={styles.topSection}>
+        <ChatSearchBar
           value={query}
-          onChangeText={(t) => {
-            setQuery(t);
-            setSearching(t.trim().length > 0);
-          }}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
+          onChangeText={setQuery}
+          onClear={() => setQuery('')}
         />
-        {searching && (
+
+        <View style={styles.toolbar}>
+          <FilterPills value={filter} onChange={setFilter} />
           <TouchableOpacity
-            onPress={() => { setQuery(''); setSearching(false); }}
+            style={styles.newChatBtn}
+            onPress={() => router.push('/(tabs)/messages/add-people' as any)}
+            accessibilityLabel="New chat"
           >
-            <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+            <Ionicons name="add" size={26} color={chatColors.text} />
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
-      {/* Content */}
       <View style={styles.content}>
-        {searching ? renderSearchResults() : renderChatList()}
+        {searching ? renderGlobalSearch() : renderChatList()}
       </View>
     </SafeAreaView>
   );
@@ -215,37 +214,21 @@ export default function MessagesIndex() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FEFCF0',
+    backgroundColor: chatColors.bg,
   },
-  header: {
+  topSection: {
+    paddingTop: 8,
+    gap: 12,
+    paddingBottom: 8,
+  },
+  toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 12,
+    paddingRight: 20,
   },
-  headerTitle: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 26,
-    color: '#1A1A1A',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 14,
-    marginHorizontal: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-    marginBottom: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontFamily: 'Zain_400Regular',
-    fontSize: 15,
-    color: '#1A1A1A',
+  newChatBtn: {
+    padding: 4,
   },
   content: {
     flex: 1,
@@ -255,40 +238,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
-    gap: 12,
   },
-  emptyTitle: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 17,
-    color: '#374151',
-    textAlign: 'center',
+  listContent: {
+    paddingTop: 4,
+    paddingBottom: 16,
+  },
+  suggestedWrap: {
+    paddingTop: 16,
+  },
+  suggestedHeader: {
+    ...chatTypography.sectionHeader,
+    paddingHorizontal: 23,
+    marginBottom: 8,
+  },
+  suggestedHint: {
+    fontFamily: chatFonts.regular,
+    fontSize: 13,
+    color: chatColors.textMuted,
+    paddingHorizontal: 23,
+    lineHeight: 18,
   },
   emptyBody: {
-    fontFamily: 'Zain_400Regular',
+    fontFamily: chatFonts.regular,
     fontSize: 14,
-    color: '#9CA3AF',
+    color: chatColors.textMuted,
     textAlign: 'center',
-    lineHeight: 20,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: '#F3F4F6',
-    marginLeft: 76,
   },
   sectionHeader: {
-    fontFamily: 'Zain_700Bold',
+    fontFamily: chatFonts.semiBold,
     fontSize: 12,
-    color: '#6B7280',
+    color: chatColors.textMuted,
     letterSpacing: 0.8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 23,
+    paddingVertical: 10,
     textTransform: 'uppercase',
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 23,
     paddingVertical: 12,
     gap: 12,
   },
@@ -296,13 +284,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   searchName: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 15,
-    color: '#1A1A1A',
+    fontFamily: chatFonts.semiBold,
+    fontSize: 12,
+    color: chatColors.text,
   },
   searchSub: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 13,
-    color: '#6B7280',
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
+    color: chatColors.textMuted,
+    marginTop: 2,
   },
 });

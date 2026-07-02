@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'rea
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getClubPoll, votePoll } from '../../services/clubPollService';
 import { useRealtimePoll } from '../../hooks/useRealtimeMessages';
+import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
 
 interface Props {
   pollId: string;
@@ -12,11 +13,9 @@ interface Props {
 }
 
 /**
- * Renders a poll inline in the chat thread.
- * Live vote counts and voter names update in real-time via Realtime subscription.
- * Respects allow_multiple and start_at/end_at — voting disabled outside window.
+ * Inline poll card — visually distinct from text bubbles; teal accent card style.
  */
-export function PollMessage({ pollId, messageId: _messageId, userId, isOwn }: Props) {
+export function PollMessage({ pollId, messageId: _messageId, userId, isOwn: _isOwn }: Props) {
   const queryClient = useQueryClient();
   const [votingOptionId, setVotingOptionId] = useState<string | null>(null);
 
@@ -26,7 +25,6 @@ export function PollMessage({ pollId, messageId: _messageId, userId, isOwn }: Pr
     staleTime: 10 * 1000,
   });
 
-  // Real-time vote updates
   useRealtimePoll(pollId);
 
   const { mutate: vote } = useMutation({
@@ -54,80 +52,45 @@ export function PollMessage({ pollId, messageId: _messageId, userId, isOwn }: Pr
 
   if (isLoading || !poll) {
     return (
-      <View style={[styles.container, isOwn && styles.containerOwn]}>
-        <ActivityIndicator size="small" color={isOwn ? '#fff' : '#0FA6A6'} />
+      <View style={styles.card}>
+        <ActivityIndicator size="small" color={chatColors.teal} />
       </View>
     );
   }
 
-  const maxVotes = Math.max(...poll.options.map((o) => o.vote_count), 1);
-
   return (
-    <View style={[styles.container, isOwn && styles.containerOwn]}>
-      <Text style={[styles.label, isOwn && styles.labelOwn]}>POLL</Text>
-      <Text style={[styles.question, isOwn && styles.questionOwn]}>{poll.question}</Text>
+    <View style={styles.card}>
+      <Text style={styles.question}>{poll.question}</Text>
 
       {!isActive && (
-        <Text style={[styles.statusLabel, isOwn && styles.statusLabelOwn]}>
+        <Text style={styles.status}>
           {poll.end_at && now > new Date(poll.end_at) ? 'Poll ended' : 'Poll not started'}
         </Text>
       )}
 
       {poll.options.map((option) => {
-        const pct = poll.total_votes > 0
-          ? Math.round((option.vote_count / poll.total_votes) * 100)
-          : 0;
         const isVoting = votingOptionId === option.id;
-
         return (
           <TouchableOpacity
             key={option.id}
-            style={[
-              styles.optionRow,
-              option.user_voted && styles.optionRowVoted,
-              !isActive && styles.optionRowDisabled,
-            ]}
+            style={[styles.optionRow, option.user_voted && styles.optionRowVoted]}
             onPress={() => handleVote(option.id)}
             disabled={!isActive || !!votingOptionId}
             activeOpacity={0.75}
           >
-            {/* Background fill bar */}
-            <View
-              style={[
-                styles.fillBar,
-                {
-                  width: `${pct}%`,
-                  backgroundColor: option.user_voted
-                    ? (isOwn ? 'rgba(255,255,255,0.35)' : '#0FA6A620')
-                    : (isOwn ? 'rgba(255,255,255,0.15)' : '#F3F4F6'),
-                },
-              ]}
-            />
-
-            <View style={styles.optionContent}>
+            <View style={styles.optionMain}>
               {isVoting ? (
-                <ActivityIndicator size="small" color={isOwn ? '#fff' : '#0FA6A6'} />
+                <ActivityIndicator size="small" color={chatColors.teal} />
               ) : (
-                <View
-                  style={[
-                    styles.checkbox,
-                    option.user_voted && styles.checkboxVoted,
-                    isOwn && option.user_voted && styles.checkboxVotedOwn,
-                  ]}
-                />
+                <View style={[styles.radio, option.user_voted && styles.radioVoted]} />
               )}
-              <Text
-                style={[styles.optionText, isOwn && styles.optionTextOwn]}
-                numberOfLines={2}
-              >
+              <Text style={styles.optionText} numberOfLines={2}>
                 {option.option_text}
               </Text>
-              <Text style={[styles.pct, isOwn && styles.pctOwn]}>{pct}%</Text>
+              <Text style={styles.voteCount}>{option.vote_count}</Text>
             </View>
-
-            {/* Voter names */}
             {option.voter_usernames.length > 0 && (
-              <Text style={[styles.voters, isOwn && styles.votersOwn]} numberOfLines={1}>
+              <Text style={styles.voters} numberOfLines={1}>
                 {option.voter_usernames.slice(0, 3).join(', ')}
                 {option.voter_usernames.length > 3
                   ? ` +${option.voter_usernames.length - 3}`
@@ -138,7 +101,7 @@ export function PollMessage({ pollId, messageId: _messageId, userId, isOwn }: Pr
         );
       })}
 
-      <Text style={[styles.totalVotes, isOwn && styles.totalVotesOwn]}>
+      <Text style={styles.footer}>
         {poll.total_votes} {poll.total_votes === 1 ? 'vote' : 'votes'}
         {poll.allow_multiple ? ' · Multiple choice' : ''}
       </Text>
@@ -147,118 +110,82 @@ export function PollMessage({ pollId, messageId: _messageId, userId, isOwn }: Pr
 }
 
 const styles = StyleSheet.create({
-  container: {
-    minWidth: 220,
-    maxWidth: 280,
-  },
-  containerOwn: {},
-  label: {
-    fontFamily: 'Zain_700Bold',
-    fontSize: 10,
-    letterSpacing: 1,
-    color: '#0FA6A6',
-    marginBottom: 4,
-  },
-  labelOwn: {
-    color: 'rgba(255,255,255,0.7)',
+  card: {
+    minWidth: 240,
+    maxWidth: 300,
+    backgroundColor: chatColors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: chatColors.border,
+    padding: 14,
+    ...chatShadow,
   },
   question: {
-    fontFamily: 'Zain_700Bold',
+    fontFamily: chatFonts.semiBold,
     fontSize: 14,
-    color: '#1A1A1A',
+    color: chatColors.text,
     marginBottom: 10,
     lineHeight: 20,
   },
-  questionOwn: {
-    color: '#fff',
-  },
-  statusLabel: {
-    fontFamily: 'Zain_400Regular',
+  status: {
+    fontFamily: chatFonts.regular,
     fontSize: 12,
-    color: '#9CA3AF',
-    marginBottom: 8,
+    color: chatColors.textMuted,
     fontStyle: 'italic',
-  },
-  statusLabelOwn: {
-    color: 'rgba(255,255,255,0.6)',
+    marginBottom: 8,
   },
   optionRow: {
-    position: 'relative',
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: chatColors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     marginBottom: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    backgroundColor: chatColors.bg,
   },
   optionRowVoted: {
-    borderColor: '#0FA6A6',
+    borderColor: chatColors.teal,
+    backgroundColor: 'rgba(15,166,166,0.08)',
   },
-  optionRowDisabled: {
-    opacity: 0.7,
-  },
-  fillBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    borderRadius: 8,
-  },
-  optionContent: {
+  optionMain: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  checkbox: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+  radio: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     borderWidth: 2,
-    borderColor: '#D1D5DB',
+    borderColor: chatColors.textMuted,
   },
-  checkboxVoted: {
-    backgroundColor: '#0FA6A6',
-    borderColor: '#0FA6A6',
-  },
-  checkboxVotedOwn: {
-    backgroundColor: '#fff',
-    borderColor: '#fff',
+  radioVoted: {
+    backgroundColor: chatColors.teal,
+    borderColor: chatColors.teal,
   },
   optionText: {
-    fontFamily: 'Zain_400Regular',
+    fontFamily: chatFonts.semiBold,
     fontSize: 13,
-    color: '#1A1A1A',
+    color: chatColors.teal,
     flex: 1,
   },
-  optionTextOwn: {
-    color: '#fff',
-  },
-  pct: {
-    fontFamily: 'Zain_700Bold',
+  voteCount: {
+    fontFamily: chatFonts.semiBold,
     fontSize: 12,
-    color: '#6B7280',
-  },
-  pctOwn: {
-    color: 'rgba(255,255,255,0.8)',
-  },
-  voters: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginTop: 3,
-  },
-  votersOwn: {
-    color: 'rgba(255,255,255,0.6)',
-  },
-  totalVotes: {
-    fontFamily: 'Zain_400Regular',
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginTop: 4,
+    color: chatColors.textMuted,
+    minWidth: 20,
     textAlign: 'right',
   },
-  totalVotesOwn: {
-    color: 'rgba(255,255,255,0.6)',
+  voters: {
+    fontFamily: chatFonts.regular,
+    fontSize: 11,
+    color: chatColors.textMuted,
+    marginTop: 4,
+    marginLeft: 22,
+  },
+  footer: {
+    ...chatTypography.timestamp,
+    marginTop: 6,
+    textAlign: 'right',
   },
 });
