@@ -173,7 +173,7 @@ export default function MessagesIndex() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Messages</Text>
         <TouchableOpacity
-          onPress={() => router.push('/profile')}
+          onPress={() => router.push('/profile' as any)}
           activeOpacity={0.7}
         >
           <Ionicons name="create-outline" size={22} color="#0FA6A6" />

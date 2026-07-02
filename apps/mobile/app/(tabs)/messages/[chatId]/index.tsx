@@ -130,7 +130,7 @@ export default function ChatRoom() {
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>{displayName}</Text>
           <TouchableOpacity
-            onPress={() => router.push(`/(tabs)/messages/${chatId}/info`)}
+            onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
             style={styles.infoBtn}
           >
             <Ionicons name="information-circle-outline" size={24} color="#0FA6A6" />
@@ -145,7 +145,7 @@ export default function ChatRoom() {
             <TouchableOpacity
               style={styles.channelRow}
               onPress={() =>
-                router.push(`/(tabs)/messages/${chatId}/${item.id}`)
+                router.push(`/(tabs)/messages/${chatId}/${item.id}` as any)
               }
               activeOpacity={0.7}
             >

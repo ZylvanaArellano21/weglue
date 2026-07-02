@@ -9,7 +9,7 @@ import { getOrCreateDirectChat, getClubGroupConversationId } from '../services/c
  * Used by every entry point in the app — do not duplicate this logic per screen.
  */
 export function openChat(chatId: string): void {
-  router.push(`/(tabs)/messages/${chatId}`);
+  router.push(`/(tabs)/messages/${chatId}` as any);
 }
 
 /**
@@ -21,7 +21,7 @@ export function openChat(chatId: string): void {
  */
 export async function openDirectChatWith(otherUserId: string): Promise<void> {
   const conversationId = await getOrCreateDirectChat(otherUserId);
-  router.push(`/(tabs)/messages/${conversationId}`);
+  router.push(`/(tabs)/messages/${conversationId}` as any);
 }
 
 /**
@@ -31,7 +31,7 @@ export async function openDirectChatWith(otherUserId: string): Promise<void> {
 export async function openClubChat(clubId: string): Promise<void> {
   const conversationId = await getClubGroupConversationId(clubId);
   if (!conversationId) return;
-  router.push(`/(tabs)/messages/${conversationId}`);
+  router.push(`/(tabs)/messages/${conversationId}` as any);
 }
 
 /**
@@ -40,7 +40,7 @@ export async function openClubChat(clubId: string): Promise<void> {
  */
 export function jumpToMessage(chatId: string, channelId: string, messageId: string): void {
   router.push({
-    pathname: `/(tabs)/messages/${chatId}/${channelId}`,
+    pathname: `/(tabs)/messages/${chatId}/${channelId}` as any,
     params: { jumpToMessageId: messageId },
   });
 }

@@ -35,7 +35,7 @@ export default function ChannelThread() {
   const clubId = chatDetails?.club_id ?? undefined;
   const { data: conversationId } = useClubConversationId(clubId);
 
-  const isOfficer = useOfficerStore((s) => clubId ? s.isOfficer(clubId) : false);
+  const isOfficer = useOfficerStore((s) => clubId ? s.officerClubIds.includes(clubId) : false);
 
   // Channel metadata from the channel list (we need is_restricted + name)
   const [channelName, setChannelName] = useState('');
@@ -152,7 +152,7 @@ export default function ChannelThread() {
           )}
         </View>
         <TouchableOpacity
-          onPress={() => router.push(`/(tabs)/messages/${chatId}/info`)}
+          onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
           style={styles.infoBtn}
         >
           <Ionicons name="information-circle-outline" size={22} color="#0FA6A6" />
@@ -191,7 +191,7 @@ export default function ChannelThread() {
                 pollSlot={
                   item.message_type === 'poll' ? (
                     <PollMessage
-                      pollId={item.id}
+                      pollId={item.poll_id ?? ''}
                       messageId={item.id}
                       userId={userId}
                       isOwn={isOwn}

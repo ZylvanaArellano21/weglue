@@ -32,6 +32,7 @@ export interface MessageWithSender {
   attachment_url: string | null;
   message_type: string;
   created_at: string;
+  poll_id: string | null;
   sender: MessageSender;
 }
 
@@ -158,7 +159,7 @@ export async function getChannelMessages(
   let query = supabase
     .from('messages')
     .select(
-      'id, conversation_id, channel_id, sender_id, content, attachment_url, message_type, created_at, profiles!sender_id(id, username, avatar_url)',
+      'id, conversation_id, channel_id, sender_id, content, attachment_url, message_type, created_at, polls(id), profiles!sender_id(id, username, avatar_url)',
     )
     .eq('channel_id', channelId)
     .order('created_at', { ascending: false })
@@ -182,6 +183,7 @@ export async function getChannelMessages(
     attachment_url: m.attachment_url,
     message_type: m.message_type,
     created_at: m.created_at,
+    poll_id: Array.isArray(m.polls) ? (m.polls[0]?.id ?? null) : null,
     sender: {
       id: m.profiles.id,
       username: m.profiles.username,

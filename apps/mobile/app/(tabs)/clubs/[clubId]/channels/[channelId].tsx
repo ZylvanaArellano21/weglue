@@ -114,7 +114,7 @@ function PollBubble({
   }
 
   const now = new Date();
-  const isPollEnded = poll.end_date ? new Date(poll.end_date) < now : false;
+  const isPollEnded = poll.end_at ? new Date(poll.end_at) < now : false;
   const totalVotes = poll.total_votes;
 
   return (
@@ -212,7 +212,7 @@ function MessageBubble({
   userId: string;
   onLongPress?: () => void;
 }) {
-  const isPoll = message.attachment_type === 'poll' && !!message.poll_id;
+  const isPoll = message.message_type === 'poll' && !!message.poll_id;
 
   return (
     <View
