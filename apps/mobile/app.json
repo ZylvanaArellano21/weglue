@@ -4,6 +4,12 @@
     "slug": "weglue",
     "version": "1.0.0",
     "orientation": "portrait",
+    "updates": {
+      "url": "https://u.expo.dev/e9ee8bc0-92ad-4802-8ce0-35735bb8ad47"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
