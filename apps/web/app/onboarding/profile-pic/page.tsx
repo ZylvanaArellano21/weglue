@@ -22,7 +22,7 @@ function Toast({ message, type }: { message: string; type: "success" | "error" |
   );
 }
 
-export default function WebProfilePicPage(): JSX.Element {
+export default function WebProfilePicPage(): JSX.Element | null {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const { pendingUsername, selectedInterests, selectedActivities } = useOnboardingStore();

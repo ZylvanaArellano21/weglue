@@ -33,7 +33,7 @@ function LegalFooter() {
   );
 }
 
-export default function ActivitiesPage(): JSX.Element {
+export default function ActivitiesPage(): JSX.Element | null {
   const router = useRouter();
   const { selectedActivities, toggleActivity, selectedInterests, setMatchCount } =
     useOnboardingStore();

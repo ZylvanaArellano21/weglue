@@ -23,7 +23,7 @@ const LogoBlock = () => (
   </div>
 );
 
-export default function ResetPasswordClient(): JSX.Element {
+export default function ResetPasswordClient(): JSX.Element | null {
   const [view, setView] = useState<View>("loading");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");

@@ -5,6 +5,6 @@ export const metadata: Metadata = {
   title: "Reset Password — We Glue",
 };
 
-export default function ResetPasswordPage(): JSX.Element {
+export default function ResetPasswordPage(): JSX.Element | null {
   return <ResetPasswordClient />;
 }

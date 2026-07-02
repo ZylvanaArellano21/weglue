@@ -5,7 +5,7 @@ export const metadata = {
   title: "Get Started",
 };
 
-export default function GetStartedPage(): JSX.Element {
+export default function GetStartedPage(): JSX.Element | null {
   return (
     <main className="min-h-screen bg-[#FEFCF0] flex flex-col items-center justify-center px-6 gap-6">
       {/* Logo */}

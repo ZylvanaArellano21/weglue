@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 
-export default function FragmentConfirm(): JSX.Element {
+export default function FragmentConfirm(): JSX.Element | null {
   const [hasTokens, setHasTokens] = useState(false);
 
   useEffect(() => {

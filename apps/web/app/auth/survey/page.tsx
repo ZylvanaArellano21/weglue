@@ -20,7 +20,7 @@ const ACTIVITIES = [
   "Social Events", "Campus Tours",
 ] as const;
 
-export default function SurveyPage(): JSX.Element {
+export default function SurveyPage(): JSX.Element | null {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [selectedInterests, setSelectedInterests] = useState<Set<string>>(new Set());

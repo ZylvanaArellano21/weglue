@@ -45,7 +45,7 @@ function LegalFooter() {
   );
 }
 
-export default function InterestsPage(): JSX.Element {
+export default function InterestsPage(): JSX.Element | null {
   const router = useRouter();
   const { selectedInterests, toggleInterest, setMatchCount } =
     useOnboardingStore();

@@ -35,7 +35,7 @@ function mapSignInError(error: { message: string; status?: number; code?: string
   return `Something unexpected happened (Error: ${error.message}). Please try again or contact support.`;
 }
 
-export default function LoginPage(): JSX.Element {
+export default function LoginPage(): JSX.Element | null {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

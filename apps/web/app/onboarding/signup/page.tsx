@@ -39,7 +39,7 @@ function LegalFooter() {
   );
 }
 
-export default function SignupPage(): JSX.Element {
+export default function SignupPage(): JSX.Element | null {
   const router = useRouter();
   const { matchCount, selectedInterests, selectedActivities } =
     useOnboardingStore();

@@ -44,7 +44,7 @@ function LegalFooter() {
   );
 }
 
-export default function LoginPage(): JSX.Element {
+export default function LoginPage(): JSX.Element | null {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

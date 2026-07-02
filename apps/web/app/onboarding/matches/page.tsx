@@ -73,7 +73,7 @@ function ClubCard({ club, onJoin }: { club: Club; onJoin: () => void }) {
   );
 }
 
-export default function WebMatchesPage(): JSX.Element {
+export default function WebMatchesPage(): JSX.Element | null {
   const router = useRouter();
   const { selectedInterests } = useOnboardingStore();
   const [clubs, setClubs] = useState<Club[]>([]);

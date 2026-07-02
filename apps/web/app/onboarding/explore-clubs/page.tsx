@@ -115,7 +115,7 @@ function ClubCard({
   );
 }
 
-export default function ExploreClubsPage(): JSX.Element {
+export default function ExploreClubsPage(): JSX.Element | null {
   const router = useRouter();
   const [clubs, setClubs] = useState<Club[]>([]);
   const [loading, setLoading] = useState(true);

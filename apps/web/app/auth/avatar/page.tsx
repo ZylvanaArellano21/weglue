@@ -15,7 +15,7 @@ const PRESET_COLORS = [
   { id: "pink", color: "#EC4899" },
 ];
 
-export default function AvatarPage(): JSX.Element {
+export default function AvatarPage(): JSX.Element | null {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
