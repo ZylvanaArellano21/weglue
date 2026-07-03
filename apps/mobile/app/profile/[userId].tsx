@@ -23,6 +23,7 @@ import { Avatar } from '../../components/shared/Avatar';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import type { UserWeeklyEvent } from '../../services/followService';
+import { openDirectChatWith } from '../../lib/chatNavigation';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_ITEM_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -289,6 +290,7 @@ export default function UserProfileScreen() {
 
               {/* Message button */}
               <TouchableOpacity
+                onPress={() => { void openDirectChatWith(targetUserId!); }}
                 disabled={profile.is_private && profile.follow_status !== 'following'}
                 activeOpacity={0.85}
                 style={{

@@ -22,6 +22,7 @@ import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
+import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -293,6 +294,7 @@ function OfficerRow({ officer }: { officer: ClubOfficer }) {
       </View>
       <TouchableOpacity
         activeOpacity={0.8}
+        onPress={() => { if (officer.user_id) void openDirectChatWith(officer.user_id); }}
         style={{
           paddingHorizontal: 14,
           paddingVertical: 8,
@@ -542,12 +544,7 @@ export default function ClubProfileScreen() {
 
             {club.is_member && (
               <TouchableOpacity
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/clubs/[clubId]/channels',
-                    params: { clubId: clubId! },
-                  })
-                }
+                onPress={() => void openClubChat(clubId!)}
                 activeOpacity={0.85}
                 style={{
                   flex: 1,
@@ -573,12 +570,7 @@ export default function ClubProfileScreen() {
           {/* Admin Chat button — officers only */}
           {isOfficer && (
             <TouchableOpacity
-              onPress={() =>
-                router.push({
-                  pathname: '/(tabs)/clubs/[clubId]/channels',
-                  params: { clubId: clubId! },
-                })
-              }
+              onPress={() => void openOfficerChat(clubId!)}
               activeOpacity={0.85}
               style={{
                 paddingVertical: 12,

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { getOrCreateDirectChat, getClubGroupConversationId } from '../services/chatService';
+import { getOrCreateDirectChat, getClubGroupConversationId, getClubOfficerConversationId } from '../services/chatService';
 
 // Module-level map persists across navigations within an app session.
 // Tracks the last channel the user was in per conversation.
@@ -36,6 +36,15 @@ export async function openDirectChatWith(otherUserId: string): Promise<void> {
  */
 export async function openClubChat(clubId: string): Promise<void> {
   const conversationId = await getClubGroupConversationId(clubId);
+  if (!conversationId) return;
+  router.push(`/(tabs)/messages/${conversationId}` as any);
+}
+
+/**
+ * Opens the officer_chat conversation for a given club.
+ */
+export async function openOfficerChat(clubId: string): Promise<void> {
+  const conversationId = await getClubOfficerConversationId(clubId);
   if (!conversationId) return;
   router.push(`/(tabs)/messages/${conversationId}` as any);
 }

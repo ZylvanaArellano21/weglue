@@ -406,3 +406,13 @@ export async function getClubGroupConversationId(clubId: string): Promise<string
     .single();
   return data?.id ?? null;
 }
+
+export async function getClubOfficerConversationId(clubId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('club_id', clubId)
+    .eq('type', 'officer_chat')
+    .single();
+  return data?.id ?? null;
+}

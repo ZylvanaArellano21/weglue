@@ -19,6 +19,7 @@ import { useToast } from '../../../../components/Toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { followUser, unfollowUser } from '../../../../services/followService';
 import type { MemberWithFollowStatus } from '../../../../services/clubTabService';
+import { openDirectChatWith } from '../../../../lib/chatNavigation';
 
 export type MembersParams = {
   clubId: string;
@@ -186,6 +187,7 @@ function MemberRow({
       {/* Message icon */}
       {!isOwnProfile && (
         <TouchableOpacity
+          onPress={() => void openDirectChatWith(member.id)}
           activeOpacity={0.7}
           style={{ padding: 4, marginRight: 4 }}
         >
