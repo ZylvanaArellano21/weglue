@@ -22,6 +22,9 @@ export function useRsvpToEvent() {
     onSuccess: (_data, { userId }) => {
       queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
       queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
+      queryClient.invalidateQueries({ queryKey: ['calendarEvents', userId] });
+      queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers', userId] });
+      queryClient.invalidateQueries({ queryKey: ['calendarDayEvents', userId] });
     },
   });
 }

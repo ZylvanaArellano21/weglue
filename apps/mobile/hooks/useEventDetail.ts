@@ -19,6 +19,9 @@ export function useRsvpMutation(userId: string | undefined, eventId: string | un
       queryClient.invalidateQueries({ queryKey: ['eventDetail', eventId, userId] });
       queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
       queryClient.invalidateQueries({ queryKey: ['eventAttendees', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['calendarEvents', userId] });
+      queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers', userId] });
+      queryClient.invalidateQueries({ queryKey: ['calendarDayEvents', userId] });
     },
   });
 }
