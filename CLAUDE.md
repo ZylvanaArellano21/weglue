@@ -48,3 +48,10 @@ Every single time all tasks in a chat are finished, you MUST triple-check that:
 **If you had to fix something after the triple-check, run the triple-check again from the start.**
 
 Do NOT say "done", "finished", "completed", or any equivalent until a full clean triple-check passes with zero issues. No exceptions.
+
+## 9. Upload all changes to Android AND iOS — PERMANENT MANDATORY RULE
+At the end of every task, after the triple-check passes:
+- If JS/TS-only changes: run `eas update --branch production` from `apps/mobile/`
+- If native changes: run `eas build --profile production --platform all --auto-submit`
+- Report the exact command run and its output
+- A task is NOT complete until both iOS and Android are live. No exceptions.
