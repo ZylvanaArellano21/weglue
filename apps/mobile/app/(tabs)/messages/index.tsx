@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
 import { openChat, openDirectChatWith } from '../../../lib/chatNavigation';
+import { navigateToDiscover } from '../../../lib/discoverNavigation';
 import { useMyChats, useChatSearch } from '../../../hooks/useChats';
 import { ChatListItem } from '../../../components/chat/ChatListItem';
 import { ChatSearchBar } from '../../../components/chat/ChatSearchBar';
@@ -151,7 +152,7 @@ export default function MessagesIndex() {
     if (filter === 'group' && groupChats.length === 0) {
       return (
         <GroupEmptyState
-          onBrowseClubs={() => router.push('/(tabs)/clubs' as any)}
+          onBrowseClubs={() => navigateToDiscover()}
           onNewGroupChat={() => router.push('/(tabs)/messages/add-people' as any)}
         />
       );

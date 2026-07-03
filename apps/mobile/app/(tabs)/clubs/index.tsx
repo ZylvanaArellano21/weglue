@@ -5,6 +5,7 @@ import { useAuthStore } from '@weglue/shared';
 import { useMyClubs } from '../../../hooks/useClubTab';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import type { ClubWithNextEvent } from '../../../services/clubTabService';
+import { navigateToDiscover } from '../../../lib/discoverNavigation';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = (SCREEN_WIDTH - 32 - 10) / 2;
@@ -254,7 +255,7 @@ export default function ClubsTabScreen() {
             {STRINGS.EMPTY_SUBTITLE}
           </Text>
           <TouchableOpacity
-            onPress={() => router.push('/(tabs)/search' as any)}
+            onPress={() => navigateToDiscover()}
             activeOpacity={0.85}
             style={{
               backgroundColor: '#0FA6A6',

@@ -1,6 +1,3 @@
-npm warn Unknown project config "minimum-release-age". This will stop working in the next major version of npm.
-npm warn Unknown project config "confirm-module-purge". This will stop working in the next major version of npm.
-npm warn Unknown project config "public-hoist-pattern". This will stop working in the next major version of npm.
 WARN: config section [inbucket] is deprecated. Please use [local_smtp] instead.
 export type Json =
   | string
@@ -16,33 +13,34 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
+      club_categories: {
+        Row: {
+          category: string
+          club_id: string
+          id: string
+        }
+        Insert: {
+          category: string
+          club_id: string
+          id?: string
+        }
+        Update: {
+          category?: string
+          club_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_categories_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       club_goals: {
         Row: {
           club_id: string
@@ -365,18 +363,21 @@ export type Database = {
           conversation_id: string
           id: string
           joined_at: string
+          last_read_at: string | null
           user_id: string
         }
         Insert: {
           conversation_id: string
           id?: string
           joined_at?: string
+          last_read_at?: string | null
           user_id: string
         }
         Update: {
           conversation_id?: string
           id?: string
           joined_at?: string
+          last_read_at?: string | null
           user_id?: string
         }
         Relationships: [
@@ -1206,6 +1207,33 @@ export type Database = {
         Returns: undefined
       }
       check_club_inactivity: { Args: never; Returns: undefined }
+      get_discovery_clubs: {
+        Args: {
+          p_category?: string
+          p_limit?: number
+          p_offset?: number
+          p_user_id: string
+        }
+        Returns: {
+          avatar_url: string
+          categories: string[]
+          id: string
+          is_member: boolean
+          member_count: number
+          name: string
+        }[]
+      }
+      get_discovery_people: {
+        Args: { p_user_id: string }
+        Returns: {
+          avatar_url: string
+          club_id: string
+          club_name: string
+          full_name: string
+          user_id: string
+          username: string
+        }[]
+      }
       get_or_create_direct_chat: {
         Args: { other_user_id: string }
         Returns: string
@@ -1221,6 +1249,21 @@ export type Database = {
         Returns: boolean
       }
       is_educational_email: { Args: { email: string }; Returns: boolean }
+      mark_conversation_read: {
+        Args: { p_conversation_id: string }
+        Returns: undefined
+      }
+      search_discovery: {
+        Args: { p_query: string; p_user_id: string }
+        Returns: {
+          avatar_url: string
+          id: string
+          is_member: boolean
+          name: string
+          result_type: string
+          sub: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
@@ -1349,9 +1392,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
