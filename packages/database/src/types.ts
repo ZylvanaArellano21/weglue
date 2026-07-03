@@ -1217,8 +1217,14 @@ export type Database = {
         Returns: {
           avatar_url: string
           categories: string[]
+          cover_image_url: string
           id: string
           is_member: boolean
+          meeting_building: string
+          meeting_day: string
+          meeting_room: string
+          meeting_time_end: string
+          meeting_time_start: string
           member_count: number
           name: string
         }[]

@@ -4,9 +4,15 @@ export interface DiscoveryClub {
   id: string;
   name: string;
   avatar_url: string | null;
+  cover_image_url: string | null;
   member_count: number;
   is_member: boolean;
   categories: string[];
+  meeting_day: string | null;
+  meeting_time_start: string | null;
+  meeting_time_end: string | null;
+  meeting_building: string | null;
+  meeting_room: string | null;
 }
 
 export interface DiscoveryPerson {
@@ -65,9 +71,15 @@ export async function getDiscoveryClubs(
     id: row.id,
     name: row.name,
     avatar_url: row.avatar_url ?? null,
+    cover_image_url: row.cover_image_url ?? null,
     member_count: row.member_count ?? 0,
     is_member: row.is_member ?? false,
     categories: row.categories ?? [],
+    meeting_day: row.meeting_day ?? null,
+    meeting_time_start: row.meeting_time_start ?? null,
+    meeting_time_end: row.meeting_time_end ?? null,
+    meeting_building: row.meeting_building ?? null,
+    meeting_room: row.meeting_room ?? null,
   }));
 }
 
