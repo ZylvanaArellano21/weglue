@@ -11,9 +11,16 @@ interface AvatarStackProps {
   size?: number;
   overlap?: number;
   maxCount?: number;
+  borderWidth?: number;
 }
 
-export function AvatarStack({ avatars, size = 28, overlap = 8, maxCount = 4 }: AvatarStackProps) {
+export function AvatarStack({
+  avatars,
+  size = 28,
+  overlap = 8,
+  maxCount = 4,
+  borderWidth = 2,
+}: AvatarStackProps) {
   const displayed = avatars.slice(0, maxCount);
   const totalWidth = displayed.length > 0
     ? size + (displayed.length - 1) * (size - overlap)
@@ -30,7 +37,7 @@ export function AvatarStack({ avatars, size = 28, overlap = 8, maxCount = 4 }: A
             width: size,
             height: size,
             borderRadius: size / 2,
-            borderWidth: 2,
+            borderWidth,
             borderColor: '#FEFCF0',
             overflow: 'hidden',
             backgroundColor: '#E5E7EB',

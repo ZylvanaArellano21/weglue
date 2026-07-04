@@ -26,6 +26,7 @@ import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../l
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
+const MUTED = '#5F5D5D';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatDate(dateStr: string): string {
@@ -496,7 +497,7 @@ export default function ClubProfileScreen() {
         </View>
 
         {/* ── Club name + member count ───────────────────────── */}
-        <View style={{ paddingHorizontal: 16, paddingTop: 46, marginBottom: 16 }}>
+        <View style={{ paddingHorizontal: 16, paddingTop: 46, marginBottom: 12 }}>
           <Text
             style={{ fontSize: 22, fontWeight: '800', color: '#111827', fontFamily: 'Zain_800ExtraBold' }}
           >
@@ -509,14 +510,23 @@ export default function ClubProfileScreen() {
             activeOpacity={0.7}
             hitSlop={{ top: 4, bottom: 4, left: 0, right: 20 }}
           >
-            <Text style={{ fontSize: 14, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginTop: 2 }}>
+            <Text
+              style={{
+                fontSize: 12,
+                color: MUTED,
+                fontFamily: 'Inter_400Regular',
+                marginTop: 2,
+                lineHeight: 20,
+                letterSpacing: 0.38,
+              }}
+            >
               {club.member_count} Members
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* ── Action buttons ─────────────────────────────────── */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+        <View style={{ paddingHorizontal: 16, marginBottom: 14 }}>
           {/* Join / Joined + Chat row */}
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: isOfficer ? 10 : 0 }}>
             <TouchableOpacity
@@ -632,18 +642,25 @@ export default function ClubProfileScreen() {
               alignItems: 'center',
               paddingHorizontal: 16,
               marginBottom: 20,
-              gap: 10,
+              gap: 8,
             }}
           >
             <AvatarStack
               avatars={club.gluemates.map((g) => ({ id: g.id, avatar_url: g.avatar_url }))}
-              size={30}
-              overlap={8}
+              size={28}
+              overlap={12}
+              borderWidth={1.5}
             />
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', fontFamily: 'Inter_600SemiBold', flex: 1 }}>
-              {club.gluemates_count} Gluemates in this club
+            <Text
+              style={{
+                fontSize: 12,
+                color: '#000000',
+                fontFamily: 'Inter_700Bold',
+                letterSpacing: 0.38,
+              }}
+            >
+              {club.gluemates_count} Gluemates
             </Text>
-            <Ionicons name="chevron-forward" size={14} color="#9CA3AF" />
           </TouchableOpacity>
         )}
 
