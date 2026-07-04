@@ -17,6 +17,8 @@ import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
 import { getUserOfficerStatus } from '../../services/clubService';
 import { parsePresetColor } from '../../components/shared/Avatar';
+import { useSidebar } from '../../context/SidebarContext';
+import { SidebarOverlay } from '../../components/sidebar/SidebarOverlay';
 
 type ActiveTab = 'posts' | 'events';
 
@@ -69,10 +71,10 @@ export default function HomeScreen() {
     router.push('/home/new-event');
   };
 
+  const { openSidebar } = useSidebar();
+
   const handleAvatarPress = () => {
-    if (userId) {
-      router.push({ pathname: '/profile/[userId]', params: { userId } });
-    }
+    openSidebar();
   };
 
   const handleNotificationsPress = () => {
@@ -268,6 +270,9 @@ export default function HomeScreen() {
         <View style={{ flex: 1 }}>
           {activeTab === 'events' ? <EventsFeed /> : <PostsFeed />}
         </View>
+
+        {/* Sidebar drawer — opened by avatar tap */}
+        <SidebarOverlay />
       </SafeAreaView>
     </TouchableWithoutFeedback>
   );

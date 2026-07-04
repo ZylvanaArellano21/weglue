@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
+import { SidebarProvider } from "../../context/SidebarContext";
 
 export default function TabsLayout() {
   const { session, isLoading, profile } = useAuthStore();
@@ -32,6 +33,7 @@ export default function TabsLayout() {
   if (!profile?.avatar_url) return <Redirect href="/onboarding/profile-pic" />;
 
   return (
+    <SidebarProvider>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -88,5 +90,6 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    </SidebarProvider>
   );
 }

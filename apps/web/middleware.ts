@@ -11,6 +11,8 @@ const PUBLIC_ROUTES = new Set([
   "/login",
   "/privacy-policy",
   "/terms-of-service",
+  "/terms",
+  "/delete-account",
   "/auth/callback",
 ]);
 

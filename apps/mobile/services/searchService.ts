@@ -124,6 +124,54 @@ export async function searchDiscovery(
   }));
 }
 
+export interface DiscoveryEvent {
+  id: string;
+  title: string;
+  club_name: string;
+  club_id: string;
+  club_avatar_url: string | null;
+  event_date: string;
+  event_time_start: string | null;
+  event_time_end: string | null;
+  location: string | null;
+  cover_image_url: string | null;
+  rsvp_count: number;
+  is_rsvped: boolean;
+  is_saved: boolean;
+  match_count: number;
+}
+
+export async function getDiscoveryEvents(
+  userId: string,
+  page: number,
+  pageSize = 20,
+): Promise<DiscoveryEvent[]> {
+  const { data, error } = await supabase.rpc('get_discovery_events', {
+    p_user_id: userId,
+    p_limit: pageSize,
+    p_offset: page * pageSize,
+  });
+
+  if (error) throw error;
+
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    title: row.title,
+    club_name: row.club_name ?? '',
+    club_id: row.club_id,
+    club_avatar_url: row.club_avatar_url ?? null,
+    event_date: row.event_date,
+    event_time_start: row.event_time_start ?? null,
+    event_time_end: row.event_time_end ?? null,
+    location: row.location ?? null,
+    cover_image_url: row.cover_image_url ?? null,
+    rsvp_count: row.rsvp_count ?? 0,
+    is_rsvped: row.is_rsvped ?? false,
+    is_saved: row.is_saved ?? false,
+    match_count: row.match_count ?? 0,
+  }));
+}
+
 export async function joinClubAndRefetch(
   userId: string,
   clubId: string,

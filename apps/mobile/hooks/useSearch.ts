@@ -2,6 +2,7 @@ import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tansta
 import {
   getDistinctCategories,
   getDiscoveryClubs,
+  getDiscoveryEvents,
   getDiscoveryPeople,
   searchDiscovery,
   joinClubAndRefetch,
@@ -45,6 +46,19 @@ export function useDiscoverySearch(userId: string, query: string) {
     queryFn: () => searchDiscovery(userId, query),
     enabled: !!userId && query.trim().length > 0,
     staleTime: 30 * 1000,
+  });
+}
+
+export function useDiscoveryEvents(userId: string) {
+  return useInfiniteQuery({
+    queryKey: ['discoveryEvents', userId],
+    queryFn: ({ pageParam = 0 }) =>
+      getDiscoveryEvents(userId, pageParam as number, PAGE_SIZE),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE ? allPages.length : undefined,
+    enabled: !!userId,
+    staleTime: 2 * 60 * 1000,
   });
 }
 
