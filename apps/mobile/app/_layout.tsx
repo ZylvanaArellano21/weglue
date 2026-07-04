@@ -102,6 +102,9 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="home" />
         <Stack.Screen name="profile" />
+        <Stack.Screen name="saved-events" />
+        <Stack.Screen name="account-center" />
+        <Stack.Screen name="privacy-center" />
       </Stack>
     </QueryClientProvider>
   );

@@ -143,8 +143,34 @@ export async function getClubMembers(
   viewerId: string,
   search?: string,
   page = 0,
+  gluematesOnly = false,
 ): Promise<ClubMembersResult> {
   const PAGE_SIZE = 20;
+
+  let gluemateIds: string[] | null = null;
+
+  if (gluematesOnly) {
+    const [{ data: following }, { data: followers }] = await Promise.all([
+      supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', viewerId)
+        .eq('status', 'accepted'),
+      supabase
+        .from('follows')
+        .select('follower_id')
+        .eq('following_id', viewerId)
+        .eq('status', 'accepted'),
+    ]);
+
+    const followingSet = new Set((following ?? []).map((f: any) => f.following_id));
+    const followerSet = new Set((followers ?? []).map((f: any) => f.follower_id));
+    gluemateIds = [...followingSet].filter((id) => followerSet.has(id));
+
+    if (gluemateIds.length === 0) {
+      return { members: [], total: 0 };
+    }
+  }
 
   let query = supabase
     .from('club_members')
@@ -154,6 +180,10 @@ export async function getClubMembers(
     .eq('club_id', clubId)
     .order('joined_at', { ascending: true })
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+
+  if (gluemateIds) {
+    query = query.in('user_id', gluemateIds);
+  }
 
   if (search) {
     query = query.ilike('profiles.username', `%${search}%`);
@@ -166,7 +196,10 @@ export async function getClubMembers(
   let followingSet = new Set<string>();
   let followersSet = new Set<string>();
 
-  if (memberIds.length > 0) {
+  if (gluemateIds) {
+    followingSet = new Set(memberIds);
+    followersSet = new Set(memberIds);
+  } else if (memberIds.length > 0) {
     const [{ data: following }, { data: followers }] = await Promise.all([
       supabase
         .from('follows')

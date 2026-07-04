@@ -6,10 +6,11 @@ export function useClubMembers(
   viewerId: string | undefined,
   search?: string,
   page = 0,
+  gluematesOnly = false,
 ) {
   return useQuery({
-    queryKey: ['clubMembers', clubId, viewerId, search, page],
-    queryFn: () => getClubMembers(clubId!, viewerId!, search, page),
+    queryKey: ['clubMembers', clubId, viewerId, search, page, gluematesOnly],
+    queryFn: () => getClubMembers(clubId!, viewerId!, search, page, gluematesOnly),
     enabled: !!clubId && !!viewerId,
     staleTime: 30 * 1000,
   });

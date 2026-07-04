@@ -502,9 +502,17 @@ export default function ClubProfileScreen() {
           >
             {club.name}
           </Text>
-          <Text style={{ fontSize: 14, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginTop: 2 }}>
-            {club.member_count} Members
-          </Text>
+          <TouchableOpacity
+            onPress={() =>
+              router.push({ pathname: '/(tabs)/clubs/[clubId]/members', params: { clubId: clubId! } })
+            }
+            activeOpacity={0.7}
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 20 }}
+          >
+            <Text style={{ fontSize: 14, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginTop: 2 }}>
+              {club.member_count} Members
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* ── Action buttons ─────────────────────────────────── */}
@@ -614,7 +622,10 @@ export default function ClubProfileScreen() {
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={() =>
-              router.push({ pathname: '/(tabs)/clubs/[clubId]/members', params: { clubId: clubId! } })
+              router.push({
+                pathname: '/(tabs)/clubs/[clubId]/members',
+                params: { clubId: clubId!, filter: 'gluemates' },
+              })
             }
             style={{
               flexDirection: 'row',
@@ -819,31 +830,9 @@ export default function ClubProfileScreen() {
         {/* ── Officers ───────────────────────────────────────── */}
         {club.officers.length > 0 && (
           <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 10,
-              }}
-            >
-              <Text style={{ fontSize: 17, fontWeight: '700', color: '#111827', fontFamily: 'Zain_700Bold' }}>
-                Officers
-              </Text>
-              <TouchableOpacity
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/clubs/[clubId]/members',
-                    params: { clubId: clubId! },
-                  })
-                }
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: 13, color: '#0FA6A6', fontFamily: 'Inter_500Medium' }}>
-                  All members
-                </Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: '#111827', fontFamily: 'Zain_700Bold', marginBottom: 10 }}>
+              Officers
+            </Text>
             {club.officers.map((officer) => (
               <OfficerRow key={officer.id} officer={officer} />
             ))}

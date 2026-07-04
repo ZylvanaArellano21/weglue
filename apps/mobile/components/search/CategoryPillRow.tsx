@@ -19,6 +19,8 @@ export function CategoryPillRow({ categories, selected, onSelect }: Props) {
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.row}
+      keyboardShouldPersistTaps="handled"
+      accessibilityRole="tablist"
     >
       {pills.map(({ key, label, value }) => (
         <CategoryPill
@@ -34,8 +36,10 @@ export function CategoryPillRow({ categories, selected, onSelect }: Props) {
 
 const styles = StyleSheet.create({
   row: {
-    paddingHorizontal: searchSizes.screenPaddingH,
-    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: searchSizes.categoryPillGap,
+    minHeight: searchSizes.categoryPillHeight,
     paddingVertical: 2,
   },
 });

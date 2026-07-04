@@ -54,6 +54,7 @@ import { useSaveEventMutation } from '../../../hooks/useEventDetail';
 import { Avatar } from '../../../components/shared/Avatar';
 import { AvatarStack } from '../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
+import { DotNavigator } from '../../../components/calendar/DotNavigator';
 import { useToast } from '../../../components/Toast';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -181,41 +182,22 @@ export default function CalendarEventDetailScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
       {ToastComponent}
 
+      <DotNavigator
+        currentIndex={currentIndex}
+        totalEvents={totalEvents}
+        onDotPress={handleDotPress}
+      />
+
       {/* Back arrow — always goes to Calendar tab */}
-      <View style={{ paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center' }}>
+      <View style={{ paddingHorizontal: 16, paddingVertical: 4, flexDirection: 'row', alignItems: 'center' }}>
         <TouchableOpacity
           onPress={handleBack}
           activeOpacity={0.7}
           hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
+          accessibilityLabel="Back to calendar"
         >
           <Ionicons name="chevron-back" size={26} color="#111827" />
         </TouchableOpacity>
-        <View style={{ flex: 1 }} />
-
-        {/* ─────────────────────────────────────────────────────────────────
-            DOT NAVIGATOR PLACEHOLDER — CURSOR SCOPE (Step 2)
-            ─────────────────────────────────────────────────────────────────
-            Replace the text below with:
-              {totalEvents > 1 && (
-                <DotNavigator
-                  currentIndex={currentIndex}
-                  totalEvents={totalEvents}
-                  onDotPress={handleDotPress}
-                />
-              )}
-
-            The swipe-down gesture on the ScrollView below should call
-            handleSwipeDown() — wire it to a PanResponder or react-native-gesture-handler
-            onHandlerStateChange checking the downward direction.
-
-            handleSwipeDown() increments currentIndex, capped at totalEvents-1.
-            Swiping past the last event does nothing (no wraparound).
-            ───────────────────────────────────────────────────────────────── */}
-        {totalEvents > 1 && (
-          <Text style={{ fontSize: 12, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
-            {currentIndex + 1} / {totalEvents}
-          </Text>
-        )}
       </View>
 
       {isLoading ? (

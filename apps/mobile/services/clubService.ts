@@ -188,21 +188,30 @@ export async function getClubProfile(
 }
 
 async function getClubGluemates(clubId: string, userId: string): Promise<ClubGluemate[]> {
-  const { data: following } = await supabase
-    .from('follows')
-    .select('following_id')
-    .eq('follower_id', userId)
-    .eq('status', 'accepted');
+  const [{ data: following }, { data: followers }] = await Promise.all([
+    supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', userId)
+      .eq('status', 'accepted'),
+    supabase
+      .from('follows')
+      .select('follower_id')
+      .eq('following_id', userId)
+      .eq('status', 'accepted'),
+  ]);
 
-  if (!following || following.length === 0) return [];
+  const followingIds = new Set((following ?? []).map((r: any) => r.following_id));
+  const followerIds = new Set((followers ?? []).map((r: any) => r.follower_id));
+  const mutualIds = [...followingIds].filter((id) => followerIds.has(id));
 
-  const followingIds = following.map((r: any) => r.following_id);
+  if (mutualIds.length === 0) return [];
 
   const { data: members } = await supabase
     .from('club_members')
     .select('user_id, profiles!inner(id, username, avatar_url)')
     .eq('club_id', clubId)
-    .in('user_id', followingIds);
+    .in('user_id', mutualIds);
 
   return ((members ?? []) as any[]).map((m) => ({
     id: m.profiles.id,

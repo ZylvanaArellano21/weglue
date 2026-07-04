@@ -1,4 +1,4 @@
-import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Pressable, Text, StyleSheet } from 'react-native';
 import { searchColors, searchShadow, searchSizes, searchTypography } from './searchTheme';
 
 interface Props {
@@ -9,29 +9,34 @@ interface Props {
 
 export function CategoryPill({ label, active, onPress }: Props) {
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
-      activeOpacity={0.85}
-      style={[styles.pill, active ? styles.pillActive : styles.pillInactive]}
-      accessibilityRole="button"
+      style={({ pressed }) => [
+        styles.pill,
+        active ? styles.pillActive : styles.pillInactive,
+        pressed && styles.pillPressed,
+      ]}
+      accessibilityRole="tab"
       accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
     >
       <Text
         style={[
           searchTypography.categoryPill,
-          { color: active ? searchColors.cream : searchColors.teal },
+          active ? styles.labelActive : styles.labelInactive,
         ]}
+        numberOfLines={1}
       >
         {label}
       </Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   pill: {
     height: searchSizes.categoryPillHeight,
-    paddingHorizontal: 12,
+    paddingHorizontal: searchSizes.categoryPillPaddingH,
     borderRadius: searchSizes.categoryPillRadius,
     alignItems: 'center',
     justifyContent: 'center',
@@ -42,5 +47,14 @@ const styles = StyleSheet.create({
   },
   pillInactive: {
     backgroundColor: searchColors.cream,
+  },
+  pillPressed: {
+    opacity: 0.85,
+  },
+  labelActive: {
+    color: searchColors.cream,
+  },
+  labelInactive: {
+    color: searchColors.teal,
   },
 });

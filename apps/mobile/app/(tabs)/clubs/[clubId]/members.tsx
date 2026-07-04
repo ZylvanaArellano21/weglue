@@ -23,6 +23,7 @@ import { openDirectChatWith } from '../../../../lib/chatNavigation';
 
 export type MembersParams = {
   clubId: string;
+  filter?: string;
 };
 
 // ─── Follow Button ────────────────────────────────────────────────────────────
@@ -210,7 +211,8 @@ function MemberRow({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ClubMembersScreen() {
-  const { clubId } = useLocalSearchParams<MembersParams>();
+  const { clubId, filter } = useLocalSearchParams<MembersParams>();
+  const gluematesOnly = filter === 'gluemates';
   const { session } = useAuthStore();
   const userId = session?.user.id ?? '';
   const router = useRouter();
@@ -220,7 +222,13 @@ export default function ClubMembersScreen() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
 
-  const { data, isLoading, refetch, isFetching } = useClubMembers(clubId, userId, search, page);
+  const { data, isLoading, refetch, isFetching } = useClubMembers(
+    clubId,
+    userId,
+    search,
+    page,
+    gluematesOnly,
+  );
 
   const handleFollowChange = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['clubMembers', clubId, userId] });
@@ -260,11 +268,11 @@ export default function ClubMembersScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', fontFamily: 'Zain_700Bold' }}>
-            Members
+            {gluematesOnly ? 'Gluemates' : 'Members'}
           </Text>
           {total > 0 && (
             <Text style={{ fontSize: 13, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
-              {total} member{total !== 1 ? 's' : ''}
+              {total} {gluematesOnly ? 'gluemate' : 'member'}{total !== 1 ? 's' : ''}
             </Text>
           )}
         </View>
@@ -363,7 +371,11 @@ export default function ClubMembersScreen() {
             <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60, gap: 10 }}>
               <Ionicons name="people-outline" size={40} color="#D1D5DB" />
               <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Inter_400Regular' }}>
-                {search ? 'No members found for that search.' : 'No members yet.'}
+                {search
+                  ? `No ${gluematesOnly ? 'gluemates' : 'members'} found for that search.`
+                  : gluematesOnly
+                    ? 'No gluemates in this club yet.'
+                    : 'No members yet.'}
               </Text>
             </View>
           }

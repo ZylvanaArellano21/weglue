@@ -50,6 +50,8 @@ export const searchSizes = {
   gridGap: 18,
   categoryPillHeight: 24,
   categoryPillRadius: 40,
+  categoryPillGap: 10,
+  categoryPillPaddingH: 12,
   clubCardRadius: 10,
   clubImageAspect: 94 / 170,
   joinBtnHeight: 18,
