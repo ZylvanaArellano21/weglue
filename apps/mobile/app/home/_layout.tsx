@@ -8,6 +8,8 @@ export default function HomeLayout() {
       <Stack.Screen name="new-event" />
       <Stack.Screen name="new-post" />
       <Stack.Screen name="notifications" />
+      <Stack.Screen name="terms" />
+      <Stack.Screen name="help" />
     </Stack>
   );
 }

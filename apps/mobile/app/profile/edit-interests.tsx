@@ -1,35 +1,19 @@
-/**
- * Edit Interests Screen
- *
- * DATA LAYER — Cursor (Step 2) renders the UI. Do not change the hooks below.
- *
- * This is a NEW screen instance, NOT the onboarding/interests.tsx screen.
- * Onboarding is tightly coupled to useOnboardingStore — do NOT reuse it here.
- *
- * Props:
- *   selectedInterests   string[]           — controlled selection (starts pre-filled from profile)
- *   allInterests        string[]           — full canonical interest list (see below)
- *   onToggle            (interest: string) => void
- *   onSave              () => void         — calls UPDATE (DELETE all + INSERT new), NOT UPSERT-append
- *   isSaving            boolean
- *   saveError           Error | null
- *
- * Canonical interest list (exact strings — must match club_categories.category values):
- *   "Art & Culture", "Community Service", "Crafts", "Environment",
- *   "Finance & Business", "Health & Wellness", "Numbers & Economics",
- *   "Science & Technology", "Social & Nightlife", "Sports & Athletics",
- *   "Strategy and Critical Thinking", "Travel & Adventure"
- *
- * On save success: pop navigation back to own profile.
- * On save: invalidates ['discoveryClubs', userId] and ['homeEventsFeed', userId] automatically (handled by hook).
- */
-
-import { useState } from 'react';
-import { Text } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
 import { useOwnProfile, useUpdateInterests } from '../../hooks/useOwnProfile';
+import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
+import { SelectionChipGrid } from '../../components/profile/SelectionChipGrid';
+import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
 
 const ALL_INTERESTS = [
   'Art & Culture',
@@ -50,9 +34,14 @@ export default function EditInterestsScreen() {
   const { session } = useAuthStore();
   const userId = session?.user.id;
   const router = useRouter();
+  const { continueTo } = useLocalSearchParams<{ continueTo?: string }>();
 
   const { data: profile } = useOwnProfile(userId);
   const [selected, setSelected] = useState<string[]>(profile?.interests ?? []);
+
+  useEffect(() => {
+    if (profile?.interests) setSelected(profile.interests);
+  }, [profile?.interests]);
 
   const updateInterests = useUpdateInterests(userId);
 
@@ -64,14 +53,96 @@ export default function EditInterestsScreen() {
 
   const onSave = async () => {
     await updateInterests.mutateAsync(selected);
-    router.back();
+    if (continueTo === 'activities') {
+      router.replace('/profile/edit-activities' as any);
+    } else {
+      router.back();
+    }
   };
 
-  // ─── Cursor: render interest selection grid UI here ───────────────────────
-  // Variables: selected, ALL_INTERESTS, onToggle, onSave, updateInterests.isPending
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#FDFBEF' }}>
-      <Text style={{ padding: 20, fontSize: 16, color: '#111' }}>Edit Interests</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ProfileScreenHeader title="Edit Interests" onBack={() => router.back()} />
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Text style={styles.heading}>What are your interests?</Text>
+        <Text style={styles.subheading}>
+          Select everything that excites you. Changes update your personalized feed.
+        </Text>
+
+        <SelectionChipGrid items={ALL_INTERESTS} selected={selected} onToggle={onToggle} />
+
+        {updateInterests.error && (
+          <Text style={styles.error}>Could not save interests. Please try again.</Text>
+        )}
+
+        <View style={{ height: 100 }} />
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={[styles.saveBtn, updateInterests.isPending && styles.saveBtnDisabled]}
+          onPress={onSave}
+          disabled={updateInterests.isPending}
+          activeOpacity={0.85}
+        >
+          {updateInterests.isPending ? (
+            <ActivityIndicator color={profileColors.bg} />
+          ) : (
+            <Text style={styles.saveBtnText}>
+              {continueTo === 'activities' ? 'Next' : 'Save'}
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: profileColors.bg },
+  scroll: { paddingHorizontal: 24, paddingTop: 16 },
+  heading: {
+    fontFamily: profileFonts.displayBold,
+    fontSize: 24,
+    color: profileColors.textDark,
+    marginBottom: 8,
+  },
+  subheading: {
+    fontFamily: profileFonts.regular,
+    fontSize: 14,
+    color: profileColors.textMuted,
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  error: {
+    fontFamily: profileFonts.regular,
+    fontSize: 13,
+    color: profileColors.alertRed,
+    marginTop: 16,
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 24,
+    paddingBottom: 36,
+    paddingTop: 12,
+    backgroundColor: profileColors.bg,
+  },
+  saveBtn: {
+    height: 52,
+    backgroundColor: profileColors.teal,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...profileShadow,
+  },
+  saveBtnDisabled: { opacity: 0.6 },
+  saveBtnText: {
+    fontFamily: profileFonts.semiBold,
+    fontSize: 16,
+    color: profileColors.bg,
+  },
+});
