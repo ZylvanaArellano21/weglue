@@ -121,6 +121,53 @@ export async function getHomePostsFeed(
   return posts.map(({ _sort_key: _, ...rest }) => rest);
 }
 
+export async function getPostById(postId: string, userId: string): Promise<FeedPost | null> {
+  const { data: p, error } = await supabase
+    .from('posts')
+    .select(`
+      id, image_url, caption, created_at, author_id, club_id,
+      profiles!inner(id, username, avatar_url),
+      clubs(id, name),
+      user_privacy(is_private)
+    `)
+    .eq('id', postId)
+    .single();
+
+  if (error || !p) return null;
+
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }] = await Promise.all([
+    supabase.from('post_likes').select('user_id').eq('post_id', postId),
+    supabase.from('post_comments').select('id').eq('post_id', postId),
+    supabase
+      .from('follows')
+      .select('id')
+      .eq('follower_id', userId)
+      .eq('following_id', (p as any).author_id)
+      .eq('status', 'accepted')
+      .maybeSingle(),
+  ]);
+
+  const likes = (likesRows ?? []) as any[];
+
+  return {
+    id: p.id,
+    image_url: p.image_url,
+    caption: p.caption,
+    created_at: p.created_at,
+    author: {
+      id: (p as any).profiles.id,
+      username: (p as any).profiles.username,
+      avatar_url: (p as any).profiles.avatar_url,
+      is_following: !!followRow,
+      profile_is_private: (p as any).user_privacy?.is_private ?? false,
+    },
+    tagged_club: (p as any).club_id ? { id: (p as any).clubs.id, name: (p as any).clubs.name } : null,
+    likes_count: likes.length,
+    comments_count: (commentsRows ?? []).length,
+    user_has_liked: likes.some((l) => l.user_id === userId),
+  };
+}
+
 async function compressImage(uri: string): Promise<string> {
   const result = await ImageManipulator.manipulateAsync(
     uri,

@@ -60,6 +60,8 @@ export async function getAllClubs(): Promise<UserClub[]> {
 export interface ClubPhoto {
   id: string;
   url: string;
+  source: 'officer_upload' | 'tagged_post';
+  post_id: string | null;
 }
 
 export interface ClubGluemate {
@@ -137,7 +139,7 @@ export async function getClubProfile(
       .limit(5),
     supabase
       .from('club_photos')
-      .select('id, url')
+      .select('id, url, source, post_id')
       .eq('club_id', clubId)
       .order('created_at', { ascending: false })
       .limit(9),

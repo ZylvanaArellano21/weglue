@@ -1,5 +1,5 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getHomePostsFeed } from '../services/postService';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getHomePostsFeed, getPostById } from '../services/postService';
 import { supabase } from '../lib/supabase';
 
 export function useHomePostsFeed(userId: string | undefined) {
@@ -24,8 +24,18 @@ export function useLikePost() {
         await supabase.from('post_likes').upsert({ user_id: userId, post_id: postId }, { onConflict: 'post_id,user_id' });
       }
     },
-    onSuccess: (_data, { userId }) => {
+    onSuccess: (_data, { userId, postId }) => {
       queryClient.invalidateQueries({ queryKey: ['homePostsFeed', userId] });
+      queryClient.invalidateQueries({ queryKey: ['postDetail', postId] });
     },
+  });
+}
+
+export function usePostDetail(postId: string | undefined, userId: string | undefined) {
+  return useQuery({
+    queryKey: ['postDetail', postId, userId],
+    queryFn: () => getPostById(postId!, userId!),
+    enabled: !!postId && !!userId,
+    staleTime: 60 * 1000,
   });
 }

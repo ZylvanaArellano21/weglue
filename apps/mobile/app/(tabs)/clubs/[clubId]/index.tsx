@@ -25,8 +25,21 @@ import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../serv
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
+const CREAM = '#FEFCF0';
+const TEAL = '#0FA6A6';
+const ALERT_RED = '#F02719';
 const MUTED = '#5F5D5D';
+const INK = '#000000';
+
+const CARD_SHADOW = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.25,
+  shadowRadius: 5,
+  elevation: 3,
+} as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatDate(dateStr: string): string {
@@ -48,11 +61,20 @@ function formatMeetingTime(start: string | null, end: string | null): string {
 }
 
 // ─── Mini Calendar ────────────────────────────────────────────────────────────
-function MiniCalendar({ eventDates }: { eventDates: string[] }) {
+function MiniCalendar({
+  events,
+  onDayPress,
+}: {
+  events: ClubUpcomingEvent[];
+  onDayPress: (eventId: string) => void;
+}) {
   const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
 
-  const eventDateSet = new Set(eventDates);
+  const eventIdByDate = new Map<string, string>();
+  for (const e of events) {
+    if (!eventIdByDate.has(e.event_date)) eventIdByDate.set(e.event_date, e.id);
+  }
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
 
@@ -83,26 +105,22 @@ function MiniCalendar({ eventDates }: { eventDates: string[] }) {
   return (
     <View
       style={{
-        backgroundColor: '#fff',
-        borderRadius: 14,
+        backgroundColor: CREAM,
+        borderRadius: 10,
         padding: 14,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        ...CARD_SHADOW,
       }}
     >
       {/* Month nav */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <TouchableOpacity onPress={prevMonth} activeOpacity={0.7} hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}>
-          <Ionicons name="chevron-back" size={18} color="#374151" />
+          <Ionicons name="chevron-back" size={18} color={MUTED} />
         </TouchableOpacity>
-        <Text style={{ fontSize: 13, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
           {monthName}
         </Text>
         <TouchableOpacity onPress={nextMonth} activeOpacity={0.7} hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}>
-          <Ionicons name="chevron-forward" size={18} color="#374151" />
+          <Ionicons name="chevron-forward" size={18} color={MUTED} />
         </TouchableOpacity>
       </View>
 
@@ -115,7 +133,7 @@ function MiniCalendar({ eventDates }: { eventDates: string[] }) {
               flex: 1,
               textAlign: 'center',
               fontSize: 10,
-              color: '#9CA3AF',
+              color: MUTED,
               fontFamily: 'Inter_500Medium',
             }}
           >
@@ -132,10 +150,17 @@ function MiniCalendar({ eventDates }: { eventDates: string[] }) {
 
             const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const isToday = dateStr === todayStr;
-            const hasEvent = eventDateSet.has(dateStr);
+            const eventId = eventIdByDate.get(dateStr);
+            const hasEvent = !!eventId;
 
             return (
-              <View key={col} style={{ flex: 1, alignItems: 'center', paddingVertical: 2 }}>
+              <TouchableOpacity
+                key={col}
+                disabled={!hasEvent}
+                onPress={() => eventId && onDayPress(eventId)}
+                activeOpacity={0.7}
+                style={{ flex: 1, alignItems: 'center', paddingVertical: 2 }}
+              >
                 <View
                   style={{
                     width: 26,
@@ -143,13 +168,13 @@ function MiniCalendar({ eventDates }: { eventDates: string[] }) {
                     borderRadius: 13,
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: isToday ? '#0FA6A6' : 'transparent',
+                    backgroundColor: isToday ? TEAL : 'transparent',
                   }}
                 >
                   <Text
                     style={{
                       fontSize: 11,
-                      color: isToday ? '#fff' : '#374151',
+                      color: isToday ? CREAM : INK,
                       fontFamily: isToday ? 'Inter_700Bold' : 'Inter_400Regular',
                     }}
                   >
@@ -162,12 +187,12 @@ function MiniCalendar({ eventDates }: { eventDates: string[] }) {
                       width: 4,
                       height: 4,
                       borderRadius: 2,
-                      backgroundColor: '#0FA6A6',
+                      backgroundColor: TEAL,
                       marginTop: 1,
                     }}
                   />
                 )}
-              </View>
+              </TouchableOpacity>
             );
           })}
         </View>
@@ -180,6 +205,7 @@ function MiniCalendar({ eventDates }: { eventDates: string[] }) {
 function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId: string }) {
   const router = useRouter();
   const isRestricted = event.visibility === 'members' || event.visibility === 'specific';
+  const locationText = [event.building, event.room, event.location].filter(Boolean).join(', ');
 
   return (
     <TouchableOpacity
@@ -193,15 +219,11 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#fff',
-        borderRadius: 12,
+        backgroundColor: CREAM,
+        borderRadius: 10,
         marginBottom: 10,
         overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        ...CARD_SHADOW,
       }}
     >
       <View style={{ width: 70, height: 70, backgroundColor: '#E5E7EB' }}>
@@ -209,7 +231,7 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
           <Image source={{ uri: event.cover_image_url }} style={{ width: 70, height: 70 }} resizeMode="cover" />
         ) : (
           <View style={{ width: 70, height: 70, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' }}>
-            <Ionicons name="calendar-outline" size={24} color="#9CA3AF" />
+            <Ionicons name="calendar-outline" size={24} color={MUTED} />
           </View>
         )}
         {isRestricted && (
@@ -218,13 +240,13 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
               position: 'absolute',
               top: 4,
               left: 4,
-              backgroundColor: '#F02719',
+              backgroundColor: ALERT_RED,
               borderRadius: 10,
               paddingHorizontal: 6,
               paddingVertical: 3,
             }}
           >
-            <Text style={{ fontSize: 10, color: '#fff', fontFamily: 'Inter_700Bold' }}>
+            <Text style={{ fontSize: 10, color: CREAM, fontFamily: 'Inter_700Bold' }}>
               Members Only
             </Text>
           </View>
@@ -232,33 +254,32 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
       </View>
       <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 10 }}>
         <Text
-          style={{ fontSize: 14, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold', marginBottom: 4 }}
+          style={{ fontSize: 13, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold', marginBottom: 4 }}
           numberOfLines={1}
         >
           {event.emoji ? `${event.emoji} ` : ''}{event.title}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-          <Ionicons name="calendar-outline" size={11} color="#9CA3AF" />
-          <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
-            {formatDate(event.event_date)}
-          </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginBottom: 2 }}>
+          <Ionicons name="calendar-outline" size={11} color={MUTED} style={{ marginTop: 1 }} />
+          <View>
+            <Text style={{ fontSize: 11, color: MUTED, fontFamily: 'Inter_500Medium' }}>
+              {formatDate(event.event_date)}
+            </Text>
+            <Text style={{ fontSize: 11, color: MUTED, fontFamily: 'Inter_500Medium' }}>
+              {formatTime(event.start_time)} - {formatTime(event.end_time)}
+            </Text>
+          </View>
         </View>
-        <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Inter_400Regular', paddingLeft: 15, marginBottom: 2 }}>
-          {formatTime(event.start_time)} - {formatTime(event.end_time)}
-        </Text>
-        {(() => {
-          const locationText = [event.building, event.room, event.location].filter(Boolean).join(', ');
-          return locationText ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Ionicons name="location-outline" size={11} color="#9CA3AF" />
-              <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Inter_400Regular' }} numberOfLines={1}>
-                {locationText}
-              </Text>
-            </View>
-          ) : null;
-        })()}
+        {locationText ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Ionicons name="location-outline" size={11} color={MUTED} />
+            <Text style={{ fontSize: 11, color: MUTED, fontFamily: 'Inter_500Medium' }} numberOfLines={1}>
+              {locationText}
+            </Text>
+          </View>
+        ) : null}
       </View>
-      <Ionicons name="chevron-forward" size={18} color="#9CA3AF" style={{ marginRight: 12 }} />
+      <Ionicons name="chevron-forward" size={18} color={MUTED} style={{ marginRight: 12 }} />
     </TouchableOpacity>
   );
 }
@@ -288,11 +309,11 @@ function OfficerRow({ officer }: { officer: ClubOfficer }) {
           }}
           activeOpacity={0.7}
         >
-          <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
             {officer.display_name}
           </Text>
         </TouchableOpacity>
-        <Text style={{ fontSize: 13, color: '#0FA6A6', fontFamily: 'Inter_500Medium' }}>
+        <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_500Medium' }}>
           {officer.role_title}
         </Text>
       </View>
@@ -303,11 +324,11 @@ function OfficerRow({ officer }: { officer: ClubOfficer }) {
           paddingHorizontal: 14,
           paddingVertical: 8,
           borderRadius: 20,
-          borderWidth: 1.5,
-          borderColor: '#D1D5DB',
+          backgroundColor: CREAM,
+          ...CARD_SHADOW,
         }}
       >
-        <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_500Medium' }}>Message</Text>
+        <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_600SemiBold' }}>Message</Text>
       </TouchableOpacity>
     </View>
   );
@@ -362,9 +383,9 @@ export default function ClubProfileScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
         <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={26} color="#111827" />
+          <Ionicons name="chevron-back" size={26} color={INK} />
         </TouchableOpacity>
         <View style={{ padding: 16, gap: 16 }}>
           <Skeleton width="100%" height={200} borderRadius={0} />
@@ -380,12 +401,12 @@ export default function ClubProfileScreen() {
 
   if (!club) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
         <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={26} color="#111827" />
+          <Ionicons name="chevron-back" size={26} color={INK} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#6B7280', fontSize: 15, fontFamily: 'Inter_400Regular' }}>
+          <Text style={{ color: MUTED, fontSize: 15, fontFamily: 'Inter_400Regular' }}>
             Club not found.
           </Text>
         </View>
@@ -394,16 +415,34 @@ export default function ClubProfileScreen() {
   }
 
   const eventDates = club.upcoming_events.map((e) => e.event_date);
+  const directUploadPhotos = club.photos.filter((p) => p.source !== 'tagged_post');
+
+  function handlePhotoPress(photo: ClubPhoto) {
+    if (photo.source === 'tagged_post' && photo.post_id) {
+      router.push({ pathname: '/post/[postId]', params: { postId: photo.post_id } });
+      return;
+    }
+    const idx = directUploadPhotos.findIndex((p) => p.id === photo.id);
+    setSelectedPhotoIndex(idx >= 0 ? idx : 0);
+    setPhotoViewerVisible(true);
+  }
+
+  function handleCalendarDayPress(eventId: string) {
+    router.push({
+      pathname: '/(tabs)/clubs/[clubId]/events/[eventId]',
+      params: { clubId: clubId!, eventId },
+    });
+  }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
       {ToastComponent}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor="#0FA6A6" />
+          <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor={TEAL} />
         }
       >
         {/* ── Banner + back arrow ───────────────────────────── */}
@@ -431,7 +470,7 @@ export default function ClubProfileScreen() {
               padding: 8,
             }}
           >
-            <Ionicons name="chevron-back" size={22} color="#111827" />
+            <Ionicons name="chevron-back" size={22} color={INK} />
           </TouchableOpacity>
 
           {/* Report ⋯ button */}
@@ -450,7 +489,7 @@ export default function ClubProfileScreen() {
               padding: 8,
             }}
           >
-            <Ionicons name="ellipsis-horizontal" size={20} color="#111827" />
+            <Ionicons name="ellipsis-horizontal" size={20} color={INK} />
           </TouchableOpacity>
 
           {/* Officer edit button */}
@@ -467,7 +506,7 @@ export default function ClubProfileScreen() {
                 position: 'absolute',
                 top: 12,
                 right: 12,
-                backgroundColor: '#0FA6A6',
+                backgroundColor: TEAL,
                 borderRadius: 20,
                 paddingHorizontal: 14,
                 paddingVertical: 8,
@@ -476,8 +515,8 @@ export default function ClubProfileScreen() {
                 gap: 5,
               }}
             >
-              <Ionicons name="pencil" size={14} color="#fff" />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: '#fff', fontFamily: 'Inter_600SemiBold' }}>
+              <Ionicons name="pencil" size={14} color={CREAM} />
+              <Text style={{ fontSize: 13, fontWeight: '600', color: CREAM, fontFamily: 'Inter_600SemiBold' }}>
                 Edit
               </Text>
             </TouchableOpacity>
@@ -490,7 +529,7 @@ export default function ClubProfileScreen() {
               bottom: -34,
               left: 16,
               borderWidth: 3,
-              borderColor: '#FEFCF0',
+              borderColor: CREAM,
               borderRadius: 38,
               overflow: 'hidden',
             }}
@@ -502,7 +541,7 @@ export default function ClubProfileScreen() {
         {/* ── Club name + member count ───────────────────────── */}
         <View style={{ paddingHorizontal: 16, paddingTop: 46, marginBottom: 12 }}>
           <Text
-            style={{ fontSize: 22, fontWeight: '800', color: '#111827', fontFamily: 'Zain_800ExtraBold' }}
+            style={{ fontSize: 22, fontWeight: '800', color: INK, fontFamily: 'Zain_800ExtraBold' }}
           >
             {club.name}
           </Text>
@@ -540,21 +579,21 @@ export default function ClubProfileScreen() {
                 flex: 1,
                 paddingVertical: 12,
                 borderRadius: 25,
-                backgroundColor: club.is_member ? 'transparent' : '#0FA6A6',
+                backgroundColor: club.is_member ? 'transparent' : TEAL,
                 borderWidth: club.is_member ? 1.5 : 0,
-                borderColor: '#0FA6A6',
+                borderColor: TEAL,
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
               {joining || leaving ? (
-                <ActivityIndicator size="small" color={club.is_member ? '#0FA6A6' : '#fff'} />
+                <ActivityIndicator size="small" color={club.is_member ? TEAL : CREAM} />
               ) : (
                 <Text
                   style={{
                     fontSize: 15,
                     fontWeight: '600',
-                    color: club.is_member ? '#0FA6A6' : '#fff',
+                    color: club.is_member ? TEAL : CREAM,
                     fontFamily: 'Inter_600SemiBold',
                   }}
                 >
@@ -573,15 +612,15 @@ export default function ClubProfileScreen() {
                   borderRadius: 25,
                   backgroundColor: 'transparent',
                   borderWidth: 1.5,
-                  borderColor: '#0FA6A6',
+                  borderColor: TEAL,
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 6,
                 }}
               >
-                <Ionicons name="chatbubble-outline" size={16} color="#0FA6A6" />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: '#0FA6A6', fontFamily: 'Inter_600SemiBold' }}>
+                <Ionicons name="chatbubble-outline" size={16} color={TEAL} />
+                <Text style={{ fontSize: 15, fontWeight: '600', color: TEAL, fontFamily: 'Inter_600SemiBold' }}>
                   Chat
                 </Text>
               </TouchableOpacity>
@@ -597,15 +636,15 @@ export default function ClubProfileScreen() {
                 paddingVertical: 12,
                 borderRadius: 25,
                 borderWidth: 1.5,
-                borderColor: '#0FA6A6',
+                borderColor: TEAL,
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 8,
               }}
             >
-              <Ionicons name="star-outline" size={16} color="#0FA6A6" />
-              <Text style={{ fontSize: 15, fontWeight: '600', color: '#0FA6A6', fontFamily: 'Inter_600SemiBold' }}>
+              <Ionicons name="star-outline" size={16} color={TEAL} />
+              <Text style={{ fontSize: 15, fontWeight: '600', color: TEAL, fontFamily: 'Inter_600SemiBold' }}>
                 Admin Chat
               </Text>
             </TouchableOpacity>
@@ -623,7 +662,7 @@ export default function ClubProfileScreen() {
                 borderColor: 'rgba(15,166,166,0.2)',
               }}
             >
-              <Text style={{ fontSize: 13, color: '#0FA6A6', textAlign: 'center', fontFamily: 'Inter_500Medium' }}>
+              <Text style={{ fontSize: 13, color: TEAL, textAlign: 'center', fontFamily: 'Inter_500Medium' }}>
                 Join this club to chat and see upcoming events
               </Text>
             </View>
@@ -657,7 +696,7 @@ export default function ClubProfileScreen() {
             <Text
               style={{
                 fontSize: 12,
-                color: '#000000',
+                color: INK,
                 fontFamily: 'Inter_700Bold',
                 letterSpacing: 0.38,
               }}
@@ -671,10 +710,10 @@ export default function ClubProfileScreen() {
         <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
           <Text
             style={{
-              fontSize: 17,
+              fontSize: 14,
               fontWeight: '700',
-              color: '#111827',
-              fontFamily: 'Zain_700Bold',
+              color: INK,
+              fontFamily: 'Inter_700Bold',
               marginBottom: 8,
             }}
           >
@@ -683,32 +722,32 @@ export default function ClubProfileScreen() {
           {club.description ? (
             <Text
               style={{
-                fontSize: 14,
-                color: '#374151',
-                fontFamily: 'Inter_400Regular',
-                lineHeight: 22,
-                marginBottom: 12,
+                fontSize: 13,
+                color: INK,
+                fontFamily: 'Inter_600SemiBold',
+                lineHeight: 20,
+                marginBottom: club.goals.length > 0 ? 8 : 0,
               }}
             >
               {club.description}
             </Text>
           ) : null}
           {club.goals.map((goal) => (
-            <View key={goal.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+            <View key={goal.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
               <View
                 style={{
                   width: 18,
                   height: 18,
-                  borderRadius: 4,
-                  backgroundColor: 'rgba(15,166,166,0.15)',
+                  borderRadius: 3,
+                  backgroundColor: TEAL,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  marginTop: 2,
+                  marginTop: 1,
                 }}
               >
-                <Ionicons name="checkmark" size={12} color="#0FA6A6" />
+                <Ionicons name="checkmark" size={12} color={CREAM} />
               </View>
-              <Text style={{ flex: 1, fontSize: 13, color: '#374151', fontFamily: 'Inter_400Regular', lineHeight: 20 }}>
+              <Text style={{ flex: 1, fontSize: 13, color: INK, fontFamily: 'Inter_600SemiBold', lineHeight: 18 }}>
                 {goal.goal_text}
               </Text>
             </View>
@@ -720,10 +759,10 @@ export default function ClubProfileScreen() {
           <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
             <Text
               style={{
-                fontSize: 17,
+                fontSize: 14,
                 fontWeight: '700',
-                color: '#111827',
-                fontFamily: 'Zain_700Bold',
+                color: INK,
+                fontFamily: 'Inter_700Bold',
                 marginBottom: 8,
               }}
             >
@@ -731,27 +770,23 @@ export default function ClubProfileScreen() {
             </Text>
             <View
               style={{
-                backgroundColor: '#fff',
-                borderRadius: 12,
+                backgroundColor: CREAM,
+                borderRadius: 10,
                 padding: 14,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.05,
-                shadowRadius: 4,
-                elevation: 2,
+                ...CARD_SHADOW,
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <Ionicons name="calendar-outline" size={16} color="#374151" />
-                <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_500Medium' }}>
+                <Ionicons name="calendar-outline" size={16} color={TEAL} />
+                <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
                   {club.meeting_day}{' '}
                   {formatMeetingTime(club.meeting_time_start, club.meeting_time_end)}
                 </Text>
               </View>
               {(club.meeting_building || club.meeting_room || club.meeting_location) && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="location-outline" size={16} color="#374151" />
-                  <Text style={{ fontSize: 14, color: '#374151', fontFamily: 'Inter_400Regular' }}>
+                  <Ionicons name="location-outline" size={16} color={TEAL} />
+                  <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
                     {[club.meeting_building, club.meeting_room, club.meeting_location]
                       .filter(Boolean)
                       .join(', ')}
@@ -767,10 +802,10 @@ export default function ClubProfileScreen() {
           <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
             <Text
               style={{
-                fontSize: 17,
+                fontSize: 14,
                 fontWeight: '700',
-                color: '#111827',
-                fontFamily: 'Zain_700Bold',
+                color: INK,
+                fontFamily: 'Inter_700Bold',
                 marginBottom: 10,
               }}
             >
@@ -793,7 +828,7 @@ export default function ClubProfileScreen() {
                 marginBottom: 10,
               }}
             >
-              <Text style={{ fontSize: 17, fontWeight: '700', color: '#111827', fontFamily: 'Zain_700Bold' }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
                 Photos that Glue
               </Text>
               <TouchableOpacity
@@ -805,17 +840,14 @@ export default function ClubProfileScreen() {
                 }
                 activeOpacity={0.7}
               >
-                <Text style={{ fontSize: 13, color: '#0FA6A6', fontFamily: 'Inter_500Medium' }}>See all</Text>
+                <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_500Medium' }}>See all</Text>
               </TouchableOpacity>
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-              {club.photos.slice(0, 9).map((photo, index) => (
+              {club.photos.slice(0, 9).map((photo) => (
                 <TouchableOpacity
                   key={photo.id}
-                  onPress={() => {
-                    setSelectedPhotoIndex(index);
-                    setPhotoViewerVisible(true);
-                  }}
+                  onPress={() => handlePhotoPress(photo)}
                   activeOpacity={0.85}
                 >
                   <Image
@@ -834,23 +866,23 @@ export default function ClubProfileScreen() {
           <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
             <Text
               style={{
-                fontSize: 17,
+                fontSize: 14,
                 fontWeight: '700',
-                color: '#111827',
-                fontFamily: 'Zain_700Bold',
+                color: INK,
+                fontFamily: 'Inter_700Bold',
                 marginBottom: 10,
               }}
             >
               Calendar
             </Text>
-            <MiniCalendar eventDates={eventDates} />
+            <MiniCalendar events={club.upcoming_events} onDayPress={handleCalendarDayPress} />
           </View>
         )}
 
         {/* ── Officers ───────────────────────────────────────── */}
         {club.officers.length > 0 && (
           <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
-            <Text style={{ fontSize: 17, fontWeight: '700', color: '#111827', fontFamily: 'Zain_700Bold', marginBottom: 10 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold', marginBottom: 10 }}>
               Officers
             </Text>
             {club.officers.map((officer) => (
@@ -860,14 +892,22 @@ export default function ClubProfileScreen() {
         )}
       </ScrollView>
 
-      {/* ── Photo Viewer Modal ─────────────────────────────── */}
+      {/* ── Photo Viewer Modal (direct club uploads only — no post UI) ── */}
       <Modal
         visible={photoViewerVisible}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setPhotoViewerVisible(false)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center' }}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.95)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <TouchableOpacity
             onPress={() => setPhotoViewerVisible(false)}
             style={{ position: 'absolute', top: 48, right: 20, zIndex: 10 }}
@@ -875,24 +915,34 @@ export default function ClubProfileScreen() {
           >
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
-          {club.photos[selectedPhotoIndex] && (
+          {directUploadPhotos[selectedPhotoIndex] && (
             <ScrollView
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
+              style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
               onMomentumScrollEnd={(e) => {
                 const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
                 setSelectedPhotoIndex(idx);
               }}
               contentOffset={{ x: selectedPhotoIndex * SCREEN_WIDTH, y: 0 }}
             >
-              {club.photos.map((photo: ClubPhoto) => (
-                <Image
+              {directUploadPhotos.map((photo: ClubPhoto) => (
+                <View
                   key={photo.id}
-                  source={{ uri: photo.url }}
-                  style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
-                  resizeMode="contain"
-                />
+                  style={{
+                    width: SCREEN_WIDTH,
+                    height: SCREEN_HEIGHT,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Image
+                    source={{ uri: photo.url }}
+                    style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
+                    resizeMode="contain"
+                  />
+                </View>
               ))}
             </ScrollView>
           )}

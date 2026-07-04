@@ -19,7 +19,7 @@ import { followUser } from '../../services/followService';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FeedPost } from '../../services/postService';
 
-function timeAgo(dateStr: string): string {
+export function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(minutes / 60);
@@ -29,14 +29,14 @@ function timeAgo(dateStr: string): string {
   return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
 }
 
-interface PostCardProps {
+export interface PostCardProps {
   post: FeedPost;
   viewerUserId: string;
   onLike: (postId: string, hasLiked: boolean) => void;
   onFollow: (authorId: string) => void;
 }
 
-function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
+export function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
   const router = useRouter();
 
   const handlePressAuthor = () => {
