@@ -246,14 +246,17 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
         <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Inter_400Regular', paddingLeft: 15, marginBottom: 2 }}>
           {formatTime(event.start_time)} - {formatTime(event.end_time)}
         </Text>
-        {event.location && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Ionicons name="location-outline" size={11} color="#9CA3AF" />
-            <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Inter_400Regular' }} numberOfLines={1}>
-              {event.location}
-            </Text>
-          </View>
-        )}
+        {(() => {
+          const locationText = [event.building, event.room, event.location].filter(Boolean).join(', ');
+          return locationText ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="location-outline" size={11} color="#9CA3AF" />
+              <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Inter_400Regular' }} numberOfLines={1}>
+                {locationText}
+              </Text>
+            </View>
+          ) : null;
+        })()}
       </View>
       <Ionicons name="chevron-forward" size={18} color="#9CA3AF" style={{ marginRight: 12 }} />
     </TouchableOpacity>

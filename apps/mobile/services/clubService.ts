@@ -42,6 +42,8 @@ export interface ClubUpcomingEvent {
   start_time: string;
   end_time: string;
   location: string | null;
+  building: string | null;
+  room: string | null;
   visibility: 'everyone' | 'members' | 'specific';
 }
 
@@ -128,7 +130,7 @@ export async function getClubProfile(
       .eq('club_id', clubId),
     supabase
       .from('events')
-      .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location, visibility')
+      .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location, building, room, visibility')
       .eq('club_id', clubId)
       .gte('event_date', new Date().toISOString().split('T')[0])
       .order('event_date', { ascending: true })
@@ -179,6 +181,8 @@ export async function getClubProfile(
       start_time: e.start_time,
       end_time: e.end_time,
       location: e.location,
+      building: e.building,
+      room: e.room,
       visibility: e.visibility as 'everyone' | 'members' | 'specific',
     })),
     photos: (photoRows ?? []) as ClubPhoto[],
@@ -292,6 +296,24 @@ export async function updateClubProfile(
     .eq('id', clubId);
 
   if (error) throw error;
+}
+
+export async function updateClubGoals(clubId: string, goalTexts: string[]): Promise<void> {
+  const trimmed = goalTexts.map((g) => g.trim()).filter((g) => g.length > 0);
+
+  const { error: deleteError } = await supabase.from('club_goals').delete().eq('club_id', clubId);
+  if (deleteError) throw deleteError;
+
+  if (trimmed.length === 0) return;
+
+  const { error: insertError } = await supabase.from('club_goals').insert(
+    trimmed.map((goal_text, index) => ({
+      club_id: clubId,
+      goal_text,
+      display_order: index,
+    })),
+  );
+  if (insertError) throw insertError;
 }
 
 export async function addOfficer(

@@ -25,6 +25,7 @@ import { Avatar } from '../../../../components/shared/Avatar';
 import * as ImagePicker from 'expo-image-picker';
 import {
   updateClubProfile,
+  updateClubGoals,
   addOfficer,
   removeOfficer,
   deleteClubPhoto,
@@ -427,7 +428,10 @@ export default function EditClubScreen() {
         meeting_building: meetingBuilding || null,
         meeting_room: meetingRoom || null,
       };
-      await updateClubProfile(clubId!, updates);
+      await Promise.all([
+        updateClubProfile(clubId!, updates),
+        updateClubGoals(clubId!, goals),
+      ]);
       queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId, userId] });
       show('Club saved!', 'success');
       setHasChanges(false);
@@ -617,7 +621,7 @@ export default function EditClubScreen() {
 
         {/* ── Learning Outcomes ──────────────────────────── */}
         <SectionTitle title="Learning Outcomes" />
-        {goals.filter((_, i) => i < goals.length - 1 || goals[i].length > 0).map((goal, idx) => (
+        {goals.map((goal, idx) => (
           <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <TextInput
               value={goal}
