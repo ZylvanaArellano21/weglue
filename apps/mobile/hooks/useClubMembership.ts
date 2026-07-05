@@ -110,7 +110,7 @@ function invalidateMembershipQueries(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: ['calendarEvents'] });
   queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers'] });
   queryClient.invalidateQueries({ queryKey: ['calendarDayEvents'] });
-  queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
 }
 
 export function useJoinClubMutation(userId: string | undefined) {

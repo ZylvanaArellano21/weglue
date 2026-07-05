@@ -49,7 +49,7 @@ export interface RsvpSnapshot {
   homeEventsFeed: [readonly unknown[], unknown][];
   calendarEvents: [readonly unknown[], unknown][];
   calendarDayEvents: [readonly unknown[], unknown][];
-  userWeeklyEvents: [readonly unknown[], unknown][];
+  ownThisWeekEvents: [readonly unknown[], unknown][];
 }
 
 // Snapshots every cache this mutation may touch (across every userId/eventId
@@ -60,7 +60,7 @@ export function snapshotRsvpQueries(queryClient: QueryClient): RsvpSnapshot {
     homeEventsFeed: queryClient.getQueriesData({ queryKey: ['homeEventsFeed'] }),
     calendarEvents: queryClient.getQueriesData({ queryKey: ['calendarEvents'] }),
     calendarDayEvents: queryClient.getQueriesData({ queryKey: ['calendarDayEvents'] }),
-    userWeeklyEvents: queryClient.getQueriesData({ queryKey: ['userWeeklyEvents'] }),
+    ownThisWeekEvents: queryClient.getQueriesData({ queryKey: ['ownThisWeekEvents'] }),
   };
 }
 
@@ -69,7 +69,7 @@ export function restoreRsvpSnapshot(queryClient: QueryClient, snapshot: RsvpSnap
   for (const [key, data] of snapshot.homeEventsFeed) queryClient.setQueryData(key, data);
   for (const [key, data] of snapshot.calendarEvents) queryClient.setQueryData(key, data);
   for (const [key, data] of snapshot.calendarDayEvents) queryClient.setQueryData(key, data);
-  for (const [key, data] of snapshot.userWeeklyEvents) queryClient.setQueryData(key, data);
+  for (const [key, data] of snapshot.ownThisWeekEvents) queryClient.setQueryData(key, data);
 }
 
 // Applies the optimistic patch: flips user_rsvp_status everywhere it's
@@ -118,7 +118,7 @@ export function applyOptimisticRsvp(
       (old) => old?.filter((e) => e.id !== eventId),
     );
     queryClient.setQueriesData<CalendarSection[] | undefined>(
-      { queryKey: ['userWeeklyEvents'] },
+      { queryKey: ['ownThisWeekEvents'] },
       (old) =>
         old
           ?.map((section) => ({ ...section, data: section.data.filter((e) => e.id !== eventId) }))
@@ -137,5 +137,5 @@ export function invalidateRsvpQueries(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: ['calendarEvents'] });
   queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers'] });
   queryClient.invalidateQueries({ queryKey: ['calendarDayEvents'] });
-  queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
 }
