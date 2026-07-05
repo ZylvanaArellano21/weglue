@@ -37,5 +37,8 @@ export async function uploadImageToBucket(
   if (error) throw error;
 
   const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-  return data.publicUrl;
+  // Cache-bust: fixed-path uploads (e.g. avatars) reuse the same URL on every
+  // re-upload, and RN's Image cache keys purely by URL, so without this the
+  // old image keeps rendering everywhere it's displayed until cache eviction.
+  return `${data.publicUrl}?v=${Date.now()}`;
 }

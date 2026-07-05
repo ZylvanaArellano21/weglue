@@ -495,6 +495,12 @@ export default function EditClubScreen() {
         updateClubGoals(clubId!, goals),
       ]);
       queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId, userId] });
+      // Club banner/avatar are also embedded in Home feed event cards and
+      // club discovery/listing screens — separate query caches that won't
+      // pick up the change until invalidated directly.
+      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
+      queryClient.invalidateQueries({ queryKey: ['discoveryClubs'] });
+      queryClient.invalidateQueries({ queryKey: ['ownClubs'] });
       show('Club saved!', 'success');
       setHasChanges(false);
     } catch {

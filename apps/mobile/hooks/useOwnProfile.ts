@@ -117,6 +117,12 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
     }) => updateProfileAvatar(userId!, avatarUrl, avatarType),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
+      // Own avatar is also embedded in Home feed posts/RSVPs and post detail —
+      // those are separate query caches with their own staleTime and won't
+      // pick up the change until invalidated directly.
+      queryClient.invalidateQueries({ queryKey: ['homePostsFeed'] });
+      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
+      queryClient.invalidateQueries({ queryKey: ['postDetail'] });
     },
   });
 }

@@ -21,6 +21,7 @@ import { uploadImageToBucket } from '../../lib/imageUpload';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
+import { useToast } from '../../components/Toast';
 
 const PRESET_COLORS = ['#0FA6A6', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
 const TEXT_MAX = 4;
@@ -32,23 +33,23 @@ export default function EditProfilePicScreen() {
 
   const { data: profile } = useOwnProfile(userId);
   const updateAvatar = useUpdateProfileAvatar(userId);
+  const { show, ToastComponent } = useToast();
 
   const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [pendingUriType, setPendingUriType] = useState<'photo' | 'camera' | null>(null);
   const [previewPreset, setPreviewPreset] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
   const [photoDenied, setPhotoDenied] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const existingPreset = parsePresetColor(profile?.avatar_url);
   const existingText = parseTextAvatar(profile?.avatar_url);
 
-  async function uploadAndSave(uri: string, type: 'photo' | 'camera') {
-    if (!userId) return;
-    const publicUrl = await uploadImageToBucket('avatars', `${userId}/avatar.jpg`, uri, 800);
-    await updateAvatar.mutateAsync({ avatarUrl: publicUrl, avatarType: type });
-    router.back();
-  }
+  const hasUnsavedSelection =
+    !!previewUri || !!previewPreset || (showTextInput && !!textInput.trim());
+  const hasPendingChange = hasUnsavedSelection && !saved;
 
   const onPickFromLibrary = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -68,14 +69,11 @@ export default function EditProfilePicScreen() {
     });
     if (!result.canceled && result.assets[0]) {
       setPreviewUri(result.assets[0].uri);
+      setPendingUriType('photo');
       setPreviewPreset(null);
       setTextInput('');
       setShowTextInput(false);
-      try {
-        await uploadAndSave(result.assets[0].uri, 'photo');
-      } catch {
-        Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
-      }
+      setSaved(false);
     }
   };
 
@@ -96,44 +94,48 @@ export default function EditProfilePicScreen() {
     });
     if (!result.canceled && result.assets[0]) {
       setPreviewUri(result.assets[0].uri);
+      setPendingUriType('camera');
       setPreviewPreset(null);
       setTextInput('');
       setShowTextInput(false);
-      try {
-        await uploadAndSave(result.assets[0].uri, 'camera');
-      } catch {
-        Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
-      }
+      setSaved(false);
     }
   };
 
-  const onSelectPreset = async (colorHex: string) => {
+  const onSelectPreset = (colorHex: string) => {
     setPreviewPreset(colorHex);
     setPreviewUri(null);
+    setPendingUriType(null);
     setTextInput('');
     setShowTextInput(false);
-    await updateAvatar.mutateAsync({
-      avatarUrl: `preset:${colorHex}`,
-      avatarType: 'text',
-    });
-    router.back();
+    setSaved(false);
   };
 
   const activateTextInput = () => {
     setShowTextInput(true);
     setPreviewUri(null);
+    setPendingUriType(null);
     setPreviewPreset(null);
     setTextInput('');
+    setSaved(false);
   };
 
-  const onSaveText = async () => {
-    const trimmed = textInput.trim();
-    if (!trimmed) return;
-    await updateAvatar.mutateAsync({
-      avatarUrl: `text:${trimmed}`,
-      avatarType: 'text',
-    });
-    router.back();
+  const onSave = async () => {
+    if (!userId || !hasPendingChange) return;
+    try {
+      if (previewUri && pendingUriType) {
+        const publicUrl = await uploadImageToBucket('avatars', `${userId}/avatar.jpg`, previewUri, 800);
+        await updateAvatar.mutateAsync({ avatarUrl: publicUrl, avatarType: pendingUriType });
+      } else if (previewPreset) {
+        await updateAvatar.mutateAsync({ avatarUrl: `preset:${previewPreset}`, avatarType: 'text' });
+      } else if (showTextInput && textInput.trim()) {
+        await updateAvatar.mutateAsync({ avatarUrl: `text:${textInput.trim()}`, avatarType: 'text' });
+      }
+      setSaved(true);
+      show('Profile picture updated!', 'success');
+    } catch {
+      Alert.alert('Save failed', 'Could not save your profile picture. Please try again.');
+    }
   };
 
   const displayPreset = previewPreset ?? existingPreset;
@@ -144,6 +146,7 @@ export default function EditProfilePicScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {ToastComponent}
       <ProfileScreenHeader title="Profile Picture" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -194,29 +197,19 @@ export default function EditProfilePicScreen() {
         </View>
 
         {showTextInput && (
-          <>
-            <TextInput
-              style={styles.textInput}
-              placeholder="e.g. ZA"
-              placeholderTextColor="rgba(0,0,0,0.3)"
-              value={textInput}
-              onChangeText={(v) => setTextInput(v.slice(0, TEXT_MAX).toUpperCase())}
-              maxLength={TEXT_MAX}
-              autoFocus
-              autoCapitalize="characters"
-            />
-            <TouchableOpacity
-              style={[styles.textSaveBtn, !textInput.trim() && { opacity: 0.45 }]}
-              onPress={onSaveText}
-              disabled={!textInput.trim() || updateAvatar.isPending}
-            >
-              {updateAvatar.isPending ? (
-                <ActivityIndicator color={profileColors.bg} />
-              ) : (
-                <Text style={styles.textSaveBtnLabel}>Save initials</Text>
-              )}
-            </TouchableOpacity>
-          </>
+          <TextInput
+            style={styles.textInput}
+            placeholder="e.g. ZA"
+            placeholderTextColor="rgba(0,0,0,0.3)"
+            value={textInput}
+            onChangeText={(v) => {
+              setTextInput(v.slice(0, TEXT_MAX).toUpperCase());
+              setSaved(false);
+            }}
+            maxLength={TEXT_MAX}
+            autoFocus
+            autoCapitalize="characters"
+          />
         )}
 
         {(cameraDenied || photoDenied) && (
@@ -242,10 +235,25 @@ export default function EditProfilePicScreen() {
           ))}
         </View>
 
-        {updateAvatar.isPending && (
+        {hasPendingChange && (
+          <TouchableOpacity
+            style={[styles.textSaveBtn, updateAvatar.isPending && { opacity: 0.7 }]}
+            onPress={onSave}
+            disabled={updateAvatar.isPending}
+            activeOpacity={0.85}
+          >
+            {updateAvatar.isPending ? (
+              <ActivityIndicator color={profileColors.bg} />
+            ) : (
+              <Text style={styles.textSaveBtnLabel}>Save</Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {saved && !hasPendingChange && (
           <View style={styles.savingRow}>
-            <ActivityIndicator color={profileColors.teal} />
-            <Text style={styles.savingText}>Saving…</Text>
+            <Ionicons name="checkmark-circle" size={16} color={profileColors.teal} />
+            <Text style={styles.savingText}>Saved</Text>
           </View>
         )}
 
