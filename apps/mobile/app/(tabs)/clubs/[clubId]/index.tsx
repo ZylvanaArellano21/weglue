@@ -4,9 +4,9 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Image,
   Dimensions,
-  Modal,
   Alert,
   ActivityIndicator,
   RefreshControl,
@@ -21,11 +21,11 @@ import { Avatar } from '../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
+import { PhotoGalleryModal } from '../../../../components/club/PhotoGalleryModal';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const SCREEN_HEIGHT = Dimensions.get('window').height;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
 const CREAM = '#FEFCF0';
 const TEAL = '#0FA6A6';
@@ -154,12 +154,18 @@ function MiniCalendar({
             const hasEvent = !!eventId;
 
             return (
-              <TouchableOpacity
+              <Pressable
                 key={col}
                 disabled={!hasEvent}
                 onPress={() => eventId && onDayPress(eventId)}
-                activeOpacity={0.7}
-                style={{ flex: 1, alignItems: 'center', paddingVertical: 2 }}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  alignItems: 'center',
+                  paddingVertical: 2,
+                  borderRadius: 13,
+                  backgroundColor:
+                    hasEvent && pressed ? 'rgba(15,166,166,0.18)' : 'transparent',
+                })}
               >
                 <View
                   style={{
@@ -169,13 +175,16 @@ function MiniCalendar({
                     alignItems: 'center',
                     justifyContent: 'center',
                     backgroundColor: isToday ? TEAL : 'transparent',
+                    ...(hasEvent && !isToday
+                      ? { borderWidth: 1, borderColor: 'rgba(15,166,166,0.35)' }
+                      : {}),
                   }}
                 >
                   <Text
                     style={{
                       fontSize: 11,
                       color: isToday ? CREAM : INK,
-                      fontFamily: isToday ? 'Inter_700Bold' : 'Inter_400Regular',
+                      fontFamily: isToday ? 'Inter_700Bold' : hasEvent ? 'Inter_600SemiBold' : 'Inter_400Regular',
                     }}
                   >
                     {day}
@@ -192,7 +201,7 @@ function MiniCalendar({
                     }}
                   />
                 )}
-              </TouchableOpacity>
+              </Pressable>
             );
           })}
         </View>
@@ -415,16 +424,16 @@ export default function ClubProfileScreen() {
   }
 
   const eventDates = club.upcoming_events.map((e) => e.event_date);
-  const directUploadPhotos = club.photos.filter((p) => p.source !== 'tagged_post');
 
   function handlePhotoPress(photo: ClubPhoto) {
-    if (photo.source === 'tagged_post' && photo.post_id) {
-      router.push({ pathname: '/post/[postId]', params: { postId: photo.post_id } });
-      return;
-    }
-    const idx = directUploadPhotos.findIndex((p) => p.id === photo.id);
+    const idx = club!.photos.findIndex((p) => p.id === photo.id);
     setSelectedPhotoIndex(idx >= 0 ? idx : 0);
     setPhotoViewerVisible(true);
+  }
+
+  function handleOpenPost(postId: string) {
+    setPhotoViewerVisible(false);
+    router.push({ pathname: '/post/[postId]', params: { postId } });
   }
 
   function handleCalendarDayPress(eventId: string) {
@@ -892,62 +901,16 @@ export default function ClubProfileScreen() {
         )}
       </ScrollView>
 
-      {/* ── Photo Viewer Modal (direct club uploads only — no post UI) ── */}
-      <Modal
+      {/* ── Photo Gallery Modal — swipes through all "Photos that Glue", tagged-post
+          photos show caption/likes/comments and can open the full post ── */}
+      <PhotoGalleryModal
         visible={photoViewerVisible}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setPhotoViewerVisible(false)}
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.95)',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <TouchableOpacity
-            onPress={() => setPhotoViewerVisible(false)}
-            style={{ position: 'absolute', top: 48, right: 20, zIndex: 10 }}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="close" size={28} color="#fff" />
-          </TouchableOpacity>
-          {directUploadPhotos[selectedPhotoIndex] && (
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
-              onMomentumScrollEnd={(e) => {
-                const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-                setSelectedPhotoIndex(idx);
-              }}
-              contentOffset={{ x: selectedPhotoIndex * SCREEN_WIDTH, y: 0 }}
-            >
-              {directUploadPhotos.map((photo: ClubPhoto) => (
-                <View
-                  key={photo.id}
-                  style={{
-                    width: SCREEN_WIDTH,
-                    height: SCREEN_HEIGHT,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Image
-                    source={{ uri: photo.url }}
-                    style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
-                    resizeMode="contain"
-                  />
-                </View>
-              ))}
-            </ScrollView>
-          )}
-        </View>
-      </Modal>
+        photos={club.photos}
+        initialIndex={selectedPhotoIndex}
+        viewerUserId={userId ?? ''}
+        onClose={() => setPhotoViewerVisible(false)}
+        onOpenPost={handleOpenPost}
+      />
     </SafeAreaView>
   );
 }
