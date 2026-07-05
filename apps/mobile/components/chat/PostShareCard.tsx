@@ -15,7 +15,7 @@ interface Props {
 export function PostShareCard({ postId, viewerUserId }: Props) {
   const router = useRouter();
   const { data: post, isLoading } = useQuery({
-    queryKey: ['postById', postId, viewerUserId],
+    queryKey: ['postDetail', postId, viewerUserId],
     queryFn: () => getPostById(postId, viewerUserId),
     staleTime: 60 * 1000,
   });
