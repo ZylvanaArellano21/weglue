@@ -884,10 +884,11 @@ async function uploadEventImage(userId: string, uri: string): Promise<string> {
   const filename = `${userId}/events/${Date.now()}.jpg`;
   const response = await fetch(uri);
   const blob = await response.blob();
+  const arrayBuffer = await new Response(blob).arrayBuffer();
 
   const { data, error } = await supabase.storage
     .from('posts')
-    .upload(filename, blob, { contentType: 'image/jpeg', upsert: false });
+    .upload(filename, new Uint8Array(arrayBuffer), { contentType: 'image/jpeg', upsert: false });
 
   if (error || !data) throw error ?? new Error('Upload failed');
 
