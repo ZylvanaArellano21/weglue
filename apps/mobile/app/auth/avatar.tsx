@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
+import { uploadImageToBucket } from "../../lib/imageUpload";
 import { useAuthStore } from "@weglue/shared";
 
 const PRESET_COLORS = [
@@ -73,23 +74,12 @@ export default function AvatarScreen() {
     let avatarUrl: string | null = null;
 
     if (selectedUri) {
-      // Upload to Supabase storage
-      const ext = selectedUri.split(".").pop() ?? "jpg";
-      const fileName = `${user.id}-${Date.now()}.${ext}`;
-      const response = await fetch(selectedUri);
-      const blob = await response.blob();
-      const arrayBuffer = await new Response(blob).arrayBuffer();
-
-      const { error } = await supabase.storage
-        .from("avatars")
-        .upload(fileName, arrayBuffer, {
-          contentType: `image/${ext}`,
-          upsert: true,
-        });
-
-      if (!error) {
-        const { data } = supabase.storage.from("avatars").getPublicUrl(fileName);
-        avatarUrl = data.publicUrl;
+      try {
+        avatarUrl = await uploadImageToBucket("avatars", `${user.id}/avatar.jpg`, selectedUri, 800);
+      } catch {
+        Alert.alert("Upload failed", "Could not upload your photo. Please try again.");
+        setLoading(false);
+        return;
       }
     } else if (selectedPreset) {
       avatarUrl = `preset:${selectedPreset}`;

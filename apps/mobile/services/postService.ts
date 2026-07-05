@@ -45,8 +45,7 @@ export async function getHomePostsFeed(
     .select(`
       id, image_url, caption, created_at, author_id, club_id,
       profiles!inner(id, username, avatar_url),
-      clubs(id, name),
-      user_privacy(is_private)
+      clubs(id, name)
     `)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
@@ -56,7 +55,7 @@ export async function getHomePostsFeed(
   const postIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: authorUniversities }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: authorUniversities }, { data: privacyRows }] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase
@@ -67,6 +66,10 @@ export async function getHomePostsFeed(
         .from('profiles')
         .select('id, university')
         .in('id', authorIds),
+      supabase
+        .from('user_privacy')
+        .select('user_id, is_private')
+        .in('user_id', authorIds),
     ]);
 
   const likesCountMap = new Map<string, number>();
@@ -84,6 +87,10 @@ export async function getHomePostsFeed(
 
   const authorUniversityMap = new Map<string, string | null>(
     (authorUniversities as any[]).map((p) => [p.id, p.university]),
+  );
+
+  const privacyMap = new Map<string, boolean>(
+    ((privacyRows as any[]) ?? []).map((r) => [r.user_id, r.is_private]),
   );
 
   const followedSet = new Set(followedIds);
@@ -104,7 +111,7 @@ export async function getHomePostsFeed(
         username: p.profiles.username,
         avatar_url: p.profiles.avatar_url,
         is_following: followedSet.has(p.author_id),
-        profile_is_private: p.user_privacy?.is_private ?? false,
+        profile_is_private: privacyMap.get(p.author_id) ?? false,
       },
       tagged_club: p.club_id ? { id: p.clubs.id, name: p.clubs.name } : null,
       likes_count: likesCountMap.get(p.id) ?? 0,
@@ -127,25 +134,30 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
     .select(`
       id, image_url, caption, created_at, author_id, club_id,
       profiles!inner(id, username, avatar_url),
-      clubs(id, name),
-      user_privacy(is_private)
+      clubs(id, name)
     `)
     .eq('id', postId)
     .single();
 
   if (error || !p) return null;
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }] = await Promise.all([
-    supabase.from('post_likes').select('user_id').eq('post_id', postId),
-    supabase.from('post_comments').select('id').eq('post_id', postId),
-    supabase
-      .from('follows')
-      .select('id')
-      .eq('follower_id', userId)
-      .eq('following_id', (p as any).author_id)
-      .eq('status', 'accepted')
-      .maybeSingle(),
-  ]);
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: privacyRow }] =
+    await Promise.all([
+      supabase.from('post_likes').select('user_id').eq('post_id', postId),
+      supabase.from('post_comments').select('id').eq('post_id', postId),
+      supabase
+        .from('follows')
+        .select('id')
+        .eq('follower_id', userId)
+        .eq('following_id', (p as any).author_id)
+        .eq('status', 'accepted')
+        .maybeSingle(),
+      supabase
+        .from('user_privacy')
+        .select('is_private')
+        .eq('user_id', (p as any).author_id)
+        .maybeSingle(),
+    ]);
 
   const likes = (likesRows ?? []) as any[];
 
@@ -159,7 +171,7 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
       username: (p as any).profiles.username,
       avatar_url: (p as any).profiles.avatar_url,
       is_following: !!followRow,
-      profile_is_private: (p as any).user_privacy?.is_private ?? false,
+      profile_is_private: (privacyRow as any)?.is_private ?? false,
     },
     tagged_club: (p as any).club_id ? { id: (p as any).clubs.id, name: (p as any).clubs.name } : null,
     likes_count: likes.length,
@@ -188,10 +200,11 @@ export async function createPost(
   const filename = `${userId}/${Date.now()}.jpg`;
   const response = await fetch(compressedUri);
   const blob = await response.blob();
+  const arrayBuffer = await new Response(blob).arrayBuffer();
 
   const { data: uploadData, error: uploadError } = await supabase.storage
     .from('posts')
-    .upload(filename, blob, {
+    .upload(filename, new Uint8Array(arrayBuffer), {
       contentType: 'image/jpeg',
       upsert: false,
     });

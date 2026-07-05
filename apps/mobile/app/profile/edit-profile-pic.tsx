@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Linking,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -16,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '@weglue/shared';
 import { useOwnProfile, useUpdateProfileAvatar } from '../../hooks/useOwnProfile';
-import { supabase } from '../../lib/supabase';
+import { uploadImageToBucket } from '../../lib/imageUpload';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
@@ -44,16 +45,7 @@ export default function EditProfilePicScreen() {
 
   async function uploadAndSave(uri: string, type: 'photo' | 'camera') {
     if (!userId) return;
-    const ext = uri.split('.').pop() ?? 'jpg';
-    const path = `${userId}/avatar.${ext}`;
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    await supabase.storage.from('avatars').upload(path, arrayBuffer, {
-      contentType: `image/${ext}`,
-      upsert: true,
-    });
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
+    const publicUrl = await uploadImageToBucket('avatars', `${userId}/avatar.jpg`, uri, 800);
     await updateAvatar.mutateAsync({ avatarUrl: publicUrl, avatarType: type });
     router.back();
   }
@@ -79,7 +71,11 @@ export default function EditProfilePicScreen() {
       setPreviewPreset(null);
       setTextInput('');
       setShowTextInput(false);
-      await uploadAndSave(result.assets[0].uri, 'photo');
+      try {
+        await uploadAndSave(result.assets[0].uri, 'photo');
+      } catch {
+        Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
+      }
     }
   };
 
@@ -103,7 +99,11 @@ export default function EditProfilePicScreen() {
       setPreviewPreset(null);
       setTextInput('');
       setShowTextInput(false);
-      await uploadAndSave(result.assets[0].uri, 'camera');
+      try {
+        await uploadAndSave(result.assets[0].uri, 'camera');
+      } catch {
+        Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
+      }
     }
   };
 

@@ -32,7 +32,7 @@ import {
   uploadClubPhoto,
   type UpdateClubInput,
 } from '../../../../services/clubService';
-import { supabase } from '../../../../lib/supabase';
+import { uploadImageToBucket } from '../../../../lib/imageUpload';
 import type { ClubOfficer, ClubPhoto, ClubUpcomingEvent } from '../../../../services/clubService';
 
 export type EditClubParams = {
@@ -439,7 +439,12 @@ export default function EditClubScreen() {
     if (type === 'banner') {
       setUploadingBanner(true);
       try {
-        const uploadedUrl = await uploadImageToStorage(localUri, `banners/${clubId}_${Date.now()}.jpg`);
+        const uploadedUrl = await uploadImageToBucket(
+          'club-covers',
+          `${clubId}/${Date.now()}.jpg`,
+          localUri,
+          1600,
+        );
         setBannerUri(uploadedUrl);
         markDirty();
       } catch {
@@ -450,7 +455,12 @@ export default function EditClubScreen() {
     } else {
       setUploadingAvatar(true);
       try {
-        const uploadedUrl = await uploadImageToStorage(localUri, `avatars/${clubId}_${Date.now()}.jpg`);
+        const uploadedUrl = await uploadImageToBucket(
+          'club-avatars',
+          `${clubId}/${Date.now()}.jpg`,
+          localUri,
+          800,
+        );
         setAvatarUri(uploadedUrl);
         markDirty();
       } catch {
@@ -459,22 +469,6 @@ export default function EditClubScreen() {
         setUploadingAvatar(false);
       }
     }
-  }
-
-  async function uploadImageToStorage(localUri: string, path: string): Promise<string> {
-    const response = await fetch(localUri);
-    const blob = await response.blob();
-    const arrayBuffer = await new Response(blob).arrayBuffer();
-    const uint8 = new Uint8Array(arrayBuffer);
-
-    const { error } = await supabase.storage
-      .from('club-images')
-      .upload(path, uint8, { contentType: 'image/jpeg', upsert: true });
-
-    if (error) throw error;
-
-    const { data } = supabase.storage.from('club-images').getPublicUrl(path);
-    return data.publicUrl;
   }
 
   async function handleSave() {

@@ -42,7 +42,7 @@ export default function AvatarPage(): JSX.Element | null {
 
     if (selectedFile) {
       const ext = selectedFile.name.split(".").pop() ?? "jpg";
-      const fileName = `${user.id}-${Date.now()}.${ext}`;
+      const fileName = `${user.id}/avatar.${ext}`;
       const { error } = await supabase.storage
         .from("avatars")
         .upload(fileName, selectedFile, { upsert: true });

@@ -17,6 +17,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
+import { uploadImageToBucket } from "../../lib/imageUpload";
 import { useAuthStore, useOnboardingStore, type Profile } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 
@@ -137,26 +138,17 @@ export default function ProfilePicScreen() {
       let avatarUrl: string | null = null;
 
       if (avatarUri && (avatarType === "photo" || avatarType === "camera")) {
-        const ext = avatarUri.split(".").pop() ?? "jpg";
-        const fileName = `${resolvedUser.id}/avatar.${ext}`;
-        const response = await fetch(avatarUri);
-        const blob = await response.blob();
-        const arrayBuffer = await new Response(blob).arrayBuffer();
-
-        const { error: uploadError } = await supabase.storage
-          .from("avatars")
-          .upload(fileName, arrayBuffer, {
-            contentType: `image/${ext}`,
-            upsert: true,
-          });
-
-        if (uploadError) {
+        try {
+          avatarUrl = await uploadImageToBucket(
+            "avatars",
+            `${resolvedUser.id}/avatar.jpg`,
+            avatarUri,
+            800,
+          );
+        } catch {
           show("Could not upload photo. Choose a different one or pick an avatar.", "error");
           return;
         }
-
-        const { data } = supabase.storage.from("avatars").getPublicUrl(fileName);
-        avatarUrl = data.publicUrl;
       } else if (avatarType === "text" && textInput.trim()) {
         avatarUrl = `text:${textInput.trim()}`;
       }
