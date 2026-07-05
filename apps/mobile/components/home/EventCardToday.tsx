@@ -236,16 +236,37 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
             onPress={() => onRsvp(event.id)}
             activeOpacity={0.8}
             style={{
-              backgroundColor: event.user_rsvp_status === 'going' ? 'transparent' : '#0FA6A6',
-              borderWidth: event.user_rsvp_status === 'going' ? 1.5 : 0,
-              borderColor: '#0FA6A6',
+              backgroundColor:
+                event.user_rsvp_status === 'going'
+                  ? '#0FA6A6'
+                  : event.user_rsvp_status === 'cant'
+                    ? 'rgba(240,39,25,0.1)'
+                    : '#0FA6A6',
+              borderWidth: event.user_rsvp_status === 'cant' ? 1.5 : 0,
+              borderColor: event.user_rsvp_status === 'cant' ? '#F02719' : 'transparent',
               borderRadius: 15,
               paddingHorizontal: 20,
               paddingVertical: 7,
             }}
           >
-            <Text style={{ color: event.user_rsvp_status === 'going' ? '#0FA6A6' : '#fff', fontSize: 12, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
-              {event.user_rsvp_status === 'going' ? 'Going ✓' : 'RSVP'}
+            <Text
+              style={{
+                color:
+                  event.user_rsvp_status === 'going'
+                    ? '#FFFFFF'
+                    : event.user_rsvp_status === 'cant'
+                      ? '#F02719'
+                      : '#FFFFFF',
+                fontSize: 12,
+                fontWeight: '600',
+                fontFamily: 'Inter_600SemiBold',
+              }}
+            >
+              {event.user_rsvp_status === 'going'
+                ? 'Going ✓'
+                : event.user_rsvp_status === 'cant'
+                  ? "Can't"
+                  : 'RSVP'}
             </Text>
           </TouchableOpacity>
         </View>

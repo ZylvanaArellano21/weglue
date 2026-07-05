@@ -8,7 +8,6 @@ import {
   Image,
   Dimensions,
   Alert,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,7 +22,7 @@ import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
 import { PhotoGalleryModal } from '../../../../components/club/PhotoGalleryModal';
-import { ProfileConfirmationModal } from '../../../../components/profile/ProfileConfirmationModal';
+import { ConfirmModal } from '../../../../components/ConfirmModal';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 
@@ -585,27 +584,24 @@ export default function ClubProfileScreen() {
                 flex: 1,
                 paddingVertical: 12,
                 borderRadius: 25,
-                backgroundColor: club.is_member ? 'transparent' : TEAL,
+                backgroundColor: club.is_member ? 'rgba(15,166,166,0.1)' : TEAL,
                 borderWidth: club.is_member ? 1.5 : 0,
                 borderColor: TEAL,
                 alignItems: 'center',
                 justifyContent: 'center',
+                opacity: joining || leaving ? 0.65 : 1,
               }}
             >
-              {joining || leaving ? (
-                <ActivityIndicator size="small" color={club.is_member ? TEAL : CREAM} />
-              ) : (
-                <Text
-                  style={{
-                    fontSize: 15,
-                    fontWeight: '600',
-                    color: club.is_member ? TEAL : CREAM,
-                    fontFamily: 'Inter_600SemiBold',
-                  }}
-                >
-                  {club.is_member ? 'Joined' : 'Join'}
-                </Text>
-              )}
+              <Text
+                style={{
+                  fontSize: 15,
+                  fontWeight: '600',
+                  color: club.is_member ? TEAL : CREAM,
+                  fontFamily: 'Inter_600SemiBold',
+                }}
+              >
+                {club.is_member ? 'Joined ✓' : 'Join'}
+              </Text>
             </TouchableOpacity>
 
             {club.is_member && (
@@ -909,12 +905,12 @@ export default function ClubProfileScreen() {
         onOpenPost={handleOpenPost}
       />
 
-      <ProfileConfirmationModal
+      <ConfirmModal
         visible={showLeaveConfirm}
-        title={`Leave ${club.name}?`}
-        message="You will be removed from all club chats and will no longer receive updates from this club."
-        confirmLabel="Leave"
-        cancelLabel="Cancel"
+        title={`Are you sure you want to leave ${club.name}?`}
+        message="You'll lose access to club chats and updates."
+        confirmLabel="Yes, Leave"
+        cancelLabel="No"
         destructive
         loading={leaving}
         onConfirm={handleConfirmLeave}

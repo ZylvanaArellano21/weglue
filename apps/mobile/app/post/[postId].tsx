@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePostDetail, useLikePost } from '../../hooks/useHomePostsFeed';
-import { PostCard } from '../../components/home/PostsFeed';
+import { PostCard } from '../../components/home/PostCard';
 import { PostCardSkeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { followUser } from '../../services/followService';

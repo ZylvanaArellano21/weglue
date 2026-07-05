@@ -8,11 +8,13 @@ import {
   mergeEventFeedPages,
 } from '../../hooks/useHomeEventsFeed';
 import { useJoinClubMutation, useLeaveClubMutation } from '../../hooks/useClubMembership';
+import { useOfficerStore } from '../../store/officerStore';
 import { EventCard } from './EventCard';
 import { EventCardToday } from './EventCardToday';
 import { EventCardSkeleton } from '../shared/SkeletonLoader';
 import { useToast } from '../Toast';
-import { ProfileConfirmationModal } from '../profile/ProfileConfirmationModal';
+import { ConfirmModal } from '../ConfirmModal';
+import { HomePostEventPrompt } from '../HomePostEventPrompt';
 import type { HomeFeedEvent } from '../../services/eventService';
 
 type FeedItem =
@@ -22,6 +24,7 @@ type FeedItem =
 export function EventsFeed() {
   const { session } = useAuthStore();
   const userId = session?.user.id;
+  const { isOfficer } = useOfficerStore();
   const [leaveTarget, setLeaveTarget] = useState<{ clubId: string; clubName: string } | null>(null);
 
   const {
@@ -101,18 +104,51 @@ export function EventsFeed() {
   const renderItem: ListRenderItem<FeedItem> = useCallback(
     ({ item }) => {
       if (item.type === 'section_header') {
+        const isRecommended = item.label === 'Recommended for You';
         return (
-          <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
-            <Text
-              style={{
-                fontSize: 15,
-                fontWeight: '600',
-                color: '#000000',
-                fontFamily: 'Inter_600SemiBold',
-              }}
-            >
-              {item.label}
-            </Text>
+          <View style={{ paddingHorizontal: 20, paddingTop: isRecommended ? 20 : 16, paddingBottom: 8 }}>
+            {isRecommended ? (
+              <View style={{ marginBottom: 4 }}>
+                <View
+                  style={{
+                    height: 1,
+                    backgroundColor: '#E5E7EB',
+                    marginBottom: 16,
+                  }}
+                />
+                <Text
+                  style={{
+                    fontSize: 17,
+                    fontWeight: '700',
+                    color: '#111827',
+                    fontFamily: 'Zain_700Bold',
+                  }}
+                >
+                  {item.label}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: '#9CA3AF',
+                    fontFamily: 'Inter_400Regular',
+                    marginTop: 2,
+                  }}
+                >
+                  Events from clubs you might like
+                </Text>
+              </View>
+            ) : (
+              <Text
+                style={{
+                  fontSize: 17,
+                  fontWeight: '700',
+                  color: '#111827',
+                  fontFamily: 'Zain_700Bold',
+                }}
+              >
+                {item.label}
+              </Text>
+            )}
           </View>
         );
       }
@@ -199,6 +235,7 @@ export function EventsFeed() {
         data={items}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
+        ListHeaderComponent={isOfficer ? <HomePostEventPrompt /> : null}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
         onEndReached={() => {
@@ -219,12 +256,12 @@ export function EventsFeed() {
         }
       />
 
-      <ProfileConfirmationModal
+      <ConfirmModal
         visible={!!leaveTarget}
-        title={`Leave ${leaveTarget?.clubName ?? 'this club'}?`}
-        message="You will be removed from all club chats and will no longer receive updates from this club."
-        confirmLabel="Leave"
-        cancelLabel="Cancel"
+        title={`Are you sure you want to leave ${leaveTarget?.clubName ?? 'this club'}?`}
+        message="You'll lose access to club chats and updates."
+        confirmLabel="Yes, Leave"
+        cancelLabel="No"
         destructive
         loading={leavingClub}
         onConfirm={handleConfirmLeaveClub}

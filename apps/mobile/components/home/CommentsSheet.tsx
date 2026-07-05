@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { usePostComments, useAddComment } from '../../hooks/useHomePostsFeed';
-import { timeAgo } from './PostsFeed';
+import { timeAgo } from './PostCard';
 import type { PostComment } from '../../services/postService';
 
 interface CommentsSheetProps {

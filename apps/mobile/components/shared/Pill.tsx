@@ -1,4 +1,4 @@
-import { TouchableOpacity, Text, ActivityIndicator } from 'react-native';
+import { TouchableOpacity, Text } from 'react-native';
 
 type PillVariant = 'join' | 'joined' | 'follow' | 'following' | 'gluemate' | 'rsvp' | 'accept' | 'followBack' | 'custom';
 
@@ -10,16 +10,34 @@ interface PillProps {
   disabled?: boolean;
 }
 
-const VARIANT_STYLES: Record<PillVariant, { bg: string; border?: string; text: string; textColor: string }> = {
-  join:       { bg: '#0FA6A6', text: 'Join',         textColor: '#fff' },
-  joined:     { bg: 'transparent', border: '#0FA6A6', text: 'Joined',   textColor: '#0FA6A6' },
-  follow:     { bg: '#0FA6A6', text: 'Follow',        textColor: '#fff' },
-  following:  { bg: 'transparent', border: '#9CA3AF', text: 'Following', textColor: '#6B7280' },
-  gluemate:   { bg: 'transparent', border: '#0FA6A6', text: 'Gluemate', textColor: '#0FA6A6' },
-  rsvp:       { bg: '#0FA6A6', text: 'RSVP',          textColor: '#fff' },
-  accept:     { bg: '#0FA6A6', text: 'Accept',         textColor: '#fff' },
-  followBack: { bg: '#0FA6A6', text: 'Follow back',    textColor: '#fff' },
-  custom:     { bg: '#0FA6A6', text: '',               textColor: '#fff' },
+const VARIANT_STYLES: Record<
+  PillVariant,
+  { bg: string; border?: string; text: string; textColor: string }
+> = {
+  join: { bg: '#0FA6A6', text: 'Join', textColor: '#FFFFFF' },
+  joined: {
+    bg: 'rgba(15,166,166,0.1)',
+    border: '#0FA6A6',
+    text: 'Joined ✓',
+    textColor: '#0FA6A6',
+  },
+  follow: { bg: '#0FA6A6', text: 'Follow', textColor: '#FFFFFF' },
+  following: {
+    bg: 'transparent',
+    border: '#9CA3AF',
+    text: 'Following',
+    textColor: '#6B7280',
+  },
+  gluemate: {
+    bg: 'rgba(15,166,166,0.1)',
+    border: '#0FA6A6',
+    text: 'Gluemate',
+    textColor: '#0FA6A6',
+  },
+  rsvp: { bg: '#0FA6A6', text: 'RSVP', textColor: '#FFFFFF' },
+  accept: { bg: '#0FA6A6', text: 'Accept', textColor: '#FFFFFF' },
+  followBack: { bg: '#0FA6A6', text: 'Follow back', textColor: '#FFFFFF' },
+  custom: { bg: '#0FA6A6', text: '', textColor: '#FFFFFF' },
 };
 
 export function Pill({ variant, onPress, loading = false, label, disabled = false }: PillProps) {
@@ -33,31 +51,28 @@ export function Pill({ variant, onPress, loading = false, label, disabled = fals
       disabled={disabled || loading}
       activeOpacity={0.75}
       style={{
-        paddingHorizontal: 16,
+        paddingHorizontal: 14,
         paddingVertical: 6,
         borderRadius: 20,
-        backgroundColor: isFilled ? style.bg : 'transparent',
+        backgroundColor: isFilled ? style.bg : style.bg === 'transparent' ? 'transparent' : style.bg,
         borderWidth: style.border ? 1.5 : 0,
         borderColor: style.border ?? 'transparent',
-        minWidth: 70,
+        minWidth: 72,
         alignItems: 'center',
         justifyContent: 'center',
+        opacity: loading ? 0.6 : 1,
       }}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={style.textColor} />
-      ) : (
-        <Text
-          style={{
-            color: style.textColor,
-            fontSize: 13,
-            fontWeight: '600',
-            fontFamily: 'Inter_600SemiBold',
-          }}
-        >
-          {displayText}
-        </Text>
-      )}
+      <Text
+        style={{
+          color: style.textColor,
+          fontSize: 12,
+          fontWeight: '600',
+          fontFamily: 'Inter_600SemiBold',
+        }}
+      >
+        {displayText}
+      </Text>
     </TouchableOpacity>
   );
 }

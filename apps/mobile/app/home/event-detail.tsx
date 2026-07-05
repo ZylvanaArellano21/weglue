@@ -5,7 +5,6 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -17,7 +16,7 @@ import { Avatar } from '../../components/shared/Avatar';
 import { AvatarStack } from '../../components/shared/AvatarStack';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
-import { ProfileConfirmationModal } from '../../components/profile/ProfileConfirmationModal';
+import { ConfirmModal } from '../../components/ConfirmModal';
 import { ShareSheet } from '../../components/shared/ShareSheet';
 
 function formatDate(dateStr: string): string {
@@ -146,7 +145,28 @@ export default function EventDetailScreen() {
               </Text>
             </TouchableOpacity>
             {joiningClub || leavingClub ? (
-              <ActivityIndicator size="small" color="#0FA6A6" />
+              <View
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 7,
+                  borderRadius: 20,
+                  backgroundColor: event.user_has_joined_club ? 'rgba(15,166,166,0.1)' : '#0FA6A6',
+                  borderWidth: event.user_has_joined_club ? 1.5 : 0,
+                  borderColor: '#0FA6A6',
+                  opacity: 0.65,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: '600',
+                    color: event.user_has_joined_club ? '#0FA6A6' : '#fff',
+                    fontFamily: 'Inter_600SemiBold',
+                  }}
+                >
+                  {event.user_has_joined_club ? 'Joined ✓' : 'Join'}
+                </Text>
+              </View>
             ) : (
               <TouchableOpacity
                 onPress={handleJoinLeaveClub}
@@ -155,7 +175,7 @@ export default function EventDetailScreen() {
                   paddingHorizontal: 16,
                   paddingVertical: 7,
                   borderRadius: 20,
-                  backgroundColor: event.user_has_joined_club ? 'transparent' : '#0FA6A6',
+                  backgroundColor: event.user_has_joined_club ? 'rgba(15,166,166,0.1)' : '#0FA6A6',
                   borderWidth: event.user_has_joined_club ? 1.5 : 0,
                   borderColor: '#0FA6A6',
                 }}
@@ -168,42 +188,46 @@ export default function EventDetailScreen() {
                     fontFamily: 'Inter_600SemiBold',
                   }}
                 >
-                  {event.user_has_joined_club ? 'Joined' : 'Join'}
+                  {event.user_has_joined_club ? 'Joined ✓' : 'Join'}
                 </Text>
               </TouchableOpacity>
             )}
           </View>
 
           {/* Hero Image */}
-          {event.cover_image_url ? (
-            <Image
-              source={{ uri: event.cover_image_url }}
-              style={{ width: '100%', height: 220 }}
-              resizeMode="cover"
-            />
-          ) : (
-            <View
-              style={{
-                width: '100%',
-                height: 220,
-                backgroundColor: '#E5E7EB',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name="image-outline" size={50} color="#9CA3AF" />
-            </View>
-          )}
+          <View style={{ paddingHorizontal: 16 }}>
+            {event.cover_image_url ? (
+              <Image
+                source={{ uri: event.cover_image_url }}
+                style={{ width: '100%', height: 220, borderRadius: 14 }}
+                resizeMode="cover"
+              />
+            ) : (
+              <View
+                style={{
+                  width: '100%',
+                  height: 220,
+                  borderRadius: 14,
+                  backgroundColor: '#E5E7EB',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="image-outline" size={50} color="#9CA3AF" />
+              </View>
+            )}
+          </View>
 
-          <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+          <View style={{ paddingHorizontal: 16, paddingTop: 18 }}>
             {/* Title */}
             <Text
               style={{
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: '800',
                 color: '#111827',
                 fontFamily: 'Zain_800ExtraBold',
-                marginBottom: 16,
+                marginBottom: 18,
+                lineHeight: 30,
               }}
             >
               {event.emoji ? `${event.emoji} ` : ''}{event.title}
@@ -255,7 +279,20 @@ export default function EventDetailScreen() {
             <TouchableOpacity
               onPress={handlePressAttendees}
               activeOpacity={0.7}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                marginBottom: 20,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 14,
+                padding: 14,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.05,
+                shadowRadius: 6,
+                elevation: 2,
+              }}
             >
               {event.attendee_preview.length > 0 && (
                 <AvatarStack avatars={event.attendee_preview} size={30} overlap={8} />
@@ -299,14 +336,38 @@ export default function EventDetailScreen() {
             ) : null}
 
             {/* Share + Bookmark row */}
-            <View style={{ flexDirection: 'row', gap: 16, marginBottom: 20 }}>
-              <TouchableOpacity onPress={() => setShareSheetVisible(true)} activeOpacity={0.7}>
-                <Ionicons name="share-outline" size={26} color="#0FA6A6" />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+              <TouchableOpacity
+                onPress={() => setShareSheetVisible(true)}
+                activeOpacity={0.7}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: 'rgba(15,166,166,0.1)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="paper-plane-outline" size={22} color="#0FA6A6" />
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleToggleSave} disabled={isSaving} activeOpacity={0.7}>
+              <TouchableOpacity
+                onPress={handleToggleSave}
+                disabled={isSaving}
+                activeOpacity={0.7}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: 'rgba(15,166,166,0.1)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: isSaving ? 0.6 : 1,
+                }}
+              >
                 <Ionicons
                   name={event.is_saved ? 'bookmark' : 'bookmark-outline'}
-                  size={26}
+                  size={22}
                   color="#0FA6A6"
                 />
               </TouchableOpacity>
@@ -315,10 +376,10 @@ export default function EventDetailScreen() {
             {/* RSVP Section */}
             <Text
               style={{
-                fontSize: 14,
-                fontWeight: '600',
-                color: '#374151',
-                fontFamily: 'Inter_600SemiBold',
+                fontSize: 16,
+                fontWeight: '700',
+                color: '#111827',
+                fontFamily: 'Zain_700Bold',
                 marginBottom: 12,
               }}
             >
@@ -331,23 +392,24 @@ export default function EventDetailScreen() {
                 activeOpacity={0.8}
                 style={{
                   flex: 1,
-                  paddingVertical: 13,
+                  paddingVertical: 14,
                   borderRadius: 14,
-                  backgroundColor: event.user_rsvp_status === 'going' ? '#0FA6A6' : 'transparent',
+                  backgroundColor: event.user_rsvp_status === 'going' ? '#0FA6A6' : '#FFFFFF',
                   borderWidth: 1.5,
                   borderColor: event.user_rsvp_status === 'going' ? '#0FA6A6' : '#D1D5DB',
                   alignItems: 'center',
+                  opacity: isRsvping ? 0.7 : 1,
                 }}
               >
                 <Text
                   style={{
                     fontSize: 15,
                     fontWeight: '600',
-                    color: event.user_rsvp_status === 'going' ? '#fff' : '#374151',
+                    color: event.user_rsvp_status === 'going' ? '#FFFFFF' : '#0FA6A6',
                     fontFamily: 'Inter_600SemiBold',
                   }}
                 >
-                  Going
+                  {event.user_rsvp_status === 'going' ? 'Going ✓' : 'Going'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -356,23 +418,26 @@ export default function EventDetailScreen() {
                 activeOpacity={0.8}
                 style={{
                   flex: 1,
-                  paddingVertical: 13,
+                  paddingVertical: 14,
                   borderRadius: 14,
-                  backgroundColor: event.user_rsvp_status === 'cant' ? '#0FA6A6' : 'transparent',
+                  backgroundColor:
+                    event.user_rsvp_status === 'cant' ? '#F02719' : '#FFFFFF',
                   borderWidth: 1.5,
-                  borderColor: event.user_rsvp_status === 'cant' ? '#0FA6A6' : '#D1D5DB',
+                  borderColor:
+                    event.user_rsvp_status === 'cant' ? '#F02719' : '#D1D5DB',
                   alignItems: 'center',
+                  opacity: isRsvping ? 0.7 : 1,
                 }}
               >
                 <Text
                   style={{
                     fontSize: 15,
                     fontWeight: '600',
-                    color: event.user_rsvp_status === 'cant' ? '#fff' : '#374151',
+                    color: event.user_rsvp_status === 'cant' ? '#FFFFFF' : '#374151',
                     fontFamily: 'Inter_600SemiBold',
                   }}
                 >
-                  Can't
+                  {event.user_rsvp_status === 'cant' ? "Can't ✓" : "Can't"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -382,12 +447,12 @@ export default function EventDetailScreen() {
 
       {event && (
         <>
-          <ProfileConfirmationModal
+          <ConfirmModal
             visible={showLeaveConfirm}
-            title={`Leave ${event.club.name}?`}
-            message="You will be removed from all club chats and will no longer receive updates from this club."
-            confirmLabel="Leave"
-            cancelLabel="Cancel"
+            title={`Are you sure you want to leave ${event.club.name}?`}
+            message="You'll lose access to club chats and updates."
+            confirmLabel="Yes, Leave"
+            cancelLabel="No"
             destructive
             loading={leavingClub}
             onConfirm={handleConfirmLeaveClub}

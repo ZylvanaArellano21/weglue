@@ -1,8 +1,9 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getPostById } from '../../services/postService';
+import { Avatar } from '../shared/Avatar';
 import { chatColors, chatFonts, chatShadow } from './chatTheme';
 
 interface Props {
@@ -10,8 +11,6 @@ interface Props {
   viewerUserId: string;
 }
 
-// Renders inside MessageBubble's cardSlot. Fetches through getPostById(),
-// so it respects the same RLS/visibility rules as opening the post directly.
 export function PostShareCard({ postId, viewerUserId }: Props) {
   const router = useRouter();
   const { data: post, isLoading } = useQuery({
@@ -23,7 +22,10 @@ export function PostShareCard({ postId, viewerUserId }: Props) {
   if (isLoading) {
     return (
       <View style={styles.card}>
-        <ActivityIndicator size="small" color={chatColors.teal} />
+        <View style={styles.loadingRow}>
+          <Ionicons name="image-outline" size={18} color={chatColors.teal} />
+          <Text style={styles.loadingText}>Loading post…</Text>
+        </View>
       </View>
     );
   }
@@ -45,28 +47,30 @@ export function PostShareCard({ postId, viewerUserId }: Props) {
       activeOpacity={0.85}
       onPress={() => router.push({ pathname: '/post/[postId]', params: { postId: post.id } })}
     >
-      <View style={styles.badgeRow}>
-        <Ionicons name="image" size={12} color={chatColors.teal} />
-        <Text style={styles.badgeText}>POST</Text>
-      </View>
-      <View style={styles.body}>
-        {post.image_url ? (
-          <Image source={{ uri: post.image_url }} style={styles.image} resizeMode="cover" />
-        ) : (
-          <View style={[styles.image, styles.imagePlaceholder]}>
-            <Ionicons name="image-outline" size={22} color={chatColors.textMuted} />
-          </View>
-        )}
-        <View style={styles.info}>
-          <Text style={styles.title} numberOfLines={1}>
+      <View style={styles.accentBar} />
+      <View style={styles.content}>
+        <View style={styles.badgeRow}>
+          <Ionicons name="image" size={12} color={chatColors.teal} />
+          <Text style={styles.badgeText}>POST</Text>
+        </View>
+        <View style={styles.authorRow}>
+          <Avatar uri={post.author.avatar_url} size={24} username={post.author.username} />
+          <Text style={styles.authorName} numberOfLines={1}>
             @{post.author.username}
           </Text>
-          {post.caption ? (
-            <Text style={styles.meta} numberOfLines={2}>
-              {post.caption}
-            </Text>
-          ) : null}
         </View>
+        {post.image_url ? (
+          <Image source={{ uri: post.image_url }} style={styles.heroImage} resizeMode="cover" />
+        ) : (
+          <View style={[styles.heroImage, styles.imagePlaceholder]}>
+            <Ionicons name="image-outline" size={28} color={chatColors.textMuted} />
+          </View>
+        )}
+        {post.caption ? (
+          <Text style={styles.caption} numberOfLines={2}>
+            {post.caption}
+          </Text>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -74,13 +78,22 @@ export function PostShareCard({ postId, viewerUserId }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    width: 240,
+    width: 260,
     backgroundColor: chatColors.white,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: chatColors.border,
-    padding: 10,
+    overflow: 'hidden',
+    flexDirection: 'row',
     ...chatShadow,
+  },
+  accentBar: {
+    width: 4,
+    backgroundColor: chatColors.teal,
+  },
+  content: {
+    flex: 1,
+    padding: 10,
   },
   badgeRow: {
     flexDirection: 'row',
@@ -94,39 +107,53 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: chatColors.teal,
   },
-  body: {
+  authorRow: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
   },
-  image: {
-    width: 56,
-    height: 56,
+  authorName: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 12,
+    color: chatColors.text,
+    flex: 1,
+  },
+  heroImage: {
+    width: '100%',
+    height: 88,
     borderRadius: 10,
+    marginBottom: 8,
   },
   imagePlaceholder: {
     backgroundColor: chatColors.tagBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  info: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  title: {
-    fontFamily: chatFonts.semiBold,
-    fontSize: 13,
-    color: chatColors.text,
-    marginBottom: 3,
-  },
-  meta: {
+  caption: {
     fontFamily: chatFonts.regular,
-    fontSize: 11,
+    fontSize: 12,
     color: chatColors.textMuted,
+    lineHeight: 17,
   },
-  unavailableRow: {
+  loadingRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    padding: 14,
+  },
+  loadingText: {
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
+    color: chatColors.textMuted,
+  },
+  unavailableRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 14,
   },
   unavailableText: {
     fontFamily: chatFonts.regular,

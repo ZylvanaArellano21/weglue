@@ -21,7 +21,7 @@ import { Avatar } from '../../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../../components/Toast';
-import { ProfileConfirmationModal } from '../../../../../components/profile/ProfileConfirmationModal';
+import { ConfirmModal } from '../../../../../components/ConfirmModal';
 import { ShareSheet } from '../../../../../components/shared/ShareSheet';
 
 export type ClubEventDetailParams = {
@@ -535,12 +535,12 @@ export default function ClubEventDetailScreen() {
 
       {event && (
         <>
-          <ProfileConfirmationModal
+          <ConfirmModal
             visible={showLeaveConfirm}
-            title={`Leave ${event.club.name}?`}
-            message="You will be removed from all club chats and will no longer receive updates from this club."
-            confirmLabel="Leave"
-            cancelLabel="Cancel"
+            title={`Are you sure you want to leave ${event.club.name}?`}
+            message="You'll lose access to club chats and updates."
+            confirmLabel="Yes, Leave"
+            cancelLabel="No"
             destructive
             loading={leavingClub}
             onConfirm={handleConfirmLeaveClub}

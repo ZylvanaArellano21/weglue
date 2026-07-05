@@ -82,7 +82,7 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#FDFBEF' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }}>
       {/* Header */}
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>

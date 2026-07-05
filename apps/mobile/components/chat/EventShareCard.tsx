@@ -1,4 +1,4 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,10 +15,13 @@ function formatDate(dateStr: string): string {
   return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-// Renders inside MessageBubble's cardSlot, same extension point as
-// PollMessage. Fetches through the same getEventDetail() used by the Event
-// Details screens, so it naturally respects RLS — a members-only event
-// shared with a non-member renders the "no longer available" fallback below.
+function formatTime(timeStr: string): string {
+  const [h, m] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'pm' : 'am';
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
 export function EventShareCard({ eventId, viewerUserId }: Props) {
   const router = useRouter();
   const { data: event, isLoading } = useQuery({
@@ -30,7 +33,10 @@ export function EventShareCard({ eventId, viewerUserId }: Props) {
   if (isLoading) {
     return (
       <View style={styles.card}>
-        <ActivityIndicator size="small" color={chatColors.teal} />
+        <View style={styles.loadingRow}>
+          <Ionicons name="calendar-outline" size={18} color={chatColors.teal} />
+          <Text style={styles.loadingText}>Loading event…</Text>
+        </View>
       </View>
     );
   }
@@ -52,26 +58,31 @@ export function EventShareCard({ eventId, viewerUserId }: Props) {
       activeOpacity={0.85}
       onPress={() => router.push({ pathname: '/home/event-detail', params: { eventId: event.id } })}
     >
-      <View style={styles.badgeRow}>
-        <Ionicons name="calendar" size={12} color={chatColors.teal} />
-        <Text style={styles.badgeText}>EVENT</Text>
-      </View>
-      <View style={styles.body}>
+      <View style={styles.accentBar} />
+      <View style={styles.content}>
+        <View style={styles.badgeRow}>
+          <Ionicons name="calendar" size={12} color={chatColors.teal} />
+          <Text style={styles.badgeText}>EVENT</Text>
+        </View>
         {event.cover_image_url ? (
-          <Image source={{ uri: event.cover_image_url }} style={styles.image} resizeMode="cover" />
+          <Image source={{ uri: event.cover_image_url }} style={styles.heroImage} resizeMode="cover" />
         ) : (
-          <View style={[styles.image, styles.imagePlaceholder]}>
-            <Ionicons name="image-outline" size={22} color={chatColors.textMuted} />
+          <View style={[styles.heroImage, styles.imagePlaceholder]}>
+            <Ionicons name="image-outline" size={28} color={chatColors.textMuted} />
           </View>
         )}
-        <View style={styles.info}>
-          <Text style={styles.title} numberOfLines={2}>
-            {event.emoji ? `${event.emoji} ` : ''}{event.title}
-          </Text>
+        <Text style={styles.title} numberOfLines={2}>
+          {event.emoji ? `${event.emoji} ` : ''}{event.title}
+        </Text>
+        <View style={styles.metaRow}>
+          <Ionicons name="time-outline" size={12} color={chatColors.textMuted} />
           <Text style={styles.meta} numberOfLines={1}>
-            {formatDate(event.event_date)}
+            {formatDate(event.event_date)} · {formatTime(event.start_time)}
           </Text>
-          <Text style={styles.meta} numberOfLines={1}>
+        </View>
+        <View style={styles.metaRow}>
+          <Ionicons name="people-outline" size={12} color={chatColors.teal} />
+          <Text style={styles.clubMeta} numberOfLines={1}>
             {event.club.name}
           </Text>
         </View>
@@ -82,13 +93,22 @@ export function EventShareCard({ eventId, viewerUserId }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    width: 240,
+    width: 260,
     backgroundColor: chatColors.white,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: chatColors.border,
-    padding: 10,
+    overflow: 'hidden',
+    flexDirection: 'row',
     ...chatShadow,
+  },
+  accentBar: {
+    width: 4,
+    backgroundColor: chatColors.teal,
+  },
+  content: {
+    flex: 1,
+    padding: 10,
   },
   badgeRow: {
     flexDirection: 'row',
@@ -102,39 +122,60 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: chatColors.teal,
   },
-  body: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  image: {
-    width: 56,
-    height: 56,
+  heroImage: {
+    width: '100%',
+    height: 88,
     borderRadius: 10,
+    marginBottom: 8,
   },
   imagePlaceholder: {
     backgroundColor: chatColors.tagBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  info: {
-    flex: 1,
-    justifyContent: 'center',
-  },
   title: {
     fontFamily: chatFonts.semiBold,
-    fontSize: 13,
+    fontSize: 14,
     color: chatColors.text,
-    marginBottom: 3,
+    marginBottom: 6,
+    lineHeight: 18,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
   },
   meta: {
     fontFamily: chatFonts.regular,
     fontSize: 11,
     color: chatColors.textMuted,
+    flex: 1,
   },
-  unavailableRow: {
+  clubMeta: {
+    fontFamily: chatFonts.medium,
+    fontSize: 11,
+    color: chatColors.teal,
+    flex: 1,
+  },
+  loadingRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    padding: 14,
+  },
+  loadingText: {
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
+    color: chatColors.textMuted,
+  },
+  unavailableRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 14,
   },
   unavailableText: {
     fontFamily: chatFonts.regular,
