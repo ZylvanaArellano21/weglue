@@ -1,4 +1,5 @@
-import { View, Text, ScrollView, TouchableOpacity, Image, Dimensions, RefreshControl } from 'react-native';
+import { memo, useCallback, useMemo } from 'react';
+import { View, Text, FlatList, TouchableOpacity, Image, Dimensions, RefreshControl, ListRenderItem } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
@@ -6,6 +7,7 @@ import { useMyClubs } from '../../../hooks/useClubTab';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import type { ClubWithNextEvent } from '../../../services/clubTabService';
 import { navigateToDiscover } from '../../../lib/discoverNavigation';
+import { getResizedImageUrl } from '../../../lib/imageResize';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = (SCREEN_WIDTH - 32 - 10) / 2;
@@ -33,7 +35,7 @@ function formatEventDate(dateStr: string): string {
 }
 
 // ─── Club Card ───────────────────────────────────────────────────────────────
-function ClubCard({ club }: { club: ClubWithNextEvent }) {
+const ClubCard = memo(function ClubCard({ club }: { club: ClubWithNextEvent }) {
   const router = useRouter();
   const isOfficer = !!club.officer_role;
   const hasEventThisWeek = !!club.next_event;
@@ -60,7 +62,7 @@ function ClubCard({ club }: { club: ClubWithNextEvent }) {
       <View style={{ width: '100%', height: CARD_WIDTH * 0.56, backgroundColor: '#E5E7EB', position: 'relative' }}>
         {club.avatar_url ? (
           <Image
-            source={{ uri: club.avatar_url }}
+            source={{ uri: getResizedImageUrl(club.avatar_url, CARD_WIDTH * 2, CARD_WIDTH * 0.56 * 2) ?? undefined }}
             style={{ width: '100%', height: '100%' }}
             resizeMode="cover"
           />
@@ -155,7 +157,7 @@ function ClubCard({ club }: { club: ClubWithNextEvent }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Section Header ──────────────────────────────────────────────────────────
 function SectionHeader({ title }: { title: string }) {
@@ -167,7 +169,7 @@ function SectionHeader({ title }: { title: string }) {
         color: '#111827',
         fontFamily: 'Zain_800ExtraBold',
         marginBottom: 12,
-        marginTop: 4,
+        marginTop: 16,
       }}
     >
       {title}
@@ -175,24 +177,35 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-// ─── Card Grid ───────────────────────────────────────────────────────────────
-function CardGrid({ clubs }: { clubs: ClubWithNextEvent[] }) {
-  const rows: ClubWithNextEvent[][] = [];
-  for (let i = 0; i < clubs.length; i += 2) {
-    rows.push(clubs.slice(i, i + 2));
+// ─── Flattened list items ─────────────────────────────────────────────────────
+// A FlatList needs one flat array to virtualize; section headers and club-card
+// rows (2 per row, matching the existing grid visual) are flattened together,
+// the same pattern already used for the Home events feed.
+type ClubTabItem =
+  | { type: 'header'; id: string; title: string }
+  | { type: 'row'; id: string; clubs: ClubWithNextEvent[] };
+
+function buildClubTabItems(
+  officerClubs: ClubWithNextEvent[],
+  memberClubs: ClubWithNextEvent[],
+): ClubTabItem[] {
+  const items: ClubTabItem[] = [];
+
+  if (officerClubs.length > 0) {
+    items.push({ type: 'header', id: 'header-officer', title: STRINGS.OFFICER_CLUB });
+    for (let i = 0; i < officerClubs.length; i += 2) {
+      items.push({ type: 'row', id: `officer-row-${i}`, clubs: officerClubs.slice(i, i + 2) });
+    }
   }
 
-  return (
-    <View style={{ gap: 10, marginBottom: 4 }}>
-      {rows.map((row, rowIdx) => (
-        <View key={rowIdx} style={{ flexDirection: 'row', gap: 10 }}>
-          {row.map((club) => (
-            <ClubCard key={club.id} club={club} />
-          ))}
-        </View>
-      ))}
-    </View>
-  );
+  if (memberClubs.length > 0) {
+    items.push({ type: 'header', id: 'header-member', title: STRINGS.MEMBER_CLUB });
+    for (let i = 0; i < memberClubs.length; i += 2) {
+      items.push({ type: 'row', id: `member-row-${i}`, clubs: memberClubs.slice(i, i + 2) });
+    }
+  }
+
+  return items;
 }
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
@@ -205,6 +218,24 @@ export default function ClubsTabScreen() {
   const hasOfficer = (data?.officer_clubs.length ?? 0) > 0;
   const hasMember = (data?.member_clubs.length ?? 0) > 0;
   const isEmpty = !isLoading && !hasOfficer && !hasMember;
+
+  const items = useMemo(
+    () => buildClubTabItems(data?.officer_clubs ?? [], data?.member_clubs ?? []),
+    [data?.officer_clubs, data?.member_clubs],
+  );
+
+  const renderItem: ListRenderItem<ClubTabItem> = useCallback(({ item }) => {
+    if (item.type === 'header') {
+      return <SectionHeader title={item.title} />;
+    }
+    return (
+      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+        {item.clubs.map((club) => (
+          <ClubCard key={club.id} club={club} />
+        ))}
+      </View>
+    );
+  }, []);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
@@ -273,9 +304,16 @@ export default function ClubsTabScreen() {
 
       {/* Club lists */}
       {!isLoading && !isEmpty && (
-        <ScrollView
+        <FlatList<ClubTabItem>
+          data={items}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40, paddingTop: 16 }}
+          windowSize={7}
+          maxToRenderPerBatch={6}
+          initialNumToRender={6}
+          removeClippedSubviews
           refreshControl={
             <RefreshControl
               refreshing={isLoading}
@@ -283,21 +321,7 @@ export default function ClubsTabScreen() {
               tintColor="#0FA6A6"
             />
           }
-        >
-          {hasOfficer && (
-            <View style={{ marginBottom: 24 }}>
-              <SectionHeader title={STRINGS.OFFICER_CLUB} />
-              <CardGrid clubs={data!.officer_clubs} />
-            </View>
-          )}
-
-          {hasMember && (
-            <View>
-              <SectionHeader title={STRINGS.MEMBER_CLUB} />
-              <CardGrid clubs={data!.member_clubs} />
-            </View>
-          )}
-        </ScrollView>
+        />
       )}
     </SafeAreaView>
   );

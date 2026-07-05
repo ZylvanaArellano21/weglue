@@ -66,6 +66,40 @@ export function EventsFeed() {
     [userId, queryClient, show],
   );
 
+  const renderItem: ListRenderItem<FeedItem> = useCallback(
+    ({ item }) => {
+      if (item.type === 'section_header') {
+        return (
+          <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
+            <Text
+              style={{
+                fontSize: 15,
+                fontWeight: '600',
+                color: '#000000',
+                fontFamily: 'Inter_600SemiBold',
+              }}
+            >
+              {item.label}
+            </Text>
+          </View>
+        );
+      }
+
+      const { event } = item;
+      const CardComponent = event.is_today ? EventCardToday : EventCard;
+
+      return (
+        <CardComponent
+          event={event}
+          onRsvp={handleRsvp}
+          onToggleSave={handleToggleSave}
+          onJoinClub={handleJoinClub}
+        />
+      );
+    },
+    [handleRsvp, handleToggleSave, handleJoinClub],
+  );
+
   if (isLoading) {
     return (
       <View style={{ paddingTop: 8 }}>
@@ -125,37 +159,6 @@ export function EventsFeed() {
     }
   }
 
-  const renderItem: ListRenderItem<FeedItem> = ({ item }) => {
-    if (item.type === 'section_header') {
-      return (
-        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
-          <Text
-            style={{
-              fontSize: 15,
-              fontWeight: '600',
-              color: '#000000',
-              fontFamily: 'Inter_600SemiBold',
-            }}
-          >
-            {item.label}
-          </Text>
-        </View>
-      );
-    }
-
-    const { event } = item;
-    const CardComponent = event.is_today ? EventCardToday : EventCard;
-
-    return (
-      <CardComponent
-        event={event}
-        onRsvp={handleRsvp}
-        onToggleSave={handleToggleSave}
-        onJoinClub={handleJoinClub}
-      />
-    );
-  };
-
   return (
     <View style={{ flex: 1 }}>
       {ToastComponent}
@@ -165,6 +168,10 @@ export function EventsFeed() {
         renderItem={renderItem}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
+        windowSize={7}
+        maxToRenderPerBatch={6}
+        initialNumToRender={6}
+        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}

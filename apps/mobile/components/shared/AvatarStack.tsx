@@ -1,5 +1,7 @@
+import { memo } from 'react';
 import { View, Image } from 'react-native';
 import { parsePresetColor } from './Avatar';
+import { getResizedImageUrl } from '../../lib/imageResize';
 
 interface AvatarItem {
   id: string;
@@ -14,7 +16,7 @@ interface AvatarStackProps {
   borderWidth?: number;
 }
 
-export function AvatarStack({
+export const AvatarStack = memo(function AvatarStack({
   avatars,
   size = 28,
   overlap = 8,
@@ -46,7 +48,7 @@ export function AvatarStack({
         >
           {a.avatar_url && !parsePresetColor(a.avatar_url) ? (
             <Image
-              source={{ uri: a.avatar_url }}
+              source={{ uri: getResizedImageUrl(a.avatar_url, size * 2) ?? undefined }}
               resizeMode="cover"
               style={{ width: size, height: size }}
             />
@@ -63,4 +65,4 @@ export function AvatarStack({
       ))}
     </View>
   );
-}
+});

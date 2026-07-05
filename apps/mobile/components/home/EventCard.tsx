@@ -1,11 +1,14 @@
-import { useState } from 'react';
-import { View, Text, Image, TouchableOpacity, Pressable } from 'react-native';
+import { memo, useState } from 'react';
+import { View, Text, Image, TouchableOpacity, Pressable, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { AvatarStack } from '../shared/AvatarStack';
 import { Pill } from '../shared/Pill';
 import type { HomeFeedEvent } from '../../services/eventService';
+import { getResizedImageUrl } from '../../lib/imageResize';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 interface EventCardProps {
   event: HomeFeedEvent;
@@ -26,7 +29,7 @@ function formatTime(timeStr: string): string {
   return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
-export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCardProps) {
+export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCardProps) {
   const router = useRouter();
   const [imageError, setImageError] = useState(false);
 
@@ -95,7 +98,7 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
         <View style={{ position: 'relative' }}>
           {event.cover_image_url && !imageError ? (
             <Image
-              source={{ uri: event.cover_image_url }}
+              source={{ uri: getResizedImageUrl(event.cover_image_url, SCREEN_WIDTH * 2, (SCREEN_WIDTH * 2 * 2) / 3) ?? undefined }}
               style={{ width: '100%', aspectRatio: 3 / 2 }}
               resizeMode="cover"
               onError={(e) => {
@@ -259,4 +262,4 @@ export function EventCard({ event, onRsvp, onToggleSave, onJoinClub }: EventCard
       </View>
     </View>
   );
-}
+});

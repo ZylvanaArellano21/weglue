@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   FlatList,
   RefreshControl,
   Share,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,9 @@ import { followUser } from '../../services/followService';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FeedPost } from '../../services/postService';
 import { CommentsSheet } from './CommentsSheet';
+import { getResizedImageUrl } from '../../lib/imageResize';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -38,7 +42,7 @@ export interface PostCardProps {
   onFollow: (authorId: string) => void;
 }
 
-export function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
+export const PostCard = memo(function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
   const router = useRouter();
   const [commentsVisible, setCommentsVisible] = useState(false);
 
@@ -132,7 +136,7 @@ export function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps
       {/* Post Image */}
       {post.image_url ? (
         <Image
-          source={{ uri: post.image_url }}
+          source={{ uri: getResizedImageUrl(post.image_url, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ?? undefined }}
           style={{ width: '100%', aspectRatio: 4 / 5 }}
           resizeMode="cover"
         />
@@ -211,7 +215,7 @@ export function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps
       </View>
     </View>
   );
-}
+});
 
 export function PostsFeed() {
   const { session } = useAuthStore();
@@ -260,6 +264,13 @@ export function PostsFeed() {
       }
     },
     [userId, queryClient, show],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: FeedPost }) => (
+      <PostCard post={item} viewerUserId={userId ?? ''} onLike={handleLike} onFollow={handleFollow} />
+    ),
+    [userId, handleLike, handleFollow],
   );
 
   if (isLoading) {
@@ -318,20 +329,17 @@ export function PostsFeed() {
       <FlatList<FeedPost>
         data={allPosts}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <PostCard
-            post={item}
-            viewerUserId={userId ?? ''}
-            onLike={handleLike}
-            onFollow={handleFollow}
-          />
-        )}
+        renderItem={renderItem}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
         onEndReached={() => {
           if (hasNextPage && !isFetchingNextPage) fetchNextPage();
         }}
         onEndReachedThreshold={0.5}
+        windowSize={7}
+        maxToRenderPerBatch={6}
+        initialNumToRender={6}
+        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}

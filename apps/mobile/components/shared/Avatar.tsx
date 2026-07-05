@@ -1,4 +1,6 @@
+import { memo } from 'react';
 import { Image, View, Text } from 'react-native';
+import { getResizedImageUrl } from '../../lib/imageResize';
 
 interface AvatarProps {
   uri: string | null | undefined;
@@ -18,13 +20,14 @@ export function parseTextAvatar(uri: string | null | undefined): string | null {
   return null;
 }
 
-export function Avatar({ uri, size = 40, username }: AvatarProps) {
+export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarProps) {
   const initials = username
     ? username.slice(0, 2).toUpperCase()
     : '?';
 
   const presetColor = parsePresetColor(uri);
   const textContent = parseTextAvatar(uri);
+  const resizedUri = getResizedImageUrl(uri, size * 2);
 
   if (textContent) {
     return (
@@ -80,10 +83,10 @@ export function Avatar({ uri, size = 40, username }: AvatarProps) {
   }
 
   // Real image URI
-  if (uri) {
+  if (resizedUri) {
     return (
       <Image
-        source={{ uri }}
+        source={{ uri: resizedUri }}
         resizeMode="cover"
         style={{
           width: size,
@@ -118,4 +121,4 @@ export function Avatar({ uri, size = 40, username }: AvatarProps) {
       </Text>
     </View>
   );
-}
+});
