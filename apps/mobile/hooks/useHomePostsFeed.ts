@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getHomePostsFeed, getPostById } from '../services/postService';
+import { getHomePostsFeed, getPostById, getPostComments, addComment } from '../services/postService';
 import { supabase } from '../lib/supabase';
 
 export function useHomePostsFeed(userId: string | undefined) {
@@ -37,5 +37,27 @@ export function usePostDetail(postId: string | undefined, userId: string | undef
     queryFn: () => getPostById(postId!, userId!),
     enabled: !!postId && !!userId,
     staleTime: 60 * 1000,
+  });
+}
+
+export function usePostComments(postId: string | undefined) {
+  return useQuery({
+    queryKey: ['postComments', postId],
+    queryFn: () => getPostComments(postId!),
+    enabled: !!postId,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAddComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ postId, userId, content }: { postId: string; userId: string; content: string }) =>
+      addComment(postId, userId, content),
+    onSuccess: (_data, { postId }) => {
+      queryClient.invalidateQueries({ queryKey: ['postComments', postId] });
+      queryClient.invalidateQueries({ queryKey: ['homePostsFeed'] });
+      queryClient.invalidateQueries({ queryKey: ['postDetail', postId] });
+    },
   });
 }

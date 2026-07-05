@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   FlatList,
   RefreshControl,
+  Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import { useToast } from '../Toast';
 import { followUser } from '../../services/followService';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FeedPost } from '../../services/postService';
+import { CommentsSheet } from './CommentsSheet';
 
 export function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -38,14 +40,25 @@ export interface PostCardProps {
 
 export function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
   const router = useRouter();
+  const [commentsVisible, setCommentsVisible] = useState(false);
 
   const handlePressAuthor = () => {
     router.push({ pathname: '/profile/[userId]', params: { userId: post.author.id } });
   };
 
-  const handlePressClub = () => {
-    if (post.tagged_club) {
-      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: post.tagged_club.id } });
+  const handlePressClub = (clubId: string) => {
+    router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId } });
+  };
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        title: `@${post.author.username}'s post`,
+        message: `Check out this post on We Glue: weglue://post/${post.id}`,
+        url: `weglue://post/${post.id}`,
+      });
+    } catch {
+      // User dismissed share sheet — no action needed
     }
   };
 
@@ -92,19 +105,20 @@ export function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps
               @{post.author.username}
             </Text>
           </TouchableOpacity>
-          {post.tagged_club && (
-            <TouchableOpacity onPress={handlePressClub} activeOpacity={0.7}>
-              <Text
-                style={{
-                  fontSize: 13,
-                  color: '#0FA6A6',
-                  fontFamily: 'Inter_400Regular',
-                  marginTop: 2,
-                }}
-              >
-                tag {post.tagged_club.name}
+          {post.tagged_clubs.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 2 }}>
+              <Text style={{ fontSize: 13, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
+                tag{' '}
               </Text>
-            </TouchableOpacity>
+              {post.tagged_clubs.map((club, idx) => (
+                <TouchableOpacity key={club.id} onPress={() => handlePressClub(club.id)} activeOpacity={0.7}>
+                  <Text style={{ fontSize: 13, color: '#0FA6A6', fontFamily: 'Inter_400Regular' }}>
+                    {club.name}
+                    {idx < post.tagged_clubs.length - 1 ? ', ' : ''}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
         </View>
         {!isOwnPost && (
@@ -148,22 +162,31 @@ export function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps
             {post.likes_count}
           </Text>
         </TouchableOpacity>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        <TouchableOpacity
+          onPress={() => setCommentsVisible(true)}
+          activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
+        >
           <Ionicons name="chatbubble-outline" size={20} color="#374151" />
           <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_400Regular' }}>
             {post.comments_count}
           </Text>
-        </View>
+        </TouchableOpacity>
         <TouchableOpacity
+          onPress={handleShare}
           activeOpacity={0.7}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
         >
           <Ionicons name="arrow-redo-outline" size={20} color="#374151" />
-          <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_400Regular' }}>
-            1
-          </Text>
         </TouchableOpacity>
       </View>
+
+      <CommentsSheet
+        visible={commentsVisible}
+        postId={post.id}
+        viewerUserId={viewerUserId}
+        onClose={() => setCommentsVisible(false)}
+      />
 
       {/* Caption */}
       <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 }}>

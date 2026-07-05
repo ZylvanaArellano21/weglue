@@ -15,10 +15,50 @@ export interface FeedPost {
   caption: string | null;
   created_at: string;
   author: PostAuthor;
-  tagged_club: { id: string; name: string } | null;
+  tagged_clubs: { id: string; name: string }[];
   likes_count: number;
   comments_count: number;
   user_has_liked: boolean;
+}
+
+export interface PostComment {
+  id: string;
+  content: string;
+  created_at: string;
+  author: { id: string; username: string; avatar_url: string | null };
+}
+
+function buildTaggedClubsMap(
+  extraTagRows: { post_id: string; club_id: string; clubs: { id: string; name: string } }[] | null,
+): Map<string, { id: string; name: string }[]> {
+  const map = new Map<string, { id: string; name: string }[]>();
+  for (const row of extraTagRows ?? []) {
+    if (!row.clubs) continue;
+    const list = map.get(row.post_id) ?? [];
+    list.push({ id: row.clubs.id, name: row.clubs.name });
+    map.set(row.post_id, list);
+  }
+  return map;
+}
+
+function mergeTaggedClubs(
+  primaryClubId: string | null,
+  primaryClub: { id: string; name: string } | null | undefined,
+  extraClubs: { id: string; name: string }[],
+): { id: string; name: string }[] {
+  const merged: { id: string; name: string }[] = [];
+  const seen = new Set<string>();
+  if (primaryClubId && primaryClub) {
+    merged.push({ id: primaryClub.id, name: primaryClub.name });
+    seen.add(primaryClub.id);
+  }
+  for (const club of extraClubs) {
+    if (!seen.has(club.id)) {
+      merged.push(club);
+      seen.add(club.id);
+    }
+  }
+  return merged;
 }
 
 export async function getHomePostsFeed(
@@ -55,7 +95,7 @@ export async function getHomePostsFeed(
   const postIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: authorUniversities }, { data: privacyRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: authorUniversities }, { data: privacyRows }, { data: extraTagRows }] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase
@@ -70,7 +110,13 @@ export async function getHomePostsFeed(
         .from('user_privacy')
         .select('user_id, is_private')
         .in('user_id', authorIds),
+      supabase
+        .from('post_club_tags')
+        .select('post_id, club_id, clubs(id, name)')
+        .in('post_id', postIds),
     ]);
+
+  const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
 
   const likesCountMap = new Map<string, number>();
   const userLikedSet = new Set<string>();
@@ -113,7 +159,7 @@ export async function getHomePostsFeed(
         is_following: followedSet.has(p.author_id),
         profile_is_private: privacyMap.get(p.author_id) ?? false,
       },
-      tagged_club: p.club_id ? { id: p.clubs.id, name: p.clubs.name } : null,
+      tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
       likes_count: likesCountMap.get(p.id) ?? 0,
       comments_count: commentsCountMap.get(p.id) ?? 0,
       user_has_liked: userLikedSet.has(p.id),
@@ -141,7 +187,7 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
 
   if (error || !p) return null;
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: privacyRow }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: privacyRow }, { data: extraTagRows }] =
     await Promise.all([
       supabase.from('post_likes').select('user_id').eq('post_id', postId),
       supabase.from('post_comments').select('id').eq('post_id', postId),
@@ -157,6 +203,10 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
         .select('is_private')
         .eq('user_id', (p as any).author_id)
         .maybeSingle(),
+      supabase
+        .from('post_club_tags')
+        .select('post_id, club_id, clubs(id, name)')
+        .eq('post_id', postId),
     ]);
 
   const likes = (likesRows ?? []) as any[];
@@ -173,11 +223,44 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
       is_following: !!followRow,
       profile_is_private: (privacyRow as any)?.is_private ?? false,
     },
-    tagged_club: (p as any).club_id ? { id: (p as any).clubs.id, name: (p as any).clubs.name } : null,
+    tagged_clubs: mergeTaggedClubs(
+      (p as any).club_id,
+      (p as any).clubs,
+      (extraTagRows as any[] ?? []).map((r) => ({ id: r.clubs.id, name: r.clubs.name })),
+    ),
     likes_count: likes.length,
     comments_count: (commentsRows ?? []).length,
     user_has_liked: likes.some((l) => l.user_id === userId),
   };
+}
+
+export async function getPostComments(postId: string): Promise<PostComment[]> {
+  const { data, error } = await supabase
+    .from('post_comments')
+    .select('id, content, created_at, profiles!inner(id, username, avatar_url)')
+    .eq('post_id', postId)
+    .order('created_at', { ascending: true });
+
+  if (error || !data) return [];
+
+  return (data as any[]).map((c) => ({
+    id: c.id,
+    content: c.content,
+    created_at: c.created_at,
+    author: {
+      id: c.profiles.id,
+      username: c.profiles.username,
+      avatar_url: c.profiles.avatar_url,
+    },
+  }));
+}
+
+export async function addComment(postId: string, userId: string, content: string): Promise<void> {
+  const { error } = await supabase
+    .from('post_comments')
+    .insert({ post_id: postId, user_id: userId, content });
+
+  if (error) throw error;
 }
 
 async function compressImage(uri: string): Promise<string> {
@@ -236,7 +319,8 @@ export async function createPost(
       post_id: post.id,
       club_id: cid,
     }));
-    await supabase.from('post_club_tags').insert(additionalTags);
+    const { error: tagError } = await supabase.from('post_club_tags').insert(additionalTags);
+    if (tagError) throw tagError;
   }
 
   return post.id;
