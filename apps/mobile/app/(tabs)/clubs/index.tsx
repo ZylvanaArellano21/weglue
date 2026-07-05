@@ -65,6 +65,7 @@ const ClubCard = memo(function ClubCard({ club }: { club: ClubWithNextEvent }) {
             source={{ uri: getResizedImageUrl(club.avatar_url, CARD_WIDTH * 2, CARD_WIDTH * 0.56 * 2) ?? undefined }}
             style={{ width: '100%', height: '100%' }}
             resizeMode="cover"
+            fadeDuration={0}
           />
         ) : (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' }}>

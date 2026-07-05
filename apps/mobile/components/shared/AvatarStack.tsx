@@ -50,6 +50,7 @@ export const AvatarStack = memo(function AvatarStack({
             <Image
               source={{ uri: getResizedImageUrl(a.avatar_url, size * 2) ?? undefined }}
               resizeMode="cover"
+              fadeDuration={0}
               style={{ width: size, height: size }}
             />
           ) : (

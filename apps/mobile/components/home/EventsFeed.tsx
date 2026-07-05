@@ -1,7 +1,12 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { View, Text, FlatList, RefreshControl, ListRenderItem } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
-import { useHomeEventsFeed, useRsvpToEvent, useToggleSaveEvent } from '../../hooks/useHomeEventsFeed';
+import {
+  useHomeEventsFeed,
+  useRsvpToEvent,
+  useToggleSaveEvent,
+  mergeEventFeedPages,
+} from '../../hooks/useHomeEventsFeed';
 import { EventCard } from './EventCard';
 import { EventCardToday } from './EventCardToday';
 import { EventCardSkeleton } from '../shared/SkeletonLoader';
@@ -19,7 +24,21 @@ export function EventsFeed() {
   const userId = session?.user.id;
   const queryClient = useQueryClient();
 
-  const { data: sections, isLoading, isError, refetch, isRefetching } = useHomeEventsFeed(userId);
+  const {
+    data,
+    isLoading,
+    isError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    refetch,
+    isRefetching,
+  } = useHomeEventsFeed(userId);
+
+  const sections = useMemo(
+    () => (data ? mergeEventFeedPages(data.pages) : undefined),
+    [data],
+  );
   const { mutate: rsvp } = useRsvpToEvent();
   const { mutate: toggleSave } = useToggleSaveEvent();
   const { show, ToastComponent } = useToast();
@@ -168,6 +187,10 @@ export function EventsFeed() {
         renderItem={renderItem}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
+        onEndReached={() => {
+          if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+        }}
+        onEndReachedThreshold={0.5}
         windowSize={7}
         maxToRenderPerBatch={6}
         initialNumToRender={6}

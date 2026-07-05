@@ -1,14 +1,40 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getHomeEventsFeed,
   rsvpToEvent,
   toggleSaveEvent,
+  type HomeEventsFeedSection,
 } from '../services/eventService';
 
+// Merges same-label sections across pages (e.g. "Your Clubs" from page 0 and
+// page 1) into one continuous section per label, in first-seen order.
+export function mergeEventFeedPages(
+  pages: { sections: HomeEventsFeedSection[]; hasMore: boolean }[],
+): HomeEventsFeedSection[] {
+  const order: string[] = [];
+  const byLabel = new Map<string, HomeEventsFeedSection>();
+
+  for (const page of pages) {
+    for (const section of page.sections) {
+      const existing = byLabel.get(section.label);
+      if (existing) {
+        existing.data = existing.data.concat(section.data);
+      } else {
+        byLabel.set(section.label, { label: section.label, data: [...section.data] });
+        order.push(section.label);
+      }
+    }
+  }
+
+  return order.map((label) => byLabel.get(label)!);
+}
+
 export function useHomeEventsFeed(userId: string | undefined) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ['homeEventsFeed', userId],
-    queryFn: () => getHomeEventsFeed(userId!),
+    queryFn: ({ pageParam = 0 }) => getHomeEventsFeed(userId!, pageParam),
+    getNextPageParam: (lastPage, allPages) => (lastPage.hasMore ? allPages.length : undefined),
+    initialPageParam: 0,
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
   });

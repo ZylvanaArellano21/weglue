@@ -101,6 +101,7 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
               source={{ uri: getResizedImageUrl(event.cover_image_url, SCREEN_WIDTH * 2, (SCREEN_WIDTH * 2 * 2) / 3) ?? undefined }}
               style={{ width: '100%', aspectRatio: 3 / 2 }}
               resizeMode="cover"
+              fadeDuration={0}
               onError={(e) => {
                 console.warn('[EventCard] Image failed to load:', event.cover_image_url, e.nativeEvent.error);
                 setImageError(true);

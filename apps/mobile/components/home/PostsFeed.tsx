@@ -139,6 +139,7 @@ export const PostCard = memo(function PostCard({ post, viewerUserId, onLike, onF
           source={{ uri: getResizedImageUrl(post.image_url, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ?? undefined }}
           style={{ width: '100%', aspectRatio: 4 / 5 }}
           resizeMode="cover"
+          fadeDuration={0}
         />
       ) : null}
 

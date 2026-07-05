@@ -3,7 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
-  TouchableWithoutFeedback,
+  Pressable,
   Animated,
   Image,
   Platform,
@@ -82,9 +82,8 @@ export default function HomeScreen() {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={closeDropdown}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#FDFBEF' }}>
-        {/* Header */}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FDFBEF' }}>
+      {/* Header */}
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
             {/* Avatar */}
@@ -150,32 +149,65 @@ export default function HomeScreen() {
           </Text>
         </View>
 
+        {/* Tap-outside-to-close backdrop — only mounted while the dropdown is
+            open, so normal scrolling has zero extra touch-responder overhead */}
+        {dropdownVisible && (
+          <Pressable
+            onPress={closeDropdown}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 900 }}
+          />
+        )}
+
         {/* Dropdown */}
         {dropdownVisible && (
-          <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
-            <Animated.View
+          <Animated.View
+            style={{
+              position: 'absolute',
+              top: Platform.OS === 'ios' ? 88 : 72,
+              right: 16,
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              paddingVertical: 8,
+              minWidth: 140,
+              zIndex: 1000,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.12,
+              shadowRadius: 12,
+              elevation: 8,
+              transform: [{ scale: dropdownScale }],
+              opacity: dropdownOpacity,
+              transformOrigin: 'top right',
+            }}
+          >
+            {/* Picture option - visible to all */}
+            <TouchableOpacity
+              onPress={handleNewPost}
+              activeOpacity={0.7}
               style={{
-                position: 'absolute',
-                top: Platform.OS === 'ios' ? 88 : 72,
-                right: 16,
-                backgroundColor: '#fff',
-                borderRadius: 12,
-                paddingVertical: 8,
-                minWidth: 140,
-                zIndex: 1000,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.12,
-                shadowRadius: 12,
-                elevation: 8,
-                transform: [{ scale: dropdownScale }],
-                opacity: dropdownOpacity,
-                transformOrigin: 'top right',
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                gap: 10,
               }}
             >
-              {/* Picture option - visible to all */}
+              <Ionicons name="image-outline" size={20} color="#374151" />
+              <Text
+                style={{
+                  fontSize: 15,
+                  color: '#111827',
+                  fontFamily: 'Inter_500Medium',
+                }}
+              >
+                Picture
+              </Text>
+            </TouchableOpacity>
+
+            {/* Event option - only for officers */}
+            {isOfficer && (
               <TouchableOpacity
-                onPress={handleNewPost}
+                onPress={handleNewEvent}
                 activeOpacity={0.7}
                 style={{
                   flexDirection: 'row',
@@ -185,7 +217,7 @@ export default function HomeScreen() {
                   gap: 10,
                 }}
               >
-                <Ionicons name="image-outline" size={20} color="#374151" />
+                <Ionicons name="calendar-outline" size={20} color="#374151" />
                 <Text
                   style={{
                     fontSize: 15,
@@ -193,37 +225,11 @@ export default function HomeScreen() {
                     fontFamily: 'Inter_500Medium',
                   }}
                 >
-                  Picture
+                  Event
                 </Text>
               </TouchableOpacity>
-
-              {/* Event option - only for officers */}
-              {isOfficer && (
-                <TouchableOpacity
-                  onPress={handleNewEvent}
-                  activeOpacity={0.7}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingHorizontal: 16,
-                    paddingVertical: 12,
-                    gap: 10,
-                  }}
-                >
-                  <Ionicons name="calendar-outline" size={20} color="#374151" />
-                  <Text
-                    style={{
-                      fontSize: 15,
-                      color: '#111827',
-                      fontFamily: 'Inter_500Medium',
-                    }}
-                  >
-                    Event
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </Animated.View>
-          </TouchableWithoutFeedback>
+            )}
+          </Animated.View>
         )}
 
         {/* Tab Switcher */}
@@ -271,10 +277,9 @@ export default function HomeScreen() {
           {activeTab === 'events' ? <EventsFeed /> : <PostsFeed />}
         </View>
 
-        {/* Sidebar drawer — opened by avatar tap */}
-        <SidebarOverlay />
-      </SafeAreaView>
-    </TouchableWithoutFeedback>
+      {/* Sidebar drawer — opened by avatar tap */}
+      <SidebarOverlay />
+    </SafeAreaView>
   );
 }
 

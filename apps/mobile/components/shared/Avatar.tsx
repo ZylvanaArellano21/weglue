@@ -88,6 +88,7 @@ export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarP
       <Image
         source={{ uri: resizedUri }}
         resizeMode="cover"
+        fadeDuration={0}
         style={{
           width: size,
           height: size,

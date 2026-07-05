@@ -41,8 +41,19 @@ export interface HomeEventsFeedSection {
   data: HomeFeedEvent[];
 }
 
-export async function getHomeEventsFeed(userId: string): Promise<HomeEventsFeedSection[]> {
+export interface HomeEventsFeedPage {
+  sections: HomeEventsFeedSection[];
+  hasMore: boolean;
+}
+
+const EVENTS_PAGE_SIZE = 20;
+
+export async function getHomeEventsFeed(
+  userId: string,
+  page: number = 0,
+): Promise<HomeEventsFeedPage> {
   const today = new Date().toISOString().split('T')[0];
+  const offset = page * EVENTS_PAGE_SIZE;
 
   const [
     { data: memberships },
@@ -74,9 +85,11 @@ export async function getHomeEventsFeed(userId: string): Promise<HomeEventsFeedS
       event_activities(activity)
     `)
     .gte('event_date', today)
-    .order('event_date', { ascending: true });
+    .order('event_date', { ascending: true })
+    .order('id', { ascending: true })
+    .range(offset, offset + EVENTS_PAGE_SIZE - 1);
 
-  if (error || !rawEvents) return [];
+  if (error || !rawEvents) return { sections: [], hasMore: false };
 
   const eventIds = (rawEvents as any[]).map((e) => e.id);
 
@@ -167,7 +180,7 @@ export async function getHomeEventsFeed(userId: string): Promise<HomeEventsFeedS
   if (yourClubs.length > 0) sections.push({ label: 'Your Clubs', data: yourClubs });
   if (recommended.length > 0) sections.push({ label: 'Recommended for You', data: recommended });
 
-  return sections;
+  return { sections, hasMore: (rawEvents as any[]).length === EVENTS_PAGE_SIZE };
 }
 
 export async function rsvpToEvent(
