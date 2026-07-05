@@ -8,6 +8,15 @@ import {
   type CalendarSection,
 } from '../services/calendarService';
 import { rsvpToEvent } from '../services/eventService';
+import {
+  applyOptimisticRsvp,
+  getCurrentRsvpStatus,
+  invalidateRsvpQueries,
+  nextRsvpStatus,
+  restoreRsvpSnapshot,
+  snapshotRsvpQueries,
+  type RsvpSnapshot,
+} from './useEventRsvp';
 
 // ─── Month markers ────────────────────────────────────────────────────────────
 // Returns the array of YYYY-MM-DD date strings for which the current user has
@@ -61,84 +70,29 @@ export function useCalendarDayEvents(
 }
 
 // ─── RSVP with optimistic update ─────────────────────────────────────────────
-//
-// Shared RSVP mutation wired to all calendar entry points. Performs an
-// OPTIMISTIC removal of the event from the calendar section list so the UI
-// reflects the change instantly, then rolls back if the Supabase write fails.
-//
-// Going logic (matches eventService.rsvpToEvent):
-//   - status='going' when already going  → deletes the row (toggle off)
-//   - status='going' when no row exists  → upserts (new RSVP)
-//   - status='cant'  when going row exists → upserts to 'cant'
-//   - status='cant'  when no row exists  → no-op (the service handles this;
-//     the mutation itself still calls through, the service does nothing)
-//
-// In all cases where the event's rsvp is removed or changed to 'cant',
-// it should disappear from the calendar (which only shows 'going' events).
-// The optimistic update handles this immediately; invalidation refreshes later.
+// Delegates to the shared helpers in useEventRsvp.ts (see there for toggle
+// semantics and exactly which caches get patched) so this stays in sync with
+// the Home feed and Event Details RSVP mutations.
 
 export function useCalendarRsvp(userId: string | undefined) {
   const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn: ({
-      eventId,
-      status,
-    }: {
-      eventId: string;
-      status: 'going' | 'cant';
-    }) => rsvpToEvent(userId!, eventId, status),
+  return useMutation<void, Error, { eventId: string; status: 'going' | 'cant' }, RsvpSnapshot>({
+    mutationFn: ({ eventId, status }) => rsvpToEvent(userId!, eventId, status),
 
     onMutate: async ({ eventId, status }) => {
-      // Only optimistic-update when removing from calendar ('cant' or toggling off 'going')
-      // Both cases should remove the event from the visible list immediately.
-      await queryClient.cancelQueries({ queryKey: ['calendarEvents', userId] });
-      await queryClient.cancelQueries({ queryKey: ['calendarDayEvents', userId] });
-
-      const previousEvents = queryClient.getQueryData<CalendarEvent[]>([
-        'calendarEvents',
-        userId,
-      ]);
-
-      // Remove from the flat events list regardless of which action —
-      // either the going row is deleted (toggle off) or set to cant.
-      // Either way the event leaves the calendar view.
-      queryClient.setQueryData<CalendarEvent[]>(
-        ['calendarEvents', userId],
-        (old = []) => old.filter((e) => e.id !== eventId),
-      );
-
-      // Also update the day-events cache if it exists
-      queryClient.setQueryData<CalendarEvent[]>(
-        // Note: date comes from the day's cache keys; cancel covers all variants
-        ['calendarDayEvents', userId],
-        (old = []) => {
-          if (!old) return old;
-          return old.filter((e) => e.id !== eventId);
-        },
-      );
-
-      return { previousEvents };
+      await queryClient.cancelQueries({ queryKey: ['calendarEvents'] });
+      await queryClient.cancelQueries({ queryKey: ['calendarDayEvents'] });
+      const snapshot = snapshotRsvpQueries(queryClient);
+      const current = getCurrentRsvpStatus(queryClient, eventId);
+      applyOptimisticRsvp(queryClient, eventId, nextRsvpStatus(current, status));
+      return snapshot;
     },
 
-    onError: (_err, { eventId }, context) => {
-      // Roll back the optimistic removal
-      if (context?.previousEvents) {
-        queryClient.setQueryData(['calendarEvents', userId], context.previousEvents);
-      }
-      // Let React Query refetch fresh state for day events
-      queryClient.invalidateQueries({ queryKey: ['calendarDayEvents', userId] });
+    onError: (_err, _vars, snapshot) => {
+      if (snapshot) restoreRsvpSnapshot(queryClient, snapshot);
     },
 
-    onSuccess: () => {
-      // Invalidate all affected queries after the server write succeeds
-      queryClient.invalidateQueries({ queryKey: ['calendarEvents', userId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers', userId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarDayEvents', userId] });
-      // Keep the home feed and event detail in sync
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
-      queryClient.invalidateQueries({ queryKey: ['eventAttendees'] });
-    },
+    onSuccess: () => invalidateRsvpQueries(queryClient),
   });
 }

@@ -19,6 +19,8 @@ import { useRealtimeDirectMessages, useRealtimeParticipants } from '../../../../
 import { useQueryClient } from '@tanstack/react-query';
 import { NonMemberPreview } from '../../../../components/chat/NonMemberPreview';
 import { MessageBubble } from '../../../../components/chat/MessageBubble';
+import { EventShareCard } from '../../../../components/chat/EventShareCard';
+import { PostShareCard } from '../../../../components/chat/PostShareCard';
 import { ChatInput } from '../../../../components/chat/ChatInput';
 import { ConfirmationModal } from '../../../../components/chat/ConfirmationModal';
 import {
@@ -221,6 +223,13 @@ export default function ChatRoom() {
                   createdAt={item.created_at}
                   isOwn={isOwn}
                   showSenderInfo={showSenderInfo}
+                  cardSlot={
+                    item.message_type === 'shared_event' && item.shared_event_id ? (
+                      <EventShareCard eventId={item.shared_event_id} viewerUserId={userId} />
+                    ) : item.message_type === 'shared_post' && item.shared_post_id ? (
+                      <PostShareCard postId={item.shared_post_id} viewerUserId={userId} />
+                    ) : undefined
+                  }
                 />
               </View>
             );

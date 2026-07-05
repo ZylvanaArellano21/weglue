@@ -40,6 +40,8 @@ export interface DirectMessageThread {
   content: string | null;
   attachment_url: string | null;
   message_type: string;
+  shared_event_id: string | null;
+  shared_post_id: string | null;
   created_at: string;
   sender: {
     id: string;
@@ -52,6 +54,15 @@ export interface DirectMessageThread {
 export interface DirectMessagesPage {
   messages: DirectMessageThread[];
   next_cursor: string | null;
+}
+
+function formatLastMessagePreview(lastMsg: { content: string | null; message_type: string } | null): string | null {
+  if (!lastMsg) return null;
+  if (lastMsg.message_type === 'shared_event') return '📅 Shared an event';
+  if (lastMsg.message_type === 'shared_post') return '🖼️ Shared a post';
+  if (lastMsg.message_type === 'poll') return '📊 Started a poll';
+  if (lastMsg.message_type === 'image') return lastMsg.content ?? '📷 Photo';
+  return lastMsg.content;
 }
 
 // ─── Chat List ────────────────────────────────────────────────────────────────
@@ -97,7 +108,7 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       name: conv.name,
       avatar_url: conv.avatar_url,
       club_id: conv.club_id,
-      last_message: lastMsg?.content ?? null,
+      last_message: formatLastMessagePreview(lastMsg),
       last_message_at: lastMsg?.created_at ?? null,
       last_sender_username: lastMsg?.profiles?.username ?? null,
       unread_count: unreadCount,
@@ -178,7 +189,7 @@ export async function getDirectMessages(
   let query = supabase
     .from('messages')
     .select(
-      'id, conversation_id, sender_id, content, attachment_url, message_type, created_at, profiles!sender_id(id, username, avatar_url)',
+      'id, conversation_id, sender_id, content, attachment_url, message_type, shared_event_id, shared_post_id, created_at, profiles!sender_id(id, username, avatar_url)',
     )
     .eq('conversation_id', conversationId)
     .is('channel_id', null)
@@ -200,6 +211,8 @@ export async function getDirectMessages(
     content: m.content,
     attachment_url: m.attachment_url,
     message_type: m.message_type,
+    shared_event_id: m.shared_event_id ?? null,
+    shared_post_id: m.shared_post_id ?? null,
     created_at: m.created_at,
     sender: {
       id: m.profiles.id,
@@ -232,6 +245,41 @@ export async function sendDirectMessage(
   if (error) throw error;
 }
 
+// ─── Share Messages ───────────────────────────────────────────────────────────
+// Sends a rich event/post preview card into a DM. Renders via
+// EventShareCard/PostShareCard (components/chat/) through MessageBubble's
+// cardSlot, the same extension point used for poll messages.
+
+export async function sendEventShareMessage(
+  conversationId: string,
+  senderId: string,
+  eventId: string,
+): Promise<void> {
+  const { error } = await supabase.from('messages').insert({
+    conversation_id: conversationId,
+    channel_id: null,
+    sender_id: senderId,
+    message_type: 'shared_event',
+    shared_event_id: eventId,
+  });
+  if (error) throw error;
+}
+
+export async function sendPostShareMessage(
+  conversationId: string,
+  senderId: string,
+  postId: string,
+): Promise<void> {
+  const { error } = await supabase.from('messages').insert({
+    conversation_id: conversationId,
+    channel_id: null,
+    sender_id: senderId,
+    message_type: 'shared_post',
+    shared_post_id: postId,
+  });
+  if (error) throw error;
+}
+
 // ─── Mark Read ────────────────────────────────────────────────────────────────
 
 export async function markConversationRead(conversationId: string): Promise<void> {
@@ -246,7 +294,7 @@ export async function getNonMemberPreview(conversationId: string): Promise<Direc
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, conversation_id, sender_id, content, attachment_url, message_type, created_at, profiles!sender_id(id, username, avatar_url)',
+      'id, conversation_id, sender_id, content, attachment_url, message_type, shared_event_id, shared_post_id, created_at, profiles!sender_id(id, username, avatar_url)',
     )
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
@@ -261,6 +309,8 @@ export async function getNonMemberPreview(conversationId: string): Promise<Direc
     content: m.content,
     attachment_url: m.attachment_url,
     message_type: m.message_type,
+    shared_event_id: m.shared_event_id ?? null,
+    shared_post_id: m.shared_post_id ?? null,
     created_at: m.created_at,
     sender: {
       id: m.profiles?.id ?? '',

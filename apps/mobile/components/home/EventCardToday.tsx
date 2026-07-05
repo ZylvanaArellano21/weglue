@@ -15,6 +15,7 @@ interface EventCardTodayProps {
   onRsvp: (eventId: string) => void;
   onToggleSave: (eventId: string) => void;
   onJoinClub?: (clubId: string) => void;
+  onRequestLeaveClub?: (clubId: string, clubName: string) => void;
 }
 
 function formatTime(timeStr: string): string {
@@ -25,7 +26,7 @@ function formatTime(timeStr: string): string {
 }
 
 
-export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub }: EventCardTodayProps) {
+export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub, onRequestLeaveClub }: EventCardTodayProps) {
   const router = useRouter();
   const [imageError, setImageError] = useState(false);
 
@@ -87,7 +88,11 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
         </TouchableOpacity>
         <Pill
           variant={event.user_has_joined_club ? 'joined' : 'join'}
-          onPress={() => !event.user_has_joined_club && onJoinClub?.(event.club_id)}
+          onPress={() =>
+            event.user_has_joined_club
+              ? onRequestLeaveClub?.(event.club_id, event.club.name)
+              : onJoinClub?.(event.club_id)
+          }
         />
       </View>
 
@@ -231,14 +236,16 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
             onPress={() => onRsvp(event.id)}
             activeOpacity={0.8}
             style={{
-              backgroundColor: '#0FA6A6',
+              backgroundColor: event.user_rsvp_status === 'going' ? 'transparent' : '#0FA6A6',
+              borderWidth: event.user_rsvp_status === 'going' ? 1.5 : 0,
+              borderColor: '#0FA6A6',
               borderRadius: 15,
               paddingHorizontal: 20,
               paddingVertical: 7,
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
-              RSVP
+            <Text style={{ color: event.user_rsvp_status === 'going' ? '#0FA6A6' : '#fff', fontSize: 12, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
+              {event.user_rsvp_status === 'going' ? 'Going ✓' : 'RSVP'}
             </Text>
           </TouchableOpacity>
         </View>

@@ -39,8 +39,6 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Share,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -56,6 +54,7 @@ import { AvatarStack } from '../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import { DotNavigator } from '../../../components/calendar/DotNavigator';
 import { useToast } from '../../../components/Toast';
+import { ShareSheet } from '../../../components/shared/ShareSheet';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -153,18 +152,7 @@ export default function CalendarEventDetailScreen() {
   }, [toggleSave, show]);
 
   // ─── Share ────────────────────────────────────────────────────────────────
-  const handleShare = useCallback(async () => {
-    if (!event) return;
-    try {
-      await Share.share({
-        title: event.title,
-        message: `Check out this event: ${event.title}\nweglue://event/${event.id}`,
-        url: `weglue://event/${event.id}`,
-      });
-    } catch {
-      // User dismissed share sheet
-    }
-  }, [event]);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   // ─── Back arrow — always routes to Calendar tab ───────────────────────────
   const handleBack = useCallback(() => {
@@ -360,7 +348,7 @@ export default function CalendarEventDetailScreen() {
 
             {/* Share + Bookmark row */}
             <View style={{ flexDirection: 'row', gap: 16, marginBottom: 20 }}>
-              <TouchableOpacity onPress={handleShare} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => setShareSheetVisible(true)} activeOpacity={0.7}>
                 <Ionicons name="share-outline" size={26} color="#0FA6A6" />
               </TouchableOpacity>
               <TouchableOpacity onPress={handleToggleSave} disabled={isSaving} activeOpacity={0.7}>
@@ -446,6 +434,17 @@ export default function CalendarEventDetailScreen() {
             )}
           </View>
         </ScrollView>
+      )}
+
+      {event && (
+        <ShareSheet
+          visible={shareSheetVisible}
+          onClose={() => setShareSheetVisible(false)}
+          userId={userId}
+          contentType="event"
+          contentId={event.id}
+          onShowToast={show}
+        />
       )}
     </SafeAreaView>
   );

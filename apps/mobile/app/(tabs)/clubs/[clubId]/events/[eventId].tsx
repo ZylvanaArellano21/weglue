@@ -5,7 +5,6 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  Share,
   ActivityIndicator,
   Alert,
   Animated,
@@ -15,13 +14,15 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useEventDetail, useRsvpMutation, useSaveEventMutation } from '../../../../../hooks/useEventDetail';
+import { useJoinClubMutation, useLeaveClubMutation } from '../../../../../hooks/useClubMembership';
 import { useRealtimeEventRsvps } from '../../../../../hooks/useRealtimeChannel';
 import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../../components/Toast';
-import { joinClub } from '../../../../../services/clubService';
+import { ProfileConfirmationModal } from '../../../../../components/profile/ProfileConfirmationModal';
+import { ShareSheet } from '../../../../../components/shared/ShareSheet';
 
 export type ClubEventDetailParams = {
   clubId: string;
@@ -50,7 +51,8 @@ export default function ClubEventDetailScreen() {
   const queryClient = useQueryClient();
   const { show, ToastComponent } = useToast();
 
-  const [joiningClub, setJoiningClub] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   // Spring animation that fires once when RSVP buttons transition from locked → enabled
   const rsvpEnableAnim = useRef(new Animated.Value(1)).current;
@@ -59,6 +61,8 @@ export default function ClubEventDetailScreen() {
   const { data: event, isLoading } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);
   const { mutate: toggleSave, isPending: isSaving } = useSaveEventMutation(userId, eventId);
+  const { mutate: joinClubMutate, isPending: joiningClub } = useJoinClubMutation(userId);
+  const { mutate: leaveClubMutate, isPending: leavingClub } = useLeaveClubMutation(userId);
 
   useRealtimeEventRsvps({
     eventId: eventId!,
@@ -93,32 +97,25 @@ export default function ClubEventDetailScreen() {
     });
   };
 
-  const handleShare = async () => {
+  const handleJoinLeaveClub = () => {
     if (!event) return;
-    try {
-      await Share.share({
-        title: event.title,
-        message: `Check out this event: ${event.title}\nweglue://event/${event.id}`,
-        url: `weglue://event/${event.id}`,
+    if (event.user_has_joined_club) {
+      setShowLeaveConfirm(true);
+    } else {
+      joinClubMutate(event.club_id, {
+        onSuccess: () => show(`Joined ${event.club.name}! 🎉`),
+        onError: () => show('Failed to join club.', 'error'),
       });
-    } catch {
-      // User dismissed share sheet
     }
   };
 
-  const handleJoinClub = async () => {
-    if (!userId || !event) return;
-    setJoiningClub(true);
-    try {
-      await joinClub(userId, event.club_id);
-      queryClient.invalidateQueries({ queryKey: ['eventDetail', eventId, userId] });
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-      show(`Joined ${event.club.name}! 🎉`);
-    } catch {
-      show('Failed to join club.', 'error');
-    } finally {
-      setJoiningClub(false);
-    }
+  const handleConfirmLeaveClub = () => {
+    if (!event) return;
+    setShowLeaveConfirm(false);
+    leaveClubMutate(event.club_id, {
+      onSuccess: () => show(`You left ${event.club.name}.`),
+      onError: () => show('Failed to leave club.', 'error'),
+    });
   };
 
   const handlePressClub = () => {
@@ -224,11 +221,11 @@ export default function ClubEventDetailScreen() {
             </TouchableOpacity>
 
             {/* Join/Joined button */}
-            {joiningClub ? (
+            {joiningClub || leavingClub ? (
               <ActivityIndicator size="small" color="#0FA6A6" />
             ) : (
               <TouchableOpacity
-                onPress={() => !event.user_has_joined_club && handleJoinClub()}
+                onPress={handleJoinLeaveClub}
                 activeOpacity={0.8}
                 style={{
                   paddingHorizontal: 16,
@@ -415,7 +412,7 @@ export default function ClubEventDetailScreen() {
 
             {/* ── Share + Bookmark row ──────────────────── */}
             <View style={{ flexDirection: 'row', gap: 16, marginBottom: 20 }}>
-              <TouchableOpacity onPress={handleShare} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => setShareSheetVisible(true)} activeOpacity={0.7}>
                 <Ionicons name="share-outline" size={26} color="#0FA6A6" />
               </TouchableOpacity>
               <TouchableOpacity onPress={handleToggleSave} disabled={isSaving} activeOpacity={0.7}>
@@ -534,6 +531,30 @@ export default function ClubEventDetailScreen() {
             })()}
           </View>
         </ScrollView>
+      )}
+
+      {event && (
+        <>
+          <ProfileConfirmationModal
+            visible={showLeaveConfirm}
+            title={`Leave ${event.club.name}?`}
+            message="You will be removed from all club chats and will no longer receive updates from this club."
+            confirmLabel="Leave"
+            cancelLabel="Cancel"
+            destructive
+            loading={leavingClub}
+            onConfirm={handleConfirmLeaveClub}
+            onCancel={() => setShowLeaveConfirm(false)}
+          />
+          <ShareSheet
+            visible={shareSheetVisible}
+            onClose={() => setShareSheetVisible(false)}
+            userId={userId}
+            contentType="event"
+            contentId={event.id}
+            onShowToast={show}
+          />
+        </>
       )}
     </SafeAreaView>
   );

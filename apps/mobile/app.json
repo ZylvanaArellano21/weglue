@@ -59,6 +59,21 @@
             {
               "scheme": "https",
               "host": "weglue.app",
+              "pathPrefix": "/post"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "weglue.app",
               "pathPrefix": "/auth/confirm"
             }
           ],

@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   FlatList,
   RefreshControl,
-  Share,
   Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -17,6 +16,7 @@ import { PostCardSkeleton } from '../shared/SkeletonLoader';
 import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
 import { useToast } from '../Toast';
+import { ShareSheet } from '../shared/ShareSheet';
 import { followUser } from '../../services/followService';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FeedPost } from '../../services/postService';
@@ -40,11 +40,13 @@ export interface PostCardProps {
   viewerUserId: string;
   onLike: (postId: string, hasLiked: boolean) => void;
   onFollow: (authorId: string) => void;
+  onShowToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-export const PostCard = memo(function PostCard({ post, viewerUserId, onLike, onFollow }: PostCardProps) {
+export const PostCard = memo(function PostCard({ post, viewerUserId, onLike, onFollow, onShowToast }: PostCardProps) {
   const router = useRouter();
   const [commentsVisible, setCommentsVisible] = useState(false);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   const handlePressAuthor = () => {
     router.push({ pathname: '/profile/[userId]', params: { userId: post.author.id } });
@@ -52,18 +54,6 @@ export const PostCard = memo(function PostCard({ post, viewerUserId, onLike, onF
 
   const handlePressClub = (clubId: string) => {
     router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId } });
-  };
-
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        title: `@${post.author.username}'s post`,
-        message: `Check out this post on We Glue: weglue://post/${post.id}`,
-        url: `weglue://post/${post.id}`,
-      });
-    } catch {
-      // User dismissed share sheet — no action needed
-    }
   };
 
   const isOwnPost = post.author.id === viewerUserId;
@@ -178,7 +168,7 @@ export const PostCard = memo(function PostCard({ post, viewerUserId, onLike, onF
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={handleShare}
+          onPress={() => setShareSheetVisible(true)}
           activeOpacity={0.7}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
         >
@@ -191,6 +181,15 @@ export const PostCard = memo(function PostCard({ post, viewerUserId, onLike, onF
         postId={post.id}
         viewerUserId={viewerUserId}
         onClose={() => setCommentsVisible(false)}
+      />
+
+      <ShareSheet
+        visible={shareSheetVisible}
+        onClose={() => setShareSheetVisible(false)}
+        userId={viewerUserId}
+        contentType="post"
+        contentId={post.id}
+        onShowToast={onShowToast}
       />
 
       {/* Caption */}
@@ -269,9 +268,15 @@ export function PostsFeed() {
 
   const renderItem = useCallback(
     ({ item }: { item: FeedPost }) => (
-      <PostCard post={item} viewerUserId={userId ?? ''} onLike={handleLike} onFollow={handleFollow} />
+      <PostCard
+        post={item}
+        viewerUserId={userId ?? ''}
+        onLike={handleLike}
+        onFollow={handleFollow}
+        onShowToast={show}
+      />
     ),
-    [userId, handleLike, handleFollow],
+    [userId, handleLike, handleFollow, show],
   );
 
   if (isLoading) {

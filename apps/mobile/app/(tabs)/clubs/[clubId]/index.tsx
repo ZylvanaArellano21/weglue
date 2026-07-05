@@ -15,13 +15,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useClubProfile, useJoinClub, useLeaveClub } from '../../../../hooks/useClubProfile';
+import { useClubProfile } from '../../../../hooks/useClubProfile';
+import { useJoinClubMutation, useLeaveClubMutation } from '../../../../hooks/useClubMembership';
 import { useOfficerStore } from '../../../../store/officerStore';
 import { Avatar } from '../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
 import { PhotoGalleryModal } from '../../../../components/club/PhotoGalleryModal';
+import { ProfileConfirmationModal } from '../../../../components/profile/ProfileConfirmationModal';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 
@@ -354,40 +356,35 @@ export default function ClubProfileScreen() {
 
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   const { data: club, isLoading, refetch } = useClubProfile(clubId, userId);
-  const { mutate: join, isPending: joining } = useJoinClub(userId, clubId);
-  const { mutate: leave, isPending: leaving } = useLeaveClub(userId, clubId);
+  const { mutate: join, isPending: joining } = useJoinClubMutation(userId);
+  const { mutate: leave, isPending: leaving } = useLeaveClubMutation(userId);
 
   const isOfficer = !!clubId && officerClubIds.includes(clubId);
 
   const handleJoinLeave = () => {
     if (club?.is_member) {
-      Alert.alert(
-        `Leave ${club.name}?`,
-        'You will be removed from all club chats and will no longer receive updates from this club.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Leave Club',
-            style: 'destructive',
-            onPress: () =>
-              leave(undefined, {
-                onSuccess: () => {
-                  show('You left ' + club.name);
-                  router.back();
-                },
-                onError: () => show('Failed to leave club.', 'error'),
-              }),
-          },
-        ],
-      );
-    } else {
-      join(undefined, {
+      setShowLeaveConfirm(true);
+    } else if (clubId) {
+      join(clubId, {
         onSuccess: () => show(`Joined ${club?.name ?? 'club'}! 🎉`),
         onError: () => show('Failed to join club.', 'error'),
       });
     }
+  };
+
+  const handleConfirmLeave = () => {
+    if (!clubId) return;
+    setShowLeaveConfirm(false);
+    leave(clubId, {
+      onSuccess: () => {
+        show('You left ' + (club?.name ?? 'the club'));
+        router.back();
+      },
+      onError: () => show('Failed to leave club.', 'error'),
+    });
   };
 
   if (isLoading) {
@@ -910,6 +907,18 @@ export default function ClubProfileScreen() {
         viewerUserId={userId ?? ''}
         onClose={() => setPhotoViewerVisible(false)}
         onOpenPost={handleOpenPost}
+      />
+
+      <ProfileConfirmationModal
+        visible={showLeaveConfirm}
+        title={`Leave ${club.name}?`}
+        message="You will be removed from all club chats and will no longer receive updates from this club."
+        confirmLabel="Leave"
+        cancelLabel="Cancel"
+        destructive
+        loading={leaving}
+        onConfirm={handleConfirmLeave}
+        onCancel={() => setShowLeaveConfirm(false)}
       />
     </SafeAreaView>
   );

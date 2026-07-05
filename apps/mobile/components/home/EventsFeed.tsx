@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, RefreshControl, ListRenderItem } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import {
@@ -7,12 +7,12 @@ import {
   useToggleSaveEvent,
   mergeEventFeedPages,
 } from '../../hooks/useHomeEventsFeed';
+import { useJoinClubMutation, useLeaveClubMutation } from '../../hooks/useClubMembership';
 import { EventCard } from './EventCard';
 import { EventCardToday } from './EventCardToday';
 import { EventCardSkeleton } from '../shared/SkeletonLoader';
 import { useToast } from '../Toast';
-import { joinClub } from '../../services/clubService';
-import { useQueryClient } from '@tanstack/react-query';
+import { ProfileConfirmationModal } from '../profile/ProfileConfirmationModal';
 import type { HomeFeedEvent } from '../../services/eventService';
 
 type FeedItem =
@@ -22,7 +22,7 @@ type FeedItem =
 export function EventsFeed() {
   const { session } = useAuthStore();
   const userId = session?.user.id;
-  const queryClient = useQueryClient();
+  const [leaveTarget, setLeaveTarget] = useState<{ clubId: string; clubName: string } | null>(null);
 
   const {
     data,
@@ -41,6 +41,8 @@ export function EventsFeed() {
   );
   const { mutate: rsvp } = useRsvpToEvent();
   const { mutate: toggleSave } = useToggleSaveEvent();
+  const { mutate: joinClubMutate } = useJoinClubMutation(userId);
+  const { mutate: leaveClubMutate, isPending: leavingClub } = useLeaveClubMutation(userId);
   const { show, ToastComponent } = useToast();
 
   const handleRsvp = useCallback(
@@ -72,18 +74,29 @@ export function EventsFeed() {
   );
 
   const handleJoinClub = useCallback(
-    async (clubId: string) => {
+    (clubId: string) => {
       if (!userId) return;
-      try {
-        await joinClub(userId, clubId);
-        queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-        show('Joined club! 🎉');
-      } catch {
-        show('Failed to join club.', 'error');
-      }
+      joinClubMutate(clubId, {
+        onSuccess: () => show('Joined club! 🎉'),
+        onError: () => show('Failed to join club.', 'error'),
+      });
     },
-    [userId, queryClient, show],
+    [userId, joinClubMutate, show],
   );
+
+  const handleRequestLeaveClub = useCallback((clubId: string, clubName: string) => {
+    setLeaveTarget({ clubId, clubName });
+  }, []);
+
+  const handleConfirmLeaveClub = useCallback(() => {
+    if (!leaveTarget) return;
+    const { clubId, clubName } = leaveTarget;
+    setLeaveTarget(null);
+    leaveClubMutate(clubId, {
+      onSuccess: () => show(`You left ${clubName}.`),
+      onError: () => show('Failed to leave club.', 'error'),
+    });
+  }, [leaveTarget, leaveClubMutate, show]);
 
   const renderItem: ListRenderItem<FeedItem> = useCallback(
     ({ item }) => {
@@ -113,10 +126,11 @@ export function EventsFeed() {
           onRsvp={handleRsvp}
           onToggleSave={handleToggleSave}
           onJoinClub={handleJoinClub}
+          onRequestLeaveClub={handleRequestLeaveClub}
         />
       );
     },
-    [handleRsvp, handleToggleSave, handleJoinClub],
+    [handleRsvp, handleToggleSave, handleJoinClub, handleRequestLeaveClub],
   );
 
   if (isLoading) {
@@ -203,6 +217,18 @@ export function EventsFeed() {
             colors={['#0FA6A6']}
           />
         }
+      />
+
+      <ProfileConfirmationModal
+        visible={!!leaveTarget}
+        title={`Leave ${leaveTarget?.clubName ?? 'this club'}?`}
+        message="You will be removed from all club chats and will no longer receive updates from this club."
+        confirmLabel="Leave"
+        cancelLabel="Cancel"
+        destructive
+        loading={leavingClub}
+        onConfirm={handleConfirmLeaveClub}
+        onCancel={() => setLeaveTarget(null)}
       />
     </View>
   );

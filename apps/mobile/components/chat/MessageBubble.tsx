@@ -16,6 +16,9 @@ interface Props {
   showSenderInfo: boolean;
   onLongPress?: (messageId: string) => void;
   pollSlot?: React.ReactNode;
+  // Renders a shared_event/shared_post preview card in place of the normal
+  // bubble chrome — same extension point as pollSlot.
+  cardSlot?: React.ReactNode;
 }
 
 function formatTime(isoString: string): string {
@@ -38,8 +41,10 @@ export function MessageBubble({
   showSenderInfo,
   onLongPress,
   pollSlot,
+  cardSlot,
 }: Props) {
   const isPoll = messageType === 'poll' && pollSlot;
+  const isCard = (messageType === 'shared_event' || messageType === 'shared_post') && cardSlot;
 
   return (
     <View style={[styles.row, isOwn && styles.rowOwn]}>
@@ -57,6 +62,10 @@ export function MessageBubble({
         {isPoll ? (
           <TouchableOpacity onLongPress={() => onLongPress?.(id)} activeOpacity={0.9}>
             {pollSlot}
+          </TouchableOpacity>
+        ) : isCard ? (
+          <TouchableOpacity onLongPress={() => onLongPress?.(id)} activeOpacity={0.9}>
+            {cardSlot}
           </TouchableOpacity>
         ) : (
           <TouchableOpacity

@@ -1,5 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getEventDetail, rsvpToEvent, toggleSaveEvent } from '../services/eventService';
+import {
+  applyOptimisticRsvp,
+  getCurrentRsvpStatus,
+  invalidateRsvpQueries,
+  nextRsvpStatus,
+  restoreRsvpSnapshot,
+  snapshotRsvpQueries,
+  type RsvpSnapshot,
+} from './useEventRsvp';
 
 export function useEventDetail(eventId: string | undefined, userId: string | undefined) {
   return useQuery({
@@ -12,17 +21,20 @@ export function useEventDetail(eventId: string | undefined, userId: string | und
 
 export function useRsvpMutation(userId: string | undefined, eventId: string | undefined) {
   const queryClient = useQueryClient();
-  return useMutation({
+  return useMutation<void, Error, 'going' | 'cant', RsvpSnapshot>({
     mutationFn: (status: 'going' | 'cant') =>
       rsvpToEvent(userId!, eventId!, status),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['eventDetail', eventId, userId] });
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eventAttendees', eventId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarEvents', userId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers', userId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarDayEvents', userId] });
+    onMutate: async (status) => {
+      await queryClient.cancelQueries({ queryKey: ['eventDetail'] });
+      const snapshot = snapshotRsvpQueries(queryClient);
+      const current = getCurrentRsvpStatus(queryClient, eventId!);
+      applyOptimisticRsvp(queryClient, eventId!, nextRsvpStatus(current, status));
+      return snapshot;
     },
+    onError: (_err, _status, snapshot) => {
+      if (snapshot) restoreRsvpSnapshot(queryClient, snapshot);
+    },
+    onSuccess: () => invalidateRsvpQueries(queryClient),
   });
 }
 

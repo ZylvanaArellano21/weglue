@@ -68,7 +68,7 @@ export default function PostDetailScreen() {
         {isLoading ? (
           <PostCardSkeleton />
         ) : post ? (
-          <PostCard post={post} viewerUserId={userId ?? ''} onLike={handleLike} onFollow={handleFollow} />
+          <PostCard post={post} viewerUserId={userId ?? ''} onLike={handleLike} onFollow={handleFollow} onShowToast={show} />
         ) : (
           <View style={{ padding: 40, alignItems: 'center' }}>
             <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Inter_400Regular' }}>

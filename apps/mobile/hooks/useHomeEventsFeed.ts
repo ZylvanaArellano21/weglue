@@ -5,6 +5,15 @@ import {
   toggleSaveEvent,
   type HomeEventsFeedSection,
 } from '../services/eventService';
+import {
+  applyOptimisticRsvp,
+  getCurrentRsvpStatus,
+  invalidateRsvpQueries,
+  nextRsvpStatus,
+  restoreRsvpSnapshot,
+  snapshotRsvpQueries,
+  type RsvpSnapshot,
+} from './useEventRsvp';
 
 // Merges same-label sections across pages (e.g. "Your Clubs" from page 0 and
 // page 1) into one continuous section per label, in first-seen order.
@@ -42,16 +51,24 @@ export function useHomeEventsFeed(userId: string | undefined) {
 
 export function useRsvpToEvent() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ userId, eventId, status }: { userId: string; eventId: string; status: 'going' | 'cant' }) =>
-      rsvpToEvent(userId, eventId, status),
-    onSuccess: (_data, { userId }) => {
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
-      queryClient.invalidateQueries({ queryKey: ['calendarEvents', userId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers', userId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarDayEvents', userId] });
+  return useMutation<
+    void,
+    Error,
+    { userId: string; eventId: string; status: 'going' | 'cant' },
+    RsvpSnapshot
+  >({
+    mutationFn: ({ userId, eventId, status }) => rsvpToEvent(userId, eventId, status),
+    onMutate: async ({ eventId, status }) => {
+      await queryClient.cancelQueries({ queryKey: ['homeEventsFeed'] });
+      const snapshot = snapshotRsvpQueries(queryClient);
+      const current = getCurrentRsvpStatus(queryClient, eventId);
+      applyOptimisticRsvp(queryClient, eventId, nextRsvpStatus(current, status));
+      return snapshot;
     },
+    onError: (_err, _vars, snapshot) => {
+      if (snapshot) restoreRsvpSnapshot(queryClient, snapshot);
+    },
+    onSuccess: () => invalidateRsvpQueries(queryClient),
   });
 }
 

@@ -1,5 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getClubProfile, joinClub, leaveClub } from '../services/clubService';
+import { useQuery } from '@tanstack/react-query';
+import { getClubProfile } from '../services/clubService';
 
 export function useClubProfile(clubId: string | undefined, userId: string | undefined) {
   return useQuery({
@@ -10,24 +10,6 @@ export function useClubProfile(clubId: string | undefined, userId: string | unde
   });
 }
 
-export function useJoinClub(userId: string | undefined, clubId: string | undefined) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => joinClub(userId!, clubId!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId, userId] });
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-    },
-  });
-}
-
-export function useLeaveClub(userId: string | undefined, clubId: string | undefined) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => leaveClub(userId!, clubId!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId, userId] });
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-    },
-  });
-}
+// Join/leave mutations moved to hooks/useClubMembership.ts (useJoinClubMutation /
+// useLeaveClubMutation) so Home, Club Profile, and Event Details all share one
+// optimistic-update implementation instead of three divergent ones.
