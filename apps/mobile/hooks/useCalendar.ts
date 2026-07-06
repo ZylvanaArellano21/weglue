@@ -17,6 +17,7 @@ import {
   snapshotRsvpQueries,
   type RsvpSnapshot,
 } from './useEventRsvp';
+import { timedQuery } from '../lib/timedQuery';
 
 // ─── Month markers ────────────────────────────────────────────────────────────
 // Returns the array of YYYY-MM-DD date strings for which the current user has
@@ -29,7 +30,7 @@ export function useCalendarMonthMarkers(
 ) {
   return useQuery({
     queryKey: ['calendarMonthMarkers', userId, year, month],
-    queryFn: () => getCalendarMonthMarkers(userId!, year, month),
+    queryFn: () => timedQuery('calendarMonthMarkers', getCalendarMonthMarkers(userId!, year, month)),
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
   });
@@ -43,7 +44,7 @@ export function useCalendarMonthMarkers(
 export function useCalendarSections(userId: string | undefined) {
   return useQuery<CalendarEvent[], Error, CalendarSection[]>({
     queryKey: ['calendarEvents', userId],
-    queryFn: () => getCalendarEvents(userId!),
+    queryFn: () => timedQuery('calendarEvents', getCalendarEvents(userId!)),
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
     select: (events) => {

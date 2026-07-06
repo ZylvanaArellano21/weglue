@@ -67,6 +67,13 @@ function formatLastMessagePreview(lastMsg: { content: string | null; message_typ
 
 // ─── Chat List ────────────────────────────────────────────────────────────────
 
+// Cap how many recent messages are fetched per conversation. Previously this
+// query pulled EVERY message of EVERY conversation (with a profile join each)
+// just to derive the last message + unread count, so the chat list got slower
+// with every message ever sent. 30 is enough for the preview and an accurate
+// unread badge up to 30.
+const CHAT_PREVIEW_MESSAGES = 30;
+
 export async function getMyChats(userId: string): Promise<ChatPreview[]> {
   const { data, error } = await supabase
     .from('conversation_participants')
@@ -79,6 +86,8 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
        )`,
     )
     .eq('user_id', userId)
+    .order('created_at', { referencedTable: 'conversations.messages', ascending: false })
+    .limit(CHAT_PREVIEW_MESSAGES, { referencedTable: 'conversations.messages' })
     .order('joined_at', { ascending: false });
 
   if (error) throw error;

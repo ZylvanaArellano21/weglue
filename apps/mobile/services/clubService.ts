@@ -105,6 +105,7 @@ export async function getClubProfile(
     { data: officerRows },
     { data: eventRows },
     { data: photoRows },
+    gluemates,
   ] = await Promise.all([
     supabase
       .from('clubs')
@@ -143,11 +144,10 @@ export async function getClubProfile(
       .eq('club_id', clubId)
       .order('created_at', { ascending: false })
       .limit(9),
+    getClubGluemates(clubId, userId),
   ]);
 
   if (!club) return null;
-
-  const gluemates = await getClubGluemates(clubId, userId);
 
   const officers: ClubOfficer[] = ((officerRows ?? []) as any[]).map((o) => ({
     id: o.id,

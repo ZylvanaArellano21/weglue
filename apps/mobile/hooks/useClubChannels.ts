@@ -10,11 +10,12 @@ import {
   type CreateChannelInput,
   type Attachment,
 } from '../services/channelService';
+import { timedQuery } from '../lib/timedQuery';
 
 export function useClubChannels(clubId: string | undefined) {
   return useQuery({
     queryKey: ['clubChannels', clubId],
-    queryFn: () => getClubChannels(clubId!),
+    queryFn: () => timedQuery('clubChannels', getClubChannels(clubId!)),
     enabled: !!clubId,
     staleTime: 30 * 1000,
   });
@@ -32,7 +33,7 @@ export function useClubConversationId(clubId: string | undefined) {
 export function useChannelMessages(channelId: string | undefined, cursor?: string) {
   return useQuery({
     queryKey: ['channelMessages', channelId, cursor],
-    queryFn: () => getChannelMessages(channelId!, cursor),
+    queryFn: () => timedQuery('channelMessages', getChannelMessages(channelId!, cursor)),
     enabled: !!channelId,
     staleTime: 0,
   });

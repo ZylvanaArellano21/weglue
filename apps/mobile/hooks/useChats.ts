@@ -10,11 +10,12 @@ import {
   isConversationMember,
   markConversationRead,
 } from '../services/chatService';
+import { timedQuery } from '../lib/timedQuery';
 
 export function useMyChats(userId: string | undefined) {
   return useQuery({
     queryKey: ['myChats', userId],
-    queryFn: () => getMyChats(userId!),
+    queryFn: () => timedQuery('myChats', getMyChats(userId!)),
     enabled: !!userId,
     staleTime: 15 * 1000,
   });
@@ -23,7 +24,7 @@ export function useMyChats(userId: string | undefined) {
 export function useChatDetails(conversationId: string | undefined) {
   return useQuery({
     queryKey: ['chatDetails', conversationId],
-    queryFn: () => getChatDetails(conversationId!),
+    queryFn: () => timedQuery('chatDetails', getChatDetails(conversationId!)),
     enabled: !!conversationId,
     staleTime: 60 * 1000,
   });
@@ -44,7 +45,7 @@ export function useConversationMembership(
 export function useDirectMessages(conversationId: string | undefined, cursor?: string) {
   return useQuery({
     queryKey: ['directMessages', conversationId, cursor],
-    queryFn: () => getDirectMessages(conversationId!, cursor),
+    queryFn: () => timedQuery('directMessages', getDirectMessages(conversationId!, cursor)),
     enabled: !!conversationId,
     staleTime: 0,
   });

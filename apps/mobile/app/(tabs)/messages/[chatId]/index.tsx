@@ -35,7 +35,13 @@ import { supabase } from '../../../../lib/supabase';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
 export default function ChatRoom() {
-  const { chatId } = useLocalSearchParams<{ chatId: string }>();
+  const { chatId, ptype, pclub, pname, pavatar } = useLocalSearchParams<{
+    chatId: string;
+    ptype?: string;
+    pclub?: string;
+    pname?: string;
+    pavatar?: string;
+  }>();
   const router = useRouter();
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
@@ -45,9 +51,17 @@ export default function ChatRoom() {
   const { data: chatDetails, isLoading: detailsLoading } = useChatDetails(chatId);
   const { data: isMember, refetch: refetchMembership } = useConversationMembership(chatId, userId);
 
-  const isDirect = chatDetails?.type === 'direct';
+  // The chat list already knows the conversation type/club/name, passed along
+  // as route params. Using them here means the header renders instantly and
+  // the channel/message queries start in parallel with the details fetch
+  // instead of serially after it.
+  const effectiveType = chatDetails?.type ?? (ptype || undefined);
+  const effectiveClubId = chatDetails?.club_id ?? (pclub || undefined);
+  const effectiveAvatarUrl = chatDetails?.avatar_url ?? (pavatar || null);
+
+  const isDirect = effectiveType === 'direct';
   const isGroupWithChannels =
-    chatDetails?.type === 'club_group' || chatDetails?.type === 'officer_chat';
+    effectiveType === 'club_group' || effectiveType === 'officer_chat';
 
   const handleJoined = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['conversationMember', chatId, userId] });
@@ -58,7 +72,7 @@ export default function ChatRoom() {
   useRealtimeParticipants(chatId, userId, handleJoined);
 
   const { data: channels } = useClubChannels(
-    isGroupWithChannels && chatDetails?.club_id ? chatDetails.club_id : undefined,
+    isGroupWithChannels && effectiveClubId ? effectiveClubId : undefined,
   );
 
   // Fix 8: auto-navigate to last-visited or default channel, bypassing the channel picker
@@ -104,7 +118,23 @@ export default function ChatRoom() {
     }
   }, [isDirect, messages.length, chatId]);
 
-  if (detailsLoading || !chatDetails) {
+  // Only block on a spinner when we know nothing at all about this chat
+  // (e.g. opened from a deep link without preview params).
+  if (!chatDetails && !effectiveType) {
+    if (!detailsLoading) {
+      return (
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={24} color={chatColors.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.center}>
+            <Text style={styles.emptyText}>Couldn't open this chat. Go back and try again.</Text>
+          </View>
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.center}>
@@ -115,13 +145,16 @@ export default function ChatRoom() {
   }
 
   const displayName =
-    chatDetails.name ??
+    chatDetails?.name ??
     (isDirect
-      ? chatDetails.participants.find((p) => p.user_id !== userId)?.username
-      : 'Chat') ??
-    'Chat';
+      ? chatDetails?.participants.find((p) => p.user_id !== userId)?.username
+      : undefined) ??
+    (pname || 'Chat');
 
-  if (!isMember && isGroupWithChannels) {
+  // isMember === undefined means the membership check is still in flight;
+  // fall through to the group header + inline spinner instead of flashing the
+  // non-member preview at people who are members.
+  if (isMember === false && isGroupWithChannels) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
@@ -136,7 +169,9 @@ export default function ChatRoom() {
         <NonMemberPreview
           messages={previewMessages ?? []}
           chatName={displayName}
-          onJoin={() => router.push(`/(tabs)/clubs/${chatDetails.club_id}`)}
+          onJoin={() => {
+            if (effectiveClubId) router.push(`/(tabs)/clubs/${effectiveClubId}`);
+          }}
         />
       </SafeAreaView>
     );
@@ -150,7 +185,7 @@ export default function ChatRoom() {
             <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
-            <Avatar uri={chatDetails.avatar_url} size={chatSizes.avatarHeader} username={displayName} />
+            <Avatar uri={effectiveAvatarUrl} size={chatSizes.avatarHeader} username={displayName} />
             <Text style={styles.headerTitle} numberOfLines={1}>
               {displayName}
             </Text>
@@ -170,7 +205,7 @@ export default function ChatRoom() {
     );
   }
 
-  const otherUser = chatDetails.participants.find((p) => p.user_id !== userId);
+  const otherUser = chatDetails?.participants.find((p) => p.user_id !== userId);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

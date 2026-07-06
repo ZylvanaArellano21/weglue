@@ -36,8 +36,19 @@ export default function CalendarScreen() {
     isLoading,
     isError,
     refetch,
-    isRefetching,
   } = useCalendarSections(userId);
+
+  // Pull-to-refresh state kept separate from background refetches so the
+  // spinner only shows for a real pull.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch]);
 
   const { data: markedDates = [] } = useCalendarMonthMarkers(
     userId,
@@ -162,8 +173,8 @@ export default function CalendarScreen() {
           stickySectionHeadersEnabled={false}
           refreshControl={
             <RefreshControl
-              refreshing={isRefetching}
-              onRefresh={refetch}
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
               tintColor={calendarColors.teal}
               colors={[calendarColors.teal]}
             />

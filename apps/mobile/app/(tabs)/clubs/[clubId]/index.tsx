@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -357,9 +357,21 @@ export default function ClubProfileScreen() {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
-  const { data: club, isLoading, refetch } = useClubProfile(clubId, userId);
+  const { data: club, isLoading, isError, refetch } = useClubProfile(clubId, userId);
   const { mutate: join, isPending: joining } = useJoinClubMutation(userId);
   const { mutate: leave, isPending: leaving } = useLeaveClubMutation(userId);
+
+  // Pull-to-refresh state kept separate from first-load state so a background
+  // refetch never swaps rendered content back to skeletons.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch]);
 
   const isOfficer = !!clubId && officerClubIds.includes(clubId);
 
@@ -410,10 +422,26 @@ export default function ClubProfileScreen() {
         <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
           <Ionicons name="chevron-back" size={26} color={INK} />
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: MUTED, fontSize: 15, fontFamily: 'Inter_400Regular' }}>
-            Club not found.
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+          <Text style={{ color: MUTED, fontSize: 15, fontFamily: 'Inter_400Regular', marginBottom: 16 }}>
+            {isError ? "Couldn't load this club." : 'Club not found.'}
           </Text>
+          {isError && (
+            <TouchableOpacity
+              onPress={() => refetch()}
+              activeOpacity={0.8}
+              style={{
+                paddingHorizontal: 22,
+                paddingVertical: 10,
+                borderRadius: 22,
+                backgroundColor: TEAL,
+              }}
+            >
+              <Text style={{ color: CREAM, fontSize: 14, fontFamily: 'Inter_600SemiBold' }}>
+                Try again
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -447,7 +475,7 @@ export default function ClubProfileScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor={TEAL} />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={TEAL} />
         }
       >
         {/* ── Banner + back arrow ───────────────────────────── */}

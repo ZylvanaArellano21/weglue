@@ -12,11 +12,12 @@ import {
   updateProfileAvatar,
   removeEventRsvp,
 } from '../services/profileService';
+import { timedQuery } from '../lib/timedQuery';
 
 export function useOwnProfile(userId: string | undefined) {
   return useQuery({
     queryKey: ['ownProfile', userId],
-    queryFn:  () => getOwnProfile(userId!),
+    queryFn:  () => timedQuery('ownProfile', getOwnProfile(userId!)),
     enabled:  !!userId,
     staleTime: 60 * 1000,
   });

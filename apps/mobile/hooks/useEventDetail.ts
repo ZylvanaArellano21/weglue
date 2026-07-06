@@ -9,11 +9,12 @@ import {
   snapshotRsvpQueries,
   type RsvpSnapshot,
 } from './useEventRsvp';
+import { timedQuery } from '../lib/timedQuery';
 
 export function useEventDetail(eventId: string | undefined, userId: string | undefined) {
   return useQuery({
     queryKey: ['eventDetail', eventId, userId],
-    queryFn: () => getEventDetail(eventId!, userId!),
+    queryFn: () => timedQuery('eventDetail', getEventDetail(eventId!, userId!)),
     enabled: !!eventId && !!userId,
     staleTime: 60 * 1000,
   });

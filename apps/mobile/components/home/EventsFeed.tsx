@@ -35,8 +35,19 @@ export function EventsFeed() {
     hasNextPage,
     isFetchingNextPage,
     refetch,
-    isRefetching,
   } = useHomeEventsFeed(userId);
+
+  // Pull-to-refresh state kept separate from background refetches (RSVPs,
+  // invalidations) so the spinner only shows for a real pull.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch]);
 
   const sections = useMemo(
     () => (data ? mergeEventFeedPages(data.pages) : undefined),
@@ -248,8 +259,8 @@ export function EventsFeed() {
         removeClippedSubviews
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetch}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
             tintColor="#0FA6A6"
             colors={['#0FA6A6']}
           />

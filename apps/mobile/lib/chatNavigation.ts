@@ -13,13 +13,31 @@ export function getLastVisitedChannel(conversationId: string): string | undefine
   return lastVisitedChannelMap.get(conversationId);
 }
 
+/** Basic conversation facts the chat list already knows. Passed as route
+ * params so the chat screen renders its header and starts the channel/message
+ * queries immediately instead of waiting for the details fetch. */
+export interface ChatPreviewParams {
+  type?: string;
+  clubId?: string | null;
+  name?: string | null;
+  avatarUrl?: string | null;
+}
+
 /**
  * Opens a chat by conversation id.
  * Group chats: auto-navigate to last-visited or default channel (bypasses channel picker).
  * Direct chats: navigates directly to the DM thread.
  */
-export function openChat(chatId: string): void {
-  router.push(`/(tabs)/messages/${chatId}` as any);
+export function openChat(chatId: string, preview?: ChatPreviewParams): void {
+  router.push({
+    pathname: `/(tabs)/messages/${chatId}`,
+    params: {
+      ptype: preview?.type ?? '',
+      pclub: preview?.clubId ?? '',
+      pname: preview?.name ?? '',
+      pavatar: preview?.avatarUrl ?? '',
+    },
+  } as any);
 }
 
 /**

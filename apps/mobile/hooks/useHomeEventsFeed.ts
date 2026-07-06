@@ -14,6 +14,7 @@ import {
   snapshotRsvpQueries,
   type RsvpSnapshot,
 } from './useEventRsvp';
+import { timedQuery } from '../lib/timedQuery';
 
 // Merges same-label sections across pages (e.g. "Your Clubs" from page 0 and
 // page 1) into one continuous section per label, in first-seen order.
@@ -41,7 +42,8 @@ export function mergeEventFeedPages(
 export function useHomeEventsFeed(userId: string | undefined) {
   return useInfiniteQuery({
     queryKey: ['homeEventsFeed', userId],
-    queryFn: ({ pageParam = 0 }) => getHomeEventsFeed(userId!, pageParam),
+    queryFn: ({ pageParam = 0 }) =>
+      timedQuery(`homeEventsFeed p${pageParam}`, getHomeEventsFeed(userId!, pageParam)),
     getNextPageParam: (lastPage, allPages) => (lastPage.hasMore ? allPages.length : undefined),
     initialPageParam: 0,
     enabled: !!userId,

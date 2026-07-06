@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, Image, Dimensions, RefreshControl, ListRenderItem } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -216,6 +216,18 @@ export default function ClubsTabScreen() {
   const userId = session?.user.id;
   const { data, isLoading, refetch } = useMyClubs(userId);
 
+  // Pull-to-refresh state kept separate from first-load state so refreshing
+  // never swaps the rendered grid back to skeletons.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch]);
+
   const hasOfficer = (data?.officer_clubs.length ?? 0) > 0;
   const hasMember = (data?.member_clubs.length ?? 0) > 0;
   const isEmpty = !isLoading && !hasOfficer && !hasMember;
@@ -317,8 +329,8 @@ export default function ClubsTabScreen() {
           removeClippedSubviews
           refreshControl={
             <RefreshControl
-              refreshing={isLoading}
-              onRefresh={refetch}
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
               tintColor="#0FA6A6"
             />
           }

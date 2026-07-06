@@ -1,10 +1,11 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUserProfile, followUser, unfollowUser, getUserPosts, getUserWeeklyEvents } from '../services/followService';
+import { timedQuery } from '../lib/timedQuery';
 
 export function useUserProfile(targetUserId: string | undefined, viewerUserId: string | undefined) {
   return useQuery({
     queryKey: ['userProfile', targetUserId, viewerUserId],
-    queryFn: () => getUserProfile(targetUserId!, viewerUserId!),
+    queryFn: () => timedQuery('userProfile', getUserProfile(targetUserId!, viewerUserId!)),
     enabled: !!targetUserId && !!viewerUserId,
     staleTime: 60 * 1000,
   });

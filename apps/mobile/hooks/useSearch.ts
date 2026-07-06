@@ -7,6 +7,7 @@ import {
   searchDiscovery,
   joinClubAndRefetch,
 } from '../services/searchService';
+import { timedQuery } from '../lib/timedQuery';
 
 const PAGE_SIZE = 20;
 
@@ -22,7 +23,10 @@ export function useDiscoveryClubs(userId: string, category: string | null) {
   return useInfiniteQuery({
     queryKey: ['discoveryClubs', userId, category],
     queryFn: ({ pageParam = 0 }) =>
-      getDiscoveryClubs(userId, category, pageParam as number, PAGE_SIZE),
+      timedQuery(
+        'discoveryClubs',
+        getDiscoveryClubs(userId, category, pageParam as number, PAGE_SIZE),
+      ),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === PAGE_SIZE ? allPages.length : undefined,
@@ -34,7 +38,7 @@ export function useDiscoveryClubs(userId: string, category: string | null) {
 export function useDiscoveryPeople(userId: string) {
   return useQuery({
     queryKey: ['discoveryPeople', userId],
-    queryFn: () => getDiscoveryPeople(userId),
+    queryFn: () => timedQuery('discoveryPeople', getDiscoveryPeople(userId)),
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
   });
@@ -43,7 +47,7 @@ export function useDiscoveryPeople(userId: string) {
 export function useDiscoverySearch(userId: string, query: string) {
   return useQuery({
     queryKey: ['discoverySearch', userId, query],
-    queryFn: () => searchDiscovery(userId, query),
+    queryFn: () => timedQuery('discoverySearch', searchDiscovery(userId, query)),
     enabled: !!userId && query.trim().length > 0,
     staleTime: 30 * 1000,
   });

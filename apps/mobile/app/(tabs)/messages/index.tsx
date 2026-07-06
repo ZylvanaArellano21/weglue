@@ -50,9 +50,22 @@ export default function MessagesIndex() {
 
   const filteredChats = filter === 'single' ? directChats : groupChats;
 
-  const handlePressChat = useCallback((chatId: string) => {
-    openChat(chatId);
-  }, []);
+  const handlePressChat = useCallback(
+    (chatId: string, preview?: { type: string; club_id: string | null; name: string | null; avatar_url: string | null }) => {
+      openChat(
+        chatId,
+        preview
+          ? {
+              type: preview.type,
+              clubId: preview.club_id,
+              name: preview.name,
+              avatarUrl: preview.avatar_url,
+            }
+          : undefined,
+      );
+    },
+    [],
+  );
 
   const handlePressUser = useCallback(async (otherUserId: string) => {
     await openDirectChatWith(otherUserId);
@@ -110,7 +123,7 @@ export default function MessagesIndex() {
             return (
               <TouchableOpacity
                 style={styles.searchRow}
-                onPress={() => handlePressChat(item.id)}
+                onPress={() => handlePressChat(item.id, item)}
                 activeOpacity={0.7}
               >
                 <Avatar uri={item.avatar_url} size={chatSizes.avatarSuggested} username={item.name ?? 'Chat'} />
@@ -177,7 +190,7 @@ export default function MessagesIndex() {
           <ChatListItem
             chat={item}
             currentUserId={userId}
-            onPress={() => handlePressChat(item.id)}
+            onPress={() => handlePressChat(item.id, item)}
           />
         )}
       />
