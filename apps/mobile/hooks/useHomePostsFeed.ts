@@ -1,11 +1,13 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getHomePostsFeed, getPostById, getPostComments, addComment } from '../services/postService';
 import { supabase } from '../lib/supabase';
+import { timedQuery } from '../lib/timedQuery';
 
 export function useHomePostsFeed(userId: string | undefined) {
   return useInfiniteQuery({
     queryKey: ['homePostsFeed', userId],
-    queryFn: ({ pageParam = 0 }) => getHomePostsFeed(userId!, pageParam),
+    queryFn: ({ pageParam = 0 }) =>
+      timedQuery(`homePostsFeed p${pageParam}`, getHomePostsFeed(userId!, pageParam)),
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === 20 ? allPages.length : undefined,
     initialPageParam: 0,
@@ -34,7 +36,7 @@ export function useLikePost() {
 export function usePostDetail(postId: string | undefined, userId: string | undefined) {
   return useQuery({
     queryKey: ['postDetail', postId, userId],
-    queryFn: () => getPostById(postId!, userId!),
+    queryFn: () => timedQuery('postDetail', getPostById(postId!, userId!)),
     enabled: !!postId && !!userId,
     staleTime: 60 * 1000,
   });

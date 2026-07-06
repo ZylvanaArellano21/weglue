@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { getClubProfile } from '../services/clubService';
+import { timedQuery } from '../lib/timedQuery';
 
 export function useClubProfile(clubId: string | undefined, userId: string | undefined) {
   return useQuery({
     queryKey: ['clubProfile', clubId, userId],
-    queryFn: () => getClubProfile(clubId!, userId!),
+    queryFn: () => timedQuery('clubProfile', getClubProfile(clubId!, userId!)),
     enabled: !!clubId && !!userId,
     staleTime: 2 * 60 * 1000,
   });

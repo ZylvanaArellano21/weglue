@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, FlatList, RefreshControl } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
@@ -23,8 +23,19 @@ export function PostsFeed() {
     hasNextPage,
     isFetchingNextPage,
     refetch,
-    isRefetching,
   } = useHomePostsFeed(userId);
+
+  // Pull-to-refresh state kept separate from background refetches (likes,
+  // invalidations) so the spinner only shows for a real pull.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch]);
 
   const { mutate: likePost } = useLikePost();
 
@@ -140,8 +151,8 @@ export function PostsFeed() {
         removeClippedSubviews
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetch}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
             tintColor="#0FA6A6"
             colors={['#0FA6A6']}
           />
