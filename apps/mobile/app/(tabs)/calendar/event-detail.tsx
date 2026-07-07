@@ -154,9 +154,14 @@ export default function CalendarEventDetailScreen() {
   // ─── Share ────────────────────────────────────────────────────────────────
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
-  // ─── Back arrow — always routes to Calendar tab ───────────────────────────
+  // ─── Back arrow — return to wherever the user came from ──────────────────
+  // Fall back to the Calendar tab only when there is no navigation history.
   const handleBack = useCallback(() => {
-    router.push('/(tabs)/calendar');
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.push('/(tabs)/calendar');
+    }
   }, [router]);
 
   // ─── Club press ───────────────────────────────────────────────────────────

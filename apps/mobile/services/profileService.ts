@@ -304,11 +304,19 @@ export async function updateUserInterests(
   userId: string,
   interests: string[],
 ): Promise<void> {
-  await supabase.from('user_interests').delete().eq('user_id', userId);
+  const { error: deleteError } = await supabase
+    .from('user_interests')
+    .delete()
+    .eq('user_id', userId);
+  if (deleteError) throw deleteError;
+
   if (interests.length > 0) {
-    await supabase
+    const { error: insertError } = await supabase
       .from('user_interests')
       .insert(interests.map((interest) => ({ user_id: userId, interest })));
+    // Surface failures (e.g. a value outside the CHECK constraint) — swallowing
+    // them here left the delete applied and silently wiped the user's data.
+    if (insertError) throw insertError;
   }
 }
 
@@ -316,11 +324,17 @@ export async function updateUserActivities(
   userId: string,
   activities: string[],
 ): Promise<void> {
-  await supabase.from('user_activities').delete().eq('user_id', userId);
+  const { error: deleteError } = await supabase
+    .from('user_activities')
+    .delete()
+    .eq('user_id', userId);
+  if (deleteError) throw deleteError;
+
   if (activities.length > 0) {
-    await supabase
+    const { error: insertError } = await supabase
       .from('user_activities')
       .insert(activities.map((activity) => ({ user_id: userId, activity })));
+    if (insertError) throw insertError;
   }
 }
 

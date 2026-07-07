@@ -238,7 +238,7 @@ export default function NewEventScreen() {
           }}
         >
           <TouchableOpacity
-            onPress={() => router.replace('/(tabs)')}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
             activeOpacity={0.7}
             hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
           >

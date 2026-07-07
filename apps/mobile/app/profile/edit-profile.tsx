@@ -59,32 +59,6 @@ export default function EditProfileScreen() {
 
         <View style={styles.sectionDivider} />
 
-        <Text style={styles.sectionTitle}>Interests & Activities</Text>
-        <Text style={styles.sectionDesc}>
-          Update what you are into so we can personalize your feed and club matches.
-        </Text>
-
-        <TouchableOpacity
-          style={styles.linkRow}
-          onPress={() =>
-            router.push({
-              pathname: '/profile/edit-interests',
-              params: { continueTo: 'activities' },
-            } as any)
-          }
-          activeOpacity={0.7}
-        >
-          <View>
-            <Text style={styles.linkTitle}>Edit Interests & Activities</Text>
-            <Text style={styles.linkSub}>
-              {(profile?.interests?.length ?? 0)} interests · {(profile?.activities?.length ?? 0)} activities
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={profileColors.textLight} />
-        </TouchableOpacity>
-
-        <View style={styles.sectionDivider} />
-
         <Text style={styles.sectionTitle}>Profile Picture</Text>
         <TouchableOpacity
           style={styles.linkRow}
@@ -156,13 +130,6 @@ const styles = StyleSheet.create({
     color: profileColors.textDark,
     marginBottom: 6,
   },
-  sectionDesc: {
-    fontFamily: profileFonts.regular,
-    fontSize: 13,
-    color: profileColors.textMuted,
-    lineHeight: 19,
-    marginBottom: 14,
-  },
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -177,12 +144,6 @@ const styles = StyleSheet.create({
     fontFamily: profileFonts.semiBold,
     fontSize: 15,
     color: profileColors.textDark,
-  },
-  linkSub: {
-    fontFamily: profileFonts.regular,
-    fontSize: 12,
-    color: profileColors.textMuted,
-    marginTop: 2,
   },
   error: {
     fontFamily: profileFonts.regular,

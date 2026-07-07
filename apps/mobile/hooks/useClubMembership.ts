@@ -111,6 +111,11 @@ function invalidateMembershipQueries(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: ['calendarMonthMarkers'] });
   queryClient.invalidateQueries({ queryKey: ['calendarDayEvents'] });
   queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
+  // Profile clubs count + clubs sheets (own and as seen by others)
+  queryClient.invalidateQueries({ queryKey: ['ownProfile'] });
+  queryClient.invalidateQueries({ queryKey: ['ownClubs'] });
+  queryClient.invalidateQueries({ queryKey: ['userClubsList'] });
+  queryClient.invalidateQueries({ queryKey: ['userProfile'] });
 }
 
 export function useJoinClubMutation(userId: string | undefined) {

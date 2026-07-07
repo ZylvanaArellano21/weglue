@@ -1,6 +1,18 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUserProfile, followUser, unfollowUser, getUserPosts, getUserWeeklyEvents } from '../services/followService';
+import { getOwnClubsList } from '../services/profileService';
 import { timedQuery } from '../lib/timedQuery';
+
+// Clubs list for ANY profile user (uses the profile user's id, not the
+// viewer's). Same fetch as the own-profile clubs sheet.
+export function useUserClubsList(targetUserId: string | undefined, enabled: boolean = false) {
+  return useQuery({
+    queryKey: ['userClubsList', targetUserId],
+    queryFn: () => getOwnClubsList(targetUserId!),
+    enabled: !!targetUserId && enabled,
+    staleTime: 2 * 60 * 1000,
+  });
+}
 
 export function useUserProfile(targetUserId: string | undefined, viewerUserId: string | undefined) {
   return useQuery({

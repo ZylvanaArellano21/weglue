@@ -6,6 +6,7 @@ import { supabase } from './supabase';
 export type SidebarItemKey =
   | 'profile'
   | 'savedEvents'
+  | 'interests'
   | 'accountCenter'
   | 'privacyCenter'
   | 'help'
@@ -46,6 +47,19 @@ export function buildSidebarItems(
       label: 'Saved Events',
       icon: 'bookmark-outline',
       onPress: () => navigate('/saved-events'),
+    },
+    {
+      key: 'interests',
+      label: 'Interests',
+      icon: 'heart-outline',
+      onPress: () => {
+        closeSidebar();
+        // Existing edit flow: interests survey → activities survey
+        router.push({
+          pathname: '/profile/edit-interests',
+          params: { continueTo: 'activities' },
+        } as any);
+      },
     },
     {
       key: 'accountCenter',

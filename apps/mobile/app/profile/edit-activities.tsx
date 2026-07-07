@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Text,
   TouchableOpacity,
@@ -15,10 +15,19 @@ import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeade
 import { SelectionChipGrid } from '../../components/profile/SelectionChipGrid';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
 
+// Must stay in sync with the onboarding survey (app/onboarding/activities.tsx)
+// and the user_activities CHECK constraint — other values are rejected by the DB.
 const ALL_ACTIVITIES = [
-  'Basketball', 'Cooking', 'Cycling', 'Dancing', 'Debate',
-  'Film & Photography', 'Gaming', 'Hiking', 'Music', 'Painting',
-  'Reading', 'Running', 'Soccer', 'Swimming', 'Tennis', 'Yoga',
+  'Projects',
+  'Volunteering',
+  'Trips',
+  'Workshops',
+  'Social Events',
+  'Campus Tours',
+  'Tournaments',
+  'Networking',
+  'Study Groups',
+  'Campus Fairs',
 ] as const;
 
 export default function EditActivitiesScreen() {
@@ -28,14 +37,18 @@ export default function EditActivitiesScreen() {
 
   const { data: profile } = useOwnProfile(userId);
   const [selected, setSelected] = useState<string[]>(profile?.activities ?? []);
+  // Once the user has toggled anything, background profile refetches must not
+  // reset the selection out from under them (it silently wiped choices).
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
-    if (profile?.activities) setSelected(profile.activities);
+    if (profile?.activities && !dirtyRef.current) setSelected(profile.activities);
   }, [profile?.activities]);
 
   const updateActivities = useUpdateActivities(userId);
 
   const onToggle = (activity: string) => {
+    dirtyRef.current = true;
     setSelected((prev) =>
       prev.includes(activity) ? prev.filter((a) => a !== activity) : [...prev, activity],
     );

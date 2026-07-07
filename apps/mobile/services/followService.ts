@@ -12,6 +12,8 @@ export interface UserProfileData {
   clubs_count: number;
   gluemates_count: number;
   is_private: boolean;
+  hide_interests: boolean;
+  hide_events: boolean;
   follow_status: FollowStatus;
   is_gluemate: boolean;
   interests: string[];
@@ -54,7 +56,11 @@ export async function getUserProfile(
       .select('id, username, full_name, avatar_url, bio, major')
       .eq('id', targetUserId)
       .single(),
-    supabase.from('user_privacy').select('is_private').eq('user_id', targetUserId).maybeSingle(),
+    supabase
+      .from('user_privacy')
+      .select('is_private, hide_interests, hide_events')
+      .eq('user_id', targetUserId)
+      .maybeSingle(),
     supabase
       .from('follows')
       .select('status')
@@ -98,8 +104,12 @@ export async function getUserProfile(
     clubs_count: clubIds.length,
     gluemates_count: gluematesCount,
     is_private: privacy?.is_private ?? false,
+    hide_interests: (privacy as any)?.hide_interests ?? false,
+    hide_events: (privacy as any)?.hide_events ?? false,
     follow_status: followStatus,
     is_gluemate: isGluemate,
+    // Hidden interests are also enforced server-side by RLS on user_interests;
+    // this array simply comes back empty when the owner hides them.
     interests: (interests ?? []).map((i: any) => i.interest),
     club_roles: (clubRoles ?? []).map((r: any) => ({
       club_id: r.clubs.id,

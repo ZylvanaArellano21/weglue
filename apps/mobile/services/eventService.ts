@@ -57,20 +57,17 @@ export async function getHomeEventsFeed(
 
   const [
     { data: memberships },
-    { data: userInterests },
     { data: userActivities },
     { data: savedEvents },
     { data: userRsvps },
   ] = await Promise.all([
     supabase.from('club_members').select('club_id').eq('user_id', userId),
-    supabase.from('user_interests').select('interest').eq('user_id', userId),
     supabase.from('user_activities').select('activity').eq('user_id', userId),
     supabase.from('saved_events').select('event_id').eq('user_id', userId),
     supabase.from('event_rsvps').select('event_id, status').eq('user_id', userId),
   ]);
 
   const joinedClubIds = new Set((memberships ?? []).map((m: any) => m.club_id));
-  const userInterestSet = new Set((userInterests ?? []).map((i: any) => i.interest));
   const userActivitySet = new Set((userActivities ?? []).map((a: any) => a.activity));
   const savedSet = new Set((savedEvents ?? []).map((s: any) => s.event_id));
   const rsvpMap = new Map((userRsvps ?? []).map((r: any) => [r.event_id, r.status as 'going' | 'cant']));
@@ -162,9 +159,9 @@ export async function getHomeEventsFeed(
     if (isInJoinedClub) {
       yourClubs.push(event);
     } else {
-      const hasOverlap =
-        activityTags.some((t) => userActivitySet.has(t)) ||
-        interestTags.some((t) => userInterestSet.has(t));
+      // Event recommendations match on the user's ACTIVITIES only
+      // (interests drive club recommendations, not events).
+      const hasOverlap = activityTags.some((t) => userActivitySet.has(t));
       if (hasOverlap) {
         recommendedMatched.push(event);
       } else {

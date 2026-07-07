@@ -33,6 +33,7 @@ const LABEL_OVERRIDES: Partial<Record<SidebarItemKey, string>> = {
 
 const MENU_KEYS: SidebarItemKey[] = [
   'savedEvents',
+  'interests',
   'accountCenter',
   'privacyCenter',
 ];

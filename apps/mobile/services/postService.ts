@@ -234,6 +234,109 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
   };
 }
 
+// ─── Profile posts feed (vertical post viewer) ────────────────────────────────
+//
+// Full-detail posts for one author, newest first, same page size/order as the
+// profile grid (getUserPosts/getOwnPosts) so the viewer's indices line up with
+// the tapped grid item.
+export async function getUserPostsFeed(
+  profileUserId: string,
+  viewerUserId: string,
+  page: number = 0,
+): Promise<FeedPost[]> {
+  const PAGE_SIZE = 12;
+  const offset = page * PAGE_SIZE;
+
+  const { data: rawPosts, error } = await supabase
+    .from('posts')
+    .select(`
+      id, image_url, caption, created_at, author_id, club_id,
+      profiles!inner(id, username, avatar_url),
+      clubs(id, name)
+    `)
+    .eq('author_id', profileUserId)
+    .not('image_url', 'is', null)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + PAGE_SIZE - 1);
+
+  if (error || !rawPosts || rawPosts.length === 0) return [];
+
+  const postIds = (rawPosts as any[]).map((p) => p.id);
+
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: privacyRow }, { data: extraTagRows }] =
+    await Promise.all([
+      supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
+      supabase.from('post_comments').select('post_id').in('post_id', postIds),
+      supabase
+        .from('follows')
+        .select('id')
+        .eq('follower_id', viewerUserId)
+        .eq('following_id', profileUserId)
+        .eq('status', 'accepted')
+        .maybeSingle(),
+      supabase
+        .from('user_privacy')
+        .select('is_private')
+        .eq('user_id', profileUserId)
+        .maybeSingle(),
+      supabase
+        .from('post_club_tags')
+        .select('post_id, club_id, clubs(id, name)')
+        .in('post_id', postIds),
+    ]);
+
+  const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
+
+  const likesCountMap = new Map<string, number>();
+  const userLikedSet = new Set<string>();
+  for (const like of (likesRows as any[]) ?? []) {
+    likesCountMap.set(like.post_id, (likesCountMap.get(like.post_id) ?? 0) + 1);
+    if (like.user_id === viewerUserId) userLikedSet.add(like.post_id);
+  }
+
+  const commentsCountMap = new Map<string, number>();
+  for (const comment of (commentsRows as any[]) ?? []) {
+    commentsCountMap.set(comment.post_id, (commentsCountMap.get(comment.post_id) ?? 0) + 1);
+  }
+
+  const isFollowing = !!followRow;
+  const isPrivate = (privacyRow as any)?.is_private ?? false;
+
+  return (rawPosts as any[]).map((p) => ({
+    id: p.id,
+    image_url: p.image_url,
+    caption: p.caption,
+    created_at: p.created_at,
+    author: {
+      id: p.profiles.id,
+      username: p.profiles.username,
+      avatar_url: p.profiles.avatar_url,
+      is_following: isFollowing,
+      profile_is_private: isPrivate,
+    },
+    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
+    likes_count: likesCountMap.get(p.id) ?? 0,
+    comments_count: commentsCountMap.get(p.id) ?? 0,
+    user_has_liked: userLikedSet.has(p.id),
+  }));
+}
+
+// ─── Edit own post caption (RLS also enforces author-only updates) ───────────
+
+export async function updatePostCaption(
+  userId: string,
+  postId: string,
+  caption: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('posts')
+    .update({ caption: caption.trim() || null })
+    .eq('id', postId)
+    .eq('author_id', userId);
+
+  if (error) throw error;
+}
+
 export async function getPostComments(postId: string): Promise<PostComment[]> {
   const { data, error } = await supabase
     .from('post_comments')

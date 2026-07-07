@@ -23,6 +23,7 @@ import {
 } from '../../hooks/useOwnProfile';
 import { Avatar } from '../../components/shared/Avatar';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
+import { InterestsLine } from '../../components/profile/InterestsLine';
 import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { SwipeableDeleteRow } from '../../components/profile/SwipeableDeleteRow';
 import { ProfileConfirmationModal } from '../../components/profile/ProfileConfirmationModal';
@@ -32,7 +33,6 @@ import type { UserPost } from '../../services/followService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_ITEM_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
-const INTERESTS_CAP = 6;
 const ROLES_CAP = 2;
 
 type ProfileTab = 'posts' | 'weekly_events';
@@ -66,7 +66,6 @@ export default function OwnProfileScreen() {
   const removeRsvp = useRemoveEventRsvp(userId);
 
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
-  const [interestsSheetOpen, setInterestsSheetOpen] = useState(false);
   const [rolesSheetOpen, setRolesSheetOpen] = useState(false);
   const [clubsSheetOpen, setClubsSheetOpen] = useState(false);
   const [gluematesSheetOpen, setGluematesSheetOpen] = useState(false);
@@ -82,9 +81,7 @@ export default function OwnProfileScreen() {
 
   const interests = profile?.interests ?? [];
   const roles = profile?.club_roles ?? [];
-  const showMoreInterests = interests.length > INTERESTS_CAP;
   const showMoreRoles = roles.length > ROLES_CAP;
-  const visibleInterests = interests.slice(0, INTERESTS_CAP);
   const visibleRoles = roles.slice(0, ROLES_CAP);
 
   const handleConfirmRemoveRsvp = async () => {
@@ -135,19 +132,8 @@ export default function OwnProfileScreen() {
             </View>
           </View>
 
-          {/* Interests */}
-          {interests.length > 0 && (
-            <View style={styles.tagSection}>
-              <Text style={styles.tagLine} numberOfLines={2}>
-                {visibleInterests.map((i) => `~${i}`).join('  ')}
-              </Text>
-              {showMoreInterests && (
-                <TouchableOpacity onPress={() => setInterestsSheetOpen(true)} activeOpacity={0.7}>
-                  <Text style={styles.showMore}>Show more</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+          {/* Interests — first 5, inline Show more / Show less */}
+          <InterestsLine interests={interests} />
 
           {/* Officer roles */}
           {roles.length > 0 && (
@@ -209,12 +195,22 @@ export default function OwnProfileScreen() {
                 <View style={styles.grid}>
                   {allPosts.map((post: UserPost) =>
                     post.image_url ? (
-                      <Image
+                      <TouchableOpacity
                         key={post.id}
-                        source={{ uri: post.image_url }}
-                        style={styles.gridItem}
-                        resizeMode="cover"
-                      />
+                        activeOpacity={0.85}
+                        onPress={() =>
+                          router.push({
+                            pathname: '/profile/post-viewer',
+                            params: { userId: userId!, postId: post.id },
+                          } as any)
+                        }
+                      >
+                        <Image
+                          source={{ uri: post.image_url }}
+                          style={styles.gridItem}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
                     ) : null,
                   )}
                 </View>
@@ -249,8 +245,11 @@ export default function OwnProfileScreen() {
                     <WeeklyEventCard
                       event={event}
                       onPress={() =>
+                        // Generic event-detail screen: takes an eventId and its
+                        // back arrow returns here (the calendar variant expects
+                        // date/initialEventId and routes back to the Calendar tab).
                         router.push({
-                          pathname: '/calendar/event-detail',
+                          pathname: '/home/event-detail',
                           params: { eventId: event.id },
                         } as any)
                       }
@@ -262,19 +261,6 @@ export default function OwnProfileScreen() {
           )}
         </View>
       </ScrollView>
-
-      {/* Interests sheet */}
-      <ShowMoreSheet
-        visible={interestsSheetOpen}
-        title="Interests"
-        onClose={() => setInterestsSheetOpen(false)}
-      >
-        {interests.map((interest) => (
-          <Text key={interest} style={styles.sheetItem}>
-            ~{interest}
-          </Text>
-        ))}
-      </ShowMoreSheet>
 
       {/* Roles sheet */}
       <ShowMoreSheet
@@ -296,6 +282,9 @@ export default function OwnProfileScreen() {
         title="Your Clubs"
         onClose={() => setClubsSheetOpen(false)}
       >
+        {(clubs ?? []).length === 0 && (
+          <Text style={styles.empty}>No clubs yet.</Text>
+        )}
         {(clubs ?? []).map((club) => (
           <TouchableOpacity
             key={club.club_id}
@@ -413,13 +402,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: profileColors.textLight,
   },
-  tagSection: { marginBottom: 12 },
-  tagLine: {
-    fontFamily: profileFonts.regular,
-    fontSize: 13,
-    color: profileColors.textMuted,
-    lineHeight: 20,
-  },
   showMore: {
     fontFamily: profileFonts.medium,
     fontSize: 13,
@@ -518,11 +500,6 @@ const styles = StyleSheet.create({
     fontFamily: profileFonts.regular,
     fontSize: 11,
     color: profileColors.textMuted,
-  },
-  sheetItem: {
-    fontFamily: profileFonts.regular,
-    fontSize: 15,
-    color: profileColors.textDark,
   },
   sheetRoleRow: {
     flexDirection: 'row',

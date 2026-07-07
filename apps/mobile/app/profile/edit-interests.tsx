@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -15,19 +15,31 @@ import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeade
 import { SelectionChipGrid } from '../../components/profile/SelectionChipGrid';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
 
+// Must stay in sync with the onboarding survey (app/onboarding/interests.tsx)
+// and the user_interests CHECK constraint — other values are rejected by the DB.
 const ALL_INTERESTS = [
+  'Finance & Business',
+  'Social Events',
+  'Music',
   'Art & Culture',
+  'Social Justice & Activism',
+  'Numbers & Economics',
+  'Sports & Athletics',
+  'Gaming',
+  'Health & Wellness',
+  'Environment',
   'Community Service',
   'Crafts',
-  'Environment',
-  'Finance & Business',
-  'Health & Wellness',
-  'Numbers & Economics',
-  'Science & Technology',
-  'Social & Nightlife',
-  'Sports & Athletics',
+  'Religion',
+  'Technology and Computer',
+  'Film & Media',
+  'Photography',
   'Strategy and Critical Thinking',
-  'Travel & Adventure',
+  'Writing',
+  'Fashion',
+  'Debate & Politics',
+  'Theater',
+  'Travel & Languages',
 ] as const;
 
 export default function EditInterestsScreen() {
@@ -38,14 +50,18 @@ export default function EditInterestsScreen() {
 
   const { data: profile } = useOwnProfile(userId);
   const [selected, setSelected] = useState<string[]>(profile?.interests ?? []);
+  // Once the user has toggled anything, background profile refetches must not
+  // reset the selection out from under them (it silently wiped choices).
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
-    if (profile?.interests) setSelected(profile.interests);
+    if (profile?.interests && !dirtyRef.current) setSelected(profile.interests);
   }, [profile?.interests]);
 
   const updateInterests = useUpdateInterests(userId);
 
   const onToggle = (interest: string) => {
+    dirtyRef.current = true;
     setSelected((prev) =>
       prev.includes(interest) ? prev.filter((i) => i !== interest) : [...prev, interest],
     );

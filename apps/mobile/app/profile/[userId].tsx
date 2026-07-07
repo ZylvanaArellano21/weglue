@@ -17,10 +17,13 @@ import {
   useUserProfile,
   useUserPosts,
   useUserWeeklyEvents,
+  useUserClubsList,
   useFollowMutation,
 } from '../../hooks/useUserProfile';
 import { Avatar } from '../../components/shared/Avatar';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
+import { InterestsLine } from '../../components/profile/InterestsLine';
+import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { useToast } from '../../components/Toast';
 import type { UserWeeklyEvent } from '../../services/followService';
 import { openDirectChatWith } from '../../lib/chatNavigation';
@@ -50,12 +53,16 @@ export default function UserProfileScreen() {
   const { show, ToastComponent } = useToast();
 
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
+  const [clubsSheetOpen, setClubsSheetOpen] = useState(false);
 
   const { data: profile, isLoading: profileLoading } = useUserProfile(targetUserId, viewerUserId);
   const { mutate: followMutate, isPending: followPending } = useFollowMutation(viewerUserId, targetUserId);
 
   const isOwnProfile = targetUserId === viewerUserId;
   const isPublic = !profile?.is_private || profile?.follow_status === 'following';
+  // Hide Events privacy: the owner always sees their own weekly events.
+  // Also enforced server-side (event_rsvps RLS), this only drives the UI state.
+  const eventsHidden = !isOwnProfile && (profile?.hide_events ?? false);
 
   const { data: postsData, fetchNextPage: fetchMorePosts, hasNextPage: hasMorePosts } = useUserPosts(
     targetUserId,
@@ -63,8 +70,10 @@ export default function UserProfileScreen() {
   );
   const { data: eventsData, fetchNextPage: fetchMoreEvents, hasNextPage: hasMoreEvents } = useUserWeeklyEvents(
     targetUserId,
-    activeTab === 'weekly_events' && isPublic,
+    activeTab === 'weekly_events' && isPublic && !eventsHidden,
   );
+  // Clubs list for THIS profile's user (not the viewer)
+  const { data: profileClubs } = useUserClubsList(targetUserId, clubsSheetOpen);
 
   const allPosts = postsData?.pages.flatMap((p) => p) ?? [];
   const allEvents = eventsData?.pages.flatMap((p) => p) ?? [];
@@ -177,14 +186,18 @@ export default function UserProfileScreen() {
                 {profile.full_name}
               </Text>
               <View style={{ flexDirection: 'row', gap: 28 }}>
-                <View style={{ alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ alignItems: 'center' }}
+                  onPress={() => setClubsSheetOpen(true)}
+                  activeOpacity={0.7}
+                >
                   <Text style={{ fontSize: 17, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
                     {profile.clubs_count}
                   </Text>
                   <Text style={{ fontSize: 12, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
                     Clubs
                   </Text>
-                </View>
+                </TouchableOpacity>
                 <View style={{ alignItems: 'center' }}>
                   <Text style={{ fontSize: 17, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
                     {profile.gluemates_count}
@@ -197,20 +210,9 @@ export default function UserProfileScreen() {
             </View>
           </View>
 
-          {/* Interest Tags */}
-          {profile.interests.length > 0 && (
-            <Text
-              style={{
-                fontSize: 13,
-                color: '#6B7280',
-                fontFamily: 'Inter_400Regular',
-                marginBottom: 8,
-              }}
-              numberOfLines={2}
-            >
-              {profile.interests.map((i) => `~${i}`).join(' ')}
-            </Text>
-          )}
+          {/* Interests — first 5, inline Show more / Show less.
+              Hidden interests come back empty from RLS, so nothing renders. */}
+          <InterestsLine interests={profile.interests} />
 
           {/* Club Roles */}
           {profile.club_roles.length > 0 && (
@@ -401,17 +403,27 @@ export default function UserProfileScreen() {
                     >
                       {allPosts.map((post) =>
                         post.image_url ? (
-                          <Image
+                          <TouchableOpacity
                             key={post.id}
-                            source={{ uri: post.image_url }}
-                            style={{
-                              width: GRID_ITEM_SIZE,
-                              height: GRID_ITEM_SIZE,
-                              borderRadius: 6,
-                              backgroundColor: '#E5E7EB',
-                            }}
-                            resizeMode="cover"
-                          />
+                            activeOpacity={0.85}
+                            onPress={() =>
+                              router.push({
+                                pathname: '/profile/post-viewer',
+                                params: { userId: targetUserId!, postId: post.id },
+                              } as any)
+                            }
+                          >
+                            <Image
+                              source={{ uri: post.image_url }}
+                              style={{
+                                width: GRID_ITEM_SIZE,
+                                height: GRID_ITEM_SIZE,
+                                borderRadius: 6,
+                                backgroundColor: '#E5E7EB',
+                              }}
+                              resizeMode="cover"
+                            />
+                          </TouchableOpacity>
                         ) : null,
                       )}
                       {hasMorePosts && (
@@ -432,7 +444,14 @@ export default function UserProfileScreen() {
               {/* Weekly Events Tab */}
               {activeTab === 'weekly_events' && (
                 <View style={{ marginBottom: 32 }}>
-                  {allEvents.length === 0 ? (
+                  {eventsHidden ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 40, gap: 10 }}>
+                      <Ionicons name="lock-closed-outline" size={36} color="#9CA3AF" />
+                      <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Inter_400Regular' }}>
+                        Weekly events are private.
+                      </Text>
+                    </View>
+                  ) : allEvents.length === 0 ? (
                     <View style={{ alignItems: 'center', paddingVertical: 32 }}>
                       <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Inter_400Regular' }}>
                         No upcoming events.
@@ -459,6 +478,40 @@ export default function UserProfileScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Clubs sheet — the clubs THIS profile's user is part of */}
+      <ShowMoreSheet
+        visible={clubsSheetOpen}
+        title={isOwnProfile ? 'Your Clubs' : `${profile.full_name}'s Clubs`}
+        onClose={() => setClubsSheetOpen(false)}
+      >
+        {(profileClubs ?? []).length === 0 ? (
+          <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Inter_400Regular' }}>
+            No clubs yet.
+          </Text>
+        ) : (
+          (profileClubs ?? []).map((club) => (
+            <TouchableOpacity
+              key={club.club_id}
+              onPress={() => {
+                setClubsSheetOpen(false);
+                router.push({
+                  pathname: '/(tabs)/clubs/[clubId]',
+                  params: { clubId: club.club_id },
+                } as any);
+              }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}
+            >
+              <Text style={{ fontSize: 13, color: '#0FA6A6', fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
+                {club.club_name}
+              </Text>
+              <Text style={{ fontSize: 13, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
+                {club.role}
+              </Text>
+            </TouchableOpacity>
+          ))
+        )}
+      </ShowMoreSheet>
     </SafeAreaView>
   );
 }
