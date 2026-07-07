@@ -1,6 +1,6 @@
 import { memo } from 'react';
-import { View, Image } from 'react-native';
-import { parsePresetColor } from './Avatar';
+import { View, Image, Text } from 'react-native';
+import { parsePresetColor, parseTextAvatar } from './Avatar';
 import { getResizedImageUrl } from '../../lib/imageResize';
 
 interface AvatarItem {
@@ -46,7 +46,7 @@ export const AvatarStack = memo(function AvatarStack({
             zIndex: i,
           }}
         >
-          {a.avatar_url && !parsePresetColor(a.avatar_url) ? (
+          {a.avatar_url && !parsePresetColor(a.avatar_url) && !parseTextAvatar(a.avatar_url) ? (
             <Image
               source={{ uri: getResizedImageUrl(a.avatar_url, size * 2) ?? undefined }}
               resizeMode="cover"
@@ -59,8 +59,20 @@ export const AvatarStack = memo(function AvatarStack({
                 width: size,
                 height: size,
                 backgroundColor: parsePresetColor(a.avatar_url) ?? '#0FA6A6',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
-            />
+            >
+              {parseTextAvatar(a.avatar_url) ? (
+                <Text
+                  style={{ color: '#fff', fontSize: size * 0.45, fontWeight: '700' }}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {parseTextAvatar(a.avatar_url)}
+                </Text>
+              ) : null}
+            </View>
           )}
         </View>
       ))}

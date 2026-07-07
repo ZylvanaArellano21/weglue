@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -15,13 +15,16 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { useOnboardingStore } from "@weglue/shared";
 import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
+import { RESET_PASSWORD_REDIRECT, checkSignupStatus } from "../../lib/authFlow";
 
 type EmailState = "idle" | "not_found" | "unverified" | "verified";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { prefillEmail } = useLocalSearchParams<{ prefillEmail?: string }>();
+  const { setPendingEmail, setPendingPassword } = useOnboardingStore();
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -35,96 +38,67 @@ export default function ForgotPasswordScreen() {
   const [sent, setSent] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // State B: Verify Now cooldown
-  const [verifyCooldown, setVerifyCooldown] = useState(0);
-  const [verifyLoading, setVerifyLoading] = useState(false);
-  const [verifySuccess, setVerifySuccess] = useState(false);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  function startCooldown() {
-    setVerifyCooldown(RESEND_COOLDOWN_SECONDS);
-    if (cooldownRef.current) clearInterval(cooldownRef.current);
-    cooldownRef.current = setInterval(() => {
-      setVerifyCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(cooldownRef.current!);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }
-
   function handleEmailChange(v: string) {
     setEmail(v);
     setEmailState("idle");
     setSent(false);
-    setVerifySuccess(false);
-    setVerifyError(null);
     setSubmitError(null);
+  }
+
+  /** Sends an unfinished signup back into onboarding with the same email. */
+  function continueCreatingAccount() {
+    setPendingEmail(email.trim().toLowerCase());
+    setPendingPassword("");
+    router.replace("/onboarding/interests");
   }
 
   async function handleSubmit() {
     const trimmed = email.trim().toLowerCase();
     setSubmitError(null);
 
-    if (!trimmed) {
-      setEmailState("not_found");
-      return;
-    }
-
-    if (!trimmed.includes(".edu")) {
+    if (!trimmed || !trimmed.includes("@")) {
       setEmailState("not_found");
       return;
     }
 
     setLoading(true);
 
-    // Probe: signInWithPassword with an invalid password reveals account state
-    // without triggering any side effects visible to the user.
-    const { error: probeError } = await supabase.auth.signInWithPassword({
-      email: trimmed,
-      password: `__probe_${Date.now()}__`,
-    });
+    // Safe backend probe (rate-limited RPC) — no fake-password login attempts.
+    const status = await checkSignupStatus(trimmed);
 
-    setLoading(false);
-
-    if (!probeError) {
-      // Extremely unlikely (would need a valid password match), treat as verified
-      setEmailState("verified");
-      await sendResetLink(trimmed);
+    if (status.kind === "rate_limited") {
+      setLoading(false);
+      setSubmitError("Too many attempts. Wait a few minutes and try again.");
+      return;
+    }
+    if (status.kind === "error") {
+      setLoading(false);
+      setSubmitError("Something went wrong. Please try again.");
       return;
     }
 
-    const probeCode = (probeError.code ?? "").toLowerCase();
-    const probeMsg = probeError.message.toLowerCase();
-
-    if (probeCode === "email_not_confirmed" || probeMsg.includes("email not confirmed")) {
-      // State B: user exists but is unverified
-      setEmailState("unverified");
-      return;
-    }
-
-    if (
-      probeCode === "user_not_found" ||
-      probeMsg.includes("user not found") ||
-      probeMsg.includes("no user found")
-    ) {
-      // State A: no account for this email
+    if (status.emailStatus === "available") {
+      setLoading(false);
       setEmailState("not_found");
       return;
     }
 
-    // invalid_credentials = user exists with wrong password = verified → State C
+    if (status.emailStatus === "exists_unverified") {
+      // Not a finished account — a password reset would go nowhere useful.
+      setLoading(false);
+      setEmailState("unverified");
+      return;
+    }
+
     setEmailState("verified");
+    setLoading(false);
     await sendResetLink(trimmed);
   }
 
   async function sendResetLink(trimmed: string) {
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-      redirectTo: "https://weglue.app/auth/reset-password",
+      redirectTo: RESET_PASSWORD_REDIRECT,
     });
     setLoading(false);
 
@@ -147,33 +121,6 @@ export default function ForgotPasswordScreen() {
       pathname: "/auth/forgot-password-success",
       params: { email: trimmed },
     });
-  }
-
-  async function handleVerifyNow() {
-    if (verifyLoading || verifyCooldown > 0) return;
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) return;
-
-    setVerifyLoading(true);
-    setVerifySuccess(false);
-    setVerifyError(null);
-
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: trimmed,
-      options: { emailRedirectTo: "weglue://auth/confirmed" },
-    });
-
-    setVerifyLoading(false);
-    startCooldown();
-
-    if (error) {
-      setVerifyError(
-        `Couldn't send. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`
-      );
-    } else {
-      setVerifySuccess(true);
-    }
   }
 
   const isButtonDisabled =
@@ -228,48 +175,20 @@ export default function ForgotPasswordScreen() {
 
             {emailState === "not_found" && (
               <Text style={styles.errorText}>
-                This email isn't associated with any account. Please create one.
+                No account under that email.{" "}
+                <Text style={styles.errorLink} onPress={continueCreatingAccount}>
+                  Create one.
+                </Text>
               </Text>
             )}
 
             {emailState === "unverified" && (
-              <View>
-                <Text style={styles.errorText}>
-                  This email hasn't been verified yet. Please verify it first.
+              <Text style={styles.errorText}>
+                This account was not finished.{" "}
+                <Text style={styles.errorLink} onPress={continueCreatingAccount}>
+                  Continue creating your account.
                 </Text>
-
-                {verifySuccess && (
-                  <Text style={styles.verifySuccessText}>
-                    Verification email sent! Check your inbox.
-                  </Text>
-                )}
-
-                {verifyError && (
-                  <Text style={styles.errorText}>{verifyError}</Text>
-                )}
-
-                <TouchableOpacity
-                  style={[
-                    styles.verifyNowBtn,
-                    (verifyLoading || verifyCooldown > 0) && styles.verifyNowBtnDisabled,
-                  ]}
-                  onPress={handleVerifyNow}
-                  disabled={verifyLoading || verifyCooldown > 0}
-                  activeOpacity={0.85}
-                >
-                  {verifyLoading ? (
-                    <ActivityIndicator color="#FEFCF0" size="small" />
-                  ) : (
-                    <Text style={styles.verifyNowBtnText}>
-                      {verifyCooldown > 0
-                        ? `Resend (${verifyCooldown}s)`
-                        : verifySuccess
-                        ? "Resend Verification Email"
-                        : "Verify Now"}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+              </Text>
             )}
 
             {!!submitError && (
@@ -343,22 +262,12 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     lineHeight: 18,
   },
-  verifySuccessText: {
-    color: "#16A34A",
+  errorLink: {
+    color: "#0FA6A6",
     fontSize: 13,
-    marginBottom: 8,
-    marginLeft: 4,
+    fontWeight: "600",
+    textDecorationLine: "underline",
   },
-  verifyNowBtn: {
-    height: 44,
-    backgroundColor: "#0FA6A6",
-    borderRadius: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  verifyNowBtnDisabled: { backgroundColor: "#CCCCCC" },
-  verifyNowBtnText: { color: "#FEFCF0", fontSize: 14, fontWeight: "600" },
   primaryBtn: {
     height: 52,
     backgroundColor: "#0FA6A6",

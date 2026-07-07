@@ -6,6 +6,9 @@ interface OnboardingState {
   matchCount: number;
   pendingUsername: string;
   pendingEmail: string;
+  // Kept in memory only (never persisted) so the confirm-email screen can
+  // silently sign the user in to detect verification. Wiped on reset.
+  pendingPassword: string;
 
   setSelectedInterests: (interests: string[]) => void;
   toggleInterest: (interest: string) => void;
@@ -14,6 +17,7 @@ interface OnboardingState {
   setMatchCount: (count: number) => void;
   setPendingUsername: (username: string) => void;
   setPendingEmail: (email: string) => void;
+  setPendingPassword: (password: string) => void;
   reset: () => void;
 }
 
@@ -23,6 +27,7 @@ const initialState = {
   matchCount: 0,
   pendingUsername: "",
   pendingEmail: "",
+  pendingPassword: "",
 };
 
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
@@ -53,6 +58,8 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   setPendingUsername: (pendingUsername) => set({ pendingUsername }),
 
   setPendingEmail: (pendingEmail) => set({ pendingEmail }),
+
+  setPendingPassword: (pendingPassword) => set({ pendingPassword }),
 
   reset: () => set(initialState),
 }));

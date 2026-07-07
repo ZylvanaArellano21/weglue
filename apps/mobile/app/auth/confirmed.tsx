@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
+import { clearPendingSignup } from "../../lib/authFlow";
 
 const SESSION_TIMEOUT_MS = 12_000;
 
@@ -15,12 +16,13 @@ export default function AuthConfirmedScreen() {
   const handledRef = useRef(false);
 
   // Fallback: if no session arrives within SESSION_TIMEOUT_MS the tokens
-  // couldn't be parsed (bad link, expired, etc.) — send the user to login.
+  // couldn't be parsed (bad link, expired, etc.) — send the user to the
+  // confirm-email screen where they can resend a fresh link.
   useEffect(() => {
     timerRef.current = setTimeout(() => {
       if (handledRef.current) return;
-      show("Couldn't sign you in. Please log in.", "error");
-      router.replace("/auth/login");
+      show("Couldn't verify from this link. You can resend a new one.", "error");
+      router.replace({ pathname: "/auth/verify-email", params: { expired: "1" } });
     }, SESSION_TIMEOUT_MS);
 
     return () => {
@@ -42,14 +44,18 @@ export default function AuthConfirmedScreen() {
       timerRef.current = null;
     }
 
+    clearPendingSignup();
+
     supabase
       .from("profiles")
-      .select("avatar_url")
+      .select("avatar_url, onboarding_completed")
       .eq("id", session.user.id)
       .single()
       .then(({ data }) => {
         if (!data?.avatar_url) {
           router.replace("/onboarding/profile-pic");
+        } else if (data.onboarding_completed === false) {
+          router.replace("/onboarding/matches");
         } else {
           router.replace("/(tabs)");
         }

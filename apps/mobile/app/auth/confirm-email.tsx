@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { useRouter } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useOnboardingStore } from "@weglue/shared";
-
-const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
+import {
+  getPendingSignupEmail,
+  setPendingSignupEmail,
+} from "../../lib/authFlow";
 
 /**
  * Deep link target: weglue://auth/confirm-email
@@ -18,14 +19,13 @@ export default function ConfirmEmailDeepLinkScreen() {
     let active = true;
 
     async function redirectToVerifyEmail() {
-      const email = await AsyncStorage.getItem(PENDING_EMAIL_KEY);
-      const userEmail =
-        email?.trim().toLowerCase() || pendingEmail.trim().toLowerCase();
+      const email = await getPendingSignupEmail();
+      const userEmail = email || pendingEmail.trim().toLowerCase();
 
       if (!active) return;
 
       if (userEmail) {
-        await AsyncStorage.setItem(PENDING_EMAIL_KEY, userEmail);
+        await setPendingSignupEmail(userEmail);
         if (!active) return;
 
         router.replace({

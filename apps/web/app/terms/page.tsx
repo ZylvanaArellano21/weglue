@@ -2,7 +2,7 @@
 // The full terms text must be provided by the founder before this page goes live.
 // Replace the PLACEHOLDER_TERMS_CONTENT below with the exact legal text.
 
-export default function TermsPage() {
+export default function TermsPage(): JSX.Element {
   return (
     <main className="min-h-screen bg-[#FDFBEF] px-4 py-12">
       <div className="max-w-2xl mx-auto">

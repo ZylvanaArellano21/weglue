@@ -9,6 +9,7 @@ export interface Profile {
   major: string | null;
   bio: string | null;
   is_seed: boolean;
+  onboarding_completed?: boolean;
   created_at: string;
   updated_at: string;
 }

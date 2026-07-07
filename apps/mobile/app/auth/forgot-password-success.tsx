@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { RESET_PASSWORD_REDIRECT } from "../../lib/authFlow";
 
 export default function ForgotPasswordSuccessScreen() {
   const router = useRouter();
@@ -42,7 +43,7 @@ export default function ForgotPasswordSuccessScreen() {
 
     const { error } = await supabase.auth.resetPasswordForEmail(
       email.trim().toLowerCase(),
-      { redirectTo: "https://weglue.app/auth/reset-password" }
+      { redirectTo: RESET_PASSWORD_REDIRECT }
     );
 
     setResendLoading(false);

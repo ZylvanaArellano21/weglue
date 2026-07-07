@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -13,28 +13,43 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
-import { validateEducationEmail } from "@weglue/shared";
-import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
+import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
+import { checkSignupStatus, clearPendingSignup } from "../../lib/authFlow";
+
+type LoginError =
+  | null
+  | "wrong_password"
+  | "no_account"
+  | "unfinished"
+  | "generic";
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { prefillEmail, verified } = useLocalSearchParams<{
+    prefillEmail?: string;
+    verified?: string;
+  }>();
   const { show, ToastComponent } = useToast();
+  const {
+    setPendingEmail,
+    setPendingPassword,
+    reset: resetOnboarding,
+  } = useOnboardingStore();
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(prefillEmail ?? "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
-  const [unconfirmedEmail, setUnconfirmedEmail] = useState(false);
-  const [invalidCredentials, setInvalidCredentials] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
-  const resendCooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [loginError, setLoginError] = useState<LoginError>(null);
+  // True only when GoTrue returned email_not_confirmed — that error is issued
+  // AFTER password validation, so the typed password is known to be correct.
+  const [unfinishedPasswordOk, setUnfinishedPasswordOk] = useState(false);
+  const [showVerifiedBanner] = useState(verified === "1");
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -42,25 +57,22 @@ export default function LoginScreen() {
     return () => sub.remove();
   }, []);
 
-  function startResendCooldown() {
-    setResendCooldown(RESEND_COOLDOWN_SECONDS);
-    if (resendCooldownRef.current) clearInterval(resendCooldownRef.current);
-    resendCooldownRef.current = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(resendCooldownRef.current!);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }
-
   function clearAllErrors() {
     setFieldErrors({});
-    setUnconfirmedEmail(false);
-    setInvalidCredentials(false);
-    setResendSuccess(false);
+    setLoginError(null);
+    setUnfinishedPasswordOk(false);
+  }
+
+  /**
+   * Routes an unfinished (unverified) signup back into the onboarding flow
+   * with the same email. If the password they just typed was correct
+   * (knownGoodPassword), carry it so the confirm-email step can auto-detect
+   * verification.
+   */
+  function continueCreatingAccount(knownGoodPassword?: string) {
+    setPendingEmail(email.trim().toLowerCase());
+    setPendingPassword(knownGoodPassword ?? "");
+    router.replace("/onboarding/interests");
   }
 
   function handleEmailChange(v: string) {
@@ -92,18 +104,22 @@ export default function LoginScreen() {
     }
 
     setLoading(true);
+    const normalizedEmail = email.trim().toLowerCase();
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       password,
     });
-    setLoading(false);
 
     if (error) {
       const msg = error.message.toLowerCase();
       const code = (error.code ?? "").toLowerCase();
 
       if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
-        setUnconfirmedEmail(true);
+        // The password was correct (GoTrue validates it before this error) —
+        // the account just never finished signup/verification.
+        setLoading(false);
+        setUnfinishedPasswordOk(true);
+        setLoginError("unfinished");
         return;
       }
 
@@ -114,48 +130,41 @@ export default function LoginScreen() {
         msg.includes("invalid credentials") ||
         msg.includes("user not found")
       ) {
-        setInvalidCredentials(true);
+        // GoTrue hides whether the account exists — ask our rate-limited
+        // backend probe so we can show the right message.
+        const status = await checkSignupStatus(normalizedEmail);
+        setLoading(false);
+        if (status.kind === "ok") {
+          if (status.emailStatus === "available") {
+            setLoginError("no_account");
+          } else if (status.emailStatus === "exists_unverified") {
+            setLoginError("unfinished");
+          } else {
+            setLoginError("wrong_password");
+          }
+        } else {
+          setLoginError("generic");
+        }
         return;
       }
 
+      setLoading(false);
       show("Something went wrong. Please try again.", "error");
       return;
     }
 
+    setLoading(false);
     if (data?.user) {
+      // Wipe any stale signup-in-progress state (marker + pending
+      // username/email/password) so it can never leak into this account.
+      resetOnboarding();
+      await clearPendingSignup();
       // Route to "/" — the index guard handles navigation to (tabs) once the
       // onAuthStateChange in _layout.tsx has synced the profile. This avoids
       // the race where (tabs)/_layout evaluates before isLoading is set to true
       // by the SIGNED_IN event, causing a flash of the profile-pic screen.
       router.replace("/");
     }
-  }
-
-  async function handleResend() {
-    if (resendLoading || resendCooldown > 0) return;
-    setResendLoading(true);
-    setResendSuccess(false);
-
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: email.trim().toLowerCase(),
-      options: { emailRedirectTo: "weglue://auth/confirmed" },
-    });
-
-    setResendLoading(false);
-    startResendCooldown();
-
-    if (error) {
-      const msg = error.message.toLowerCase();
-      if (msg.includes("not found") || msg.includes("user not found")) {
-        show("No account found for this email. Please sign up first.", "error");
-      } else {
-        show(`Couldn't send verification email. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`, "error");
-      }
-      return;
-    }
-
-    setResendSuccess(true);
   }
 
   return (
@@ -233,29 +242,43 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {invalidCredentials && (
-              <Text style={styles.generalError}>
-                No account found with these credentials. Double-check your email and password.
+            {showVerifiedBanner && (
+              <Text style={styles.verifiedBanner}>
+                Your email is verified. Log in to continue.
               </Text>
             )}
 
-            {unconfirmedEmail && (
-              <View style={styles.unconfirmedBox}>
-                <Text style={styles.unconfirmedText}>
-                  You haven't verified this email.{" "}
-                  {resendSuccess ? (
-                    <Text style={styles.resendSuccessText}>Email sent!</Text>
-                  ) : resendLoading ? (
-                    <Text style={styles.resendLoadingText}>Sending…</Text>
-                  ) : resendCooldown > 0 ? (
-                    <Text style={styles.resendLoadingText}>Resend in {resendCooldown}s</Text>
-                  ) : (
-                    <Text style={styles.resendLink} onPress={handleResend}>
-                      Verify now
-                    </Text>
-                  )}
+            {loginError === "wrong_password" && (
+              <Text style={styles.generalError}>Incorrect password.</Text>
+            )}
+
+            {loginError === "no_account" && (
+              <Text style={styles.generalError}>
+                No account found with that email.{" "}
+                <Text style={styles.resendLink} onPress={() => continueCreatingAccount()}>
+                  Create one.
                 </Text>
-              </View>
+              </Text>
+            )}
+
+            {loginError === "unfinished" && (
+              <Text style={styles.generalError}>
+                This account was not finished.{" "}
+                <Text
+                  style={styles.resendLink}
+                  onPress={() =>
+                    continueCreatingAccount(unfinishedPasswordOk ? password : undefined)
+                  }
+                >
+                  Continue creating your account.
+                </Text>
+              </Text>
+            )}
+
+            {loginError === "generic" && (
+              <Text style={styles.generalError}>
+                Incorrect email or password.
+              </Text>
             )}
 
             <TouchableOpacity
@@ -341,30 +364,19 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 18,
   },
-  unconfirmedBox: {
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  unconfirmedText: {
+  verifiedBanner: {
     fontSize: 13,
-    color: "#F02719",
+    color: "#0FA6A6",
+    fontWeight: "600",
+    marginTop: 2,
+    marginBottom: 8,
     lineHeight: 18,
-    marginBottom: 6,
   },
   resendLink: {
     fontSize: 13,
     color: "#0FA6A6",
     fontWeight: "600",
     textDecorationLine: "underline",
-  },
-  resendLoadingText: {
-    fontSize: 13,
-    color: "#9CA3AF",
-  },
-  resendSuccessText: {
-    fontSize: 13,
-    color: "#16A34A",
-    fontWeight: "600",
   },
   passwordRow: {
     backgroundColor: "#FEFCF0",

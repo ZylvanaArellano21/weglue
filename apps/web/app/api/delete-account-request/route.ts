@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "../../lib/supabase/admin";
+import { createAdminClient } from "../../../lib/supabase/admin";
 
 // Public endpoint — no auth required.
 // Inserts a row into deletion_requests and sends a notification email.

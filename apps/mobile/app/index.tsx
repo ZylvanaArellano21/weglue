@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -10,13 +10,33 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@weglue/shared";
+import { getPendingSignupEmail } from "../lib/authFlow";
 
 export default function WelcomeScreen() {
   const { session, isLoading, profile } = useAuthStore();
   const router = useRouter();
+  // null = still checking AsyncStorage; "" = no pending signup
+  const [pendingSignupEmail, setPendingSignupEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isLoading || !session) return;
+    getPendingSignupEmail().then((stored) => setPendingSignupEmail(stored ?? ""));
+  }, []);
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (!session) {
+      // No session, but a signup is mid-flight (signed up, never verified,
+      // closed the app) — resume at the confirm-email step. Its back button
+      // clears the marker, so this can never trap the user.
+      if (pendingSignupEmail) {
+        router.replace({
+          pathname: "/auth/verify-email",
+          params: { email: pendingSignupEmail, from: "resume" },
+        });
+      }
+      return;
+    }
 
     if (!session.user.email_confirmed_at) {
       // Email not yet confirmed — send back to waiting screen
@@ -33,11 +53,17 @@ export default function WelcomeScreen() {
       return;
     }
 
+    if (profile.onboarding_completed === false) {
+      // Profile picture done but the club-matches step never finished
+      router.replace("/onboarding/matches");
+      return;
+    }
+
     // Fully onboarded — go to the main app
     router.replace("/(tabs)");
-  }, [isLoading, session, profile]);
+  }, [isLoading, session, profile, pendingSignupEmail]);
 
-  if (isLoading) {
+  if (isLoading || pendingSignupEmail === null) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#0FA6A6" />
@@ -45,7 +71,7 @@ export default function WelcomeScreen() {
     );
   }
 
-  if (session) return null;
+  if (session || pendingSignupEmail) return null;
 
   return (
     <SafeAreaView style={styles.container}>

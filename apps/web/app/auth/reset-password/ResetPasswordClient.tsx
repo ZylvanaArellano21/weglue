@@ -32,6 +32,28 @@ export default function ResetPasswordClient(): JSX.Element | null {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Expired view: self-serve "send me a new link" form
+  const [resendEmail, setResendEmail] = useState("");
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendResult, setResendResult] = useState<"sent" | "error" | null>(null);
+
+  async function handleResendReset(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = resendEmail.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes("@")) {
+      setResendResult("error");
+      return;
+    }
+    setResendLoading(true);
+    setResendResult(null);
+    const supabase = getSupabaseBrowser();
+    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
+      redirectTo: "https://weglue.app/auth/reset-password",
+    });
+    setResendLoading(false);
+    setResendResult(error ? "error" : "sent");
+  }
+
   useEffect(() => {
     async function handleToken() {
       const supabase = getSupabaseBrowser();
@@ -218,15 +240,61 @@ export default function ResetPasswordClient(): JSX.Element | null {
             Connection starts with you
           </p>
 
-          <div className="mt-4 max-w-[300px] mx-auto">
+          <div className="mt-4 max-w-[300px] mx-auto w-full">
             <p className="text-sm leading-relaxed" style={{ color: "#4B5563" }}>
               This reset link has expired or has already been used.
             </p>
             <p className="text-sm leading-relaxed mt-2" style={{ color: "#4B5563" }}>
-              Go back to the We Glue app and request a new reset link from the login screen.
+              Enter your school email and we&apos;ll send you a fresh link:
             </p>
-            <p className="text-xs mt-3" style={{ color: "#9CA3AF" }}>
-              You can close this tab.
+
+            <form onSubmit={handleResendReset} className="mt-4 flex flex-col gap-3">
+              <input
+                type="email"
+                value={resendEmail}
+                onChange={(e) => {
+                  setResendEmail(e.target.value);
+                  setResendResult(null);
+                }}
+                placeholder="you@school.edu"
+                className="h-[48px] rounded-xl border px-4 text-sm outline-none"
+                style={{
+                  backgroundColor: "#FEFCF0",
+                  borderColor: resendResult === "error" ? "#F02719" : "rgba(0,0,0,0.2)",
+                  color: "#1a1a1a",
+                }}
+              />
+              <button
+                type="submit"
+                disabled={resendLoading || resendResult === "sent"}
+                className="h-[48px] rounded-full font-semibold text-sm text-white disabled:opacity-60 flex items-center justify-center"
+                style={{
+                  backgroundColor: "#0FA6A6",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                }}
+              >
+                {resendLoading
+                  ? "Sending…"
+                  : resendResult === "sent"
+                  ? "Email sent!"
+                  : "Send New Reset Link"}
+              </button>
+            </form>
+
+            {resendResult === "sent" && (
+              <p className="text-sm mt-3" style={{ color: "#16A34A" }}>
+                Check your inbox for the new reset link.
+              </p>
+            )}
+            {resendResult === "error" && (
+              <p className="text-sm mt-3" style={{ color: "#F02719" }}>
+                Couldn&apos;t send the email. Check the address and try again.
+              </p>
+            )}
+
+            <p className="text-xs mt-4" style={{ color: "#9CA3AF" }}>
+              Or go back to the We Glue app and request a new link from the
+              login screen.
             </p>
           </div>
         </div>

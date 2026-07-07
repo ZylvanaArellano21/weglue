@@ -32,6 +32,10 @@ export default function TabsLayout() {
 
   if (!profile?.avatar_url) return <Redirect href="/onboarding/profile-pic" />;
 
+  if (profile.onboarding_completed === false) {
+    return <Redirect href="/onboarding/matches" />;
+  }
+
   return (
     <SidebarProvider>
     <Tabs

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export default function DeleteAccountPage() {
+export default function DeleteAccountPage(): JSX.Element {
   const [email, setEmail] = useState("");
   const [reason, setReason] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");

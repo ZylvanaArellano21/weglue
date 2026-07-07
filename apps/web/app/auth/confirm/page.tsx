@@ -130,6 +130,23 @@ export default async function AuthConfirmPage({ searchParams }: PageProps): Prom
                 <span className="font-semibold">&ldquo;Resend email&rdquo;</span>{" "}
                 to get a new link.
               </p>
+
+              <a
+                href="weglue://auth/confirm-email"
+                className="inline-flex items-center justify-center h-[48px] px-8 mt-6 rounded-full font-semibold text-base text-white"
+                style={{
+                  backgroundColor: "#0FA6A6",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                }}
+              >
+                Open We Glue
+              </a>
+
+              <p className="text-xs text-gray-400 leading-relaxed mt-4">
+                Already tapped a link before? Your email may be verified
+                already — go back to We Glue and tap{" "}
+                <span className="font-semibold">&ldquo;Next&rdquo;</span>.
+              </p>
             </>
           )}
         </div>

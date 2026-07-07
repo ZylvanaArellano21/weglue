@@ -16,7 +16,7 @@ import { useOfficerStore } from '../../store/officerStore';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
 import { getUserOfficerStatus } from '../../services/clubService';
-import { parsePresetColor } from '../../components/shared/Avatar';
+import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
 import { useSidebar } from '../../context/SidebarContext';
 import { SidebarOverlay } from '../../components/sidebar/SidebarOverlay';
 
@@ -294,12 +294,36 @@ interface HeaderAvatarProps {
 
 function HeaderAvatar({ avatarUrl, initial }: HeaderAvatarProps) {
   const presetColor = parsePresetColor(avatarUrl);
+  const textContent = parseTextAvatar(avatarUrl);
 
   const baseStyle = {
     width: 63,
     height: 63,
     borderRadius: 31.5,
   };
+
+  if (textContent) {
+    return (
+      <View
+        style={[
+          baseStyle,
+          {
+            backgroundColor: '#0FA6A6',
+            alignItems: 'center' as const,
+            justifyContent: 'center' as const,
+          },
+        ]}
+      >
+        <Text
+          style={{ color: '#fff', fontSize: 22, fontWeight: '700' }}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+        >
+          {textContent}
+        </Text>
+      </View>
+    );
+  }
 
   if (presetColor) {
     return (

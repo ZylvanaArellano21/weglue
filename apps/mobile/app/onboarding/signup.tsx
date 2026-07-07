@@ -12,17 +12,27 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../../lib/supabase";
 import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
-
-const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
+import {
+  CONFIRM_EMAIL_REDIRECT,
+  checkSignupStatus,
+  friendlyEmailSendError,
+  replacePendingSignup,
+  setPendingSignupEmail,
+} from "../../lib/authFlow";
 
 export default function OnboardingSignupScreen() {
   const router = useRouter();
-  const { matchCount, setPendingUsername, setPendingEmail, pendingUsername, pendingEmail } =
-    useOnboardingStore();
+  const {
+    matchCount,
+    setPendingUsername,
+    setPendingEmail,
+    setPendingPassword,
+    pendingUsername,
+    pendingEmail,
+  } = useOnboardingStore();
   const { show, ToastComponent } = useToast();
 
   // Restore username/email from store so back navigation preserves the form
@@ -30,6 +40,9 @@ export default function OnboardingSignupScreen() {
   const [email, setEmail] = useState(pendingEmail);
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Verified duplicate email — rendered as an inline error with a tappable
+  // "Try to log in." link instead of a plain string.
+  const [emailExistsVerified, setEmailExistsVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [emailFeedback, setEmailFeedback] = useState<{ valid: boolean; reason?: string } | null>(null);
 
@@ -59,6 +72,7 @@ export default function OnboardingSignupScreen() {
     setEmail(text);
     // Always clear the server-side "already taken" error when the user edits the field
     if (errors.email) setErrors((prev) => { const next = { ...prev }; delete next.email; return next; });
+    if (emailExistsVerified) setEmailExistsVerified(false);
     if (!text.includes("@")) {
       setEmailFeedback(null);
       return;
@@ -70,73 +84,104 @@ export default function OnboardingSignupScreen() {
   async function handleNext() {
     if (!validate()) return;
     setLoading(true);
+    setEmailExistsVerified(false);
 
     const cleanUsername = username.trim().replace(/^@/, "");
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Check username uniqueness before calling signUp so we can show an
-    // inline field error rather than a generic toast.
-    const { data: existingUser } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("username", cleanUsername)
-      .maybeSingle();
+    try {
+      // 1. Ask the backend what state this email/username is in. This is the
+      //    only safe way to distinguish a verified duplicate (block, point to
+      //    login) from an abandoned unverified signup (silently resume).
+      const status = await checkSignupStatus(normalizedEmail, cleanUsername);
 
-    if (existingUser) {
-      setErrors((prev) => ({ ...prev, username: "This username is already taken." }));
-      setLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase.auth.signUp({
-      email: normalizedEmail,
-      password,
-      options: {
-        data: {
-          username: cleanUsername,
-          full_name: cleanUsername,
-        },
-        emailRedirectTo: "https://weglue.app/auth/confirm",
-      },
-    });
-
-    setLoading(false);
-
-    if (error) {
-      const msg = (error.code ?? "").toLowerCase();
-      const body = error.message.toLowerCase();
-      if (msg === "user_already_exists" || body.includes("already registered") || body.includes("already exists")) {
-        setErrors((prev) => ({ ...prev, email: "This email is already taken." }));
-      } else {
-        const displayMsg =
-          error.message && error.message !== "{}" && !error.message.startsWith("{")
-            ? error.message
-            : "Something went wrong. Please try again.";
-        show(displayMsg, "error");
+      if (status.kind === "rate_limited") {
+        show("Too many attempts. Wait a few minutes and try again.", "error");
+        return;
       }
-      return;
-    }
+      if (status.kind === "error") {
+        show("Something went wrong. Please try again.", "error");
+        return;
+      }
 
-    // Supabase returns a fake success (no error, identities=[]) when the email
-    // already exists, to avoid user enumeration. Detect it explicitly.
-    if (!data.session && data.user?.identities?.length === 0) {
-      setErrors((prev) => ({ ...prev, email: "This email is already taken." }));
-      return;
-    }
+      if (status.emailStatus === "exists_verified") {
+        setEmailExistsVerified(true);
+        return;
+      }
 
-    setPendingUsername(cleanUsername);
-    setPendingEmail(normalizedEmail);
-    await AsyncStorage.setItem(PENDING_EMAIL_KEY, normalizedEmail);
+      if (status.usernameStatus === "taken") {
+        setErrors((prev) => ({ ...prev, username: "This username is already taken." }));
+        return;
+      }
 
-    if (data.session) {
-      // Email confirmation is OFF — user is logged in immediately
-      router.push("/onboarding/profile-pic");
-    } else {
-      // Email confirmation is ON — send to a waiting screen
-      router.push({
-        pathname: "/auth/verify-email",
-        params: { email: normalizedEmail, from: "signup" },
+      // 2. Abandoned unverified signup with this email — replace it so the
+      //    NEW password/username take effect (GoTrue would otherwise keep the
+      //    old ones and only resend the stale confirmation email).
+      if (status.emailStatus === "exists_unverified") {
+        const replaced = await replacePendingSignup(normalizedEmail);
+        if (replaced === "exists_verified") {
+          setEmailExistsVerified(true);
+          return;
+        }
+        if (replaced === "rate_limited") {
+          show("Too many attempts. Wait a few minutes and try again.", "error");
+          return;
+        }
+        if (replaced === "error") {
+          show("Something went wrong. Please try again.", "error");
+          return;
+        }
+        // "replaced" or "not_found" → proceed with a fresh signup below.
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          data: {
+            username: cleanUsername,
+            full_name: cleanUsername,
+          },
+          emailRedirectTo: CONFIRM_EMAIL_REDIRECT,
+        },
       });
+
+      if (error) {
+        const code = (error.code ?? "").toLowerCase();
+        const body = error.message.toLowerCase();
+        if (code === "user_already_exists" || body.includes("already registered") || body.includes("already exists")) {
+          // Race: became verified between the probe and signUp.
+          setEmailExistsVerified(true);
+        } else {
+          show(friendlyEmailSendError(error), "error");
+        }
+        return;
+      }
+
+      // Supabase returns a fake success (no error, identities=[]) when a
+      // verified email already exists, to avoid user enumeration.
+      if (!data.session && data.user?.identities?.length === 0) {
+        setEmailExistsVerified(true);
+        return;
+      }
+
+      setPendingUsername(cleanUsername);
+      setPendingEmail(normalizedEmail);
+      setPendingPassword(password);
+      await setPendingSignupEmail(normalizedEmail);
+
+      if (data.session) {
+        // Email confirmation is OFF — user is logged in immediately
+        router.push("/onboarding/profile-pic");
+      } else {
+        // Email confirmation is ON — send to a waiting screen
+        router.push({
+          pathname: "/auth/verify-email",
+          params: { email: normalizedEmail, from: "signup" },
+        });
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -196,8 +241,8 @@ export default function OnboardingSignupScreen() {
               <TextInput
                 style={[
                   styles.input,
-                  (!!errors.email || (emailFeedback !== null && !emailFeedback.valid)) && styles.inputError,
-                  emailFeedback?.valid && styles.inputValid,
+                  (!!errors.email || emailExistsVerified || (emailFeedback !== null && !emailFeedback.valid)) && styles.inputError,
+                  emailFeedback?.valid && !emailExistsVerified && styles.inputValid,
                 ]}
                 placeholder="yourname@university.edu"
                 placeholderTextColor="rgba(0,0,0,0.3)"
@@ -213,10 +258,22 @@ export default function OnboardingSignupScreen() {
                 </View>
               )}
             </View>
-            {(!!errors.email || (emailFeedback !== null && !emailFeedback.valid && !errors.email)) && (
+            {emailExistsVerified ? (
               <Text style={styles.errorText}>
-                {errors.email || "Please use your university or college email (.edu or equivalent)"}
+                You already have an account.{" "}
+                <Text
+                  style={styles.errorLink}
+                  onPress={() => router.replace("/auth/login")}
+                >
+                  Try to log in.
+                </Text>
               </Text>
+            ) : (
+              (!!errors.email || (emailFeedback !== null && !emailFeedback.valid && !errors.email)) && (
+                <Text style={styles.errorText}>
+                  {errors.email || "Please use your university or college email (.edu or equivalent)"}
+                </Text>
+              )
             )}
 
             {/* Password */}
@@ -338,6 +395,12 @@ const styles = StyleSheet.create({
   },
   inputError: { borderColor: "#F02719" },
   inputValid: { borderColor: "#0FA6A6" },
+  errorLink: {
+    fontSize: 11,
+    color: "#0FA6A6",
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
   inputCheckmark: {
     position: "absolute",
     right: 14,

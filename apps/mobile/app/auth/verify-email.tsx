@@ -12,88 +12,204 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useOnboardingStore } from "@weglue/shared";
 import { supabase } from "../../lib/supabase";
 import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
+import {
+  CONFIRM_EMAIL_REDIRECT,
+  checkSignupStatus,
+  clearPendingSignup,
+  friendlyEmailSendError,
+  getPendingSignupEmail,
+  setPendingSignupEmail,
+} from "../../lib/authFlow";
 
-const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
 const SUCCESS_MESSAGE_DURATION_MS = 5000;
 const RESEND_SUCCESS_MESSAGE =
   "Confirmation email resent. Check your inbox and spam folder.";
-const RESEND_ERROR_MESSAGE = `We couldn't resend the email. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`;
+const NOT_VERIFIED_MESSAGE =
+  "Your email is not verified yet. Please check your email or resend the link.";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
-  const { pendingEmail } = useOnboardingStore();
+  const { email: emailParam, expired } = useLocalSearchParams<{
+    email?: string;
+    expired?: string;
+  }>();
+  const { pendingEmail, pendingPassword } = useOnboardingStore();
 
   const [email, setEmail] = useState(emailParam ?? "");
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [resendStatus, setResendStatus] = useState<"success" | "error" | null>(null);
+  const [resendErrorMessage, setResendErrorMessage] = useState("");
   const [isVerified, setIsVerified] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [notVerifiedError, setNotVerifiedError] = useState(false);
+  const [expiredNotice, setExpiredNotice] = useState(expired === "1");
 
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkingRef = useRef(false);
 
   // Load persisted email if not passed as param
   useEffect(() => {
     const paramEmail = emailParam?.trim().toLowerCase();
     if (paramEmail) {
       setEmail(paramEmail);
-      AsyncStorage.setItem(PENDING_EMAIL_KEY, paramEmail);
+      setPendingSignupEmail(paramEmail);
       return;
     }
 
-    AsyncStorage.getItem(PENDING_EMAIL_KEY).then((stored) => {
-      const storedEmail = stored?.trim().toLowerCase();
-      const fallbackEmail =
-        storedEmail || pendingEmail.trim().toLowerCase() || "";
-
+    getPendingSignupEmail().then((stored) => {
+      const fallbackEmail = stored || pendingEmail.trim().toLowerCase() || "";
       if (fallbackEmail) {
         setEmail(fallbackEmail);
-        AsyncStorage.setItem(PENDING_EMAIL_KEY, fallbackEmail);
+        setPendingSignupEmail(fallbackEmail);
       }
     });
   }, [emailParam, pendingEmail]);
 
-  const checkVerification = useCallback(async () => {
-    // refreshSession fetches current state from Supabase servers — necessary
-    // for cold-start after the user verified in a browser while the app was
-    // closed, so the locally cached session's email_confirmed_at is stale.
-    await supabase.auth.refreshSession();
+  /**
+   * Detects whether the email is verified. With email confirmations ON,
+   * signUp() returns NO session, so a session-refresh alone can never see the
+   * confirmation. Detection order:
+   *   1. An existing session (deep-link / already logged in) — refresh it and
+   *      read email_confirmed_at.
+   *   2. Silent sign-in with the password from this signup session — succeeds
+   *      only once the email is confirmed ("email_not_confirmed" otherwise).
+   *   3. Backend status probe (cold start, password no longer in memory).
+   * Returns "verified" | "not_verified" | "verified_login_required".
+   */
+  const detectVerification = useCallback(async (): Promise<
+    "verified" | "not_verified" | "verified_login_required" | "unknown"
+  > => {
+    // 1. Session path (user verified via a deep link that logged them in)
     const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user.email_confirmed_at) {
-      setIsVerified(true);
+    if (session) {
+      if (session.user.email_confirmed_at) return "verified";
+      await supabase.auth.refreshSession();
+      const { data: { session: fresh } } = await supabase.auth.getSession();
+      if (fresh?.user.email_confirmed_at) return "verified";
     }
-  }, []);
+
+    const userEmail = email.trim().toLowerCase();
+    if (!userEmail) return "unknown";
+
+    // 2. Silent sign-in with the in-memory signup password
+    if (pendingPassword) {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: pendingPassword,
+      });
+      if (data?.session) return "verified";
+      const code = (error?.code ?? "").toLowerCase();
+      const msg = (error?.message ?? "").toLowerCase();
+      if (code === "email_not_confirmed" || msg.includes("email not confirmed")) {
+        return "not_verified";
+      }
+      // invalid_credentials etc. — fall through to the status probe.
+    }
+
+    // 3. Backend probe — knows verified state but cannot create a session
+    const status = await checkSignupStatus(userEmail);
+    if (status.kind === "ok") {
+      if (status.emailStatus === "exists_verified") {
+        return pendingPassword ? "verified" : "verified_login_required";
+      }
+      if (status.emailStatus === "exists_unverified") return "not_verified";
+    }
+    return "unknown";
+  }, [email, pendingPassword]);
+
+  const runCheck = useCallback(
+    async (fromUserTap: boolean) => {
+      if (checkingRef.current) return;
+      checkingRef.current = true;
+      if (fromUserTap) {
+        setChecking(true);
+        setNotVerifiedError(false);
+      }
+      try {
+        const result = await detectVerification();
+        if (result === "verified") {
+          setIsVerified(true);
+          setNotVerifiedError(false);
+          if (fromUserTap) {
+            await clearPendingSignup();
+            // "/" routes by real state: confirmed + no avatar → profile-pic.
+            router.replace("/");
+          }
+        } else if (result === "verified_login_required") {
+          // Verified, but we can't create a session (no password in memory
+          // after a cold start) — send them to log in with the email ready.
+          await clearPendingSignup();
+          router.replace({
+            pathname: "/auth/login",
+            params: { prefillEmail: email, verified: "1" },
+          });
+        } else if (fromUserTap) {
+          setNotVerifiedError(true);
+        }
+      } finally {
+        checkingRef.current = false;
+        if (fromUserTap) setChecking(false);
+      }
+    },
+    [detectVerification, email, router],
+  );
 
   // Check on mount in case they return to this screen after already verifying
   useEffect(() => {
-    checkVerification();
-  }, [checkVerification]);
+    runCheck(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email]);
 
-  // On foreground return: refresh session then check verification — this is
-  // what enables the Next button automatically after they tap the email link.
+  // On foreground return (user comes back from their mail app / browser):
+  // re-check automatically — this is what turns the Next button teal.
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (state) => {
       if (state !== "active") return;
-      await supabase.auth.refreshSession();
-      await checkVerification();
+      await runCheck(false);
     });
     return () => {
       sub.remove();
       if (cooldownRef.current) clearInterval(cooldownRef.current);
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
     };
-  }, [checkVerification]);
+  }, [runCheck]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleBack();
+      return true;
+    });
     return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleBack() {
+    // Back returns to the signup form when it's in the stack (normal flow);
+    // after a cold-start resume there is no stack, so exit to Welcome. The
+    // pending marker is cleared so Welcome doesn't bounce straight back here —
+    // the signup flow safely resumes the pending account by email anyway.
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      clearPendingSignup().finally(() => router.replace("/"));
+    }
+  }
+
+  async function handleNext() {
+    if (checking) return;
+    if (isVerified) {
+      await clearPendingSignup();
+      router.replace("/");
+      return;
+    }
+    await runCheck(true);
+  }
 
   async function handleResend() {
     if (!email || cooldown > 0 || resending) return;
@@ -102,6 +218,7 @@ export default function VerifyEmailScreen() {
 
     setResending(true);
     setResendStatus(null);
+    setExpiredNotice(false);
     if (feedbackTimeoutRef.current) {
       clearTimeout(feedbackTimeoutRef.current);
       feedbackTimeoutRef.current = null;
@@ -110,14 +227,18 @@ export default function VerifyEmailScreen() {
 
     try {
       setEmail(userEmail);
-      await AsyncStorage.setItem(PENDING_EMAIL_KEY, userEmail);
+      await setPendingSignupEmail(userEmail);
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: userEmail,
-        options: { emailRedirectTo: "weglue://auth/confirmed" },
+        options: { emailRedirectTo: CONFIRM_EMAIL_REDIRECT },
       });
 
-      if (error) throw error;
+      if (error) {
+        setResendErrorMessage(friendlyEmailSendError(error));
+        setResendStatus("error");
+        return;
+      }
 
       setResendStatus("success");
       feedbackTimeoutRef.current = setTimeout(() => {
@@ -125,6 +246,9 @@ export default function VerifyEmailScreen() {
         feedbackTimeoutRef.current = null;
       }, SUCCESS_MESSAGE_DURATION_MS);
     } catch {
+      setResendErrorMessage(
+        `We couldn't resend the email. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`,
+      );
       setResendStatus("error");
     } finally {
       setResending(false);
@@ -152,18 +276,22 @@ export default function VerifyEmailScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header row */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
         <View style={styles.nextRow}>
           <Text style={styles.alreadyText}>Already verified it?</Text>
           <TouchableOpacity
             style={[styles.nextBtn, !isVerified && styles.nextBtnDisabled]}
-            onPress={() => router.replace("/onboarding/profile-pic")}
-            disabled={!isVerified}
+            onPress={handleNext}
+            disabled={checking}
             activeOpacity={0.85}
           >
-            <Text style={styles.nextBtnText}>Next</Text>
+            {checking ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.nextBtnText}>Next</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -184,6 +312,12 @@ export default function VerifyEmailScreen() {
           Tap the link in the email to verify your account. Once verified, you
           will be taken to the next step automatically.
         </Text>
+
+        {expiredNotice && (
+          <Text style={styles.feedbackError}>
+            That confirmation link expired. Tap Resend Email to get a new one.
+          </Text>
+        )}
 
         <TouchableOpacity
           style={[
@@ -208,11 +342,14 @@ export default function VerifyEmailScreen() {
           )}
         </TouchableOpacity>
 
+        {notVerifiedError && (
+          <Text style={styles.feedbackError}>{NOT_VERIFIED_MESSAGE}</Text>
+        )}
         {resendStatus === "success" && (
           <Text style={styles.feedbackSuccess}>{RESEND_SUCCESS_MESSAGE}</Text>
         )}
         {resendStatus === "error" && (
-          <Text style={styles.feedbackError}>{RESEND_ERROR_MESSAGE}</Text>
+          <Text style={styles.feedbackError}>{resendErrorMessage}</Text>
         )}
       </View>
     </SafeAreaView>
@@ -294,6 +431,7 @@ const styles = StyleSheet.create({
   },
   feedbackError: {
     marginTop: 14,
+    marginBottom: 14,
     fontSize: 13,
     color: "#F02719",
     textAlign: "center",

@@ -17,6 +17,8 @@ import { supabase } from "../../lib/supabase";
 import { useAuthStore, useOnboardingStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 import { MOCK_CLUBS } from "../../data/mockClubs";
+import { clearPendingSignup } from "../../lib/authFlow";
+import { writeCachedProfile } from "../../lib/profileCache";
 
 interface Club {
   id: string;
@@ -92,9 +94,10 @@ function ClubCard({
 
 export default function MatchesScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, profile, setProfile } = useAuthStore();
   const { selectedInterests } = useOnboardingStore();
   const { show, ToastComponent } = useToast();
+  const [completing, setCompleting] = useState(false);
   const { viewAll: viewAllParam } = useLocalSearchParams<{ viewAll?: string }>();
 
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -133,6 +136,17 @@ export default function MatchesScreen() {
 
       if (error || !clubsData) throw error;
 
+      // After a cold-start resume the in-memory store is empty — fall back to
+      // the interests already saved in the DB so match scores still work.
+      let interests = selectedInterests;
+      if (interests.length === 0 && user) {
+        const { data: dbInterests } = await supabase
+          .from("user_interests")
+          .select("interest")
+          .eq("user_id", user.id);
+        interests = (dbInterests ?? []).map((r: { interest: string }) => r.interest);
+      }
+
       // Load club interests to compute match scores
       const { data: ciData } = await supabase
         .from("club_interests")
@@ -156,7 +170,7 @@ export default function MatchesScreen() {
 
       const enriched: Club[] = clubsData.map((c: Omit<Club, "matchScore" | "joined">) => {
         const clubInterests = interestsByClub[c.id] ?? [];
-        const matches = clubInterests.filter((i) => selectedInterests.includes(i)).length;
+        const matches = clubInterests.filter((i) => interests.includes(i)).length;
         const matchScore = clubInterests.length > 0 ? matches / clubInterests.length : 0;
         return { ...c, matchScore, joined: joinedSet.has(c.id) };
       });
@@ -213,6 +227,36 @@ export default function MatchesScreen() {
     }
   }
 
+  async function handleDone() {
+    if (completing) return;
+    setCompleting(true);
+    try {
+      // Mark the final onboarding step complete so login/startup routing
+      // sends this user straight to Home from now on.
+      if (user) {
+        await supabase
+          .from("profiles")
+          .update({ onboarding_completed: true })
+          .eq("id", user.id);
+        if (profile) {
+          const completed = { ...profile, onboarding_completed: true };
+          setProfile(completed);
+          // Keep the cold-start cache in sync so relaunch goes straight Home.
+          void writeCachedProfile(user.id, {
+            profile: completed,
+            isOnboarded: true,
+          });
+        }
+      }
+      await clearPendingSignup();
+    } catch {
+      // Non-fatal: routing falls back to re-showing matches next launch.
+    } finally {
+      setCompleting(false);
+      router.replace("/(tabs)");
+    }
+  }
+
   const filtered = clubs.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase())
   );
@@ -234,9 +278,14 @@ export default function MatchesScreen() {
         <View style={styles.headerRight}>
           <TouchableOpacity
             style={styles.doneBtn}
-            onPress={() => router.replace("/(tabs)")}
+            onPress={handleDone}
+            disabled={completing}
           >
-            <Text style={styles.doneBtnText}>Done</Text>
+            {completing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.doneBtnText}>Done</Text>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.viewAllBtn}

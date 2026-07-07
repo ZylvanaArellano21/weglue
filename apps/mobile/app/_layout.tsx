@@ -143,10 +143,17 @@ export default function RootLayout() {
           isOnboarded: onboarded,
         });
       } else if (profileResult.error?.code === "PGRST116") {
-        // Profile row definitively gone — drop the stale disk cache. On any
-        // other error keep the cached/previous profile instead of wiping it
-        // and bouncing the user back to onboarding.
+        // Profile row missing (e.g. the signup trigger hit a username
+        // collision) — repair it server-side instead of stranding the user.
         void clearCachedProfile(userId);
+        const { data: repaired } = await supabase.rpc("ensure_profile");
+        if (repaired) {
+          setProfile(repaired);
+          void writeCachedProfile(userId, {
+            profile: repaired,
+            isOnboarded: onboarded,
+          });
+        }
       }
       setOnboarded(onboarded);
     } catch {

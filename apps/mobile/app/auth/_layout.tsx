@@ -7,9 +7,7 @@ export default function AuthLayout() {
       <Stack.Screen name="verify-email" options={{ gestureEnabled: false }} />
       <Stack.Screen name="confirm-email" options={{ animation: "none" }} />
       <Stack.Screen name="confirmed" options={{ animation: "none" }} />
-      <Stack.Screen name="avatar" />
-      <Stack.Screen name="survey" />
-      <Stack.Screen name="signup" options={{ gestureEnabled: false }} />
+      <Stack.Screen name="confirm" options={{ animation: "none" }} />
       <Stack.Screen name="forgot-password" options={{ gestureEnabled: false }} />
       <Stack.Screen name="forgot-password-success" options={{ gestureEnabled: false }} />
     </Stack>

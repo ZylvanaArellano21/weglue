@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
 import { uploadImageToBucket } from "../../lib/imageUpload";
+import { writeCachedProfile } from "../../lib/profileCache";
 import { useAuthStore, useOnboardingStore, type Profile } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 
@@ -44,6 +45,14 @@ export default function ProfilePicScreen() {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
     return () => sub.remove();
   }, []);
+
+  // Self-heal: if a stale disk cache routed a fully onboarded user here, the
+  // background profile sync will surface the truth — leave immediately.
+  useEffect(() => {
+    if (profile?.avatar_url && profile.onboarding_completed === true) {
+      router.replace("/(tabs)");
+    }
+  }, [profile, router]);
 
   async function pickFromCamera() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -153,13 +162,18 @@ export default function ProfilePicScreen() {
         avatarUrl = `text:${textInput.trim()}`;
       }
 
+      // Only overwrite the username when this signup session actually chose
+      // one — after a cold-start resume pendingUsername is empty and the
+      // profile row already holds the username picked at signup.
+      const profileUpdate: Record<string, unknown> = {
+        avatar_url: avatarUrl,
+        avatar_type: avatarType,
+      };
+      if (pendingUsername) profileUpdate.username = pendingUsername;
+
       const { error: updateError } = await supabase
         .from("profiles")
-        .update({
-          avatar_url: avatarUrl,
-          avatar_type: avatarType,
-          username: pendingUsername || (resolvedUser.email?.split("@")[0] ?? "user"),
-        })
+        .update(profileUpdate)
         .eq("id", resolvedUser.id);
 
       if (updateError) {
@@ -174,7 +188,15 @@ export default function ProfilePicScreen() {
         .select("*")
         .eq("id", resolvedUser.id)
         .single();
-      if (freshProfile) setProfile(freshProfile as Profile);
+      if (freshProfile) {
+        setProfile(freshProfile as Profile);
+        // Keep the cold-start cache in sync or the next relaunch would route
+        // back here off the stale avatar-less profile.
+        void writeCachedProfile(resolvedUser.id, {
+          profile: freshProfile as Profile,
+          isOnboarded: true,
+        });
+      }
 
       if (selectedInterests.length > 0) {
         const interestRows = selectedInterests.map((interest) => ({
