@@ -234,7 +234,15 @@ CREATE TABLE events (
   visibility       TEXT NOT NULL DEFAULT 'everyone' CHECK (visibility IN ('everyone', 'members', 'specific')),
   is_seed          BOOLEAN NOT NULL DEFAULT false,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Recipient allow-list for "Only these members" (visibility = 'specific')
+  -- events. This column was originally added directly in the live database
+  -- (schema drift); it is documented here at its true origin so that a fresh
+  -- rebuild matches production and the functions in migrations 018/026/029 that
+  -- reference events.specific_user_ids can be created in order. Nullable uuid[]
+  -- with no default, exactly matching the live column. Migration 030 re-adds it
+  -- idempotently for databases that already applied the original 001.
+  specific_user_ids UUID[]
 );
 
 CREATE INDEX idx_events_club_id    ON events(club_id);
