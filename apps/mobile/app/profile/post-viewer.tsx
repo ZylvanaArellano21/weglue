@@ -380,7 +380,7 @@ function ViewerPostBlock({
           style={styles.actionItem}
           hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
         >
-          <Ionicons name="share-social-outline" size={22} color={profileColors.textDark} />
+          <Ionicons name="paper-plane-outline" size={22} color={profileColors.textDark} />
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
         {isOwnPost && (

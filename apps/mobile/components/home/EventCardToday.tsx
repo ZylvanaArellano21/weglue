@@ -44,19 +44,23 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
 
   return (
     <View
+      // Stronger green highlight so a "today" event clearly stands out (task 8).
+      // iOS renders the teal glow via the colored shadow; Android can't tint
+      // elevation shadows, so the thicker teal border carries the today cue
+      // there — both stores get an unmistakable highlight.
       style={{
         backgroundColor: '#FEFFF8',
-        borderRadius: 10,
+        borderRadius: 12,
         marginHorizontal: 20,
-        marginBottom: 16,
+        marginBottom: 20,
         overflow: 'hidden',
-        borderWidth: 2,
+        borderWidth: 2.5,
         borderColor: '#0FA6A6',
         shadowColor: '#0FA6A6',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.45,
-        shadowRadius: 12,
-        elevation: 8,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.75,
+        shadowRadius: 18,
+        elevation: 12,
       }}
     >
       {/* Club Row */}

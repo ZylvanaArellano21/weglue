@@ -61,13 +61,18 @@ export async function getHomeEventsFeed(
     { data: savedEvents },
     { data: userRsvps },
   ] = await Promise.all([
-    supabase.from('club_members').select('club_id').eq('user_id', userId),
+    supabase.from('club_members').select('club_id, role').eq('user_id', userId),
     supabase.from('user_activities').select('activity').eq('user_id', userId),
     supabase.from('saved_events').select('event_id').eq('user_id', userId),
     supabase.from('event_rsvps').select('event_id, status').eq('user_id', userId),
   ]);
 
   const joinedClubIds = new Set((memberships ?? []).map((m: any) => m.club_id));
+  // Officers of a club always see that club's events, regardless of visibility
+  // (mirrors the events RLS policy in migration 029).
+  const officerClubIds = new Set(
+    (memberships ?? []).filter((m: any) => m.role === 'officer').map((m: any) => m.club_id),
+  );
   const userActivitySet = new Set((userActivities ?? []).map((a: any) => a.activity));
   const savedSet = new Set((savedEvents ?? []).map((s: any) => s.event_id));
   const rsvpMap = new Map((userRsvps ?? []).map((r: any) => [r.event_id, r.status as 'going' | 'cant']));
@@ -76,7 +81,7 @@ export async function getHomeEventsFeed(
     .from('events')
     .select(`
       id, title, description, cover_image_url, event_date, start_time, end_time,
-      location, building, room, club_id, visibility, specific_user_ids,
+      location, building, room, club_id, created_by, visibility, specific_user_ids,
       clubs!inner(id, name, avatar_url),
       event_interests(interest),
       event_activities(activity)
@@ -120,10 +125,28 @@ export async function getHomeEventsFeed(
     const visibility = e.visibility as 'everyone' | 'members' | 'specific';
     const specificIds: string[] = e.specific_user_ids ?? [];
     const isInJoinedClub = joinedClubIds.has(e.club_id);
+    const isOfficerOfClub = officerClubIds.has(e.club_id);
+    const isCreator = e.created_by === userId;
 
-    // Visibility gate: hide events that shouldn't appear on this user's feed
-    if (visibility === 'members' && !isInJoinedClub) continue;
-    if (visibility === 'specific' && !specificIds.includes(userId)) continue;
+    // Visibility gate: hide events that shouldn't appear on this user's feed.
+    // Creator + hosting-club officers always see the event; this mirrors the
+    // events RLS policy so the feed and the DB agree.
+    if (
+      visibility === 'members' &&
+      !isInJoinedClub &&
+      !isOfficerOfClub &&
+      !isCreator
+    ) {
+      continue;
+    }
+    if (
+      visibility === 'specific' &&
+      !isCreator &&
+      !isOfficerOfClub &&
+      !specificIds.includes(userId)
+    ) {
+      continue;
+    }
 
     const activityTags: string[] = (e.event_activities ?? []).map((a: any) => a.activity);
     const interestTags: string[] = (e.event_interests ?? []).map((i: any) => i.interest);

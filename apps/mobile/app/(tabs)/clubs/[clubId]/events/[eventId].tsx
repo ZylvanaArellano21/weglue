@@ -413,7 +413,7 @@ export default function ClubEventDetailScreen() {
             {/* ── Share + Bookmark row ──────────────────── */}
             <View style={{ flexDirection: 'row', gap: 16, marginBottom: 20 }}>
               <TouchableOpacity onPress={() => setShareSheetVisible(true)} activeOpacity={0.7}>
-                <Ionicons name="share-outline" size={26} color="#0FA6A6" />
+                <Ionicons name="paper-plane-outline" size={26} color="#0FA6A6" />
               </TouchableOpacity>
               <TouchableOpacity onPress={handleToggleSave} disabled={isSaving} activeOpacity={0.7}>
                 <Ionicons

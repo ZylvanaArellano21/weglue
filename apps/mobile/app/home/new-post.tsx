@@ -20,6 +20,7 @@ import { getAllClubs, UserClub } from '../../services/clubService';
 import { useToast } from '../../components/Toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SearchBottomSheet } from '../../components/shared/SearchBottomSheet';
+import { useHomeTabStore } from '../../store/homeTabStore';
 
 export default function NewPostScreen() {
   const router = useRouter();
@@ -96,7 +97,10 @@ export default function NewPostScreen() {
     try {
       const clubIds = selectedClubs.map((c) => c.id);
       await createPost(userId, imageUri, caption.trim() || undefined, clubIds.length > 0 ? clubIds : undefined);
-      queryClient.invalidateQueries({ queryKey: ['homePostsFeed', userId] });
+      // Refetch the Home posts feed so the new post is present, then land the
+      // user on Home → Posts (not Events) with it visible at the top.
+      await queryClient.invalidateQueries({ queryKey: ['homePostsFeed', userId] });
+      useHomeTabStore.getState().setActiveTab('posts');
       show('Post shared! 📸');
       setTimeout(() => router.replace('/(tabs)'), 800);
     } catch (err: unknown) {

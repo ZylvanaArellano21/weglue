@@ -232,12 +232,37 @@ export async function joinClub(userId: string, clubId: string): Promise<void> {
     .upsert({ user_id: userId, club_id: clubId, role: 'member' }, { onConflict: 'club_id,user_id' });
 }
 
-export async function leaveClub(userId: string, clubId: string): Promise<void> {
-  await supabase
+export type LeaveClubResult = 'left' | 'blocked_only_officer' | 'not_member';
+
+export class OnlyOfficerError extends Error {
+  constructor() {
+    super("You're the only officer of this club. Assign another officer before leaving.");
+    this.name = 'OnlyOfficerError';
+  }
+}
+
+// Leaves a club via the race-safe leave_club RPC (migration 029). The RPC
+// blocks the sole officer of a club from leaving and, on success, lets the
+// existing AFTER DELETE triggers strip officer role + officer/club group-chat
+// access + club_officers row + members-only RSVPs atomically. Throws
+// OnlyOfficerError when the caller is the last officer so callers can surface
+// the "assign another officer first" note without mutating any UI state.
+export async function leaveClub(_userId: string, clubId: string): Promise<LeaveClubResult> {
+  const { data, error } = await supabase.rpc('leave_club', { p_club_id: clubId });
+  if (error) throw error;
+  const result = data as LeaveClubResult;
+  if (result === 'blocked_only_officer') throw new OnlyOfficerError();
+  return result;
+}
+
+// Number of active officers of a club (source of truth: club_members.role).
+export async function getClubOfficerCount(clubId: string): Promise<number> {
+  const { count } = await supabase
     .from('club_members')
-    .delete()
-    .eq('user_id', userId)
-    .eq('club_id', clubId);
+    .select('id', { count: 'exact', head: true })
+    .eq('club_id', clubId)
+    .eq('role', 'officer');
+  return count ?? 0;
 }
 
 export interface UserClub {

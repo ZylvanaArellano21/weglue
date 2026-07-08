@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { usePostComments, useAddComment } from '../../hooks/useHomePostsFeed';
@@ -27,9 +28,18 @@ interface CommentsSheetProps {
 }
 
 export function CommentsSheet({ visible, postId, viewerUserId, onClose }: CommentsSheetProps) {
+  const router = useRouter();
   const [draft, setDraft] = useState('');
   const { data: comments = [], isLoading } = usePostComments(visible ? postId : undefined);
   const { mutate: submitComment, isPending } = useAddComment();
+
+  // Open a commenter's profile. The sheet is a native Modal that would cover a
+  // pushed screen, so we dismiss it first, then navigate. Back from the profile
+  // returns to the post/feed the sheet was opened from.
+  const handlePressCommenter = (userId: string) => {
+    onClose();
+    router.push({ pathname: '/profile/[userId]', params: { userId } });
+  };
 
   const handleSend = () => {
     const content = draft.trim();
@@ -110,10 +120,18 @@ export function CommentsSheet({ visible, postId, viewerUserId, onClose }: Commen
                 }
                 renderItem={({ item }) => (
                   <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <Avatar uri={item.author.avatar_url} size={32} username={item.author.username} />
+                    <TouchableOpacity
+                      onPress={() => handlePressCommenter(item.author.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Avatar uri={item.author.avatar_url} size={32} username={item.author.username} />
+                    </TouchableOpacity>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 13, color: '#111827', fontFamily: 'Inter_400Regular' }}>
-                        <Text style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
+                        <Text
+                          onPress={() => handlePressCommenter(item.author.id)}
+                          style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}
+                        >
                           @{item.author.username}{' '}
                         </Text>
                         {item.content}

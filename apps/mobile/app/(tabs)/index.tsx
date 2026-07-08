@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,13 +9,13 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useOfficerStore } from '../../store/officerStore';
+import { useOfficerStore, refreshOfficerStatus } from '../../store/officerStore';
+import { useHomeTabStore } from '../../store/homeTabStore';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
-import { getUserOfficerStatus } from '../../services/clubService';
 import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
 import { useSidebar } from '../../context/SidebarContext';
 import { SidebarOverlay } from '../../components/sidebar/SidebarOverlay';
@@ -24,23 +24,28 @@ type ActiveTab = 'posts' | 'events';
 
 export default function HomeScreen() {
   const { session, profile } = useAuthStore();
-  const { isOfficer, setOfficerStatus } = useOfficerStore();
+  const { isOfficer } = useOfficerStore();
+  const { activeTab, setActiveTab } = useHomeTabStore();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('events');
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const dropdownAnim = useRef(new Animated.Value(0)).current;
 
   const userId = session?.user.id;
   const firstName = profile?.full_name?.split(' ')[0] ?? profile?.username ?? '';
 
-  // Bootstrap officer status once on mount
+  // Keep officer status fresh: on mount AND every time Home regains focus, so
+  // gaining/losing an officer role flips the plus-menu Event option and the
+  // New Event club picker quickly (task 4/14) without an app restart.
   useEffect(() => {
-    if (!userId) return;
-    getUserOfficerStatus(userId).then(({ isOfficer: io, officerClubIds }) => {
-      setOfficerStatus(io, officerClubIds);
-    });
+    void refreshOfficerStatus(userId);
   }, [userId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshOfficerStatus(userId);
+    }, [userId]),
+  );
 
   // Animate dropdown
   useEffect(() => {
@@ -232,11 +237,11 @@ export default function HomeScreen() {
           </Animated.View>
         )}
 
-        {/* Tab Switcher */}
+        {/* Tab Switcher — Posts | Events, each centered in its half with a
+            centered underline under the active tab (matches founder design). */}
         <View
           style={{
             flexDirection: 'row',
-            paddingHorizontal: 16,
             marginTop: 8,
             borderBottomWidth: 1,
             borderBottomColor: '#E5E7EB',
@@ -251,9 +256,9 @@ export default function HomeScreen() {
               }}
               activeOpacity={0.7}
               style={{
-                paddingHorizontal: 12,
+                flex: 1,
+                alignItems: 'center',
                 paddingBottom: 10,
-                marginRight: 8,
                 borderBottomWidth: 2,
                 borderBottomColor: activeTab === tab ? '#0FA6A6' : 'transparent',
               }}

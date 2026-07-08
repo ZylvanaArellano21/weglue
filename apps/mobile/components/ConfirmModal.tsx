@@ -14,6 +14,9 @@ interface ConfirmModalProps {
   cancelLabel?: string;
   destructive?: boolean;
   loading?: boolean;
+  // When true, only the confirm button is shown (informational / acknowledge
+  // modal, e.g. the sole-officer "you can't leave yet" note).
+  hideCancel?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -26,6 +29,7 @@ export function ConfirmModal({
   cancelLabel = 'No',
   destructive = false,
   loading = false,
+  hideCancel = false,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
@@ -36,14 +40,16 @@ export function ConfirmModal({
           <Text style={styles.title}>{title}</Text>
           {message ? <Text style={styles.message}>{message}</Text> : null}
           <View style={styles.row}>
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              onPress={onCancel}
-              activeOpacity={0.7}
-              disabled={loading}
-            >
-              <Text style={styles.cancelLabel}>{cancelLabel}</Text>
-            </TouchableOpacity>
+            {!hideCancel && (
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={onCancel}
+                activeOpacity={0.7}
+                disabled={loading}
+              >
+                <Text style={styles.cancelLabel}>{cancelLabel}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.confirmBtn, destructive && styles.destructiveBtn]}
               onPress={onConfirm}

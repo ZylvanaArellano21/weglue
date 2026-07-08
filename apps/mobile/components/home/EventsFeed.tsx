@@ -7,14 +7,13 @@ import {
   useToggleSaveEvent,
   mergeEventFeedPages,
 } from '../../hooks/useHomeEventsFeed';
-import { useJoinClubMutation, useLeaveClubMutation } from '../../hooks/useClubMembership';
-import { useOfficerStore } from '../../store/officerStore';
+import { useJoinClubMutation } from '../../hooks/useClubMembership';
+import { useLeaveClubFlow } from '../../hooks/useLeaveClubFlow';
 import { EventCard } from './EventCard';
 import { EventCardToday } from './EventCardToday';
 import { EventCardSkeleton } from '../shared/SkeletonLoader';
 import { useToast } from '../Toast';
-import { ConfirmModal } from '../ConfirmModal';
-import { HomePostEventPrompt } from '../HomePostEventPrompt';
+import { LeaveClubModals } from '../club/LeaveClubModals';
 import type { HomeFeedEvent } from '../../services/eventService';
 
 type FeedItem =
@@ -24,8 +23,6 @@ type FeedItem =
 export function EventsFeed() {
   const { session } = useAuthStore();
   const userId = session?.user.id;
-  const { isOfficer } = useOfficerStore();
-  const [leaveTarget, setLeaveTarget] = useState<{ clubId: string; clubName: string } | null>(null);
 
   const {
     data,
@@ -56,8 +53,14 @@ export function EventsFeed() {
   const { mutate: rsvp } = useRsvpToEvent();
   const { mutate: toggleSave } = useToggleSaveEvent();
   const { mutate: joinClubMutate } = useJoinClubMutation(userId);
-  const { mutate: leaveClubMutate, isPending: leavingClub } = useLeaveClubMutation(userId);
   const { show, ToastComponent } = useToast();
+  const {
+    target: leaveTarget,
+    isPending: leavingClub,
+    requestLeave,
+    cancel: cancelLeave,
+    confirm: confirmLeave,
+  } = useLeaveClubFlow(userId, show);
 
   const handleRsvp = useCallback(
     (eventId: string) => {
@@ -98,19 +101,12 @@ export function EventsFeed() {
     [userId, joinClubMutate, show],
   );
 
-  const handleRequestLeaveClub = useCallback((clubId: string, clubName: string) => {
-    setLeaveTarget({ clubId, clubName });
-  }, []);
-
-  const handleConfirmLeaveClub = useCallback(() => {
-    if (!leaveTarget) return;
-    const { clubId, clubName } = leaveTarget;
-    setLeaveTarget(null);
-    leaveClubMutate(clubId, {
-      onSuccess: () => show(`You left ${clubName}.`),
-      onError: () => show('Failed to leave club.', 'error'),
-    });
-  }, [leaveTarget, leaveClubMutate, show]);
+  const handleRequestLeaveClub = useCallback(
+    (clubId: string, clubName: string) => {
+      void requestLeave(clubId, clubName);
+    },
+    [requestLeave],
+  );
 
   const renderItem: ListRenderItem<FeedItem> = useCallback(
     ({ item }) => {
@@ -246,7 +242,6 @@ export function EventsFeed() {
         data={items}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        ListHeaderComponent={isOfficer ? <HomePostEventPrompt /> : null}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
         onEndReached={() => {
@@ -267,16 +262,11 @@ export function EventsFeed() {
         }
       />
 
-      <ConfirmModal
-        visible={!!leaveTarget}
-        title={`Are you sure you want to leave ${leaveTarget?.clubName ?? 'this club'}?`}
-        message="You'll lose access to club chats and updates."
-        confirmLabel="Yes, Leave"
-        cancelLabel="No"
-        destructive
+      <LeaveClubModals
+        target={leaveTarget}
         loading={leavingClub}
-        onConfirm={handleConfirmLeaveClub}
-        onCancel={() => setLeaveTarget(null)}
+        onConfirm={() => confirmLeave()}
+        onCancel={cancelLeave}
       />
     </View>
   );

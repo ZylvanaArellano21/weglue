@@ -15,14 +15,15 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useClubProfile } from '../../../../hooks/useClubProfile';
-import { useJoinClubMutation, useLeaveClubMutation } from '../../../../hooks/useClubMembership';
+import { useJoinClubMutation } from '../../../../hooks/useClubMembership';
+import { useLeaveClubFlow } from '../../../../hooks/useLeaveClubFlow';
 import { useOfficerStore } from '../../../../store/officerStore';
 import { Avatar } from '../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
 import { PhotoGalleryModal } from '../../../../components/club/PhotoGalleryModal';
-import { ConfirmModal } from '../../../../components/ConfirmModal';
+import { LeaveClubModals } from '../../../../components/club/LeaveClubModals';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 
@@ -355,11 +356,16 @@ export default function ClubProfileScreen() {
 
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   const { data: club, isLoading, isError, refetch } = useClubProfile(clubId, userId);
   const { mutate: join, isPending: joining } = useJoinClubMutation(userId);
-  const { mutate: leave, isPending: leaving } = useLeaveClubMutation(userId);
+  const {
+    target: leaveTarget,
+    isPending: leaving,
+    requestLeave,
+    cancel: cancelLeave,
+    confirm: confirmLeave,
+  } = useLeaveClubFlow(userId, show);
 
   // Pull-to-refresh state kept separate from first-load state so a background
   // refetch never swaps rendered content back to skeletons.
@@ -376,26 +382,14 @@ export default function ClubProfileScreen() {
   const isOfficer = !!clubId && officerClubIds.includes(clubId);
 
   const handleJoinLeave = () => {
-    if (club?.is_member) {
-      setShowLeaveConfirm(true);
+    if (club?.is_member && clubId) {
+      void requestLeave(clubId, club.name);
     } else if (clubId) {
       join(clubId, {
         onSuccess: () => show(`Joined ${club?.name ?? 'club'}! 🎉`),
         onError: () => show('Failed to join club.', 'error'),
       });
     }
-  };
-
-  const handleConfirmLeave = () => {
-    if (!clubId) return;
-    setShowLeaveConfirm(false);
-    leave(clubId, {
-      onSuccess: () => {
-        show('You left ' + (club?.name ?? 'the club'));
-        router.back();
-      },
-      onError: () => show('Failed to leave club.', 'error'),
-    });
   };
 
   if (isLoading) {
@@ -933,16 +927,11 @@ export default function ClubProfileScreen() {
         onOpenPost={handleOpenPost}
       />
 
-      <ConfirmModal
-        visible={showLeaveConfirm}
-        title={`Are you sure you want to leave ${club.name}?`}
-        message="You'll lose access to club chats and updates."
-        confirmLabel="Yes, Leave"
-        cancelLabel="No"
-        destructive
+      <LeaveClubModals
+        target={leaveTarget}
         loading={leaving}
-        onConfirm={handleConfirmLeave}
-        onCancel={() => setShowLeaveConfirm(false)}
+        onConfirm={() => confirmLeave(() => router.back())}
+        onCancel={cancelLeave}
       />
     </SafeAreaView>
   );

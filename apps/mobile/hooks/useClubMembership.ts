@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient, QueryClient } from '@tanstack/react-query';
-import { joinClub, leaveClub, type ClubProfileData } from '../services/clubService';
+import { joinClub, leaveClub, type ClubProfileData, type LeaveClubResult } from '../services/clubService';
 import type { EventDetail, HomeEventsFeedSection } from '../services/eventService';
 
 // Centralizes join/leave so Home (event cards), Club Profile, and both
@@ -138,7 +138,7 @@ export function useJoinClubMutation(userId: string | undefined) {
 
 export function useLeaveClubMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
-  return useMutation<void, Error, string, MembershipSnapshot>({
+  return useMutation<LeaveClubResult, Error, string, MembershipSnapshot>({
     mutationFn: (clubId: string) => leaveClub(userId!, clubId),
     onMutate: async (clubId) => {
       await queryClient.cancelQueries({ queryKey: ['clubProfile'] });

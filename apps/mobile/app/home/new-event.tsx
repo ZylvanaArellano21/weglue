@@ -18,11 +18,12 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
 import { createEvent } from '../../services/eventService';
-import { getAllClubs, searchAllUsers, AppUser, UserClub } from '../../services/clubService';
+import { getUserOfficerClubs, searchAllUsers, AppUser, UserClub } from '../../services/clubService';
 import { useToast } from '../../components/Toast';
 import { supabase } from '../../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SearchBottomSheet } from '../../components/shared/SearchBottomSheet';
+import { useHomeTabStore } from '../../store/homeTabStore';
 
 type Visibility = 'everyone' | 'members' | 'specific';
 
@@ -93,12 +94,15 @@ export default function NewEventScreen() {
 
   const [submitting, setSubmitting] = useState(false);
 
-  const { data: allClubs = [], isLoading: loadingClubs } = useQuery<UserClub[]>({
-    queryKey: ['allClubs'],
-    queryFn: getAllClubs,
+  // Hosting-by can only be a club where the current user is an officer — never
+  // a club they merely joined (task 5). Sourced from the real club_members role.
+  const { data: officerClubs = [], isLoading: loadingClubs } = useQuery<UserClub[]>({
+    queryKey: ['officerClubs', userId],
+    queryFn: () => getUserOfficerClubs(userId!),
+    enabled: !!userId,
   });
 
-  const filteredClubs = allClubs.filter((c) =>
+  const filteredClubs = officerClubs.filter((c) =>
     c.name.toLowerCase().includes(clubSearch.toLowerCase()),
   );
 
@@ -187,6 +191,7 @@ export default function NewEventScreen() {
           visibility === 'specific' ? specificUsers.map((u) => u.id) : undefined,
       });
       queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
+      useHomeTabStore.getState().setActiveTab('events');
       show('Event posted! 🎉');
       setTimeout(() => router.replace('/(tabs)'), 1000);
     } catch (err: unknown) {

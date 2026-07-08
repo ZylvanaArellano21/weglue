@@ -80,32 +80,40 @@ export async function getHomePostsFeed(
   const followedIds = (followedRows ?? []).map((r: any) => r.following_id);
   const myUniversity: string | null = (myProfile as any)?.university ?? null;
 
-  const { data: rawPosts, error } = await supabase
+  // Home → Posts shows every picture post from the viewer's university/community.
+  // No follow relationship and no club membership required. Scope is the same
+  // university only (never all We Glue users globally). Filtering by the
+  // author's university server-side keeps pagination correct at scale — a
+  // client-side filter after .range() would silently drop same-university posts
+  // whenever the newest 20 rows happened to be from other schools.
+  let postsQuery = supabase
     .from('posts')
     .select(`
       id, image_url, caption, created_at, author_id, club_id,
-      profiles!inner(id, username, avatar_url),
+      profiles!inner(id, username, avatar_url, university),
       clubs(id, name)
     `)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
+
+  if (myUniversity) {
+    postsQuery = postsQuery.eq('profiles.university', myUniversity);
+  }
+
+  const { data: rawPosts, error } = await postsQuery;
 
   if (error || !rawPosts) return [];
 
   const postIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: authorUniversities }, { data: privacyRows }, { data: extraTagRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: privacyRows }, { data: extraTagRows }] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase
         .from('post_comments')
         .select('post_id')
         .in('post_id', postIds),
-      supabase
-        .from('profiles')
-        .select('id, university')
-        .in('id', authorIds),
       supabase
         .from('user_privacy')
         .select('user_id, is_private')
@@ -131,22 +139,16 @@ export async function getHomePostsFeed(
     commentsCountMap.set(comment.post_id, (commentsCountMap.get(comment.post_id) ?? 0) + 1);
   }
 
-  const authorUniversityMap = new Map<string, string | null>(
-    (authorUniversities as any[]).map((p) => [p.id, p.university]),
-  );
-
   const privacyMap = new Map<string, boolean>(
     ((privacyRows as any[]) ?? []).map((r) => [r.user_id, r.is_private]),
   );
 
   const followedSet = new Set(followedIds);
 
+  // No follow/club/university drop here — the university scope is already
+  // enforced by the query above. Followed authors still float to the top so
+  // ordering is preserved.
   const posts: (FeedPost & { _sort_key: number })[] = (rawPosts as any[])
-    .filter((p) => {
-      if (p.author_id === userId) return true;
-      const authorUniv = authorUniversityMap.get(p.author_id);
-      return followedSet.has(p.author_id) || (myUniversity && authorUniv === myUniversity);
-    })
     .map((p) => ({
       id: p.id,
       image_url: p.image_url,
