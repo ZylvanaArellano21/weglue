@@ -19,7 +19,7 @@ import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState, Platform, Text, TouchableOpacity, View } from "react-native";
 import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
@@ -31,6 +31,55 @@ import {
 } from "../lib/profileCache";
 
 SplashScreen.preventAutoHideAsync();
+
+// expo-router renders this instead of crashing when any screen throws during
+// render (e.g. a malformed cached profile field reaching a component). It
+// catches JS-level errors only — native crashes still surface to the OS — but
+// it keeps a single bad value from turning into a blank/hard launch failure.
+export function ErrorBoundary({
+  error,
+  retry,
+}: {
+  error: Error;
+  retry: () => Promise<void>;
+}) {
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+  return (
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#FEFCF0",
+        padding: 24,
+      }}
+    >
+      <Text style={{ fontSize: 20, fontWeight: "700", color: "#000", textAlign: "center" }}>
+        Something went wrong
+      </Text>
+      <Text style={{ fontSize: 14, color: "#444", textAlign: "center", marginTop: 8 }}>
+        {error?.message ?? "Please try again."}
+      </Text>
+      <TouchableOpacity
+        onPress={() => retry()}
+        activeOpacity={0.85}
+        style={{
+          marginTop: 24,
+          height: 48,
+          paddingHorizontal: 32,
+          backgroundColor: "#0FA6A6",
+          borderRadius: 40,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text style={{ color: "#FEFCF0", fontSize: 16, fontWeight: "600" }}>Try again</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 // Refetch stale queries in the background when the app returns to the
 // foreground (RN has no window focus events, so wire AppState manually).

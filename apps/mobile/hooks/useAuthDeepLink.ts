@@ -13,6 +13,11 @@ import { supabase } from "../lib/supabase";
  * with a clear resend path instead of dropping them.
  */
 async function handleUrl(url: string) {
+  // Guard against a malformed/non-string payload from the native Linking
+  // bridge — calling string methods on a non-string would throw during the
+  // cold-start deep-link path and take the whole launch down.
+  if (typeof url !== "string" || url.length === 0) return;
+
   const isAuthLink =
     url.includes("auth/confirmed") || url.includes("auth/confirm");
   if (!isAuthLink) return;

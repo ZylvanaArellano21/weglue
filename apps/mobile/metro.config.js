@@ -28,15 +28,58 @@ function variantScore(entry) {
   return score;
 }
 
+// Extract the package's own version from a pnpm store dir name, e.g.
+//   "expo-updates@29.0.18_expo@54.0.35_react@19.1.0" -> "29.0.18"
+//   "@scope+name@1.2.3(peer@4)"                       -> "1.2.3"
+// The version is the token right after the package identifier's "@", stopping
+// at the first peer-dependency separator ("_" or "(").
+function parseVersion(entry, isScoped) {
+  const afterName = isScoped
+    ? entry.replace(/^@[^+]+\+[^@]+@/, "")
+    : entry.replace(/^[^@][^@]*@/, "");
+  const m = afterName.match(/^([0-9]+(?:\.[0-9]+)*[^_(]*)/);
+  return m ? m[1] : "0";
+}
+
+// Numeric-aware version compare: 29.0.18 must beat 0.28.18 (a lexical compare
+// would wrongly rank "0.28" over "29"). Returns >0 when a is newer than b.
+function compareVersions(a, b) {
+  const pa = a.split(/[.\-+]/);
+  const pb = b.split(/[.\-+]/);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = parseInt(pa[i] ?? "0", 10);
+    const nb = parseInt(pb[i] ?? "0", 10);
+    if (Number.isNaN(na) || Number.isNaN(nb)) {
+      const s = (pa[i] ?? "").localeCompare(pb[i] ?? "");
+      if (s !== 0) return s;
+    } else if (na !== nb) {
+      return na - nb;
+    }
+  }
+  return 0;
+}
+
 function buildPnpmExtraModules(storeDir) {
   const map = {};
   const scoreByPkg = {};
-  const consider = (pkgName, pkgPath, entry) => {
+  const versionByPkg = {};
+  const consider = (pkgName, pkgPath, entry, isScoped) => {
     if (!fs.existsSync(pkgPath)) return;
     const score = variantScore(entry);
-    if (!(pkgName in map) || score > scoreByPkg[pkgName]) {
+    const version = parseVersion(entry, isScoped);
+    // Pick the react@19 variant first; on a tie, pick the highest version so a
+    // stale duplicate left in the store (e.g. an old expo-updates that pnpm
+    // removed from the lockfile but not from disk) can never win and reintroduce
+    // a JS/native ABI mismatch.
+    const better =
+      !(pkgName in map) ||
+      score > scoreByPkg[pkgName] ||
+      (score === scoreByPkg[pkgName] &&
+        compareVersions(version, versionByPkg[pkgName]) > 0);
+    if (better) {
       map[pkgName] = pkgPath;
       scoreByPkg[pkgName] = score;
+      versionByPkg[pkgName] = version;
     }
   };
   try {
@@ -50,11 +93,11 @@ function buildPnpmExtraModules(storeDir) {
       if (scopedMatch) {
         const pkgName = `${scopedMatch[1]}/${scopedMatch[2]}`;
         const pkgPath = path.join(storeDir, entry, "node_modules", scopedMatch[1], scopedMatch[2]);
-        consider(pkgName, pkgPath, entry);
+        consider(pkgName, pkgPath, entry, true);
       } else if (unscopedMatch) {
         const pkgName = unscopedMatch[1];
         const pkgPath = path.join(storeDir, entry, "node_modules", pkgName);
-        consider(pkgName, pkgPath, entry);
+        consider(pkgName, pkgPath, entry, false);
       }
     });
   } catch (_) {}

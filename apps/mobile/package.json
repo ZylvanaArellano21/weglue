@@ -39,7 +39,7 @@
     "expo-router": "~6.0.24",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
-    "expo-updates": "~0.28.18",
+    "expo-updates": "~29.0.18",
     "nativewind": "^4.0.36",
     "react": "19.1.0",
     "react-native": "0.81.5",
