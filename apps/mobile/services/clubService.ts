@@ -255,6 +255,19 @@ export async function leaveClub(_userId: string, clubId: string): Promise<LeaveC
   return result;
 }
 
+// Whether this user is currently an officer of the club (source of truth:
+// club_members.role — never a cached store, so the leave flow can't pick the
+// wrong confirmation modal off stale state).
+export async function getIsClubOfficer(userId: string, clubId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('club_members')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  return (data as { role?: string } | null)?.role === 'officer';
+}
+
 // Number of active officers of a club (source of truth: club_members.role).
 export async function getClubOfficerCount(clubId: string): Promise<number> {
   const { count } = await supabase

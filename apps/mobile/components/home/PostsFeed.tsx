@@ -1,8 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, FlatList, RefreshControl } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useHomePostsFeed, useLikePost } from '../../hooks/useHomePostsFeed';
+import { useHomeTabStore } from '../../store/homeTabStore';
 import { PostCardSkeleton } from '../shared/SkeletonLoader';
 import { useToast } from '../Toast';
 import { followUser } from '../../services/followService';
@@ -40,6 +41,37 @@ export function PostsFeed() {
   const { mutate: likePost } = useLikePost();
 
   const allPosts = data?.pages.flatMap((p) => p) ?? [];
+
+  // ── Scroll to a freshly created post ────────────────────────────────────────
+  // After creating a normal post, new-post.tsx sets pendingScrollPostId. As
+  // soon as that post shows up in the feed data (the feed was invalidated
+  // before navigating back, so it may land a moment later), scroll straight
+  // to it so the user immediately sees what they shared.
+  const listRef = useRef<FlatList<FeedPost>>(null);
+  const pendingScrollPostId = useHomeTabStore((s) => s.pendingScrollPostId);
+
+  useEffect(() => {
+    if (!pendingScrollPostId) return;
+    const index = allPosts.findIndex((p) => p.id === pendingScrollPostId);
+    if (index < 0) return; // feed still refetching — try again on next data change
+    useHomeTabStore.getState().setPendingScrollPostId(null);
+    // Give the list one frame to lay out before scrolling.
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
+    });
+  }, [pendingScrollPostId, allPosts]);
+
+  // Drop a stale pending scroll if the post never appears (e.g. moderation
+  // delay) so it can't hijack a scroll position minutes later.
+  useEffect(() => {
+    if (!pendingScrollPostId) return;
+    const timer = setTimeout(() => {
+      if (useHomeTabStore.getState().pendingScrollPostId === pendingScrollPostId) {
+        useHomeTabStore.getState().setPendingScrollPostId(null);
+      }
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [pendingScrollPostId]);
 
   const handleLike = useCallback(
     (postId: string, hasLiked: boolean) => {
@@ -136,9 +168,18 @@ export function PostsFeed() {
     <View style={{ flex: 1 }}>
       {ToastComponent}
       <FlatList<FeedPost>
+        ref={listRef}
         data={allPosts}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
+        onScrollToIndexFailed={({ index }) => {
+          // Post cards vary in height, so distant indexes may not be measured
+          // yet — jump to top (new posts are newest-first) as a safe landing.
+          listRef.current?.scrollToOffset({ offset: 0, animated: true });
+          setTimeout(() => {
+            listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
+          }, 350);
+        }}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
         onEndReached={() => {

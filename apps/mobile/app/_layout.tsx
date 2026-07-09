@@ -223,17 +223,12 @@ export default function RootLayout() {
         buster: "v1",
       }}
     >
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="onboarding" />
-        <Stack.Screen name="auth" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="home" />
-        <Stack.Screen name="profile" />
-        <Stack.Screen name="saved-events" />
-        <Stack.Screen name="account-center" />
-        <Stack.Screen name="privacy-center" />
-      </Stack>
+      {/* Screens are auto-registered by expo-router from the file tree.
+          Declaring names that don't match real routes (e.g. "profile" when the
+          routes are "profile/[userId]", "profile/own", …) makes the navigator
+          re-reconcile its children on every state change — which turned the
+          sign-out <Redirect> into an infinite update loop (the logout freeze). */}
+      <Stack screenOptions={{ headerShown: false }} />
     </PersistQueryClientProvider>
   );
 }

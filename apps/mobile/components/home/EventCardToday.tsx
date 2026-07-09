@@ -43,24 +43,32 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
   };
 
   return (
+    // Two layers because a single view can't do both: `overflow: 'hidden'`
+    // (needed to clip the cover image to the rounded corners) sets
+    // masksToBounds on iOS, which silently clips the shadow away — that's why
+    // the today glow never rendered. The OUTER view carries the teal glow
+    // (iOS shadow / Android colored elevation on API 28+), the INNER view
+    // keeps the border and clips its content.
     <View
-      // Stronger green highlight so a "today" event clearly stands out (task 8).
-      // iOS renders the teal glow via the colored shadow; Android can't tint
-      // elevation shadows, so the thicker teal border carries the today cue
-      // there — both stores get an unmistakable highlight.
       style={{
         backgroundColor: '#FEFFF8',
         borderRadius: 12,
         marginHorizontal: 20,
         marginBottom: 20,
+        shadowColor: '#0FA6A6',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.6,
+        shadowRadius: 10,
+        elevation: 10,
+      }}
+    >
+    <View
+      style={{
+        backgroundColor: '#FEFFF8',
+        borderRadius: 12,
         overflow: 'hidden',
         borderWidth: 2.5,
         borderColor: '#0FA6A6',
-        shadowColor: '#0FA6A6',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.75,
-        shadowRadius: 18,
-        elevation: 12,
       }}
     >
       {/* Club Row */}
@@ -275,6 +283,7 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
           </TouchableOpacity>
         </View>
       </View>
+    </View>
     </View>
   );
 });

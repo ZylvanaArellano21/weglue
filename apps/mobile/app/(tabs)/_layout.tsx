@@ -17,7 +17,10 @@ export default function TabsLayout() {
     );
   }
 
-  if (!session) return <Redirect href="/" />;
+  // "/welcome" (not "/"): the root URL is ambiguous between app/index.tsx and
+  // (tabs)/index.tsx, and resolving it from inside the tabs re-entered Home in
+  // an infinite redirect loop — the historical logout freeze.
+  if (!session) return <Redirect href="/welcome" />;
 
   if (!session.user.email_confirmed_at) {
     return (

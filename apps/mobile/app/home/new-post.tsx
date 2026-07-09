@@ -96,13 +96,24 @@ export default function NewPostScreen() {
     setSubmitting(true);
     try {
       const clubIds = selectedClubs.map((c) => c.id);
-      await createPost(userId, imageUri, caption.trim() || undefined, clubIds.length > 0 ? clubIds : undefined);
+      const newPostId = await createPost(
+        userId,
+        imageUri,
+        caption.trim() || undefined,
+        clubIds.length > 0 ? clubIds : undefined,
+      );
       // Refetch the Home posts feed so the new post is present, then land the
-      // user on Home → Posts (not Events) with it visible at the top.
+      // user on Home → Posts with the feed scrolled to the post they just
+      // created (PostsFeed picks up pendingScrollPostId once the post is in
+      // its data). router.back() preserves the Home screen they came from.
       await queryClient.invalidateQueries({ queryKey: ['homePostsFeed', userId] });
       useHomeTabStore.getState().setActiveTab('posts');
+      useHomeTabStore.getState().setPendingScrollPostId(newPostId);
       show('Post shared! 📸');
-      setTimeout(() => router.replace('/(tabs)'), 800);
+      setTimeout(() => {
+        if (router.canGoBack()) router.back();
+        else router.replace('/(tabs)');
+      }, 600);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to post. Try again.';
       show(msg, 'error');

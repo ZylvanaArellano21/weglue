@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useOfficerStore, refreshOfficerStatus } from '../store/officerStore';
-import { getClubOfficerCount, OnlyOfficerError } from '../services/clubService';
+import { getClubOfficerCount, getIsClubOfficer, OnlyOfficerError } from '../services/clubService';
 import { useLeaveClubMutation } from './useClubMembership';
 
 // Which confirmation a "leave club" tap should surface:
@@ -17,11 +17,13 @@ export interface LeaveTarget {
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 
-// Centralizes the officer-aware leave flow so Home event cards and the Club
-// Profile screen behave identically. Officer status comes from the real
-// club_members source (officerStore + a live officer count), and the actual
-// mutation is enforced again server-side by the leave_club RPC (migration 029),
-// so a former officer can never keep permissions through stale UI/cache.
+// Centralizes the officer-aware leave flow so Home event cards, both event
+// detail screens, and the Club Profile screen behave identically. Exactly ONE
+// target (→ one modal) can exist at a time, so the sole-officer note can never
+// stack on top of a leave confirmation. Officer status is verified against
+// club_members server-side on every request — a stale officer cache can no
+// longer pick the wrong modal — and the actual mutation is enforced again by
+// the leave_club RPC (migration 029), so a sole officer can never leave.
 export function useLeaveClubFlow(userId: string | undefined, showToast: ToastFn) {
   const { officerClubIds } = useOfficerStore();
   const { mutate: leaveMutate, isPending } = useLeaveClubMutation(userId);
@@ -30,25 +32,27 @@ export function useLeaveClubFlow(userId: string | undefined, showToast: ToastFn)
 
   const requestLeave = useCallback(
     async (clubId: string, clubName: string) => {
-      const isOfficer = officerClubIds.includes(clubId);
-      if (!isOfficer) {
-        setTarget({ clubId, clubName, mode: 'normal' });
-        return;
-      }
-      // Officer: check whether they're the last one before choosing the modal.
       setChecking(true);
       try {
+        // Server truth first: role from club_members, then (officers only)
+        // the live officer count to detect the sole-officer case.
+        const isOfficer = userId ? await getIsClubOfficer(userId, clubId) : false;
+        if (!isOfficer) {
+          setTarget({ clubId, clubName, mode: 'normal' });
+          return;
+        }
         const count = await getClubOfficerCount(clubId);
         setTarget({ clubId, clubName, mode: count <= 1 ? 'blocked' : 'officer' });
       } catch {
-        // Network hiccup: fall back to the officer confirm. The RPC still
+        // Network hiccup: fall back to the cached officer list. The RPC still
         // blocks a sole officer, so the club can never be orphaned.
-        setTarget({ clubId, clubName, mode: 'officer' });
+        const cachedOfficer = officerClubIds.includes(clubId);
+        setTarget({ clubId, clubName, mode: cachedOfficer ? 'officer' : 'normal' });
       } finally {
         setChecking(false);
       }
     },
-    [officerClubIds],
+    [userId, officerClubIds],
   );
 
   const cancel = useCallback(() => setTarget(null), []);

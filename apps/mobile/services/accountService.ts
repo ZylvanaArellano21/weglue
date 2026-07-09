@@ -8,6 +8,10 @@ export const ACCOUNT_CENTER_ERRORS = {
   COOLDOWN: 'cooldown',
   USERNAME_TAKEN: 'username_taken',
   INVALID_EMAIL: 'invalid_email',
+  EMAIL_IN_USE: 'email_in_use',
+  SEND_FAILED: 'send_failed',
+  SESSION_EXPIRED: 'session_expired',
+  NETWORK: 'network',
   WRONG_PASSWORD: 'wrong_password',
   MISMATCH: 'password_mismatch',
   WEAK_PASSWORD: 'weak_password',
@@ -126,49 +130,123 @@ export type ChangeEmailResult =
   | { success: true }
   | { success: false; error: AccountCenterError; message: string };
 
+const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+// Safe email-change flow:
+//   1. Validate locally (format + .edu) — instant, no network.
+//   2. Confirm the session is still alive (local check, no network).
+//   3. Ask Supabase Auth to start the change — GoTrue itself rejects an email
+//      that is already registered to another account, so nothing is ever sent
+//      in that case; on success it emails a verification link to the NEW
+//      address. The account email does NOT change until that link is opened.
+//   4. Every failure path returns a typed result (never throws), so the UI
+//      can re-enable the button and show a clear message without freezing.
 export async function changeEmail(
   userId: string,
   newEmail: string,
 ): Promise<ChangeEmailResult> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('email_changed_at')
-    .eq('id', userId)
-    .single();
+  try {
+    const trimmedEmail = newEmail.trim().toLowerCase();
 
-  if (profile?.email_changed_at) {
-    const lastChanged = new Date(profile.email_changed_at as string);
-    const nextAllowed = addDays(lastChanged, COOLDOWN_DAYS);
-    if (new Date() < nextAllowed) {
+    if (!EMAIL_FORMAT_REGEX.test(trimmedEmail)) {
       return {
         success: false,
-        error: ACCOUNT_CENTER_ERRORS.COOLDOWN,
-        message: `You can change your email again on ${formatDateForError(nextAllowed)}.`,
+        error: ACCOUNT_CENTER_ERRORS.INVALID_EMAIL,
+        message: 'Please enter a valid email address.',
       };
     }
-  }
 
-  const trimmedEmail = newEmail.trim().toLowerCase();
+    if (!isEducationalEmail(trimmedEmail)) {
+      return {
+        success: false,
+        error: ACCOUNT_CENTER_ERRORS.INVALID_EMAIL,
+        message: 'We Glue requires a valid .edu email address.',
+      };
+    }
 
-  if (!isEducationalEmail(trimmedEmail)) {
+    // Local session check — no network round-trip.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData?.session;
+    if (!session) {
+      return {
+        success: false,
+        error: ACCOUNT_CENTER_ERRORS.SESSION_EXPIRED,
+        message: 'Your session has expired. Please log in again.',
+      };
+    }
+
+    if (session.user.email?.toLowerCase() === trimmedEmail) {
+      return {
+        success: false,
+        error: ACCOUNT_CENTER_ERRORS.INVALID_EMAIL,
+        message: 'That is already your current email address.',
+      };
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('email_changed_at')
+      .eq('id', userId)
+      .single();
+
+    if (profile?.email_changed_at) {
+      const lastChanged = new Date(profile.email_changed_at as string);
+      const nextAllowed = addDays(lastChanged, COOLDOWN_DAYS);
+      if (new Date() < nextAllowed) {
+        return {
+          success: false,
+          error: ACCOUNT_CENTER_ERRORS.COOLDOWN,
+          message: `You can change your email again on ${formatDateForError(nextAllowed)}.`,
+        };
+      }
+    }
+
+    // Starts the verified email change. The current email stays active and
+    // displayed until the new address is verified.
+    const { error } = await supabase.auth.updateUser({ email: trimmedEmail });
+
+    if (error) {
+      const msg = (error.message ?? '').toLowerCase();
+      const code = (error as { code?: string }).code ?? '';
+      if (
+        code === 'email_exists' ||
+        (msg.includes('already') &&
+          (msg.includes('registered') || msg.includes('exists') || msg.includes('in use')))
+      ) {
+        return {
+          success: false,
+          error: ACCOUNT_CENTER_ERRORS.EMAIL_IN_USE,
+          message: 'That email is already used by another account.',
+        };
+      }
+      if (code === 'over_email_send_rate_limit' || msg.includes('rate limit') || msg.includes('security purposes')) {
+        return {
+          success: false,
+          error: ACCOUNT_CENTER_ERRORS.SEND_FAILED,
+          message: 'Too many attempts. Please wait a minute and try again.',
+        };
+      }
+      return {
+        success: false,
+        error: ACCOUNT_CENTER_ERRORS.SEND_FAILED,
+        message: 'Could not send the verification email. Please try again.',
+      };
+    }
+
+    // Track cooldown timestamp only after the verification email actually sent.
+    await supabase
+      .from('profiles')
+      .update({ email_changed_at: new Date().toISOString() })
+      .eq('id', userId);
+
+    return { success: true };
+  } catch {
     return {
       success: false,
-      error: ACCOUNT_CENTER_ERRORS.INVALID_EMAIL,
-      message: 'We Glue requires a valid .edu email address.',
+      error: ACCOUNT_CENTER_ERRORS.NETWORK,
+      message: 'Network error. Check your connection and try again.',
     };
   }
-
-  // Supabase sends a confirmation to the NEW email — stays inactive until verified.
-  const { error } = await supabase.auth.updateUser({ email: trimmedEmail });
-  if (error) throw error;
-
-  // Track cooldown timestamp immediately
-  await supabase
-    .from('profiles')
-    .update({ email_changed_at: new Date().toISOString() })
-    .eq('id', userId);
-
-  return { success: true };
 }
 
 // ─── Password Change ──────────────────────────────────────────────────────────

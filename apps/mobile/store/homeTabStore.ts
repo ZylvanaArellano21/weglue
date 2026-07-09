@@ -5,6 +5,11 @@ export type HomeTab = 'posts' | 'events';
 interface HomeTabState {
   activeTab: HomeTab;
   setActiveTab: (tab: HomeTab) => void;
+  // Post ID the Posts feed should scroll to as soon as it appears in the
+  // feed data — set right after creating a post so the user lands directly
+  // on what they just shared. Cleared by PostsFeed once the scroll happens.
+  pendingScrollPostId: string | null;
+  setPendingScrollPostId: (postId: string | null) => void;
 }
 
 // The Home screen's selected section (Posts | Events). Lifted into a store so
@@ -13,4 +18,6 @@ interface HomeTabState {
 export const useHomeTabStore = create<HomeTabState>((set) => ({
   activeTab: 'events',
   setActiveTab: (activeTab) => set({ activeTab }),
+  pendingScrollPostId: null,
+  setPendingScrollPostId: (pendingScrollPostId) => set({ pendingScrollPostId }),
 }));

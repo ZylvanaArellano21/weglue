@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,12 @@ import {
   ScrollView,
   ActivityIndicator,
   StyleSheet,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
+import { supabase } from '../../lib/supabase';
 import {
   useChangeUsername,
   useChangeEmail,
@@ -54,8 +56,47 @@ export default function AccountCenterScreen() {
   } = useDeleteAccount(userId);
 
   const [usernameMsg, setUsernameMsg] = useState<string | null>(null);
-  const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  const [emailMsg, setEmailMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
+
+  // ── Fast verified-email detection ──────────────────────────────────────────
+  // The displayed email comes straight from the auth session, so it never
+  // changes before verification. Once the user verifies the new address
+  // (usually in their mail app), this sync runs on screen focus and on app
+  // foreground: it asks GoTrue for the current user and, if the email changed,
+  // refreshes the session — onAuthStateChange in the root layout then updates
+  // the store and this screen re-renders with the new email in under a second.
+  const syncingEmailRef = useRef(false);
+  const syncVerifiedEmail = useCallback(async () => {
+    if (syncingEmailRef.current) return;
+    syncingEmailRef.current = true;
+    try {
+      const { data } = await supabase.auth.getUser();
+      const freshEmail = data.user?.email;
+      const { data: current } = await supabase.auth.getSession();
+      if (freshEmail && current.session && current.session.user.email !== freshEmail) {
+        await supabase.auth.refreshSession();
+        setEmailMsg({ text: 'Your email was updated successfully.', isError: false });
+      }
+    } catch {
+      // Background sync only — never surface errors for this.
+    } finally {
+      syncingEmailRef.current = false;
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void syncVerifiedEmail();
+    }, [syncVerifiedEmail]),
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (status) => {
+      if (status === 'active') void syncVerifiedEmail();
+    });
+    return () => sub.remove();
+  }, [syncVerifiedEmail]);
 
   useEffect(() => {
     if (changeUsernameMutation.data && !changeUsernameMutation.data.success) {
@@ -68,9 +109,12 @@ export default function AccountCenterScreen() {
 
   useEffect(() => {
     if (changeEmailMutation.data && !changeEmailMutation.data.success) {
-      setEmailMsg(changeEmailMutation.data.message);
+      setEmailMsg({ text: changeEmailMutation.data.message, isError: true });
     } else if (changeEmailMutation.data?.success) {
-      setEmailMsg('Check your new email to confirm the change.');
+      setEmailMsg({
+        text: 'Verification sent. Your email will update after you verify it.',
+        isError: false,
+      });
       setEmailInput('');
     }
   }, [changeEmailMutation.data]);
@@ -93,8 +137,14 @@ export default function AccountCenterScreen() {
 
   const onChangeEmail = async () => {
     setEmailMsg(null);
-    const result = await changeEmailMutation.mutateAsync(emailInput);
-    if (!result.success) setEmailMsg(result.message);
+    try {
+      const result = await changeEmailMutation.mutateAsync(emailInput);
+      if (!result.success) setEmailMsg({ text: result.message, isError: true });
+    } catch {
+      // changeEmail returns typed results, but keep a belt-and-suspenders
+      // catch so an unexpected throw can never leave the button stuck.
+      setEmailMsg({ text: 'Something went wrong. Please try again.', isError: true });
+    }
   };
 
   const onChangePassword = async () => {
@@ -134,8 +184,8 @@ export default function AccountCenterScreen() {
           autoCorrect={false}
         />
         {emailMsg && (
-          <Text style={[styles.feedback, emailMsg.includes('again on') && styles.feedbackError]}>
-            {emailMsg}
+          <Text style={[styles.feedback, emailMsg.isError && styles.feedbackError]}>
+            {emailMsg.text}
           </Text>
         )}
         <TouchableOpacity

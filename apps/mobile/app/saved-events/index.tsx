@@ -15,12 +15,14 @@ import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeade
 import { CalendarEventCard } from '../../components/calendar/CalendarEventCard';
 import { calendarTypography } from '../../components/calendar/calendarTheme';
 import { profileColors, profileFonts } from '../../components/profile/profileTheme';
+import { useToast } from '../../components/Toast';
 import type { CalendarEvent, CalendarSection } from '../../services/calendarService';
 
 export default function SavedEventsScreen() {
   const { session } = useAuthStore();
   const userId = session?.user.id;
   const router = useRouter();
+  const { show, ToastComponent } = useToast();
 
   const { data: upcoming = [], isLoading: loadingUpcoming } = useSavedEventsUpcoming(userId);
   const {
@@ -34,11 +36,18 @@ export default function SavedEventsScreen() {
 
   const [showPast, setShowPast] = useState(false);
 
-  const onUnsave = (eventId: string) => unsave.mutate(eventId);
+  // Optimistic: the card disappears instantly; on failure the hook restores
+  // the saved state and we surface a clear error.
+  const onUnsave = (eventId: string) =>
+    unsave.mutate(eventId, {
+      onError: () => show('Could not unsave the event. Please try again.', 'error'),
+    });
   const onFetchMorePast = () => fetchNextPage();
+  // Root-stack event detail (not a tab route) so pressing back returns to
+  // Saved Events — never to Home or Calendar.
   const onEventPress = (event: CalendarEvent) =>
     router.push({
-      pathname: '/calendar/event-detail',
+      pathname: '/home/event-detail',
       params: { eventId: event.id },
     } as any);
 
@@ -56,6 +65,7 @@ export default function SavedEventsScreen() {
   if (showPast) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
+        {ToastComponent}
         <ProfileScreenHeader
           title="Past Events"
           onBack={() => setShowPast(false)}
@@ -101,16 +111,24 @@ export default function SavedEventsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.topBar}>
-        <ProfileScreenHeader title="Saved Events" onBack={() => router.back()} />
-        <TouchableOpacity
-          onPress={() => setShowPast(true)}
-          style={styles.pastLinkBtn}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.pastLink}>Past Events</Text>
-        </TouchableOpacity>
-      </View>
+      {ToastComponent}
+      {/* "Past Events" lives in the header's right-action slot so it always
+          sits fully inside the safe area — never clipped by the screen edge. */}
+      <ProfileScreenHeader
+        title="Saved Events"
+        onBack={() => router.back()}
+        rightAction={
+          <TouchableOpacity
+            onPress={() => setShowPast(true)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Past Events"
+          >
+            <Text style={styles.pastLink}>Past Events</Text>
+          </TouchableOpacity>
+        }
+      />
 
       {loadingUpcoming ? (
         <ActivityIndicator color={profileColors.teal} style={{ marginTop: 24 }} />
@@ -162,16 +180,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: profileColors.bg,
-  },
-  headerRow: { position: 'relative' },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingRight: 16,
-  },
-  pastLinkBtn: {
-    paddingTop: 22,
   },
   pastLink: {
     fontFamily: profileFonts.medium,

@@ -2,7 +2,7 @@
  * SidebarOverlay — Slide-in drawer from the left side of the screen.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -17,10 +17,14 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Clipboard from 'expo-clipboard';
 import { useAuthStore } from '@weglue/shared';
 import { useSidebar } from '../../context/SidebarContext';
 import { buildSidebarItems, type SidebarItemKey } from '../../lib/sidebarNavigation';
+import { openSupportEmail, safeSignOut, SUPPORT_EMAIL } from '../../lib/support';
 import { useOwnProfile } from '../../hooks/useOwnProfile';
+import { useToast } from '../Toast';
+import { ConfirmModal } from '../ConfirmModal';
 import { Avatar } from '../shared/Avatar';
 import { profileColors, profileFonts, profileShadow } from '../profile/profileTheme';
 
@@ -48,7 +52,53 @@ export function SidebarOverlay() {
   const insets = useSafeAreaInsets();
 
   const { data: profile } = useOwnProfile(userId);
-  const allItems = buildSidebarItems(router, closeSidebar);
+  const { show, ToastComponent } = useToast();
+
+  // Help fallback (no mail app) + logout confirmation. Both render as their
+  // own Modals after the drawer closes so only one modal is ever visible.
+  const [helpFallbackVisible, setHelpFallbackVisible] = useState(false);
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleHelp = () => {
+    closeSidebar();
+    void openSupportEmail().then((opened) => {
+      if (!opened) setHelpFallbackVisible(true);
+    });
+  };
+
+  const handleLogoutRequest = () => {
+    closeSidebar();
+    setLogoutConfirmVisible(true);
+  };
+
+  const handleLogoutConfirm = async () => {
+    if (signingOut) return; // double-tap guard — one sign-out call only
+    setSigningOut(true);
+    try {
+      await safeSignOut();
+      // Session flips to null → (tabs) layout redirects to the welcome/login
+      // screen and this whole tree unmounts. No manual navigation needed.
+    } finally {
+      setSigningOut(false);
+      setLogoutConfirmVisible(false);
+    }
+  };
+
+  const handleCopySupportEmail = async () => {
+    try {
+      await Clipboard.setStringAsync(SUPPORT_EMAIL);
+      setHelpFallbackVisible(false);
+      show('Email address copied!');
+    } catch {
+      show('Could not copy. Email: ' + SUPPORT_EMAIL, 'error');
+    }
+  };
+
+  const allItems = buildSidebarItems(router, closeSidebar, {
+    onHelp: handleHelp,
+    onLogout: handleLogoutRequest,
+  });
 
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -93,6 +143,7 @@ export function SidebarOverlay() {
   };
 
   return (
+    <>
     <Modal
       visible={isOpen}
       transparent
@@ -156,6 +207,35 @@ export function SidebarOverlay() {
         </Animated.View>
       </View>
     </Modal>
+
+    {/* Log Out confirmation — shown after the drawer closes */}
+    <ConfirmModal
+      visible={logoutConfirmVisible}
+      title="Log out?"
+      message="Are you sure you want to log out?"
+      confirmLabel="Log Out"
+      cancelLabel="Cancel"
+      destructive
+      loading={signingOut}
+      onConfirm={() => void handleLogoutConfirm()}
+      onCancel={() => {
+        if (!signingOut) setLogoutConfirmVisible(false);
+      }}
+    />
+
+    {/* Help fallback — no mail app available on this device */}
+    <ConfirmModal
+      visible={helpFallbackVisible}
+      title="Contact Support"
+      message={`We couldn't open your email app.\n\nReach us at:\n${SUPPORT_EMAIL}`}
+      confirmLabel="Copy Email"
+      cancelLabel="Close"
+      onConfirm={() => void handleCopySupportEmail()}
+      onCancel={() => setHelpFallbackVisible(false)}
+    />
+
+    {ToastComponent}
+    </>
   );
 }
 

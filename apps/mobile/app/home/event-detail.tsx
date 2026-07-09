@@ -11,12 +11,13 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useEventDetail, useRsvpMutation, useSaveEventMutation } from '../../hooks/useEventDetail';
-import { useJoinClubMutation, useLeaveClubMutation } from '../../hooks/useClubMembership';
+import { useJoinClubMutation } from '../../hooks/useClubMembership';
+import { useLeaveClubFlow } from '../../hooks/useLeaveClubFlow';
 import { Avatar } from '../../components/shared/Avatar';
 import { AvatarStack } from '../../components/shared/AvatarStack';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
-import { ConfirmModal } from '../../components/ConfirmModal';
+import { LeaveClubModals } from '../../components/club/LeaveClubModals';
 import { ShareSheet } from '../../components/shared/ShareSheet';
 
 function formatDate(dateStr: string): string {
@@ -42,9 +43,17 @@ export default function EventDetailScreen() {
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);
   const { mutate: toggleSave, isPending: isSaving } = useSaveEventMutation(userId, eventId);
   const { mutate: joinClubMutate, isPending: joiningClub } = useJoinClubMutation(userId);
-  const { mutate: leaveClubMutate, isPending: leavingClub } = useLeaveClubMutation(userId);
+  // Shared officer-aware leave flow: shows exactly one modal (normal /
+  // officer / sole-officer "blocked" note) and never lets a sole officer
+  // leave — same behavior as Home cards and Club Profile.
+  const {
+    target: leaveTarget,
+    isPending: leavingClub,
+    requestLeave,
+    cancel: cancelLeave,
+    confirm: confirmLeave,
+  } = useLeaveClubFlow(userId, show);
 
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   const handleRsvp = (status: 'going' | 'cant') => {
@@ -64,22 +73,13 @@ export default function EventDetailScreen() {
   const handleJoinLeaveClub = () => {
     if (!event) return;
     if (event.user_has_joined_club) {
-      setShowLeaveConfirm(true);
+      void requestLeave(event.club_id, event.club.name);
     } else {
       joinClubMutate(event.club_id, {
         onSuccess: () => show('Joined club! 🎉'),
         onError: () => show('Failed to join club.', 'error'),
       });
     }
-  };
-
-  const handleConfirmLeaveClub = () => {
-    if (!event) return;
-    setShowLeaveConfirm(false);
-    leaveClubMutate(event.club_id, {
-      onSuccess: () => show(`You left ${event.club.name}.`),
-      onError: () => show('Failed to leave club.', 'error'),
-    });
   };
 
   const handlePressClub = () => {
@@ -447,16 +447,11 @@ export default function EventDetailScreen() {
 
       {event && (
         <>
-          <ConfirmModal
-            visible={showLeaveConfirm}
-            title={`Are you sure you want to leave ${event.club.name}?`}
-            message="You'll lose access to club chats and updates."
-            confirmLabel="Yes, Leave"
-            cancelLabel="No"
-            destructive
+          <LeaveClubModals
+            target={leaveTarget}
             loading={leavingClub}
-            onConfirm={handleConfirmLeaveClub}
-            onCancel={() => setShowLeaveConfirm(false)}
+            onConfirm={() => confirmLeave()}
+            onCancel={cancelLeave}
           />
           <ShareSheet
             visible={shareSheetVisible}

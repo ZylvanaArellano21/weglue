@@ -1,5 +1,4 @@
 import type { Router } from 'expo-router';
-import { supabase } from './supabase';
 
 // ─── Sidebar Item Types ───────────────────────────────────────────────────────
 
@@ -21,6 +20,14 @@ export interface SidebarItem {
   destructive?: boolean;
 }
 
+export interface SidebarActionHandlers {
+  // Help opens the device mail composer (with a copyable fallback) and Log Out
+  // shows a confirmation modal first — both owned by SidebarOverlay, which
+  // hosts the modals. Navigation-only items stay here.
+  onHelp: () => void;
+  onLogout: () => void;
+}
+
 // ─── Build sidebar items with navigation callbacks ────────────────────────────
 //
 // Call this inside a component that has access to expo-router's useRouter().
@@ -29,6 +36,7 @@ export interface SidebarItem {
 export function buildSidebarItems(
   router: Router,
   closeSidebar: () => void,
+  handlers: SidebarActionHandlers,
 ): SidebarItem[] {
   function navigate(path: string) {
     closeSidebar();
@@ -77,11 +85,11 @@ export function buildSidebarItems(
       key: 'help',
       label: 'Help',
       icon: 'help-circle-outline',
-      onPress: () => navigate('/home/help'),
+      onPress: handlers.onHelp,
     },
     {
       key: 'terms',
-      label: 'Terms of Service',
+      label: 'Terms & Conditions',
       icon: 'document-text-outline',
       onPress: () => navigate('/home/terms'),
     },
@@ -90,10 +98,7 @@ export function buildSidebarItems(
       label: 'Log Out',
       icon: 'log-out-outline',
       destructive: true,
-      onPress: async () => {
-        closeSidebar();
-        await supabase.auth.signOut();
-      },
+      onPress: handlers.onLogout,
     },
   ];
 }
