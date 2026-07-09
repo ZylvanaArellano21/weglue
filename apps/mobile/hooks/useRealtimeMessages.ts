@@ -1,7 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
 
 /**
  * Subscribes to new messages in a conversation and auto-invalidates
@@ -9,30 +8,24 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
  */
 export function useRealtimeDirectMessages(conversationId: string | undefined): void {
   const queryClient = useQueryClient();
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   useEffect(() => {
     if (!conversationId) return;
 
-    const channel = supabase
-      .channel(`dm:${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        () => {
+    const channel = createSafeChannel(`dm:${conversationId}`, [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId}`,
+        callback: () => {
           queryClient.invalidateQueries({ queryKey: ['directMessages', conversationId] });
           queryClient.invalidateQueries({ queryKey: ['myChats'] });
         },
-      )
-      .subscribe();
+      },
+    ]);
 
-    channelRef.current = channel;
-    return () => { supabase.removeChannel(channel); };
+    return () => { removeSafeChannel(channel); };
   }, [conversationId, queryClient]);
 }
 
@@ -42,29 +35,23 @@ export function useRealtimeDirectMessages(conversationId: string | undefined): v
  */
 export function useRealtimePoll(pollId: string | undefined): void {
   const queryClient = useQueryClient();
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   useEffect(() => {
     if (!pollId) return;
 
-    const channel = supabase
-      .channel(`poll:${pollId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'poll_votes',
-          filter: `poll_id=eq.${pollId}`,
-        },
-        () => {
+    const channel = createSafeChannel(`poll:${pollId}`, [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'poll_votes',
+        filter: `poll_id=eq.${pollId}`,
+        callback: () => {
           queryClient.invalidateQueries({ queryKey: ['poll', pollId] });
         },
-      )
-      .subscribe();
+      },
+    ]);
 
-    channelRef.current = channel;
-    return () => { supabase.removeChannel(channel); };
+    return () => { removeSafeChannel(channel); };
   }, [pollId, queryClient]);
 }
 
@@ -78,30 +65,23 @@ export function useRealtimeParticipants(
   userId: string | undefined,
   onJoined: () => void,
 ): void {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-
   useEffect(() => {
     if (!conversationId || !userId) return;
 
-    const channel = supabase
-      .channel(`participants:${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'conversation_participants',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
+    const channel = createSafeChannel(`participants:${conversationId}`, [
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'conversation_participants',
+        filter: `conversation_id=eq.${conversationId}`,
+        callback: (payload) => {
           if ((payload.new as any).user_id === userId) {
             onJoined();
           }
         },
-      )
-      .subscribe();
+      },
+    ]);
 
-    channelRef.current = channel;
-    return () => { supabase.removeChannel(channel); };
+    return () => { removeSafeChannel(channel); };
   }, [conversationId, userId, onJoined]);
 }

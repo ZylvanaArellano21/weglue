@@ -25,7 +25,7 @@ import {
   useUpdatePostCaption,
 } from '../../hooks/useHomePostsFeed';
 import { useDeleteOwnPost } from '../../hooks/useOwnProfile';
-import { followUser } from '../../services/followService';
+import { followUser, unfollowUser } from '../../services/followService';
 import { Avatar } from '../../components/shared/Avatar';
 import { Pill } from '../../components/shared/Pill';
 import { CommentsSheet } from '../../components/home/CommentsSheet';
@@ -115,17 +115,50 @@ export default function ProfilePostViewerScreen() {
     );
   };
 
-  const handleFollow = async (authorId: string) => {
+  const invalidateRelationshipQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ['userPostsFeed', profileUserId] });
+    queryClient.invalidateQueries({ queryKey: ['userProfile', profileUserId] });
+    queryClient.invalidateQueries({ queryKey: ['homePostsFeed'] });
+  };
+
+  // Starting a follow is immediate; stopping one confirms first (same rules
+  // as the Home posts feed).
+  const handleFollow = async (author: FeedPost['author']) => {
     if (!viewerUserId) return;
     try {
-      await followUser(viewerUserId, authorId);
-      queryClient.invalidateQueries({ queryKey: ['userPostsFeed', profileUserId] });
-      queryClient.invalidateQueries({ queryKey: ['userProfile', profileUserId] });
-      queryClient.invalidateQueries({ queryKey: ['homePostsFeed'] });
-      show('Following! 🎉');
+      await followUser(viewerUserId, author.id);
+      invalidateRelationshipQueries();
+      show(
+        author.profile_is_private
+          ? 'Follow request sent!'
+          : author.follows_me
+            ? "You're now Gluemates! 🎉"
+            : 'Following! 🎉',
+      );
     } catch {
       show('Failed to follow user.', 'error');
     }
+  };
+
+  const [unfollowTarget, setUnfollowTarget] = useState<FeedPost['author'] | null>(null);
+
+  const performUnfollow = async (author: FeedPost['author'], successMessage: string) => {
+    if (!viewerUserId) return;
+    try {
+      await unfollowUser(viewerUserId, author.id);
+      invalidateRelationshipQueries();
+      show(successMessage);
+    } catch {
+      show('Failed to unfollow.', 'error');
+    }
+  };
+
+  const handleRequestUnfollow = (author: FeedPost['author']) => {
+    if (!author.is_following && author.is_requested) {
+      void performUnfollow(author, 'Request canceled.');
+      return;
+    }
+    setUnfollowTarget(author);
   };
 
   // ─── Own-post edit/delete ─────────────────────────────────────────────────
@@ -188,7 +221,10 @@ export default function ProfilePostViewerScreen() {
           data={displayPosts}
           keyExtractor={(p) => p.id}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          // Top padding clears the floating back button so the first post's
+          // identity row is never hidden; bottom padding keeps the last post
+          // fully visible above the home indicator.
+          contentContainerStyle={{ paddingTop: 54, paddingBottom: insets.bottom + 32 }}
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onEndReached={() => hasNextPage && !isFetchingNextPage && fetchNextPage()}
           onEndReachedThreshold={0.6}
@@ -198,6 +234,7 @@ export default function ProfilePostViewerScreen() {
               viewerUserId={viewerUserId ?? ''}
               onLike={handleLike}
               onFollow={handleFollow}
+              onRequestUnfollow={handleRequestUnfollow}
               onOpenOptions={() => setOptionsPostId(item.id)}
               onShowToast={show}
             />
@@ -271,6 +308,26 @@ export default function ProfilePostViewerScreen() {
         loading={deletePost.isPending}
       />
 
+      {/* Unfollow confirmation */}
+      <ProfileConfirmationModal
+        visible={!!unfollowTarget}
+        title={`Unfollow @${unfollowTarget?.username ?? ''}?`}
+        message={
+          unfollowTarget?.follows_me
+            ? `You'll no longer be Gluemates. @${unfollowTarget?.username ?? ''} will still follow you.`
+            : `You'll stop following @${unfollowTarget?.username ?? ''}.`
+        }
+        confirmLabel="Unfollow"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => {
+          const author = unfollowTarget;
+          setUnfollowTarget(null);
+          if (author) void performUnfollow(author, 'Unfollowed.');
+        }}
+        onCancel={() => setUnfollowTarget(null)}
+      />
+
       {/* Edit caption */}
       <Modal
         visible={editTarget !== null}
@@ -325,13 +382,15 @@ function ViewerPostBlock({
   viewerUserId,
   onLike,
   onFollow,
+  onRequestUnfollow,
   onOpenOptions,
   onShowToast,
 }: {
   post: FeedPost;
   viewerUserId: string;
   onLike: (postId: string, hasLiked: boolean) => void;
-  onFollow: (authorId: string) => void;
+  onFollow: (author: FeedPost['author']) => void;
+  onRequestUnfollow: (author: FeedPost['author']) => void;
   onOpenOptions: () => void;
   onShowToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }) {
@@ -343,6 +402,80 @@ function ViewerPostBlock({
 
   return (
     <View style={styles.postBlock}>
+      {/* Identity row — username and avatar always on top, matching the Home
+          posts design, so no post ever appears "cut off" above its image. */}
+      <View style={styles.identityRow}>
+        <TouchableOpacity
+          onPress={() =>
+            router.push({ pathname: '/profile/[userId]', params: { userId: post.author.id } })
+          }
+          activeOpacity={0.7}
+          style={styles.identityLeft}
+        >
+          <Avatar uri={post.author.avatar_url} size={40} username={post.author.username} />
+          <View>
+            <Text style={styles.identityUsername}>@{post.author.username}</Text>
+            {post.tagged_clubs.length > 0 && (
+              <View style={styles.tagRow}>
+                <Text style={styles.tagLabel}>tag </Text>
+                {post.tagged_clubs.map((club, idx) => (
+                  <TouchableOpacity
+                    key={club.id}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(tabs)/clubs/[clubId]',
+                        params: { clubId: club.id },
+                      } as any)
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.tagClub}>
+                      {club.name}
+                      {idx < post.tagged_clubs.length - 1 ? ', ' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+        {isOwnPost ? (
+          <TouchableOpacity
+            onPress={onOpenOptions}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Post options"
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={profileColors.textDark} />
+          </TouchableOpacity>
+        ) : (
+          // Stopping a follow (Following / Gluemate) confirms first; starting
+          // one (Follow / Follow back) never does — same rules as Home posts.
+          <Pill
+            variant={
+              post.author.is_following
+                ? post.author.follows_me
+                  ? 'gluemate'
+                  : 'following'
+                : post.author.is_requested
+                  ? 'following'
+                  : post.author.follows_me
+                    ? 'followBack'
+                    : 'follow'
+            }
+            label={post.author.is_requested && !post.author.is_following ? 'Requested' : undefined}
+            onPress={() => {
+              if (post.author.is_following || post.author.is_requested) {
+                onRequestUnfollow(post.author);
+              } else {
+                onFollow(post.author);
+              }
+            }}
+          />
+        )}
+      </View>
+
       {/* Media */}
       {post.image_url ? (
         <Image
@@ -389,18 +522,6 @@ function ViewerPostBlock({
         >
           <Ionicons name="paper-plane-outline" size={22} color={profileColors.textDark} />
         </TouchableOpacity>
-        <View style={{ flex: 1 }} />
-        {isOwnPost && (
-          <TouchableOpacity
-            onPress={onOpenOptions}
-            activeOpacity={0.7}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityRole="button"
-            accessibilityLabel="Post options"
-          >
-            <Ionicons name="ellipsis-horizontal" size={22} color={profileColors.textDark} />
-          </TouchableOpacity>
-        )}
       </View>
 
       {/* Caption */}
@@ -413,50 +534,6 @@ function ViewerPostBlock({
 
       {/* Timestamp */}
       <Text style={styles.timestamp}>{timeAgo(post.created_at)}</Text>
-
-      {/* Identity row */}
-      <View style={styles.identityRow}>
-        <TouchableOpacity
-          onPress={() =>
-            router.push({ pathname: '/profile/[userId]', params: { userId: post.author.id } })
-          }
-          activeOpacity={0.7}
-          style={styles.identityLeft}
-        >
-          <Avatar uri={post.author.avatar_url} size={40} username={post.author.username} />
-          <View>
-            <Text style={styles.identityUsername}>@{post.author.username}</Text>
-            {post.tagged_clubs.length > 0 && (
-              <View style={styles.tagRow}>
-                <Text style={styles.tagLabel}>tag </Text>
-                {post.tagged_clubs.map((club, idx) => (
-                  <TouchableOpacity
-                    key={club.id}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/(tabs)/clubs/[clubId]',
-                        params: { clubId: club.id },
-                      } as any)
-                    }
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.tagClub}>
-                      {club.name}
-                      {idx < post.tagged_clubs.length - 1 ? ', ' : ''}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
-        {!isOwnPost && (
-          <Pill
-            variant={post.author.is_following ? 'following' : 'follow'}
-            onPress={() => !post.author.is_following && onFollow(post.author.id)}
-          />
-        )}
-      </View>
 
       <CommentsSheet
         visible={commentsVisible}
@@ -539,10 +616,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.04)',
+    paddingVertical: 12,
   },
   identityLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   identityUsername: {

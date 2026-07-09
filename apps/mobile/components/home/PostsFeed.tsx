@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, FlatList, RefreshControl } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
@@ -6,7 +6,8 @@ import { useHomePostsFeed, useLikePost } from '../../hooks/useHomePostsFeed';
 import { useHomeTabStore } from '../../store/homeTabStore';
 import { PostCardSkeleton } from '../shared/SkeletonLoader';
 import { useToast } from '../Toast';
-import { followUser } from '../../services/followService';
+import { followUser, unfollowUser } from '../../services/followService';
+import { ConfirmModal } from '../ConfirmModal';
 import { PostCard } from './PostCard';
 import type { FeedPost } from '../../services/postService';
 
@@ -40,7 +41,18 @@ export function PostsFeed() {
 
   const { mutate: likePost } = useLikePost();
 
-  const allPosts = data?.pages.flatMap((p) => p) ?? [];
+  // Flatten + dedupe by id so a post can never render twice (e.g. when a new
+  // post shifts pagination windows between page fetches).
+  const allPosts = useMemo(() => {
+    const seen = new Set<string>();
+    const posts: FeedPost[] = [];
+    for (const post of data?.pages.flat() ?? []) {
+      if (seen.has(post.id)) continue;
+      seen.add(post.id);
+      posts.push(post);
+    }
+    return posts;
+  }, [data]);
 
   // ── Scroll to a freshly created post ────────────────────────────────────────
   // After creating a normal post, new-post.tsx sets pendingScrollPostId. As
@@ -87,19 +99,69 @@ export function PostsFeed() {
     [userId, likePost, show],
   );
 
+  const invalidateRelationshipQueries = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['homePostsFeed', userId] });
+    queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+    queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
+    queryClient.invalidateQueries({ queryKey: ['ownGluemates', userId] });
+  }, [queryClient, userId]);
+
+  // Starting a follow (Follow / Follow back) is immediate — no confirmation.
   const handleFollow = useCallback(
-    async (authorId: string) => {
+    async (author: FeedPost['author']) => {
       if (!userId) return;
       try {
-        await followUser(userId, authorId);
-        queryClient.invalidateQueries({ queryKey: ['homePostsFeed', userId] });
-        show('Following! 🎉');
+        await followUser(userId, author.id);
+        invalidateRelationshipQueries();
+        show(
+          author.profile_is_private
+            ? 'Follow request sent!'
+            : author.follows_me
+              ? "You're now Gluemates! 🎉"
+              : 'Following! 🎉',
+        );
       } catch {
         show('Failed to follow user.', 'error');
       }
     },
-    [userId, queryClient, show],
+    [userId, invalidateRelationshipQueries, show],
   );
+
+  // Stopping a follow always confirms first. Canceling a pending request is
+  // immediate (matches the profile screen's Requested button).
+  const [unfollowTarget, setUnfollowTarget] = useState<FeedPost['author'] | null>(null);
+
+  const performUnfollow = useCallback(
+    async (author: FeedPost['author'], successMessage: string) => {
+      if (!userId) return;
+      try {
+        await unfollowUser(userId, author.id);
+        invalidateRelationshipQueries();
+        show(successMessage);
+      } catch {
+        show('Failed to unfollow.', 'error');
+      }
+    },
+    [userId, invalidateRelationshipQueries, show],
+  );
+
+  const handleRequestUnfollow = useCallback(
+    (author: FeedPost['author']) => {
+      if (!author.is_following && author.is_requested) {
+        void performUnfollow(author, 'Request canceled.');
+        return;
+      }
+      setUnfollowTarget(author);
+    },
+    [performUnfollow],
+  );
+
+  const confirmUnfollow = useCallback(() => {
+    if (!unfollowTarget) return;
+    const author = unfollowTarget;
+    setUnfollowTarget(null);
+    void performUnfollow(author, 'Unfollowed.');
+  }, [unfollowTarget, performUnfollow]);
 
   const renderItem = useCallback(
     ({ item }: { item: FeedPost }) => (
@@ -108,10 +170,11 @@ export function PostsFeed() {
         viewerUserId={userId ?? ''}
         onLike={handleLike}
         onFollow={handleFollow}
+        onRequestUnfollow={handleRequestUnfollow}
         onShowToast={show}
       />
     ),
-    [userId, handleLike, handleFollow, show],
+    [userId, handleLike, handleFollow, handleRequestUnfollow, show],
   );
 
   if (isLoading) {
@@ -198,6 +261,21 @@ export function PostsFeed() {
             colors={['#0FA6A6']}
           />
         }
+      />
+
+      <ConfirmModal
+        visible={!!unfollowTarget}
+        title={`Unfollow @${unfollowTarget?.username ?? ''}?`}
+        message={
+          unfollowTarget?.follows_me
+            ? `You'll no longer be Gluemates. @${unfollowTarget?.username ?? ''} will still follow you.`
+            : `You'll stop following @${unfollowTarget?.username ?? ''}.`
+        }
+        confirmLabel="Unfollow"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={confirmUnfollow}
+        onCancel={() => setUnfollowTarget(null)}
       />
     </View>
   );

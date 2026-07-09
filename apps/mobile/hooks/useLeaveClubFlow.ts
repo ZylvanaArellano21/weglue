@@ -74,18 +74,18 @@ export function useLeaveClubFlow(userId: string | undefined, showToast: ToastFn)
             void refreshOfficerStatus(userId);
             onLeft?.();
           } else if (result === 'blocked_only_officer') {
-            // Race backstop (another officer left first). Nothing was mutated.
-            showToast(
-              "You're the only officer of this club. Assign another officer before leaving.",
-              'error',
-            );
+            // Race backstop (another officer left first). Nothing was mutated —
+            // surface the sole-officer note, never a failure toast.
+            setTarget({ clubId, clubName, mode: 'blocked' });
           }
         },
         onError: (err) => {
-          showToast(
-            err instanceof OnlyOfficerError ? err.message : 'Failed to leave club.',
-            'error',
-          );
+          if (err instanceof OnlyOfficerError) {
+            // Sole officer can't leave — informational modal, not an error.
+            setTarget({ clubId, clubName, mode: 'blocked' });
+          } else {
+            showToast('Failed to leave club.', 'error');
+          }
         },
       });
     },

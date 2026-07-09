@@ -7,7 +7,7 @@ import {
   markNotificationsRead,
 } from '../services/notificationService';
 import { followUser } from '../services/followService';
-import { supabase } from '../lib/supabase';
+import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
 
 export function useNotifications(userId: string | undefined) {
   return useQuery({
@@ -27,17 +27,13 @@ export function useRealtimeNotifications(userId: string | undefined) {
   useEffect(() => {
     if (!userId) return;
 
-    const channel = supabase
-      .channel(`notifications:${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
+    const channel = createSafeChannel(`notifications:${userId}`, [
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+        callback: (payload) => {
           queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
           const type = (payload.new as { type?: string } | null)?.type;
           if (type === 'follow_accepted' || type === 'gluemate' || type === 'new_follower') {
@@ -46,11 +42,11 @@ export function useRealtimeNotifications(userId: string | undefined) {
             queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
           }
         },
-      )
-      .subscribe();
+      },
+    ]);
 
     return () => {
-      supabase.removeChannel(channel);
+      removeSafeChannel(channel);
     };
   }, [userId, queryClient]);
 }

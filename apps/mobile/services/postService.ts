@@ -6,6 +6,10 @@ export interface PostAuthor {
   username: string;
   avatar_url: string | null;
   is_following: boolean;
+  // Viewer has a pending follow request to this (private) author.
+  is_requested: boolean;
+  // Author follows the viewer (drives Gluemate / Follow back states).
+  follows_me: boolean;
   profile_is_private: boolean;
 }
 
@@ -68,16 +72,26 @@ export async function getHomePostsFeed(
   const PAGE_SIZE = 20;
   const offset = page * PAGE_SIZE;
 
-  const [{ data: followedRows }, { data: myProfile }] = await Promise.all([
+  const [{ data: followedRows }, { data: followerRows }, { data: myProfile }] = await Promise.all([
     supabase
       .from('follows')
-      .select('following_id')
-      .eq('follower_id', userId)
+      .select('following_id, status')
+      .eq('follower_id', userId),
+    supabase
+      .from('follows')
+      .select('follower_id')
+      .eq('following_id', userId)
       .eq('status', 'accepted'),
     supabase.from('profiles').select('university').eq('id', userId).single(),
   ]);
 
-  const followedIds = (followedRows ?? []).map((r: any) => r.following_id);
+  const followedIds = ((followedRows ?? []) as any[])
+    .filter((r) => r.status === 'accepted')
+    .map((r) => r.following_id);
+  const requestedIds = ((followedRows ?? []) as any[])
+    .filter((r) => r.status === 'pending')
+    .map((r) => r.following_id);
+  const followerIds = ((followerRows ?? []) as any[]).map((r) => r.follower_id);
   const myUniversity: string | null = (myProfile as any)?.university ?? null;
 
   // Home → Posts shows every picture post from the viewer's university/community.
@@ -144,36 +158,37 @@ export async function getHomePostsFeed(
   );
 
   const followedSet = new Set(followedIds);
+  const requestedSet = new Set(requestedIds);
+  const followerSet = new Set(followerIds);
 
   // No follow/club/university drop here — the university scope is already
-  // enforced by the query above. Followed authors still float to the top so
-  // ordering is preserved.
-  const posts: (FeedPost & { _sort_key: number })[] = (rawPosts as any[])
-    .map((p) => ({
-      id: p.id,
-      image_url: p.image_url,
-      caption: p.caption,
-      created_at: p.created_at,
-      author: {
-        id: p.profiles.id,
-        username: p.profiles.username,
-        avatar_url: p.profiles.avatar_url,
-        is_following: followedSet.has(p.author_id),
-        profile_is_private: privacyMap.get(p.author_id) ?? false,
-      },
-      tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
-      likes_count: likesCountMap.get(p.id) ?? 0,
-      comments_count: commentsCountMap.get(p.id) ?? 0,
-      user_has_liked: userLikedSet.has(p.id),
-      _sort_key: followedSet.has(p.author_id) ? 0 : 1,
-    }));
+  // enforced by the query above. Strictly newest-first for everyone: follow
+  // status never changes whether a post appears or where it ranks.
+  const posts: FeedPost[] = (rawPosts as any[]).map((p) => ({
+    id: p.id,
+    image_url: p.image_url,
+    caption: p.caption,
+    created_at: p.created_at,
+    author: {
+      id: p.profiles.id,
+      username: p.profiles.username,
+      avatar_url: p.profiles.avatar_url,
+      is_following: followedSet.has(p.author_id),
+      is_requested: requestedSet.has(p.author_id),
+      follows_me: followerSet.has(p.author_id),
+      profile_is_private: privacyMap.get(p.author_id) ?? false,
+    },
+    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
+    likes_count: likesCountMap.get(p.id) ?? 0,
+    comments_count: commentsCountMap.get(p.id) ?? 0,
+    user_has_liked: userLikedSet.has(p.id),
+  }));
 
-  posts.sort((a, b) => {
-    if (a._sort_key !== b._sort_key) return a._sort_key - b._sort_key;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  });
+  posts.sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
 
-  return posts.map(({ _sort_key: _, ...rest }) => rest);
+  return posts;
 }
 
 export async function getPostById(postId: string, userId: string): Promise<FeedPost | null> {
@@ -189,15 +204,21 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
 
   if (error || !p) return null;
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: privacyRow }, { data: extraTagRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }] =
     await Promise.all([
       supabase.from('post_likes').select('user_id').eq('post_id', postId),
       supabase.from('post_comments').select('id').eq('post_id', postId),
       supabase
         .from('follows')
-        .select('id')
+        .select('status')
         .eq('follower_id', userId)
         .eq('following_id', (p as any).author_id)
+        .maybeSingle(),
+      supabase
+        .from('follows')
+        .select('id')
+        .eq('follower_id', (p as any).author_id)
+        .eq('following_id', userId)
         .eq('status', 'accepted')
         .maybeSingle(),
       supabase
@@ -222,7 +243,9 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
       id: (p as any).profiles.id,
       username: (p as any).profiles.username,
       avatar_url: (p as any).profiles.avatar_url,
-      is_following: !!followRow,
+      is_following: (followRow as any)?.status === 'accepted',
+      is_requested: (followRow as any)?.status === 'pending',
+      follows_me: !!followsMeRow,
       profile_is_private: (privacyRow as any)?.is_private ?? false,
     },
     tagged_clubs: mergeTaggedClubs(
@@ -265,15 +288,21 @@ export async function getUserPostsFeed(
 
   const postIds = (rawPosts as any[]).map((p) => p.id);
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: privacyRow }, { data: extraTagRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase.from('post_comments').select('post_id').in('post_id', postIds),
       supabase
         .from('follows')
-        .select('id')
+        .select('status')
         .eq('follower_id', viewerUserId)
         .eq('following_id', profileUserId)
+        .maybeSingle(),
+      supabase
+        .from('follows')
+        .select('id')
+        .eq('follower_id', profileUserId)
+        .eq('following_id', viewerUserId)
         .eq('status', 'accepted')
         .maybeSingle(),
       supabase
@@ -301,7 +330,9 @@ export async function getUserPostsFeed(
     commentsCountMap.set(comment.post_id, (commentsCountMap.get(comment.post_id) ?? 0) + 1);
   }
 
-  const isFollowing = !!followRow;
+  const isFollowing = (followRow as any)?.status === 'accepted';
+  const isRequested = (followRow as any)?.status === 'pending';
+  const followsMe = !!followsMeRow;
   const isPrivate = (privacyRow as any)?.is_private ?? false;
 
   return (rawPosts as any[]).map((p) => ({
@@ -314,6 +345,8 @@ export async function getUserPostsFeed(
       username: p.profiles.username,
       avatar_url: p.profiles.avatar_url,
       is_following: isFollowing,
+      is_requested: isRequested,
+      follows_me: followsMe,
       profile_is_private: isPrivate,
     },
     tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),

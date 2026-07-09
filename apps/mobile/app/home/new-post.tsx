@@ -115,8 +115,8 @@ export default function NewPostScreen() {
         else router.replace('/(tabs)');
       }, 600);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to post. Try again.';
-      show(msg, 'error');
+      console.error('[new-post] create failed', err);
+      show('Failed to post. Please try again.', 'error');
     } finally {
       setSubmitting(false);
     }

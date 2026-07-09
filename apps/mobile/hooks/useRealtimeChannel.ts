@@ -1,6 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { supabase } from '../lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { useEffect } from 'react';
+import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
 
 // ─── Channel messages (System 1: messages table) ──────────────────────────────
 
@@ -11,31 +10,23 @@ export interface RealtimeChannelOptions {
 }
 
 export function useRealtimeMessages(options: RealtimeChannelOptions): void {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-
   useEffect(() => {
     if (!options.channelId || !options.conversationId) return;
 
-    const channel = supabase
-      .channel(`messages:channel:${options.channelId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `channel_id=eq.${options.channelId}`,
-        },
-        (payload) => {
+    const channel = createSafeChannel(`messages:channel:${options.channelId}`, [
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `channel_id=eq.${options.channelId}`,
+        callback: (payload) => {
           options.onNewMessage?.(payload.new);
         },
-      )
-      .subscribe();
-
-    channelRef.current = channel;
+      },
+    ]);
 
     return () => {
-      supabase.removeChannel(channel);
+      removeSafeChannel(channel);
     };
   }, [options.channelId, options.conversationId]);
 }
@@ -48,31 +39,23 @@ export interface RealtimePollOptions {
 }
 
 export function useRealtimePollVotes(options: RealtimePollOptions): void {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-
   useEffect(() => {
     if (!options.pollId) return;
 
-    const channel = supabase
-      .channel(`poll_votes:${options.pollId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'poll_votes',
-          filter: `poll_id=eq.${options.pollId}`,
-        },
-        (payload) => {
+    const channel = createSafeChannel(`poll_votes:${options.pollId}`, [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'poll_votes',
+        filter: `poll_id=eq.${options.pollId}`,
+        callback: (payload) => {
           options.onVoteChange?.(payload);
         },
-      )
-      .subscribe();
-
-    channelRef.current = channel;
+      },
+    ]);
 
     return () => {
-      supabase.removeChannel(channel);
+      removeSafeChannel(channel);
     };
   }, [options.pollId]);
 }
@@ -85,31 +68,23 @@ export interface RealtimeRsvpOptions {
 }
 
 export function useRealtimeEventRsvps(options: RealtimeRsvpOptions): void {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-
   useEffect(() => {
     if (!options.eventId) return;
 
-    const channel = supabase
-      .channel(`event_rsvps:${options.eventId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'event_rsvps',
-          filter: `event_id=eq.${options.eventId}`,
-        },
-        (payload) => {
+    const channel = createSafeChannel(`event_rsvps:${options.eventId}`, [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'event_rsvps',
+        filter: `event_id=eq.${options.eventId}`,
+        callback: (payload) => {
           options.onRsvpChange?.(payload);
         },
-      )
-      .subscribe();
-
-    channelRef.current = channel;
+      },
+    ]);
 
     return () => {
-      supabase.removeChannel(channel);
+      removeSafeChannel(channel);
     };
   }, [options.eventId]);
 }
@@ -122,31 +97,23 @@ export interface RealtimeMemberOptions {
 }
 
 export function useRealtimeClubMembers(options: RealtimeMemberOptions): void {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-
   useEffect(() => {
     if (!options.clubId) return;
 
-    const channel = supabase
-      .channel(`club_members:${options.clubId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'club_members',
-          filter: `club_id=eq.${options.clubId}`,
-        },
-        (payload) => {
+    const channel = createSafeChannel(`club_members:${options.clubId}`, [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'club_members',
+        filter: `club_id=eq.${options.clubId}`,
+        callback: (payload) => {
           options.onMemberChange?.(payload);
         },
-      )
-      .subscribe();
-
-    channelRef.current = channel;
+      },
+    ]);
 
     return () => {
-      supabase.removeChannel(channel);
+      removeSafeChannel(channel);
     };
   }, [options.clubId]);
 }
@@ -160,39 +127,28 @@ export interface RealtimeConvOptions {
 }
 
 export function useRealtimeConversation(options: RealtimeConvOptions): void {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-
   useEffect(() => {
     if (!options.conversationId) return;
 
-    const channel = supabase
-      .channel(`messages:conv:${options.conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${options.conversationId}`,
-        },
-        (payload) => options.onNewMessage?.(payload.new),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${options.conversationId}`,
-        },
-        (payload) => options.onDeleteMessage?.(payload.old),
-      )
-      .subscribe();
-
-    channelRef.current = channel;
+    const channel = createSafeChannel(`messages:conv:${options.conversationId}`, [
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${options.conversationId}`,
+        callback: (payload) => options.onNewMessage?.(payload.new),
+      },
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${options.conversationId}`,
+        callback: (payload) => options.onDeleteMessage?.(payload.old),
+      },
+    ]);
 
     return () => {
-      supabase.removeChannel(channel);
+      removeSafeChannel(channel);
     };
   }, [options.conversationId]);
 }

@@ -45,7 +45,10 @@ export function ErrorBoundary({
 }) {
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
-  }, []);
+    // Keep the technical detail for debugging, but never show raw errors
+    // (Supabase/Realtime internals, stack fragments…) to users.
+    console.error('[ErrorBoundary]', error);
+  }, [error]);
   return (
     <View
       style={{
@@ -60,7 +63,7 @@ export function ErrorBoundary({
         Something went wrong
       </Text>
       <Text style={{ fontSize: 14, color: "#444", textAlign: "center", marginTop: 8 }}>
-        {error?.message ?? "Please try again."}
+        An unexpected error occurred. Please try again.
       </Text>
       <TouchableOpacity
         onPress={() => retry()}

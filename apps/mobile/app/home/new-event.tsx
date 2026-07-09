@@ -48,6 +48,14 @@ function toDateString(d: Date): string {
   return `${y}-${mo}-${day}`;
 }
 
+// minimumDate must be midnight, not "now" — passing the current time can make
+// today itself unselectable in the calendar.
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 export default function NewEventScreen() {
   const router = useRouter();
   const { session } = useAuthStore();
@@ -72,8 +80,11 @@ export default function NewEventScreen() {
   const [building, setBuilding] = useState('');
   const [room, setRoom] = useState('');
 
-  // Date picker
+  // Date picker. iOS commits via tempDate on "Done" — the inline calendar
+  // already highlights today, so tapping today never fires onChange and a
+  // null eventDate would otherwise stay null (the "today won't select" bug).
   const [eventDate, setEventDate] = useState<Date | null>(null);
+  const [tempDate, setTempDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Time pickers
@@ -198,17 +209,31 @@ export default function NewEventScreen() {
       show('Event posted! 🎉');
       setTimeout(() => router.replace('/(tabs)'), 1000);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to create event.';
-      show(msg, 'error');
+      console.error('[new-event] create failed', err);
+      show('Failed to create event. Please try again.', 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
   // ── Date picker handlers (Android shows natively, iOS uses modal) ─────────
+  const openDatePicker = () => {
+    setTempDate(eventDate ?? new Date());
+    setShowDatePicker(true);
+  };
+
   const onDateChange = (_: DateTimePickerEvent, selected?: Date) => {
-    if (Platform.OS === 'android') setShowDatePicker(false);
-    if (selected) setEventDate(selected);
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+      if (selected) setEventDate(selected);
+      return;
+    }
+    if (selected) setTempDate(selected);
+  };
+
+  const confirmDatePicker = () => {
+    setEventDate(tempDate);
+    setShowDatePicker(false);
   };
 
   const onTimeChange = (_: DateTimePickerEvent, selected?: Date) => {
@@ -404,7 +429,7 @@ export default function NewEventScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[labelStyle, { fontSize: 12 }]}>Date:</Text>
               <TouchableOpacity
-                onPress={() => setShowDatePicker(true)}
+                onPress={openDatePicker}
                 activeOpacity={0.7}
                 style={[inputStyle, { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 0 }]}
               >
@@ -473,7 +498,7 @@ export default function NewEventScreen() {
             <DateTimePicker
               value={eventDate ?? new Date()}
               mode="date"
-              minimumDate={new Date()}
+              minimumDate={startOfToday()}
               onChange={onDateChange}
             />
           )}
@@ -734,17 +759,17 @@ export default function NewEventScreen() {
                   <Text style={{ color: '#6B7280', fontSize: 16, fontFamily: 'Inter_500Medium' }}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setShowDatePicker(false)}
+                  onPress={confirmDatePicker}
                   activeOpacity={0.7}
                 >
                   <Text style={{ color: '#0FA6A6', fontSize: 16, fontFamily: 'Inter_600SemiBold' }}>Done</Text>
                 </TouchableOpacity>
               </View>
               <DateTimePicker
-                value={eventDate ?? new Date()}
+                value={tempDate}
                 mode="date"
                 display="inline"
-                minimumDate={new Date()}
+                minimumDate={startOfToday()}
                 onChange={onDateChange}
                 style={{ alignSelf: 'center' }}
                 themeVariant="light"

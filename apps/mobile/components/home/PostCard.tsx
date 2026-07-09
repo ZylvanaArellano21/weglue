@@ -33,7 +33,8 @@ export interface PostCardProps {
   post: FeedPost;
   viewerUserId: string;
   onLike: (postId: string, hasLiked: boolean) => void;
-  onFollow: (authorId: string) => void;
+  onFollow: (author: FeedPost['author']) => void;
+  onRequestUnfollow: (author: FeedPost['author']) => void;
   onShowToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
@@ -42,6 +43,7 @@ export const PostCard = memo(function PostCard({
   viewerUserId,
   onLike,
   onFollow,
+  onRequestUnfollow,
   onShowToast,
 }: PostCardProps) {
   const router = useRouter();
@@ -117,9 +119,32 @@ export const PostCard = memo(function PostCard({
           )}
         </View>
         {!isOwnPost && (
+          // Relationship pill. Stopping a follow (Following / Gluemate) always
+          // confirms first; starting one (Follow / Follow back) never does.
           <Pill
-            variant={post.author.is_following ? 'following' : 'follow'}
-            onPress={() => !post.author.is_following && onFollow(post.author.id)}
+            variant={
+              post.author.is_following
+                ? post.author.follows_me
+                  ? 'gluemate'
+                  : 'following'
+                : post.author.is_requested
+                  ? 'following' // gray outline, relabeled "Requested" below
+                  : post.author.follows_me
+                    ? 'followBack'
+                    : 'follow'
+            }
+            label={post.author.is_requested && !post.author.is_following ? 'Requested' : undefined}
+            onPress={() => {
+              if (post.author.is_following) {
+                onRequestUnfollow(post.author);
+              } else if (post.author.is_requested) {
+                // Cancel the pending request — same immediate behavior as the
+                // profile screen's Requested button.
+                onRequestUnfollow(post.author);
+              } else {
+                onFollow(post.author);
+              }
+            }}
           />
         )}
       </View>
