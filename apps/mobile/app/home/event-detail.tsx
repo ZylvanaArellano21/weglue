@@ -19,6 +19,7 @@ import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { LeaveClubModals } from '../../components/club/LeaveClubModals';
 import { ShareSheet } from '../../components/shared/ShareSheet';
+import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00');
@@ -256,11 +257,19 @@ export default function EventDetailScreen() {
                   {formatDate(event.event_date)}
                 </Text>
               </View>
-              <Text style={{ fontSize: 14, color: '#374151', fontFamily: 'Inter_400Regular', marginLeft: 26, marginBottom: 12 }}>
+              <Text
+                style={{
+                  fontSize: 14,
+                  color: '#374151',
+                  fontFamily: 'Inter_400Regular',
+                  marginLeft: 26,
+                  marginBottom: formatEventLocation(event.building, event.room, event.location) ? 12 : 0,
+                }}
+              >
                 {formatTime(event.start_time)} - {formatTime(event.end_time)}
               </Text>
 
-              {event.location ? (
+              {formatEventLocation(event.building, event.room, event.location) ? (
                 <>
                   <Text style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginBottom: 4 }}>
                     Location
@@ -268,7 +277,7 @@ export default function EventDetailScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name="location-outline" size={18} color="#374151" />
                     <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
-                      {event.location}
+                      {formatEventLocation(event.building, event.room, event.location)}
                     </Text>
                   </View>
                 </>
@@ -373,7 +382,21 @@ export default function EventDetailScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* RSVP Section */}
+            {/* RSVP Section — ended events are view-only: attendee count stays
+                visible above, but attendance can no longer be changed */}
+            {isEventPast(event.event_date, event.end_time) ? (
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: '#9CA3AF',
+                  fontFamily: 'Inter_400Regular',
+                  textAlign: 'center',
+                }}
+              >
+                This event has ended
+              </Text>
+            ) : (
+            <>
             <Text
               style={{
                 fontSize: 16,
@@ -441,6 +464,8 @@ export default function EventDetailScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+            </>
+            )}
           </View>
         </ScrollView>
       )}

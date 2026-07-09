@@ -44,6 +44,41 @@ export function dateInAppTz(date: Date): string {
   }
 }
 
+// 24-hour HH:MM:SS wall-clock time formatter for America/Chicago; same
+// fallback rules as the day formatter above.
+let timeFormatter: Intl.DateTimeFormat | null = null;
+try {
+  timeFormatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: APP_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+} catch {
+  timeFormatter = null;
+}
+
+function localTimeString(date: Date): string {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  const s = String(date.getSeconds()).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
+// The current wall-clock time in America/Chicago as HH:MM:SS — string-sortable
+// against events.start_time/end_time (both stored as wall-clock time strings).
+export function nowTimeInAppTz(): string {
+  const now = new Date();
+  if (!timeFormatter) return localTimeString(now);
+  try {
+    // en-GB hour12:false can yield "24:xx:xx" at midnight on some ICU builds.
+    return timeFormatter.format(now).replace(/^24/, '00');
+  } catch {
+    return localTimeString(now);
+  }
+}
+
 // YYYY-MM-DD + n days → YYYY-MM-DD (pure calendar math, timezone-safe
 // because the string is re-anchored at UTC noon before shifting).
 export function addDaysToDateString(dateStr: string, days: number): string {

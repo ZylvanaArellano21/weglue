@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { todayInAppTz } from '../lib/timezone';
+import { isEventPast } from '../lib/eventDisplay';
 
 export type EventTier = 'your_clubs' | 'recommended';
 
@@ -209,6 +210,18 @@ export async function rsvpToEvent(
   eventId: string,
   status: 'going' | 'cant',
 ): Promise<void> {
+  // Attendance on ended events is immutable from EVERY entry point (club
+  // profile, home, calendar, deep links) — the UI hides the buttons, this is
+  // the backstop.
+  const { data: eventRow } = await supabase
+    .from('events')
+    .select('event_date, end_time')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (eventRow && isEventPast(eventRow.event_date, eventRow.end_time)) {
+    throw new Error('This event has ended');
+  }
+
   const { data: existing } = await supabase
     .from('event_rsvps')
     .select('status')

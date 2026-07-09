@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { todayInAppTz } from '../lib/timezone';
+import { splitPastAndUpcoming } from '../lib/eventDisplay';
 
 export interface OfficerStatus {
   isOfficer: boolean;
@@ -89,6 +89,7 @@ export interface ClubProfileData {
   goals: ClubGoal[];
   officers: ClubOfficer[];
   upcoming_events: ClubUpcomingEvent[];
+  past_events: ClubUpcomingEvent[];
   photos: ClubPhoto[];
   gluemates: ClubGluemate[];
   gluemates_count: number;
@@ -132,13 +133,14 @@ export async function getClubProfile(
       .from('club_officers')
       .select('id, user_id, display_name, role_title, profiles(avatar_url)')
       .eq('club_id', clubId),
+    // ALL of the club's events — past AND future. Splitting into Upcoming /
+    // Past happens client-side against the real end datetime; filtering here
+    // would silently delete past events from Past Events and the Calendar.
     supabase
       .from('events')
       .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location, building, room, visibility')
       .eq('club_id', clubId)
-      .gte('event_date', todayInAppTz())
-      .order('event_date', { ascending: true })
-      .limit(5),
+      .order('event_date', { ascending: true }),
     supabase
       .from('club_photos')
       .select('id, url, source, post_id')
@@ -158,6 +160,21 @@ export async function getClubProfile(
     avatar_url: o.profiles?.avatar_url ?? null,
   }));
 
+  const allEvents: ClubUpcomingEvent[] = ((eventRows ?? []) as any[]).map((e) => ({
+    id: e.id,
+    title: e.title,
+    emoji: e.emoji,
+    cover_image_url: e.cover_image_url,
+    event_date: e.event_date,
+    start_time: e.start_time,
+    end_time: e.end_time,
+    location: e.location,
+    building: e.building,
+    room: e.room,
+    visibility: e.visibility as 'everyone' | 'members' | 'specific',
+  }));
+  const { upcoming, past } = splitPastAndUpcoming(allEvents);
+
   return {
     id: club.id,
     name: club.name,
@@ -175,19 +192,8 @@ export async function getClubProfile(
     is_member: !!membership,
     goals: (goals ?? []) as ClubGoal[],
     officers,
-    upcoming_events: ((eventRows ?? []) as any[]).map((e) => ({
-      id: e.id,
-      title: e.title,
-      emoji: e.emoji,
-      cover_image_url: e.cover_image_url,
-      event_date: e.event_date,
-      start_time: e.start_time,
-      end_time: e.end_time,
-      location: e.location,
-      building: e.building,
-      room: e.room,
-      visibility: e.visibility as 'everyone' | 'members' | 'specific',
-    })),
+    upcoming_events: upcoming,
+    past_events: past,
     photos: (photoRows ?? []) as ClubPhoto[],
     gluemates: gluemates.slice(0, 4),
     gluemates_count: gluemates.length,

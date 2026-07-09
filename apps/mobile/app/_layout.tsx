@@ -223,7 +223,10 @@ export default function RootLayout() {
       persistOptions={{
         persister: queryPersister,
         maxAge: 24 * 60 * 60 * 1000,
-        buster: "v1",
+        // Bumped whenever a persisted query's shape changes: v2 added
+        // clubProfile.past_events — a v1 cache entry would crash the Past
+        // Events section on first render before refetch.
+        buster: "v2",
       }}
     >
       {/* Screens are auto-registered by expo-router from the file tree.

@@ -33,6 +33,7 @@ import {
   type UpdateClubInput,
 } from '../../../../services/clubService';
 import { uploadImageToBucket } from '../../../../lib/imageUpload';
+import { invalidateClubDataEverywhere } from '../../../../lib/clubCache';
 import type { ClubOfficer, ClubPhoto, ClubUpcomingEvent } from '../../../../services/clubService';
 
 export type EditClubParams = {
@@ -494,13 +495,10 @@ export default function EditClubScreen() {
         updateClubProfile(clubId!, updates),
         updateClubGoals(clubId!, goals),
       ]);
-      queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId, userId] });
-      // Club banner/avatar are also embedded in Home feed event cards and
-      // club discovery/listing screens — separate query caches that won't
-      // pick up the change until invalidated directly.
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
-      queryClient.invalidateQueries({ queryKey: ['discoveryClubs'] });
-      queryClient.invalidateQueries({ queryKey: ['ownClubs'] });
+      // Club avatar/banner/name are embedded in many separate query caches
+      // (Club Tab, Home cards, Discovery, Search, Calendar, Saved, chats…);
+      // invalidate them all so every screen refreshes without an app restart.
+      invalidateClubDataEverywhere(queryClient);
       show('Club saved!', 'success');
       setHasChanges(false);
     } catch {

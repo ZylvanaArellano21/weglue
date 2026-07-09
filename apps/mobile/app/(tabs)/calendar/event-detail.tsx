@@ -55,6 +55,7 @@ import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import { DotNavigator } from '../../../components/calendar/DotNavigator';
 import { useToast } from '../../../components/Toast';
 import { ShareSheet } from '../../../components/shared/ShareSheet';
+import { formatEventLocation, isEventPast } from '../../../lib/eventDisplay';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -91,7 +92,6 @@ export default function CalendarEventDetailScreen() {
 
   const date = params.date;
   const initialEventId = params.initialEventId;
-  const isPast = params.isPast === 'true';
 
   // Fetch all events for this day (sorted by start_time)
   const { data: dayEvents = [], isLoading } = useCalendarDayEvents(userId, date);
@@ -108,6 +108,13 @@ export default function CalendarEventDetailScreen() {
 
   const event = dayEvents[currentIndex] ?? null;
   const totalEvents = dayEvents.length;
+
+  // Read-only once the event's REAL end datetime has passed — not the
+  // date-only param, which would lock today's still-running events. The param
+  // remains the fallback while event data loads.
+  const isPast = event
+    ? isEventPast(event.event_date, event.end_time)
+    : params.isPast === 'true';
 
   // ─── Swipe-down handler: advance to next event, cap at last ───────────────
   // No wraparound — swiping past the last event does nothing.
@@ -315,11 +322,19 @@ export default function CalendarEventDetailScreen() {
                   {formatDate(event.event_date)}
                 </Text>
               </View>
-              <Text style={{ fontSize: 14, color: '#374151', fontFamily: 'Inter_400Regular', marginLeft: 26, marginBottom: 12 }}>
+              <Text
+                style={{
+                  fontSize: 14,
+                  color: '#374151',
+                  fontFamily: 'Inter_400Regular',
+                  marginLeft: 26,
+                  marginBottom: formatEventLocation(event.building, event.room, event.location) ? 12 : 0,
+                }}
+              >
                 {formatTime(event.start_time)} - {formatTime(event.end_time)}
               </Text>
 
-              {(event.location || event.building) ? (
+              {formatEventLocation(event.building, event.room, event.location) ? (
                 <>
                   <Text style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginBottom: 4 }}>
                     Location
@@ -327,7 +342,7 @@ export default function CalendarEventDetailScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name="location-outline" size={18} color="#374151" />
                     <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
-                      {event.location ?? `${event.building ?? ''} ${event.room ?? ''}`.trim()}
+                      {formatEventLocation(event.building, event.room, event.location)}
                     </Text>
                   </View>
                 </>

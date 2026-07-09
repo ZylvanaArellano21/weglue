@@ -24,6 +24,7 @@ import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../../components/Toast';
 import { LeaveClubModals } from '../../../../../components/club/LeaveClubModals';
 import { ShareSheet } from '../../../../../components/shared/ShareSheet';
+import { formatEventLocation, isEventPast } from '../../../../../lib/eventDisplay';
 
 export type ClubEventDetailParams = {
   clubId: string;
@@ -327,13 +328,13 @@ export default function ClubEventDetailScreen() {
                   color: '#374151',
                   fontFamily: 'Inter_400Regular',
                   marginLeft: 26,
-                  marginBottom: event.location ? 12 : 0,
+                  marginBottom: formatEventLocation(event.building, event.room, event.location) ? 12 : 0,
                 }}
               >
                 {formatTime(event.start_time)} - {formatTime(event.end_time)}
               </Text>
 
-              {event.location && (
+              {formatEventLocation(event.building, event.room, event.location) ? (
                 <>
                   <Text
                     style={{
@@ -348,11 +349,11 @@ export default function ClubEventDetailScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name="location-outline" size={18} color="#374151" />
                     <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
-                      {event.location}
+                      {formatEventLocation(event.building, event.room, event.location)}
                     </Text>
                   </View>
                 </>
-              )}
+              ) : null}
             </View>
 
             {/* ── Attendees Row ─────────────────────────── */}
@@ -423,8 +424,24 @@ export default function ClubEventDetailScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* ── RSVP Section ──────────────────────────── */}
+            {/* ── RSVP Section — ended events are view-only: attendees stay
+                visible above, but no attendance can be changed ── */}
             {(() => {
+              if (isEventPast(event.event_date, event.end_time)) {
+                return (
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color: '#9CA3AF',
+                      fontFamily: 'Inter_400Regular',
+                      textAlign: 'center',
+                    }}
+                  >
+                    This event has ended
+                  </Text>
+                );
+              }
+
               const isRestricted =
                 event.visibility === 'members' || event.visibility === 'specific';
               const rsvpBlocked = isRestricted && !event.user_has_joined_club;

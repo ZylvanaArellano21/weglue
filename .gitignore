@@ -47,3 +47,6 @@ ios/
 *.tsbuildinfo
 .vercel
 weglue-a5631ceb0d14.json
+
+# Claude Code local settings
+.claude/

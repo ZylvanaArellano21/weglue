@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import { LeaveClubModals } from '../../../../components/club/LeaveClubModals';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 import { todayInAppTz } from '../../../../lib/timezone';
+import { formatEventLocation } from '../../../../lib/eventDisplay';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -63,6 +64,49 @@ function formatMeetingTime(start: string | null, end: string | null): string {
   return end ? `${formatted} - ${formatTime(end)}` : formatted;
 }
 
+// ─── Section shell ────────────────────────────────────────────────────────────
+// Permanent product rule: every club profile renders the same major sections.
+// A section with no data keeps its title and shows a calm gray empty state so
+// officers can see the space they can fill later — sections never disappear.
+function Section({
+  title,
+  emptyText,
+  isEmpty,
+  headerRight,
+  children,
+}: {
+  title: string;
+  emptyText: string;
+  isEmpty: boolean;
+  headerRight?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 8,
+        }}
+      >
+        <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
+          {title}
+        </Text>
+        {!isEmpty && headerRight}
+      </View>
+      {isEmpty ? (
+        <Text style={{ fontSize: 13, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
+          {emptyText}
+        </Text>
+      ) : (
+        children
+      )}
+    </View>
+  );
+}
+
 // ─── Mini Calendar ────────────────────────────────────────────────────────────
 function MiniCalendar({
   events,
@@ -71,16 +115,24 @@ function MiniCalendar({
   events: ClubUpcomingEvent[];
   onDayPress: (eventId: string) => void;
 }) {
-  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
-  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
+  // Anchor "this month" on the app timezone, not the device timezone.
+  const [todayY, todayM] = todayInAppTz().split('-').map(Number);
+  const [viewYear, setViewYear] = useState(todayY);
+  const [viewMonth, setViewMonth] = useState(todayM - 1);
 
+  // Every event — past AND future — marks its day. Earliest event of the day
+  // opens first when tapped.
   const eventIdByDate = new Map<string, string>();
   for (const e of events) {
     if (!eventIdByDate.has(e.event_date)) eventIdByDate.set(e.event_date, e.id);
   }
   const todayStr = todayInAppTz();
 
-  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  // Monday-first grid: number of leading blanks before the 1st of the month.
+  // getDay() is 0=Sunday, so (getDay()+6)%7 maps Monday→0 … Sunday→6. This is
+  // pure calendar math on a local Date constructed from Y/M — correct for
+  // months starting on any weekday.
+  const leadingBlanks = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
 
   const monthName = new Date(viewYear, viewMonth, 1).toLocaleDateString('en-US', {
@@ -88,11 +140,15 @@ function MiniCalendar({
     year: 'numeric',
   });
 
-  const days: (number | null)[] = Array(firstDay === 0 ? 6 : firstDay - 1).fill(null);
+  const days: (number | null)[] = Array(leadingBlanks).fill(null);
   for (let d = 1; d <= daysInMonth; d++) days.push(d);
   while (days.length % 7 !== 0) days.push(null);
 
   const DAY_LABELS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+  // Fixed one-seventh columns: headers and day cells share the exact same
+  // width so every date sits under its weekday and the first week can never
+  // drift away from the rest of the month.
+  const CELL_WIDTH = `${100 / 7}%` as const;
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
@@ -132,7 +188,7 @@ function MiniCalendar({
           <Text
             key={d}
             style={{
-              flex: 1,
+              width: CELL_WIDTH,
               textAlign: 'center',
               fontSize: 10,
               color: MUTED,
@@ -148,7 +204,7 @@ function MiniCalendar({
       {Array.from({ length: days.length / 7 }, (_, row) => (
         <View key={row} style={{ flexDirection: 'row', marginBottom: 2 }}>
           {days.slice(row * 7, row * 7 + 7).map((day, col) => {
-            if (!day) return <View key={col} style={{ flex: 1 }} />;
+            if (!day) return <View key={col} style={{ width: CELL_WIDTH }} />;
 
             const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const isToday = dateStr === todayStr;
@@ -161,7 +217,7 @@ function MiniCalendar({
                 disabled={!hasEvent}
                 onPress={() => eventId && onDayPress(eventId)}
                 style={({ pressed }) => ({
-                  flex: 1,
+                  width: CELL_WIDTH,
                   alignItems: 'center',
                   paddingVertical: 2,
                   borderRadius: 13,
@@ -212,11 +268,15 @@ function MiniCalendar({
   );
 }
 
-// ─── Upcoming Event Row ───────────────────────────────────────────────────────
-function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId: string }) {
+// ─── Club Event Card ──────────────────────────────────────────────────────────
+// Figma "Club profile" card: large left image filling the card height, red
+// "Members only" banner hanging from the top edge, bold title, calendar +
+// location rows, right chevron — the whole card is one tappable 3D button.
+// Used for both Upcoming Events and Past Events.
+function ClubEventCard({ event, clubId }: { event: ClubUpcomingEvent; clubId: string }) {
   const router = useRouter();
   const isRestricted = event.visibility === 'members' || event.visibility === 'specific';
-  const locationText = [event.building, event.room, event.location].filter(Boolean).join(', ');
+  const locationText = formatEventLocation(event.building, event.room, event.location);
 
   return (
     <TouchableOpacity
@@ -227,77 +287,100 @@ function UpcomingEventRow({ event, clubId }: { event: ClubUpcomingEvent; clubId:
         })
       }
       activeOpacity={0.7}
+      // overflow:'hidden' would clip the iOS shadow (masksToBounds), killing
+      // the 3D button look — so the card keeps its shadow and only the image
+      // column clips itself to the card's left radius.
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: CREAM,
-        borderRadius: 10,
-        marginBottom: 10,
-        overflow: 'hidden',
+        borderRadius: 12,
+        marginBottom: 14,
+        minHeight: 96,
         ...CARD_SHADOW,
       }}
     >
-      <View style={{ width: 70, height: 70, backgroundColor: '#E5E7EB' }}>
+      <View
+        style={{
+          width: 128,
+          alignSelf: 'stretch',
+          backgroundColor: '#E5E7EB',
+          borderTopLeftRadius: 12,
+          borderBottomLeftRadius: 12,
+          overflow: 'hidden',
+        }}
+      >
         {event.cover_image_url ? (
-          <Image source={{ uri: event.cover_image_url }} style={{ width: 70, height: 70 }} resizeMode="cover" />
+          // Absolutely filled so the image adopts the card's content-driven
+          // height instead of its own intrinsic size stretching the card.
+          <Image
+            source={{ uri: event.cover_image_url }}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+            resizeMode="cover"
+          />
         ) : (
-          <View style={{ width: 70, height: 70, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' }}>
-            <Ionicons name="calendar-outline" size={24} color={MUTED} />
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="calendar-outline" size={30} color={MUTED} />
           </View>
         )}
         {isRestricted && (
           <View
             style={{
               position: 'absolute',
-              top: 4,
-              left: 4,
+              top: 0,
+              left: 22,
               backgroundColor: ALERT_RED,
-              borderRadius: 10,
-              paddingHorizontal: 6,
-              paddingVertical: 3,
+              borderBottomLeftRadius: 4,
+              borderBottomRightRadius: 4,
+              paddingHorizontal: 10,
+              paddingVertical: 4,
             }}
           >
-            <Text style={{ fontSize: 10, color: CREAM, fontFamily: 'Inter_700Bold' }}>
-              Members Only
+            <Text style={{ fontSize: 11, color: '#FFFFFF', fontFamily: 'Inter_700Bold' }}>
+              Members only
             </Text>
           </View>
         )}
       </View>
-      <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 10 }}>
+      <View style={{ flex: 1, paddingHorizontal: 14, paddingVertical: 12, justifyContent: 'center' }}>
         <Text
-          style={{ fontSize: 13, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold', marginBottom: 4 }}
+          style={{ fontSize: 15, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold', marginBottom: 6 }}
           numberOfLines={1}
         >
           {event.emoji ? `${event.emoji} ` : ''}{event.title}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginBottom: 2 }}>
-          <Ionicons name="calendar-outline" size={11} color={MUTED} style={{ marginTop: 1 }} />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 4 }}>
+          <Ionicons name="calendar-outline" size={15} color={MUTED} style={{ marginTop: 1 }} />
           <View>
-            <Text style={{ fontSize: 11, color: MUTED, fontFamily: 'Inter_500Medium' }}>
+            <Text style={{ fontSize: 12, color: MUTED, fontFamily: 'Inter_500Medium' }}>
               {formatDate(event.event_date)}
             </Text>
-            <Text style={{ fontSize: 11, color: MUTED, fontFamily: 'Inter_500Medium' }}>
+            <Text style={{ fontSize: 12, color: MUTED, fontFamily: 'Inter_500Medium' }}>
               {formatTime(event.start_time)} - {formatTime(event.end_time)}
             </Text>
           </View>
         </View>
         {locationText ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Ionicons name="location-outline" size={11} color={MUTED} />
-            <Text style={{ fontSize: 11, color: MUTED, fontFamily: 'Inter_500Medium' }} numberOfLines={1}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="location-outline" size={15} color={MUTED} />
+            <Text style={{ fontSize: 12, color: MUTED, fontFamily: 'Inter_500Medium' }} numberOfLines={1}>
               {locationText}
             </Text>
           </View>
         ) : null}
       </View>
-      <Ionicons name="chevron-forward" size={18} color={MUTED} style={{ marginRight: 12 }} />
+      <Ionicons name="chevron-forward" size={22} color={INK} style={{ marginRight: 12 }} />
     </TouchableOpacity>
   );
 }
 
 // ─── Officer Row ──────────────────────────────────────────────────────────────
-function OfficerRow({ officer }: { officer: ClubOfficer }) {
+// `currentUserId` decides self vs. other by authenticated user id — never by
+// username/display-name text, which can change. Your own officer row shows no
+// Message action.
+function OfficerRow({ officer, currentUserId }: { officer: ClubOfficer; currentUserId?: string }) {
   const router = useRouter();
+  const isSelf = !!officer.user_id && officer.user_id === currentUserId;
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
@@ -328,19 +411,21 @@ function OfficerRow({ officer }: { officer: ClubOfficer }) {
           {officer.role_title}
         </Text>
       </View>
-      <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={() => { if (officer.user_id) void openDirectChatWith(officer.user_id); }}
-        style={{
-          paddingHorizontal: 14,
-          paddingVertical: 8,
-          borderRadius: 20,
-          backgroundColor: CREAM,
-          ...CARD_SHADOW,
-        }}
-      >
-        <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_600SemiBold' }}>Message</Text>
-      </TouchableOpacity>
+      {!isSelf && (
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => { if (officer.user_id) void openDirectChatWith(officer.user_id); }}
+          style={{
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            borderRadius: 20,
+            backgroundColor: CREAM,
+            ...CARD_SHADOW,
+          }}
+        >
+          <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_600SemiBold' }}>Message</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -441,7 +526,9 @@ export default function ClubProfileScreen() {
     );
   }
 
-  const eventDates = club.upcoming_events.map((e) => e.event_date);
+  // One event source drives Upcoming, Past AND the calendar — past events are
+  // relocated to Past Events, never deleted, and always stay on the calendar.
+  const allCalendarEvents = [...club.upcoming_events, ...club.past_events];
 
   function handlePhotoPress(photo: ClubPhoto) {
     const idx = club!.photos.findIndex((p) => p.id === photo.id);
@@ -730,19 +817,13 @@ export default function ClubProfileScreen() {
           </TouchableOpacity>
         )}
 
-        {/* ── About Section ──────────────────────────────────── */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
-          <Text
-            style={{
-              fontSize: 14,
-              fontWeight: '700',
-              color: INK,
-              fontFamily: 'Inter_700Bold',
-              marginBottom: 8,
-            }}
-          >
-            About
-          </Text>
+        {/* ── About Section — always visible; learning outcomes (goals) live
+            inside About, never as a separate section ──────────── */}
+        <Section
+          title="About"
+          emptyText="No about yet"
+          isEmpty={!club.description && club.goals.length === 0}
+        >
           {club.description ? (
             <Text
               style={{
@@ -776,132 +857,98 @@ export default function ClubProfileScreen() {
               </Text>
             </View>
           ))}
-        </View>
+        </Section>
 
-        {/* ── Meeting Schedule ───────────────────────────────── */}
-        {club.meeting_day && (
-          <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
-            <Text
-              style={{
-                fontSize: 14,
-                fontWeight: '700',
-                color: INK,
-                fontFamily: 'Inter_700Bold',
-                marginBottom: 8,
-              }}
-            >
-              Meeting Schedule
-            </Text>
-            <View
-              style={{
-                backgroundColor: CREAM,
-                borderRadius: 10,
-                padding: 14,
-                ...CARD_SHADOW,
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <Ionicons name="calendar-outline" size={16} color={TEAL} />
+        {/* ── Meeting Schedule — always visible ──────────────── */}
+        <Section title="Meeting Schedule" emptyText="No weekly events yet" isEmpty={!club.meeting_day}>
+          <View
+            style={{
+              backgroundColor: CREAM,
+              borderRadius: 10,
+              padding: 14,
+              ...CARD_SHADOW,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Ionicons name="calendar-outline" size={16} color={TEAL} />
+              <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
+                {club.meeting_day}{' '}
+                {formatMeetingTime(club.meeting_time_start, club.meeting_time_end)}
+              </Text>
+            </View>
+            {formatEventLocation(club.meeting_building, club.meeting_room, club.meeting_location) ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location-outline" size={16} color={TEAL} />
                 <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
-                  {club.meeting_day}{' '}
-                  {formatMeetingTime(club.meeting_time_start, club.meeting_time_end)}
+                  {formatEventLocation(club.meeting_building, club.meeting_room, club.meeting_location)}
                 </Text>
               </View>
-              {(club.meeting_building || club.meeting_room || club.meeting_location) && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="location-outline" size={16} color={TEAL} />
-                  <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
-                    {[club.meeting_building, club.meeting_room, club.meeting_location]
-                      .filter(Boolean)
-                      .join(', ')}
-                  </Text>
-                </View>
-              )}
-            </View>
+            ) : null}
           </View>
-        )}
+        </Section>
 
-        {/* ── Upcoming Events ────────────────────────────────── */}
-        {club.upcoming_events.length > 0 && (
-          <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
-            <Text
-              style={{
-                fontSize: 14,
-                fontWeight: '700',
-                color: INK,
-                fontFamily: 'Inter_700Bold',
-                marginBottom: 10,
-              }}
+        {/* ── Upcoming Events — always visible ───────────────── */}
+        <Section
+          title="Upcoming Events"
+          emptyText="No upcoming events yet"
+          isEmpty={club.upcoming_events.length === 0}
+        >
+          {club.upcoming_events.map((event) => (
+            <ClubEventCard key={event.id} event={event} clubId={clubId!} />
+          ))}
+        </Section>
+
+        {/* ── Past Events — ended events relocate here, same card design ── */}
+        <Section
+          title="Past Events"
+          emptyText="No past events yet"
+          isEmpty={club.past_events.length === 0}
+        >
+          {club.past_events.map((event) => (
+            <ClubEventCard key={event.id} event={event} clubId={clubId!} />
+          ))}
+        </Section>
+
+        {/* ── Photos that Glue — always visible ──────────────── */}
+        <Section
+          title="Photos that Glue"
+          emptyText="No photos yet"
+          isEmpty={club.photos.length === 0}
+          headerRight={
+            <TouchableOpacity
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/clubs/[clubId]/photos',
+                  params: { clubId: clubId! },
+                })
+              }
+              activeOpacity={0.7}
             >
-              Upcoming Events
-            </Text>
-            {club.upcoming_events.map((event) => (
-              <UpcomingEventRow key={event.id} event={event} clubId={clubId!} />
+              <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_500Medium' }}>See all</Text>
+            </TouchableOpacity>
+          }
+        >
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+            {club.photos.slice(0, 9).map((photo) => (
+              <TouchableOpacity
+                key={photo.id}
+                onPress={() => handlePhotoPress(photo)}
+                activeOpacity={0.85}
+              >
+                <Image
+                  source={{ uri: photo.url }}
+                  style={{ width: PHOTO_SIZE, height: PHOTO_SIZE, borderRadius: 8, backgroundColor: '#E5E7EB' }}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
             ))}
           </View>
-        )}
+        </Section>
 
-        {/* ── Photos that Glue ───────────────────────────────── */}
-        {club.photos.length > 0 && (
-          <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 10,
-              }}
-            >
-              <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
-                Photos that Glue
-              </Text>
-              <TouchableOpacity
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/clubs/[clubId]/photos',
-                    params: { clubId: clubId! },
-                  })
-                }
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_500Medium' }}>See all</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-              {club.photos.slice(0, 9).map((photo) => (
-                <TouchableOpacity
-                  key={photo.id}
-                  onPress={() => handlePhotoPress(photo)}
-                  activeOpacity={0.85}
-                >
-                  <Image
-                    source={{ uri: photo.url }}
-                    style={{ width: PHOTO_SIZE, height: PHOTO_SIZE, borderRadius: 8, backgroundColor: '#E5E7EB' }}
-                    resizeMode="cover"
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* ── Mini Calendar ──────────────────────────────────── */}
-        {eventDates.length > 0 && (
-          <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
-            <Text
-              style={{
-                fontSize: 14,
-                fontWeight: '700',
-                color: INK,
-                fontFamily: 'Inter_700Bold',
-                marginBottom: 10,
-              }}
-            >
-              Calendar
-            </Text>
-            <MiniCalendar events={club.upcoming_events} onDayPress={handleCalendarDayPress} />
-          </View>
-        )}
+        {/* ── Mini Calendar — always visible; marks past AND future days ── */}
+        <Section title="Calendar" emptyText="" isEmpty={false}>
+          <MiniCalendar events={allCalendarEvents} onDayPress={handleCalendarDayPress} />
+        </Section>
 
         {/* ── Officers ───────────────────────────────────────── */}
         {club.officers.length > 0 && (
@@ -910,7 +957,7 @@ export default function ClubProfileScreen() {
               Officers
             </Text>
             {club.officers.map((officer) => (
-              <OfficerRow key={officer.id} officer={officer} />
+              <OfficerRow key={officer.id} officer={officer} currentUserId={userId} />
             ))}
           </View>
         )}
