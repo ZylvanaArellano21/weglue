@@ -39,8 +39,6 @@ import { profileColors, profileFonts } from '../../components/profile/profileThe
 import type { FeedPost } from '../../services/postService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-// Image block + meta block rough height, used only as a scroll estimate.
-const ESTIMATED_ITEM_HEIGHT = SCREEN_WIDTH * 1.25 + 170;
 
 // Vertical full-post viewer opened from a profile's Posts grid.
 // Instagram-style: the tapped post is the first visible one, and the
@@ -58,7 +56,6 @@ export default function ProfilePostViewerScreen() {
   const { show, ToastComponent } = useToast();
 
   const listRef = useRef<FlatList<FeedPost>>(null);
-  const didScrollToInitial = useRef(false);
 
   const {
     data,
@@ -80,32 +77,35 @@ export default function ProfilePostViewerScreen() {
   // The tapped post can sit on a page the viewer hasn't fetched yet —
   // keep paging until it's loaded so the list can start on it.
   useEffect(() => {
-    if (isLoading || didScrollToInitial.current) return;
+    if (isLoading) return;
     if (initialIndex < 0 && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
   }, [initialIndex, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // Jump to the tapped post once it's in the list.
-  useEffect(() => {
-    if (didScrollToInitial.current || initialIndex < 0) return;
-    didScrollToInitial.current = true;
-    if (initialIndex === 0) return;
-    // Let the list mount before jumping
-    setTimeout(() => {
-      listRef.current?.scrollToIndex({ index: initialIndex, animated: false });
-    }, 50);
-  }, [initialIndex]);
+  // Instagram-style anchoring without scroll estimation (post blocks have
+  // variable heights, so scrollToIndex-by-estimate clipped the first visible
+  // post and could strand the last one half off-screen). Instead the list
+  // initially renders FROM the tapped post — guaranteed flush with the top —
+  // and one frame later the earlier posts are prepended while
+  // maintainVisibleContentPosition keeps the anchor exactly in place, so
+  // scrolling up still reaches the profile's earlier posts.
+  const [showEarlierPosts, setShowEarlierPosts] = useState(false);
+  const anchorIndex = initialIndex >= 0 ? initialIndex : 0;
+  const displayPosts = useMemo(
+    () => (showEarlierPosts ? posts : posts.slice(anchorIndex)),
+    [posts, showEarlierPosts, anchorIndex],
+  );
 
-  const handleScrollToIndexFailed = (info: { index: number; averageItemLength: number }) => {
-    listRef.current?.scrollToOffset({
-      offset: info.index * (info.averageItemLength || ESTIMATED_ITEM_HEIGHT),
-      animated: false,
-    });
-    setTimeout(() => {
-      listRef.current?.scrollToIndex({ index: info.index, animated: false });
-    }, 120);
-  };
+  useEffect(() => {
+    if (showEarlierPosts || isLoading || initialIndex < 0) return;
+    if (initialIndex === 0) {
+      setShowEarlierPosts(true);
+      return;
+    }
+    const timer = setTimeout(() => setShowEarlierPosts(true), 350);
+    return () => clearTimeout(timer);
+  }, [showEarlierPosts, isLoading, initialIndex]);
 
   const handleLike = (id: string, hasLiked: boolean) => {
     if (!viewerUserId) return;
@@ -172,19 +172,26 @@ export default function ProfilePostViewerScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {ToastComponent}
 
-      {isLoading ? (
+      {isLoading || (initialIndex < 0 && hasNextPage) ? (
+        // Also wait while earlier pages are still being fetched to locate the
+        // tapped post, so the list always mounts anchored on it.
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={profileColors.teal} />
+        </View>
+      ) : initialIndex < 0 ? (
+        <View style={styles.loading}>
+          <Text style={styles.emptyText}>This post is no longer available.</Text>
         </View>
       ) : (
         <FlatList
           ref={listRef}
-          data={posts}
+          data={displayPosts}
           keyExtractor={(p) => p.id}
           showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onEndReached={() => hasNextPage && !isFetchingNextPage && fetchNextPage()}
           onEndReachedThreshold={0.6}
-          onScrollToIndexFailed={handleScrollToIndexFailed}
           renderItem={({ item }) => (
             <ViewerPostBlock
               post={item}

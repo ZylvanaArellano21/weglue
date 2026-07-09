@@ -4,10 +4,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
 import { SidebarProvider } from "../../context/SidebarContext";
+import { useRealtimeNotifications } from "../../hooks/useNotifications";
 
 export default function TabsLayout() {
   const { session, isLoading, profile } = useAuthStore();
   const insets = useSafeAreaInsets();
+
+  // App-wide live notifications: keeps the notification list fresh and flips
+  // profile relationship state (Requested → Following) in under a second
+  // when a follow request is accepted, on whatever screen is open.
+  useRealtimeNotifications(session?.user.id);
 
   if (isLoading) {
     return (

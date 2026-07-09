@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { todayInAppTz } from '../lib/timezone';
 
 export interface OfficerStatus {
   isOfficer: boolean;
@@ -135,7 +136,7 @@ export async function getClubProfile(
       .from('events')
       .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location, building, room, visibility')
       .eq('club_id', clubId)
-      .gte('event_date', new Date().toISOString().split('T')[0])
+      .gte('event_date', todayInAppTz())
       .order('event_date', { ascending: true })
       .limit(5),
     supabase

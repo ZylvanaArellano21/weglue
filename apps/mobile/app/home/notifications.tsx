@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,24 +13,27 @@ import { useAuthStore } from '@weglue/shared';
 import {
   useNotifications,
   useAcceptFollowRequest,
+  useDeclineFollowRequest,
   useFollowBack,
   useMarkNotificationsRead,
 } from '../../hooks/useNotifications';
 import { Avatar } from '../../components/shared/Avatar';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
+import { timeAgo } from '../../components/home/PostCard';
 import type { AppNotification } from '../../services/notificationService';
 
 function notificationDescription(type: AppNotification['type']): string {
   switch (type) {
     case 'follow_request':  return 'requested to follow you';
-    case 'follow_accepted': return 'started following you';
+    case 'follow_accepted': return 'accepted your follow request';
+    case 'new_follower':    return 'started following you';
     case 'like':            return 'liked your photo';
     case 'comment':         return 'commented on your photo';
     case 'event_rsvp':      return 'is going to an event you posted';
     case 'new_event':       return 'posted a new event';
     case 'new_message':     return 'sent you a message';
-    case 'gluemate':        return 'is now your Gluemate!';
+    case 'gluemate':        return 'is now your Gluemate! 🎉';
     default:                return 'interacted with you';
   }
 }
@@ -43,25 +46,50 @@ export default function NotificationsScreen() {
 
   const { data: sections, isLoading } = useNotifications(userId);
   const { mutate: markRead } = useMarkNotificationsRead(userId);
-  const { mutate: acceptRequest, isPending: accepting } = useAcceptFollowRequest(userId);
-  const { mutate: followBack, isPending: followingBack } = useFollowBack(userId);
+  const { mutate: acceptRequest } = useAcceptFollowRequest(userId);
+  const { mutate: declineRequest } = useDeclineFollowRequest(userId);
+  const { mutate: followBack } = useFollowBack(userId);
 
-  // Mark all as read when screen mounts
+  // Live inserts are handled by the app-wide subscription in (tabs)/_layout.
+
+  // Mark everything read when LEAVING the screen, so the unread highlight
+  // stays visible for the whole visit (marking on mount wiped it instantly).
+  const markReadRef = useRef(markRead);
+  markReadRef.current = markRead;
   useEffect(() => {
-    if (userId) markRead();
+    if (!userId) return;
+    return () => markReadRef.current();
   }, [userId]);
+
+  // Where a tapped row goes: post for likes/comments, event detail for
+  // events, otherwise the actor's profile. Always push — back returns here
+  // at the same list position.
+  const openNotification = (item: AppNotification) => {
+    if ((item.type === 'like' || item.type === 'comment') && item.reference_id) {
+      router.push({ pathname: '/post/[postId]', params: { postId: item.reference_id } });
+      return;
+    }
+    if (item.type === 'new_event' && item.reference_id) {
+      router.push({ pathname: '/home/event-detail', params: { eventId: item.reference_id } });
+      return;
+    }
+    if (item.sender?.id) {
+      router.push({ pathname: '/profile/[userId]', params: { userId: item.sender.id } });
+    }
+  };
 
   const renderNotification = ({ item }: { item: AppNotification }) => {
     const isFollowRequest = item.type === 'follow_request';
-    const isNewFollower = item.type === 'follow_accepted';
+    const showFollowBack =
+      (item.type === 'new_follower' || item.type === 'follow_accepted') &&
+      item.actor_follow_state === 'not_following';
+    const showRequested =
+      (item.type === 'new_follower' || item.type === 'follow_accepted') &&
+      item.actor_follow_state === 'pending';
 
     return (
       <TouchableOpacity
-        onPress={() => {
-          if (item.sender?.id) {
-            router.push({ pathname: '/profile/[userId]', params: { userId: item.sender.id } });
-          }
-        }}
+        onPress={() => openNotification(item)}
         activeOpacity={0.7}
         style={{
           flexDirection: 'row',
@@ -69,9 +97,19 @@ export default function NotificationsScreen() {
           paddingHorizontal: 16,
           paddingVertical: 12,
           gap: 12,
+          backgroundColor: item.is_read ? 'transparent' : 'rgba(15, 166, 166, 0.06)',
         }}
       >
-        <Avatar uri={item.sender?.avatar_url} size={46} username={item.sender?.username} />
+        <TouchableOpacity
+          onPress={() => {
+            if (item.sender?.id) {
+              router.push({ pathname: '/profile/[userId]', params: { userId: item.sender.id } });
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <Avatar uri={item.sender?.avatar_url} size={46} username={item.sender?.username} />
+        </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
             <Text style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
@@ -80,46 +118,70 @@ export default function NotificationsScreen() {
             {' '}
             {notificationDescription(item.type)}
           </Text>
-        </View>
-
-        {isFollowRequest && (
-          <TouchableOpacity
-            onPress={() => {
-              if (!item.sender?.id) return;
-              acceptRequest(item.sender.id, {
-                onSuccess: () => show('Request accepted! 🎉'),
-                onError: () => show('Failed to accept.', 'error'),
-              });
-            }}
-            disabled={accepting}
-            activeOpacity={0.8}
+          <Text
             style={{
-              backgroundColor: '#0FA6A6',
-              borderRadius: 20,
-              paddingHorizontal: 16,
-              paddingVertical: 8,
+              fontSize: 12,
+              color: '#9CA3AF',
+              fontFamily: 'Inter_400Regular',
+              marginTop: 2,
             }}
           >
-            {accepting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
+            {timeAgo(item.created_at)}
+          </Text>
+        </View>
+
+        {isFollowRequest && item.sender?.id && (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity
+              onPress={() =>
+                acceptRequest(item.sender!.id, {
+                  onSuccess: () => show('Request accepted! 🎉'),
+                  onError: () => show('Failed to accept.', 'error'),
+                })
+              }
+              activeOpacity={0.8}
+              style={{
+                backgroundColor: '#0FA6A6',
+                borderRadius: 20,
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+              }}
+            >
               <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
                 Accept
               </Text>
-            )}
-          </TouchableOpacity>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() =>
+                declineRequest(item.sender!.id, {
+                  onSuccess: () => show('Request declined.'),
+                  onError: () => show('Failed to decline.', 'error'),
+                })
+              }
+              activeOpacity={0.8}
+              style={{
+                borderWidth: 1.5,
+                borderColor: '#0FA6A6',
+                borderRadius: 20,
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+              }}
+            >
+              <Text style={{ color: '#0FA6A6', fontSize: 13, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
+                Decline
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
 
-        {isNewFollower && (
+        {showFollowBack && item.sender?.id && (
           <TouchableOpacity
-            onPress={() => {
-              if (!item.sender?.id) return;
-              followBack(item.sender.id, {
+            onPress={() =>
+              followBack(item.sender!.id, {
                 onSuccess: () => show('Following back! 🎉'),
                 onError: () => show('Failed to follow.', 'error'),
-              });
-            }}
-            disabled={followingBack}
+              })
+            }
             activeOpacity={0.8}
             style={{
               backgroundColor: '#0FA6A6',
@@ -128,14 +190,26 @@ export default function NotificationsScreen() {
               paddingVertical: 8,
             }}
           >
-            {followingBack ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
-                Follow back
-              </Text>
-            )}
+            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
+              Follow back
+            </Text>
           </TouchableOpacity>
+        )}
+
+        {showRequested && (
+          <View
+            style={{
+              borderWidth: 1.5,
+              borderColor: '#0FA6A6',
+              borderRadius: 20,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+            }}
+          >
+            <Text style={{ color: '#0FA6A6', fontSize: 13, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
+              Requested
+            </Text>
+          </View>
         )}
       </TouchableOpacity>
     );

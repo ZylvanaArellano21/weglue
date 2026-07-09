@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { addDaysToDateString, todayInAppTz } from '../lib/timezone';
 import { bucketCalendarEvents, type CalendarEvent, type CalendarSection } from './calendarService';
 import type { UserPost } from './followService';
 
@@ -137,9 +138,12 @@ export async function getOwnGluematesList(userId: string): Promise<OwnGluemate[]
 
   const followingIds = (following as any[]).map((r) => r.following_id);
 
+  // The follower_id FK hint is required — follows has TWO FKs to profiles,
+  // and an unhinted profiles!inner embed fails with PGRST201 (ambiguous),
+  // which silently made this list always come back empty.
   const { data: mutualFollowers } = await supabase
     .from('follows')
-    .select('follower_id, profiles!inner(id, username, full_name, avatar_url)')
+    .select('follower_id, profiles!follows_follower_id_fkey(id, username, full_name, avatar_url)')
     .eq('following_id', userId)
     .in('follower_id', followingIds)
     .eq('status', 'accepted');
@@ -155,8 +159,8 @@ export async function getOwnGluematesList(userId: string): Promise<OwnGluemate[]
 // ─── Weekly Events (THIS WEEK only — dayDiff 0-7) ────────────────────────────
 
 export async function getOwnThisWeekEvents(userId: string): Promise<CalendarSection[]> {
-  const today = new Date().toISOString().split('T')[0];
-  const sevenDaysOut = new Date(Date.now() + 7 * 86_400_000).toISOString().split('T')[0];
+  const today = todayInAppTz();
+  const sevenDaysOut = addDaysToDateString(today, 7);
 
   const { data: rsvps } = await supabase
     .from('event_rsvps')

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { todayInAppTz } from '../lib/timezone';
 import type { AttendeePreview } from './eventService';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -161,7 +162,7 @@ export async function getCalendarMonthMarkers(
 // Used for the section list on the Calendar tab. The caller runs bucketCalendarEvents
 // on the result so the bucketing always uses the live current date.
 export async function getCalendarEvents(userId: string): Promise<CalendarEvent[]> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInAppTz();
 
   const { data: rsvps } = await supabase
     .from('event_rsvps')

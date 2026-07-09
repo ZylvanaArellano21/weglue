@@ -176,7 +176,7 @@ export default function NewEventScreen() {
 
     setSubmitting(true);
     try {
-      await createEvent(userId, {
+      const newEventId = await createEvent(userId, {
         club_id: selectedClub!.id,
         title: title.trim(),
         description: about.trim(),
@@ -192,6 +192,9 @@ export default function NewEventScreen() {
       });
       queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
       useHomeTabStore.getState().setActiveTab('events');
+      // Land Home → Events exactly on the new small event card (located by
+      // ID once the refreshed feed contains it) instead of the detail screen.
+      useHomeTabStore.getState().setPendingScrollEventId(newEventId);
       show('Event posted! 🎉');
       setTimeout(() => router.replace('/(tabs)'), 1000);
     } catch (err: unknown) {

@@ -1,7 +1,24 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getUserProfile, followUser, unfollowUser, getUserPosts, getUserWeeklyEvents } from '../services/followService';
+import {
+  getUserProfile,
+  followUser,
+  unfollowUser,
+  getUserPosts,
+  getUserWeeklyEvents,
+  getUserGluematesList,
+} from '../services/followService';
 import { getOwnClubsList } from '../services/profileService';
 import { timedQuery } from '../lib/timedQuery';
+
+// Gluemates list for ANY profile user — opened by tapping the Gluemates count.
+export function useUserGluematesList(targetUserId: string | undefined, enabled: boolean = false) {
+  return useQuery({
+    queryKey: ['userGluemates', targetUserId],
+    queryFn: () => getUserGluematesList(targetUserId!),
+    enabled: !!targetUserId && enabled,
+    staleTime: 2 * 60 * 1000,
+  });
+}
 
 // Clubs list for ANY profile user (uses the profile user's id, not the
 // viewer's). Same fetch as the own-profile clubs sheet.

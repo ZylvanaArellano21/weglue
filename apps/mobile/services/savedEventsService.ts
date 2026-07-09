@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { todayInAppTz } from '../lib/timezone';
 import { bucketCalendarEvents, type CalendarEvent, type CalendarSection } from './calendarService';
 import type { AttendeePreview } from './eventService';
 
@@ -98,7 +99,7 @@ async function getSavedEventIds(userId: string): Promise<string[]> {
 
 // All upcoming saved events, bucketed using the same logic as Calendar tab.
 export async function getSavedEventsUpcoming(userId: string): Promise<CalendarSection[]> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInAppTz();
   const savedIds = await getSavedEventIds(userId);
   if (savedIds.length === 0) return [];
 
@@ -126,7 +127,7 @@ export async function getSavedEventsPast(
   page: number = 0,
   pageSize: number = 20,
 ): Promise<CalendarEvent[]> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInAppTz();
   const savedIds = await getSavedEventIds(userId);
   if (savedIds.length === 0) return [];
 

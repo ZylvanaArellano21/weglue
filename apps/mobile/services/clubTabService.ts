@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { todayInAppTz } from '../lib/timezone';
 
 export interface NextEvent {
   id: string;
@@ -54,7 +55,7 @@ export async function getMyClubs(
   let nextEvents: Record<string, NextEvent> = {};
 
   if (clubIds.length > 0) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInAppTz();
     const weekEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split('T')[0];

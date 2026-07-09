@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, FlatList, RefreshControl, ListRenderItem } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
+import { useHomeTabStore } from '../../store/homeTabStore';
 import {
   useHomeEventsFeed,
   useRsvpToEvent,
@@ -49,6 +50,64 @@ export function EventsFeed() {
   const sections = useMemo(
     () => (data ? mergeEventFeedPages(data.pages) : undefined),
     [data],
+  );
+
+  // ── Scroll to a freshly created event ─────────────────────────────────────
+  // After posting an event, new-event.tsx switches Home to the Events tab and
+  // sets pendingScrollEventId. As soon as the refreshed feed data contains
+  // that event, scroll the feed so its small card is at the top — the user
+  // lands exactly where their new event appears (sorted position included).
+  const listRef = useRef<FlatList<FeedItem>>(null);
+  const pendingScrollEventId = useHomeTabStore((s) => s.pendingScrollEventId);
+
+  const flatItems = useMemo(() => {
+    const items: FeedItem[] = [];
+    for (const section of sections ?? []) {
+      items.push({ type: 'section_header', id: `header-${section.label}`, label: section.label });
+      for (const event of section.data) {
+        items.push({ type: 'event', id: event.id, event });
+      }
+    }
+    return items;
+  }, [sections]);
+
+  useEffect(() => {
+    if (!pendingScrollEventId) return;
+    const index = flatItems.findIndex(
+      (i) => i.type === 'event' && i.id === pendingScrollEventId,
+    );
+    if (index < 0) return; // feed still refetching — try again on next data change
+    useHomeTabStore.getState().setPendingScrollEventId(null);
+    // Give the list one frame to lay out before scrolling.
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
+    });
+  }, [pendingScrollEventId, flatItems]);
+
+  // Drop a stale pending scroll if the event never appears so it can't hijack
+  // a scroll position minutes later.
+  useEffect(() => {
+    if (!pendingScrollEventId) return;
+    const timer = setTimeout(() => {
+      if (useHomeTabStore.getState().pendingScrollEventId === pendingScrollEventId) {
+        useHomeTabStore.getState().setPendingScrollEventId(null);
+      }
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [pendingScrollEventId]);
+
+  const handleScrollToIndexFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      // Estimated jump, then retry once items around the target are rendered.
+      listRef.current?.scrollToOffset({
+        offset: info.index * (info.averageItemLength || 300),
+        animated: false,
+      });
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0 });
+      }, 120);
+    },
+    [],
   );
   const { mutate: rsvp } = useRsvpToEvent();
   const { mutate: toggleSave } = useToggleSaveEvent();
@@ -226,21 +285,14 @@ export function EventsFeed() {
     );
   }
 
-  // Flatten sections + headers into a single list
-  const items: FeedItem[] = [];
-  for (const section of sections ?? []) {
-    items.push({ type: 'section_header', id: `header-${section.label}`, label: section.label });
-    for (const event of section.data) {
-      items.push({ type: 'event', id: event.id, event });
-    }
-  }
-
   return (
     <View style={{ flex: 1 }}>
       {ToastComponent}
       <FlatList
-        data={items}
+        ref={listRef}
+        data={flatItems}
         keyExtractor={(item) => item.id}
+        onScrollToIndexFailed={handleScrollToIndexFailed}
         renderItem={renderItem}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}

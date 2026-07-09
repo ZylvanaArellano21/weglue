@@ -17,6 +17,7 @@ import { calendarTypography } from '../../components/calendar/calendarTheme';
 import { profileColors, profileFonts } from '../../components/profile/profileTheme';
 import { useToast } from '../../components/Toast';
 import type { CalendarEvent, CalendarSection } from '../../services/calendarService';
+import { todayInAppTz } from '../../lib/timezone';
 
 export default function SavedEventsScreen() {
   const { session } = useAuthStore();
@@ -52,7 +53,7 @@ export default function SavedEventsScreen() {
     } as any);
 
   const pastEvents = pastData?.pages.flatMap((p) => p) ?? [];
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInAppTz();
 
   if (loadingUpcoming && loadingPast) {
     return (

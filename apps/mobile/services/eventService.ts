@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { todayInAppTz } from '../lib/timezone';
 
 export type EventTier = 'your_clubs' | 'recommended';
 
@@ -52,7 +53,7 @@ export async function getHomeEventsFeed(
   userId: string,
   page: number = 0,
 ): Promise<HomeEventsFeedPage> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInAppTz();
   const offset = page * EVENTS_PAGE_SIZE;
 
   const [

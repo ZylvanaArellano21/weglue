@@ -74,17 +74,26 @@ export default function WebProfilePicPage(): JSX.Element | null {
           .upload(`${user.id}/avatar.${ext}`, avatarFile, { upsert: true });
         if (!uploadError) {
           const { data } = supabase.storage.from("avatars").getPublicUrl(`${user.id}/avatar.${ext}`);
-          finalAvatarUrl = data.publicUrl;
+          // Cache-bust: this fixed path reuses the same URL on every upload,
+          // and image caches key purely by URL — without this the old picture
+          // keeps rendering until cache eviction.
+          finalAvatarUrl = `${data.publicUrl}?v=${Date.now()}`;
         }
       } else if (selectedPreset) {
         finalAvatarUrl = `preset:${selectedPreset}`;
       }
 
-      await supabase.from("profiles").update({
+      // Only overwrite the username when this signup session actually chose
+      // one. The profile row already holds the username picked at signup —
+      // falling back to the email prefix here silently destroyed real
+      // usernames whenever pendingUsername was lost (e.g. cold-start resume).
+      const profileUpdate: Record<string, unknown> = {
         avatar_url: finalAvatarUrl,
         avatar_type: avatarFile ? "photo" : selectedPreset ? "preset" : null,
-        username: pendingUsername || (user.email?.split("@")[0] ?? "user"),
-      }).eq("id", user.id);
+      };
+      if (pendingUsername) profileUpdate.username = pendingUsername;
+
+      await supabase.from("profiles").update(profileUpdate).eq("id", user.id);
 
       if (selectedInterests.length > 0) {
         await supabase.from("user_interests").upsert(

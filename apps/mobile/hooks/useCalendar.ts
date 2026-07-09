@@ -18,6 +18,7 @@ import {
   type RsvpSnapshot,
 } from './useEventRsvp';
 import { timedQuery } from '../lib/timedQuery';
+import { todayInAppTz } from '../lib/timezone';
 
 // ─── Month markers ────────────────────────────────────────────────────────────
 // Returns the array of YYYY-MM-DD date strings for which the current user has
@@ -48,7 +49,7 @@ export function useCalendarSections(userId: string | undefined) {
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
     select: (events) => {
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayInAppTz();
       return bucketCalendarEvents(events, today);
     },
   });

@@ -18,6 +18,7 @@ import {
   useUserPosts,
   useUserWeeklyEvents,
   useUserClubsList,
+  useUserGluematesList,
   useFollowMutation,
 } from '../../hooks/useUserProfile';
 import { Avatar } from '../../components/shared/Avatar';
@@ -54,6 +55,7 @@ export default function UserProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
   const [clubsSheetOpen, setClubsSheetOpen] = useState(false);
+  const [gluematesSheetOpen, setGluematesSheetOpen] = useState(false);
 
   const { data: profile, isLoading: profileLoading } = useUserProfile(targetUserId, viewerUserId);
   const { mutate: followMutate, isPending: followPending } = useFollowMutation(viewerUserId, targetUserId);
@@ -74,12 +76,19 @@ export default function UserProfileScreen() {
   );
   // Clubs list for THIS profile's user (not the viewer)
   const { data: profileClubs } = useUserClubsList(targetUserId, clubsSheetOpen);
+  // Gluemates list respects privacy: only loads for public/followed profiles.
+  const { data: profileGluemates } = useUserGluematesList(
+    targetUserId,
+    gluematesSheetOpen && (isPublic || isOwnProfile),
+  );
 
   const allPosts = postsData?.pages.flatMap((p) => p) ?? [];
   const allEvents = eventsData?.pages.flatMap((p) => p) ?? [];
 
   const handleFollow = () => {
-    const action = profile?.follow_status === 'following' ? 'unfollow' : 'follow';
+    // Tapping "Requested" cancels the pending request; "Following"/"Gluemate"
+    // unfollows; "Follow" follows (or sends a request to a private account).
+    const action = profile?.follow_status === 'not_following' ? 'follow' : 'unfollow';
     followMutate(
       { action },
       {
@@ -89,6 +98,8 @@ export default function UserProfileScreen() {
               ? profile?.is_private
                 ? 'Follow request sent!'
                 : 'Following! 🎉'
+              : profile?.follow_status === 'pending'
+              ? 'Request canceled.'
               : 'Unfollowed.',
           ),
         onError: () => show('Something went wrong.', 'error'),
@@ -133,7 +144,9 @@ export default function UserProfileScreen() {
 
   const followButtonLabel =
     profile.follow_status === 'following'
-      ? 'Following'
+      ? profile.is_gluemate
+        ? 'Gluemate'
+        : 'Following'
       : profile.follow_status === 'pending'
       ? 'Requested'
       : 'Follow';
@@ -198,14 +211,22 @@ export default function UserProfileScreen() {
                     Clubs
                   </Text>
                 </TouchableOpacity>
-                <View style={{ alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={{ alignItems: 'center' }}
+                  onPress={() => {
+                    // Privacy: the gluemates list of a private account stays
+                    // hidden until the viewer follows them.
+                    if (isPublic || isOwnProfile) setGluematesSheetOpen(true);
+                  }}
+                  activeOpacity={0.7}
+                >
                   <Text style={{ fontSize: 17, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
                     {profile.gluemates_count}
                   </Text>
                   <Text style={{ fontSize: 12, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
                     Gluemates
                   </Text>
-                </View>
+                </TouchableOpacity>
               </View>
             </View>
           </View>
@@ -321,7 +342,9 @@ export default function UserProfileScreen() {
             </View>
           )}
 
-          {/* Private Account — no tabs, lock icon */}
+          {/* Private Account — no tabs, lock icon. The copy tracks the
+              request state: not following → invite to follow; requested →
+              confirm the request was sent and what happens on accept. */}
           {profile.is_private && profile.follow_status !== 'following' && !isOwnProfile ? (
             <View style={{ alignItems: 'center', paddingVertical: 48, gap: 12 }}>
               <Ionicons name="lock-closed-outline" size={48} color="#9CA3AF" />
@@ -341,9 +364,12 @@ export default function UserProfileScreen() {
                   color: '#9CA3AF',
                   textAlign: 'center',
                   fontFamily: 'Inter_400Regular',
+                  paddingHorizontal: 24,
                 }}
               >
-                Follow to see their posts and events.
+                {profile.follow_status === 'pending'
+                  ? "Follow request sent. You'll see their posts and events if they accept."
+                  : 'Follow to see their posts and events.'}
               </Text>
             </View>
           ) : (
@@ -478,6 +504,45 @@ export default function UserProfileScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Gluemates sheet — the mutual follows of THIS profile's user.
+          Tapping a row opens that gluemate's profile; back returns here. */}
+      <ShowMoreSheet
+        visible={gluematesSheetOpen}
+        title={isOwnProfile ? 'Gluemates' : `${profile.full_name}'s Gluemates`}
+        onClose={() => setGluematesSheetOpen(false)}
+      >
+        {(profileGluemates ?? []).length === 0 ? (
+          <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Inter_400Regular' }}>
+            No gluemates yet.
+          </Text>
+        ) : (
+          (profileGluemates ?? []).map((mate) => (
+            <TouchableOpacity
+              key={mate.user_id}
+              onPress={() => {
+                setGluematesSheetOpen(false);
+                router.push({
+                  pathname: '/profile/[userId]',
+                  params: { userId: mate.user_id },
+                } as any);
+              }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 }}
+              activeOpacity={0.7}
+            >
+              <Avatar uri={mate.avatar_url} size={36} username={mate.username} />
+              <View>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', fontFamily: 'Inter_600SemiBold' }}>
+                  {mate.full_name}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
+                  @{mate.username}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
+      </ShowMoreSheet>
 
       {/* Clubs sheet — the clubs THIS profile's user is part of */}
       <ShowMoreSheet

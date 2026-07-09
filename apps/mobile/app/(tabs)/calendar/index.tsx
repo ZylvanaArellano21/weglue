@@ -21,6 +21,7 @@ import {
   useCalendarMonthMarkers,
 } from '../../../hooks/useCalendar';
 import type { CalendarEvent, CalendarSection } from '../../../services/calendarService';
+import { todayInAppTz } from '../../../lib/timezone';
 
 export default function CalendarScreen() {
   const router = useRouter();
@@ -56,7 +57,7 @@ export default function CalendarScreen() {
     displayMonth,
   );
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInAppTz();
 
   const handlePrevMonth = useCallback(() => {
     if (displayMonth === 1) {

@@ -1,10 +1,13 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getNotifications,
   acceptFollowRequest,
+  declineFollowRequest,
   markNotificationsRead,
 } from '../services/notificationService';
 import { followUser } from '../services/followService';
+import { supabase } from '../lib/supabase';
 
 export function useNotifications(userId: string | undefined) {
   return useQuery({
@@ -15,13 +18,66 @@ export function useNotifications(userId: string | undefined) {
   });
 }
 
+// Live inserts: a new notification lands (follow request, accept, like…) →
+// refresh the list immediately, and refresh profile relationship state so
+// Requested → Following flips in under a second after an accept.
+export function useRealtimeNotifications(userId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel(`notifications:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+          const type = (payload.new as { type?: string } | null)?.type;
+          if (type === 'follow_accepted' || type === 'gluemate' || type === 'new_follower') {
+            // Relationship changed — profiles the viewer has open must update.
+            queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+            queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId, queryClient]);
+}
+
+function invalidateRelationshipQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string | undefined,
+) {
+  queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+  queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+  queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
+  queryClient.invalidateQueries({ queryKey: ['ownGluemates', userId] });
+}
+
 export function useAcceptFollowRequest(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (requesterId: string) => acceptFollowRequest(requesterId, userId!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
-    },
+    onSuccess: () => invalidateRelationshipQueries(queryClient, userId),
+  });
+}
+
+export function useDeclineFollowRequest(userId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (requesterId: string) => declineFollowRequest(requesterId, userId!),
+    onSuccess: () => invalidateRelationshipQueries(queryClient, userId),
   });
 }
 
@@ -29,9 +85,7 @@ export function useFollowBack(viewerUserId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (targetUserId: string) => followUser(viewerUserId!, targetUserId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications', viewerUserId] });
-    },
+    onSuccess: () => invalidateRelationshipQueries(queryClient, viewerUserId),
   });
 }
 

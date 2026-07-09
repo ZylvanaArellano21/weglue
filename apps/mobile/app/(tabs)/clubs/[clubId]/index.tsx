@@ -26,6 +26,7 @@ import { PhotoGalleryModal } from '../../../../components/club/PhotoGalleryModal
 import { LeaveClubModals } from '../../../../components/club/LeaveClubModals';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
+import { todayInAppTz } from '../../../../lib/timezone';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -77,8 +78,7 @@ function MiniCalendar({
   for (const e of events) {
     if (!eventIdByDate.has(e.event_date)) eventIdByDate.set(e.event_date, e.id);
   }
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  const todayStr = todayInAppTz();
 
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();

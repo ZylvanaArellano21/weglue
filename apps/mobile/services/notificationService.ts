@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
+import { dateInAppTz, dayDiff, todayInAppTz } from '../lib/timezone';
 
-export type NotificationGroup = 'Yesterday' | 'Last week' | 'Earlier';
+export type NotificationGroup = 'New' | 'Yesterday' | 'Last week' | 'Earlier';
 
 export interface NotificationSender {
   id: string;
@@ -8,11 +9,27 @@ export interface NotificationSender {
   avatar_url: string | null;
 }
 
+// How the viewer relates to the notification's actor — drives the row's
+// action button (Follow back / Requested / nothing when already following).
+export type ActorFollowState = 'not_following' | 'pending' | 'following';
+
 export interface AppNotification {
   id: string;
-  type: 'follow_request' | 'follow_accepted' | 'like' | 'comment' | 'event_rsvp' | 'new_event' | 'new_message' | 'gluemate';
+  type:
+    | 'follow_request'
+    | 'follow_accepted'
+    | 'new_follower'
+    | 'like'
+    | 'comment'
+    | 'event_rsvp'
+    | 'new_event'
+    | 'new_message'
+    | 'gluemate'
+    | 'club_inactive';
   sender: NotificationSender | null;
   reference_id: string | null;
+  entity_type: 'event' | 'club' | 'message' | 'post' | null;
+  actor_follow_state: ActorFollowState;
   is_read: boolean;
   created_at: string;
 }
@@ -26,7 +43,7 @@ export async function getNotifications(userId: string): Promise<NotificationSect
   const { data, error } = await supabase
     .from('notifications')
     .select(`
-      id, type, entity_id, read, created_at,
+      id, type, entity_id, entity_type, read, created_at,
       profiles!notifications_actor_id_fkey(id, username, avatar_url)
     `)
     .eq('user_id', userId)
@@ -35,19 +52,43 @@ export async function getNotifications(userId: string): Promise<NotificationSect
 
   if (error || !data) return [];
 
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterdayStart = new Date(todayStart.getTime() - 86400000);
-  const weekStart = new Date(todayStart.getTime() - 7 * 86400000);
+  // One extra round-trip: how the viewer relates to each actor, so rows can
+  // render Follow back / Requested correctly without N queries.
+  const actorIds = [
+    ...new Set(
+      (data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[],
+    ),
+  ];
+  const followStateMap = new Map<string, ActorFollowState>();
+  if (actorIds.length > 0) {
+    const { data: myFollows } = await supabase
+      .from('follows')
+      .select('following_id, status')
+      .eq('follower_id', userId)
+      .in('following_id', actorIds);
+    for (const f of (myFollows ?? []) as any[]) {
+      followStateMap.set(
+        f.following_id,
+        f.status === 'accepted' ? 'following' : 'pending',
+      );
+    }
+  }
+
+  // Group by calendar day in America/Chicago (device/UTC drift previously
+  // made every notification created *today* vanish — no bucket matched it).
+  const today = todayInAppTz();
 
   const groups: Record<NotificationGroup, AppNotification[]> = {
+    New: [],
     Yesterday: [],
     'Last week': [],
     Earlier: [],
   };
 
   for (const n of data as any[]) {
-    const date = new Date(n.created_at);
+    const notifDay = dateInAppTz(new Date(n.created_at));
+    const daysAgo = dayDiff(notifDay, today);
+
     const notification: AppNotification = {
       id: n.id,
       type: n.type,
@@ -55,17 +96,18 @@ export async function getNotifications(userId: string): Promise<NotificationSect
         ? { id: n.profiles.id, username: n.profiles.username, avatar_url: n.profiles.avatar_url }
         : null,
       reference_id: n.entity_id ?? null,
+      entity_type: n.entity_type ?? null,
+      actor_follow_state: n.profiles
+        ? followStateMap.get(n.profiles.id) ?? 'not_following'
+        : 'not_following',
       is_read: n.read,
       created_at: n.created_at,
     };
 
-    if (date >= yesterdayStart && date < todayStart) {
-      groups['Yesterday'].push(notification);
-    } else if (date >= weekStart && date < yesterdayStart) {
-      groups['Last week'].push(notification);
-    } else if (date < yesterdayStart) {
-      groups['Earlier'].push(notification);
-    }
+    if (daysAgo <= 0) groups['New'].push(notification);
+    else if (daysAgo === 1) groups['Yesterday'].push(notification);
+    else if (daysAgo <= 7) groups['Last week'].push(notification);
+    else groups['Earlier'].push(notification);
   }
 
   return (Object.entries(groups) as [NotificationGroup, AppNotification[]][])
@@ -73,12 +115,28 @@ export async function getNotifications(userId: string): Promise<NotificationSect
     .map(([group, data]) => ({ group, data }));
 }
 
+// Accept a pending follow request. The DB trigger (migration 031) replaces
+// the follow_request notification and notifies the requester.
 export async function acceptFollowRequest(requesterId: string, userId: string): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from('follows')
     .update({ status: 'accepted' })
     .eq('follower_id', requesterId)
-    .eq('following_id', userId);
+    .eq('following_id', userId)
+    .eq('status', 'pending');
+  if (error) throw error;
+}
+
+// Decline a pending follow request — deletes the follows row; the DB trigger
+// removes the stale follow_request notification.
+export async function declineFollowRequest(requesterId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('follows')
+    .delete()
+    .eq('follower_id', requesterId)
+    .eq('following_id', userId)
+    .eq('status', 'pending');
+  if (error) throw error;
 }
 
 export async function markNotificationsRead(userId: string): Promise<void> {

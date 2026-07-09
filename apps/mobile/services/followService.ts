@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { todayInAppTz } from '../lib/timezone';
 
 export type FollowStatus = 'following' | 'pending' | 'not_following';
 
@@ -140,7 +141,21 @@ async function getGluematesCount(userId: string): Promise<number> {
   return count ?? 0;
 }
 
+// Follow (or request to follow) a user. Notifications are created by DB
+// triggers (migration 031) — never insert them here or they duplicate.
 export async function followUser(followerId: string, followingId: string): Promise<void> {
+  if (followerId === followingId) return;
+
+  // A repeated tap must never downgrade an accepted follow back to pending
+  // or fire duplicate requests — the existing row always wins.
+  const { data: existing } = await supabase
+    .from('follows')
+    .select('status')
+    .eq('follower_id', followerId)
+    .eq('following_id', followingId)
+    .maybeSingle();
+  if (existing) return;
+
   const { data: privacy } = await supabase
     .from('user_privacy')
     .select('is_private')
@@ -149,35 +164,59 @@ export async function followUser(followerId: string, followingId: string): Promi
 
   const status = privacy?.is_private ? 'pending' : 'accepted';
 
-  await supabase
+  const { error } = await supabase
     .from('follows')
-    .upsert({ follower_id: followerId, following_id: followingId, status }, { onConflict: 'follower_id,following_id' });
-
-  if (status === 'pending') {
-    await supabase.from('notifications').insert({
-      user_id: followingId,
-      actor_id: followerId,
-      type: 'follow_request',
-      entity_type: 'event',
-      read: false,
-    });
-  } else {
-    await supabase.from('notifications').insert({
-      user_id: followingId,
-      actor_id: followerId,
-      type: 'follow_accepted',
-      entity_type: 'event',
-      read: false,
-    });
-  }
+    .upsert(
+      { follower_id: followerId, following_id: followingId, status },
+      { onConflict: 'follower_id,following_id', ignoreDuplicates: true },
+    );
+  if (error) throw error;
 }
 
+// Unfollow, or cancel a pending follow request (same row either way).
 export async function unfollowUser(followerId: string, followingId: string): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from('follows')
     .delete()
     .eq('follower_id', followerId)
     .eq('following_id', followingId);
+  if (error) throw error;
+}
+
+export interface GluemateRow {
+  user_id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+}
+
+// Gluemates (mutual accepted follows) of ANY profile user — powers the list
+// opened by tapping the Gluemates count.
+export async function getUserGluematesList(userId: string): Promise<GluemateRow[]> {
+  const { data: following } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', userId)
+    .eq('status', 'accepted');
+
+  if (!following || following.length === 0) return [];
+
+  const followingIds = (following as any[]).map((r) => r.following_id);
+
+  const { data: mutuals, error } = await supabase
+    .from('follows')
+    .select('follower_id, profiles!follows_follower_id_fkey(id, username, full_name, avatar_url)')
+    .eq('following_id', userId)
+    .in('follower_id', followingIds)
+    .eq('status', 'accepted');
+  if (error) throw error;
+
+  return ((mutuals ?? []) as any[]).map((r) => ({
+    user_id: r.profiles.id,
+    username: r.profiles.username,
+    full_name: r.profiles.full_name,
+    avatar_url: r.profiles.avatar_url,
+  }));
 }
 
 export async function getUserPosts(
@@ -204,7 +243,7 @@ export async function getUserWeeklyEvents(
 ): Promise<UserWeeklyEvent[]> {
   const PAGE_SIZE = 10;
   const offset = page * PAGE_SIZE;
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInAppTz();
 
   const { data: rsvps } = await supabase
     .from('event_rsvps')
