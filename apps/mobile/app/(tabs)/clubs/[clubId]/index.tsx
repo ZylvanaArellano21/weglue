@@ -4,11 +4,11 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Pressable,
   Image,
   Dimensions,
   Alert,
   RefreshControl,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -108,6 +108,15 @@ function Section({
 }
 
 // ─── Mini Calendar ────────────────────────────────────────────────────────────
+// Figma "May 2023" calendar card, replicated exactly for every club profile:
+// chunky month title on the left with both nav chevrons grouped on the right,
+// bold weekday labels, a hairline-bordered table grid, adjacent-month days as
+// gray-filled cells, today as a teal rounded square, and event days marked
+// with a teal underline bar. Days with events (past or future) are tappable.
+const CAL_GRID_LINE = '#EDEBE9';
+const CAL_OUT_MONTH_BG = '#EFF0F4';
+const CAL_OUT_MONTH_TEXT = '#9CA3AF';
+
 function MiniCalendar({
   events,
   onDayPress,
@@ -128,27 +137,36 @@ function MiniCalendar({
   }
   const todayStr = todayInAppTz();
 
-  // Monday-first grid: number of leading blanks before the 1st of the month.
-  // getDay() is 0=Sunday, so (getDay()+6)%7 maps Monday→0 … Sunday→6. This is
-  // pure calendar math on a local Date constructed from Y/M — correct for
-  // months starting on any weekday.
-  const leadingBlanks = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
+  // Monday-first grid: getDay() is 0=Sunday, so (getDay()+6)%7 maps Monday→0
+  // … Sunday→6. Pure calendar math on a local Date constructed from Y/M —
+  // correct for months starting on any weekday.
+  const leadingCount = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
 
   const monthName = new Date(viewYear, viewMonth, 1).toLocaleDateString('en-US', {
     month: 'long',
     year: 'numeric',
   });
 
-  const days: (number | null)[] = Array(leadingBlanks).fill(null);
-  for (let d = 1; d <= daysInMonth; d++) days.push(d);
-  while (days.length % 7 !== 0) days.push(null);
+  // Full grid incl. the design's gray adjacent-month cells: trailing days of
+  // the previous month lead in, first days of the next month fill the last row.
+  const cells: { day: number; inMonth: boolean }[] = [];
+  for (let i = 0; i < leadingCount; i++) {
+    cells.push({ day: daysInPrevMonth - leadingCount + 1 + i, inMonth: false });
+  }
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, inMonth: true });
+  for (let d = 1; cells.length % 7 !== 0; d++) cells.push({ day: d, inMonth: false });
 
   const DAY_LABELS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
-  // Fixed one-seventh columns: headers and day cells share the exact same
+  // Fixed one-seventh columns in absolute points (screen − section padding −
+  // card padding, split 7 ways). Headers and day cells share the exact same
   // width so every date sits under its weekday and the first week can never
-  // drift away from the rest of the month.
-  const CELL_WIDTH = `${100 / 7}%` as const;
+  // drift away from the rest of the month. Percentage widths are avoided on
+  // purpose: they resolve inconsistently for cells inside the bordered grid.
+  const CELL_WIDTH = Math.floor((SCREEN_WIDTH - 32 - 28) / 7);
+  const GRID_WIDTH = CELL_WIDTH * 7;
+  const HAIRLINE = StyleSheet.hairlineWidth;
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
@@ -164,35 +182,46 @@ function MiniCalendar({
     <View
       style={{
         backgroundColor: CREAM,
-        borderRadius: 10,
-        padding: 14,
+        borderRadius: 12,
+        paddingHorizontal: 14,
+        paddingTop: 16,
+        paddingBottom: 18,
         ...CARD_SHADOW,
       }}
     >
-      {/* Month nav */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <TouchableOpacity onPress={prevMonth} activeOpacity={0.7} hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}>
-          <Ionicons name="chevron-back" size={18} color={MUTED} />
-        </TouchableOpacity>
-        <Text style={{ fontSize: 13, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
+      {/* Header: month title left, both chevrons grouped on the right */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 14,
+        }}
+      >
+        <Text style={{ fontSize: 19, fontWeight: '800', color: INK, fontFamily: 'Zain_800ExtraBold' }}>
           {monthName}
         </Text>
-        <TouchableOpacity onPress={nextMonth} activeOpacity={0.7} hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}>
-          <Ionicons name="chevron-forward" size={18} color={MUTED} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 22 }}>
+          <TouchableOpacity onPress={prevMonth} activeOpacity={0.7} hitSlop={{ top: 10, left: 10, right: 8, bottom: 10 }}>
+            <Ionicons name="chevron-back" size={16} color={INK} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={nextMonth} activeOpacity={0.7} hitSlop={{ top: 10, left: 8, right: 10, bottom: 10 }}>
+            <Ionicons name="chevron-forward" size={16} color={INK} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Day labels */}
-      <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+      {/* Weekday labels — bold, dark, like the design */}
+      <View style={{ flexDirection: 'row', width: GRID_WIDTH, alignSelf: 'center', marginBottom: 10 }}>
         {DAY_LABELS.map((d) => (
           <Text
             key={d}
             style={{
               width: CELL_WIDTH,
               textAlign: 'center',
-              fontSize: 10,
-              color: MUTED,
-              fontFamily: 'Inter_500Medium',
+              fontSize: 11,
+              color: INK,
+              fontFamily: 'Inter_700Bold',
             }}
           >
             {d}
@@ -200,70 +229,92 @@ function MiniCalendar({
         ))}
       </View>
 
-      {/* Days grid */}
-      {Array.from({ length: days.length / 7 }, (_, row) => (
-        <View key={row} style={{ flexDirection: 'row', marginBottom: 2 }}>
-          {days.slice(row * 7, row * 7 + 7).map((day, col) => {
-            if (!day) return <View key={col} style={{ width: CELL_WIDTH }} />;
+      {/* Bordered table grid */}
+      <View
+        style={{
+          width: GRID_WIDTH,
+          alignSelf: 'center',
+          borderTopWidth: HAIRLINE,
+          borderLeftWidth: HAIRLINE,
+          borderColor: CAL_GRID_LINE,
+        }}
+      >
+        {Array.from({ length: cells.length / 7 }, (_, row) => (
+          <View key={row} style={{ flexDirection: 'row' }}>
+            {cells.slice(row * 7, row * 7 + 7).map((cell, col) => {
+              const cellFrame = {
+                width: CELL_WIDTH,
+                height: 40,
+                alignItems: 'center' as const,
+                justifyContent: 'center' as const,
+                borderRightWidth: HAIRLINE,
+                borderBottomWidth: HAIRLINE,
+                borderColor: CAL_GRID_LINE,
+              };
 
-            const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const isToday = dateStr === todayStr;
-            const eventId = eventIdByDate.get(dateStr);
-            const hasEvent = !!eventId;
+              if (!cell.inMonth) {
+                return (
+                  <View key={col} style={{ ...cellFrame, backgroundColor: CAL_OUT_MONTH_BG }}>
+                    <Text style={{ fontSize: 13, color: CAL_OUT_MONTH_TEXT, fontFamily: 'Inter_400Regular' }}>
+                      {cell.day}
+                    </Text>
+                  </View>
+                );
+              }
 
-            return (
-              <Pressable
-                key={col}
-                disabled={!hasEvent}
-                onPress={() => eventId && onDayPress(eventId)}
-                style={({ pressed }) => ({
-                  width: CELL_WIDTH,
-                  alignItems: 'center',
-                  paddingVertical: 2,
-                  borderRadius: 13,
-                  backgroundColor:
-                    hasEvent && pressed ? 'rgba(15,166,166,0.18)' : 'transparent',
-                })}
-              >
-                <View
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 13,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: isToday ? TEAL : 'transparent',
-                    ...(hasEvent && !isToday
-                      ? { borderWidth: 1, borderColor: 'rgba(15,166,166,0.35)' }
-                      : {}),
-                  }}
+              const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(cell.day).padStart(2, '0')}`;
+              const isToday = dateStr === todayStr;
+              const eventId = eventIdByDate.get(dateStr);
+              const hasEvent = !!eventId;
+
+              return (
+                <TouchableOpacity
+                  key={col}
+                  disabled={!hasEvent}
+                  onPress={() => eventId && onDayPress(eventId)}
+                  activeOpacity={0.5}
+                  // Static style object on purpose: function styles get
+                  // swallowed by the NativeWind JSX runtime here, collapsing
+                  // the cells to content width.
+                  style={cellFrame}
                 >
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      color: isToday ? CREAM : INK,
-                      fontFamily: isToday ? 'Inter_700Bold' : hasEvent ? 'Inter_600SemiBold' : 'Inter_400Regular',
-                    }}
-                  >
-                    {day}
-                  </Text>
-                </View>
-                {hasEvent && (
-                  <View
-                    style={{
-                      width: 4,
-                      height: 4,
-                      borderRadius: 2,
-                      backgroundColor: TEAL,
-                      marginTop: 1,
-                    }}
-                  />
-                )}
-              </Pressable>
-            );
-          })}
-        </View>
-      ))}
+                  {isToday ? (
+                    <View
+                      style={{
+                        width: 26,
+                        height: 26,
+                        borderRadius: 6,
+                        backgroundColor: TEAL,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text style={{ fontSize: 13, color: CREAM, fontFamily: 'Inter_700Bold' }}>
+                        {cell.day}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_500Medium' }}>
+                      {cell.day}
+                    </Text>
+                  )}
+                  {hasEvent && (
+                    <View
+                      style={{
+                        width: 14,
+                        height: 3,
+                        borderRadius: 1.5,
+                        backgroundColor: TEAL,
+                        marginTop: 2,
+                      }}
+                    />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
