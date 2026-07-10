@@ -292,78 +292,69 @@ export async function changePassword(
 
 // ─── Account Deletion ─────────────────────────────────────────────────────────
 //
-// Two-phase:
-//   Phase 1: call deleteOwnUserData() RPC — cleans all DB rows, anonymizes messages
-//   Phase 2: call the web API route DELETE /api/delete-account to delete auth.users
+// One server-side call: the `delete-account` Supabase Edge Function verifies
+// the caller's own JWT, runs delete_own_user_data() (anonymizes messages in
+// shared conversations, deletes all owned rows), and removes the auth.users
+// record with the service-role admin client. The service-role key never
+// touches this app. Storage objects (avatar, post images) are best-effort
+// cleaned client-side first.
 //
 // The caller (UI) is responsible for:
 //   - Showing a double-confirmation dialog before invoking this
-//   - Deleting Storage objects (avatar, post images) before calling this
 //   - Signing out and routing to the welcome screen after this resolves
 //
 export async function deleteOwnAccount(userId: string): Promise<void> {
-  // Delete avatar from Storage if it exists
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('avatar_url, avatar_type')
-    .eq('id', userId)
-    .maybeSingle();
+  // Best-effort storage cleanup — a storage failure must never block the
+  // actual account deletion.
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('avatar_url, avatar_type')
+      .eq('id', userId)
+      .maybeSingle();
 
-  if (profile?.avatar_url && profile?.avatar_type !== 'text') {
-    const url = profile.avatar_url as string;
-    const avatarPath = url.split('/storage/v1/object/public/avatars/')[1];
-    if (avatarPath) {
-      await supabase.storage.from('avatars').remove([avatarPath]);
+    if (profile?.avatar_url && profile?.avatar_type !== 'text') {
+      const url = profile.avatar_url as string;
+      const avatarPath = url.split('/storage/v1/object/public/avatars/')[1];
+      if (avatarPath) {
+        await supabase.storage.from('avatars').remove([avatarPath]);
+      }
     }
-  }
 
-  // Delete all post images from Storage
-  const { data: posts } = await supabase
-    .from('posts')
-    .select('image_url')
-    .eq('author_id', userId)
-    .not('image_url', 'is', null);
+    const { data: posts } = await supabase
+      .from('posts')
+      .select('image_url')
+      .eq('author_id', userId)
+      .not('image_url', 'is', null);
 
-  if (posts && posts.length > 0) {
-    const postPaths = (posts as any[])
-      .map((p) => {
-        const u = p.image_url as string;
-        const parts = u.split('/storage/v1/object/public/posts/');
-        return parts.length === 2 ? parts[1] : null;
-      })
-      .filter(Boolean) as string[];
+    if (posts && posts.length > 0) {
+      const postPaths = (posts as any[])
+        .map((p) => {
+          const u = p.image_url as string;
+          const parts = u.split('/storage/v1/object/public/posts/');
+          return parts.length === 2 ? parts[1] : null;
+        })
+        .filter(Boolean) as string[];
 
-    if (postPaths.length > 0) {
-      await supabase.storage.from('posts').remove(postPaths);
+      if (postPaths.length > 0) {
+        await supabase.storage.from('posts').remove(postPaths);
+      }
     }
+  } catch (e) {
+    console.warn('[deleteOwnAccount] storage cleanup failed (continuing)', e);
   }
 
-  // Phase 1: Delete all DB data via SECURITY DEFINER RPC
-  const { error: rpcError } = await supabase.rpc('delete_own_user_data');
-  if (rpcError) throw rpcError;
-
-  // Phase 2: Delete auth.users via web API route (uses admin client)
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData?.session?.access_token;
-  if (!token) {
-    // Session already destroyed by the RPC (profile deleted → auth mismatch)
-    // Sign out locally and proceed — the auth.users row will be cleaned up
-    // by the nightly admin job or webhook.
-    return;
-  }
-
-  const apiBase = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://weglue.app';
-  const response = await fetch(`${apiBase}/api/delete-account`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+  const { data, error } = await supabase.functions.invoke('delete-account', {
+    method: 'POST',
+    body: {},
   });
 
-  if (!response.ok && response.status !== 401) {
-    // If 401, auth record was already cleaned up. All other errors: log + continue.
-    console.error('[deleteOwnAccount] API error:', response.status, await response.text());
+  if (error) {
+    console.error('[deleteOwnAccount] edge function error:', error);
+    throw error;
+  }
+  if (!(data as { success?: boolean } | null)?.success) {
+    throw new Error('Account deletion failed');
   }
 }
 

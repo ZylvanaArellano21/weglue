@@ -25,10 +25,16 @@ export interface AppNotification {
     | 'new_event'
     | 'new_message'
     | 'gluemate'
-    | 'club_inactive';
+    | 'club_inactive'
+    | 'club_chat_added'
+    | 'officer_chat_added'
+    | 'officer_role';
   sender: NotificationSender | null;
   reference_id: string | null;
   entity_type: 'event' | 'club' | 'message' | 'post' | null;
+  /** Pre-rendered copy from the DB trigger (club/chat notifications) —
+   * shown verbatim when present. */
+  message: string | null;
   actor_follow_state: ActorFollowState;
   is_read: boolean;
   created_at: string;
@@ -43,7 +49,7 @@ export async function getNotifications(userId: string): Promise<NotificationSect
   const { data, error } = await supabase
     .from('notifications')
     .select(`
-      id, type, entity_id, entity_type, read, created_at,
+      id, type, entity_id, entity_type, read, created_at, message,
       profiles!notifications_actor_id_fkey(id, username, avatar_url)
     `)
     .eq('user_id', userId)
@@ -97,6 +103,7 @@ export async function getNotifications(userId: string): Promise<NotificationSect
         : null,
       reference_id: n.entity_id ?? null,
       entity_type: n.entity_type ?? null,
+      message: n.message ?? null,
       actor_follow_state: n.profiles
         ? followStateMap.get(n.profiles.id) ?? 'not_following'
         : 'not_following',

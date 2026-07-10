@@ -33,6 +33,13 @@ export function patchPostInCaches(
   queryClient.setQueriesData({ queryKey: ['postDetail'] }, (old: any) =>
     old && old.id === postId ? patch(old) : old,
   );
+  // Club Photos that Glue viewer: items wrap a post ({ photo, post }).
+  queryClient.setQueriesData({ queryKey: ['clubPhotoFeed'] }, (old: any) => {
+    if (!Array.isArray(old)) return old;
+    return old.map((item: any) =>
+      item?.post?.id === postId ? { ...item, post: patch(item.post) } : item,
+    );
+  });
 }
 
 // Removes a post from every cached list immediately (delete flow).
@@ -46,6 +53,14 @@ export function removePostFromCaches(queryClient: QueryClient, postId: string): 
       };
     });
   }
+  queryClient.setQueriesData({ queryKey: ['clubPhotoFeed'] }, (old: any) => {
+    if (!Array.isArray(old)) return old;
+    return old.filter((item: any) => item?.post?.id !== postId);
+  });
+  // Deleted posts also vanish from every club's Photos that Glue (the
+  // club_photos rows cascade server-side); refetch the club caches.
+  queryClient.invalidateQueries({ queryKey: ['clubPhotoFeed'] });
+  queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
 }
 
 export function useHomePostsFeed(userId: string | undefined) {

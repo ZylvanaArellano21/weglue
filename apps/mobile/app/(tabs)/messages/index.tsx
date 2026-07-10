@@ -51,7 +51,16 @@ export default function MessagesIndex() {
   const filteredChats = filter === 'single' ? directChats : groupChats;
 
   const handlePressChat = useCallback(
-    (chatId: string, preview?: { type: string; club_id: string | null; name: string | null; avatar_url: string | null }) => {
+    (
+      chatId: string,
+      preview?: {
+        type: string;
+        club_id: string | null;
+        name: string | null;
+        avatar_url: string | null;
+        default_channel_id?: string | null;
+      },
+    ) => {
       openChat(
         chatId,
         preview
@@ -60,6 +69,7 @@ export default function MessagesIndex() {
               clubId: preview.club_id,
               name: preview.name,
               avatarUrl: preview.avatar_url,
+              defaultChannelId: preview.default_channel_id ?? null,
             }
           : undefined,
       );

@@ -75,13 +75,19 @@ export default function ChatRoom() {
     isGroupWithChannels && effectiveClubId ? effectiveClubId : undefined,
   );
 
-  // Fix 8: auto-navigate to last-visited or default channel, bypassing the channel picker
+  // Auto-navigate to last-visited or default channel, bypassing the channel
+  // picker. CRITICAL: a club has TWO conversations (members + officers) and
+  // useClubChannels returns the channels of BOTH — only channels belonging to
+  // THIS conversation may be considered, otherwise the redirect lands in the
+  // wrong chat (the "opens the member chat first" flicker bug).
   useEffect(() => {
     if (!isGroupWithChannels || !isMember || !channels || channels.length === 0) return;
+    const ownChannels = channels.filter((c) => c.conversation_id === chatId);
+    if (ownChannels.length === 0) return;
     const saved = getLastVisitedChannel(chatId);
-    const target = (saved && channels.find((c) => c.id === saved))
+    const target = (saved && ownChannels.find((c) => c.id === saved))
       ? saved
-      : (channels.find((c) => c.is_default) ?? channels[0])?.id;
+      : (ownChannels.find((c) => c.is_default) ?? ownChannels[0])?.id;
     if (target) {
       router.replace(`/(tabs)/messages/${chatId}/${target}` as any);
     }

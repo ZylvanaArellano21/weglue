@@ -19,6 +19,9 @@ const DRAWER_WIDTH = SCREEN_WIDTH * 0.31;
 interface Props {
   visible: boolean;
   clubId: string;
+  /** Channels are scoped to THIS conversation — a club has separate member
+   * and officer conversations and their channels must never mix. */
+  conversationId: string;
   activeChannelId: string;
   isOfficer: boolean;
   onSelectChannel: (id: string, name: string) => void;
@@ -29,6 +32,7 @@ interface Props {
 export function ChannelDrawer({
   visible,
   clubId,
+  conversationId,
   activeChannelId,
   isOfficer,
   onSelectChannel,
@@ -36,7 +40,8 @@ export function ChannelDrawer({
   onAddChannel,
 }: Props) {
   const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
-  const { data: channels } = useClubChannels(clubId);
+  const { data: allChannels } = useClubChannels(clubId);
+  const channels = (allChannels ?? []).filter((c) => c.conversation_id === conversationId);
 
   useEffect(() => {
     Animated.timing(translateX, {
@@ -53,7 +58,7 @@ export function ChannelDrawer({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <Animated.View style={[styles.drawer, { transform: [{ translateX }] }]}>
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {(channels ?? []).map((ch) => {
+          {channels.map((ch) => {
             const active = ch.id === activeChannelId;
             return (
               <TouchableOpacity

@@ -73,6 +73,16 @@ export default function NotificationsScreen() {
       router.push({ pathname: '/home/event-detail', params: { eventId: item.reference_id } });
       return;
     }
+    // Club membership / group chat / officer notifications open the club.
+    if (
+      (item.type === 'club_chat_added' ||
+        item.type === 'officer_chat_added' ||
+        item.type === 'officer_role') &&
+      item.reference_id
+    ) {
+      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: item.reference_id } });
+      return;
+    }
     if (item.sender?.id) {
       router.push({ pathname: '/profile/[userId]', params: { userId: item.sender.id } });
     }
@@ -111,13 +121,22 @@ export default function NotificationsScreen() {
           <Avatar uri={item.sender?.avatar_url} size={46} username={item.sender?.username} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
-            <Text style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
-              {item.sender?.username ?? 'Someone'}
+          {/* Club/chat notifications carry their full copy from the DB
+              trigger ("You were added to X members group chat.") — render it
+              verbatim instead of "username did something". */}
+          {item.message ? (
+            <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
+              {item.message}
             </Text>
-            {' '}
-            {notificationDescription(item.type)}
-          </Text>
+          ) : (
+            <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
+              <Text style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
+                {item.sender?.username ?? 'Someone'}
+              </Text>
+              {' '}
+              {notificationDescription(item.type)}
+            </Text>
+          )}
           <Text
             style={{
               fontSize: 12,

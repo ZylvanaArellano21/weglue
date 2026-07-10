@@ -24,6 +24,7 @@ import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../../components/Toast';
 import { LeaveClubModals } from '../../../../../components/club/LeaveClubModals';
 import { ShareSheet } from '../../../../../components/shared/ShareSheet';
+import { openReportFlow } from '../../../../../components/shared/ReportButton';
 import { formatEventLocation, isEventPast } from '../../../../../lib/eventDisplay';
 
 export type ClubEventDetailParams = {
@@ -131,10 +132,13 @@ export default function ClubEventDetailScreen() {
   };
 
   const handleReport = () => {
-    Alert.alert('Report Event', 'Do you want to report this event?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Report', style: 'destructive' },
-    ]);
+    if (!event) return;
+    openReportFlow({
+      entityType: 'event',
+      entityId: event.id,
+      entityName: event.title,
+      clubId: event.club_id,
+    });
   };
 
   return (

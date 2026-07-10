@@ -23,6 +23,7 @@ import {
 } from '../../hooks/useUserProfile';
 import { Avatar } from '../../components/shared/Avatar';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
+import { openReportFlow } from '../../components/shared/ReportButton';
 import { InterestsLine } from '../../components/profile/InterestsLine';
 import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { useToast } from '../../components/Toast';
@@ -180,6 +181,24 @@ export default function UserProfileScreen() {
           >
             {profile.full_name}
           </Text>
+          {/* Report menu — other people's profiles only */}
+          {!isOwnProfile && (
+            <TouchableOpacity
+              onPress={() =>
+                openReportFlow({
+                  entityType: 'user',
+                  entityId: targetUserId!,
+                  entityName: profile.username ? `@${profile.username}` : profile.full_name,
+                })
+              }
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Report this user"
+            >
+              <Ionicons name="ellipsis-horizontal" size={22} color="#6B7280" />
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={{ paddingHorizontal: 16 }}>
@@ -241,7 +260,11 @@ export default function UserProfileScreen() {
               {profile.club_roles.map((role) => (
                 <TouchableOpacity
                   key={role.club_id}
-                  onPress={() => router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: role.club_id } })}
+                  onPress={() => {
+                    // Guard: never route to a missing/deleted club id.
+                    if (!role.club_id) return;
+                    router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: role.club_id } });
+                  }}
                   activeOpacity={0.7}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
                 >
@@ -559,6 +582,7 @@ export default function UserProfileScreen() {
             <TouchableOpacity
               key={club.club_id}
               onPress={() => {
+                if (!club.club_id) return;
                 setClubsSheetOpen(false);
                 router.push({
                   pathname: '/(tabs)/clubs/[clubId]',

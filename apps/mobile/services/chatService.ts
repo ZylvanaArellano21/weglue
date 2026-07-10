@@ -22,6 +22,9 @@ export interface ChatPreview {
   last_sender_username: string | null;
   unread_count: number;
   channel_names: string[];
+  /** Default channel of THIS conversation — lets taps open the thread
+   * directly with a single navigation (no intermediate redirect screen). */
+  default_channel_id: string | null;
 }
 
 export interface ChatDetails {
@@ -81,7 +84,7 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       `conversation_id, last_read_at, joined_at,
        conversations!inner(
          id, type, name, avatar_url, club_id,
-         conversation_channels(name),
+         conversation_channels(id, name, is_default, display_order),
          messages(id, content, message_type, created_at, profiles!sender_id(username))
        )`,
     )
@@ -109,7 +112,10 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       ? msgs.filter((m: any) => new Date(m.created_at) > new Date(lastReadAt)).length
       : msgs.length;
 
-    const channels: any[] = conv.conversation_channels ?? [];
+    const channels: any[] = [...(conv.conversation_channels ?? [])].sort(
+      (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0),
+    );
+    const defaultChannel = channels.find((c: any) => c.is_default) ?? channels[0] ?? null;
 
     return {
       id: conv.id,
@@ -122,6 +128,7 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       last_sender_username: lastMsg?.profiles?.username ?? null,
       unread_count: unreadCount,
       channel_names: channels.map((c: any) => c.name),
+      default_channel_id: defaultChannel?.id ?? null,
     } as ChatPreview;
   });
 }
@@ -474,4 +481,42 @@ export async function getClubOfficerConversationId(clubId: string): Promise<stri
     .eq('type', 'officer_chat')
     .single();
   return data?.id ?? null;
+}
+
+export interface ClubChatTarget {
+  conversationId: string;
+  channelId: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+// Resolves the exact conversation AND its default channel in one query so
+// tapping Chat / Admin Chat on a club profile lands directly in the correct
+// thread — one push, no intermediate screen, no wrong-chat flash. Channels
+// are read from THIS conversation only (channels of the sibling member/
+// officer conversation can never leak in).
+export async function getClubChatTarget(
+  clubId: string,
+  type: 'club_group' | 'officer_chat',
+): Promise<ClubChatTarget | null> {
+  const { data } = await supabase
+    .from('conversations')
+    .select('id, name, avatar_url, conversation_channels(id, is_default, display_order)')
+    .eq('club_id', clubId)
+    .eq('type', type)
+    .maybeSingle();
+
+  if (!data) return null;
+
+  const channels = [...(((data as any).conversation_channels ?? []) as any[])].sort(
+    (a, b) => (a.display_order ?? 0) - (b.display_order ?? 0),
+  );
+  const defaultChannel = channels.find((c) => c.is_default) ?? channels[0] ?? null;
+
+  return {
+    conversationId: (data as any).id,
+    channelId: defaultChannel?.id ?? null,
+    name: (data as any).name ?? null,
+    avatarUrl: (data as any).avatar_url ?? null,
+  };
 }

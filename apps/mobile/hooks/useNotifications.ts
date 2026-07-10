@@ -8,6 +8,7 @@ import {
 } from '../services/notificationService';
 import { followUser } from '../services/followService';
 import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
+import { refreshOfficerStatus } from '../store/officerStore';
 
 export function useNotifications(userId: string | undefined) {
   return useQuery({
@@ -40,6 +41,19 @@ export function useRealtimeNotifications(userId: string | undefined) {
             // Relationship changed — profiles the viewer has open must update.
             queryClient.invalidateQueries({ queryKey: ['userProfile'] });
             queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
+          }
+          if (
+            type === 'club_chat_added' ||
+            type === 'officer_chat_added' ||
+            type === 'officer_role'
+          ) {
+            // Membership/officer change: group chats appear in Messages and
+            // officer-gated UI unlocks in under a second, app-wide.
+            queryClient.invalidateQueries({ queryKey: ['myChats'] });
+            queryClient.invalidateQueries({ queryKey: ['myClubs'] });
+            queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
+            queryClient.invalidateQueries({ queryKey: ['officerClubs'] });
+            void refreshOfficerStatus(userId);
           }
         },
       },

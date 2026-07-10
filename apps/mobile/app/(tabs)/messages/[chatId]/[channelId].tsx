@@ -19,7 +19,6 @@ import {
   useChannelMessages,
   useSendMessage,
   useDeleteMessage,
-  useClubConversationId,
 } from '../../../../hooks/useClubChannels';
 import { useRealtimeMessages } from '../../../../hooks/useRealtimeChannel';
 import { useChatDetails } from '../../../../hooks/useChats';
@@ -41,8 +40,14 @@ import { recordChannelVisit } from '../../../../lib/chatNavigation';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
 export default function ChannelThread() {
-  const { chatId, channelId, jumpToMessageId } =
-    useLocalSearchParams<{ chatId: string; channelId: string; jumpToMessageId?: string }>();
+  const { chatId, channelId, jumpToMessageId, pname, pavatar } =
+    useLocalSearchParams<{
+      chatId: string;
+      channelId: string;
+      jumpToMessageId?: string;
+      pname?: string;
+      pavatar?: string;
+    }>();
   const router = useRouter();
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
@@ -50,7 +55,10 @@ export default function ChannelThread() {
 
   const { data: chatDetails } = useChatDetails(chatId);
   const clubId = chatDetails?.club_id ?? undefined;
-  const { data: conversationId } = useClubConversationId(clubId);
+  // The route's chatId IS the conversation. The old useClubConversationId
+  // lookup always returned the club_group conversation, so messages sent in
+  // the OFFICER chat were written to the member conversation — mixed chats.
+  const conversationId = chatId;
 
   const isOfficer = useOfficerStore((s) => (clubId ? s.officerClubIds.includes(clubId) : false));
 
@@ -68,28 +76,45 @@ export default function ChannelThread() {
     if (!activeChannelId) return;
     supabase
       .from('conversation_channels')
-      .select('name, is_restricted')
+      .select('name, is_restricted, conversation_id')
       .eq('id', activeChannelId)
       .single()
-      .then(({ data }) => {
-        if (data) {
-          setChannelName(data.name);
-          setIsRestricted(data.is_restricted);
+      .then(async ({ data }) => {
+        if (!data) return;
+        // Defensive: a stale/foreign channel id (e.g. recorded before the
+        // member/officer channel separation fix) must never render another
+        // conversation's thread — fall back to this conversation's own
+        // default channel.
+        if (data.conversation_id && data.conversation_id !== chatId) {
+          const { data: own } = await supabase
+            .from('conversation_channels')
+            .select('id, name, is_restricted, is_default, display_order')
+            .eq('conversation_id', chatId)
+            .order('display_order', { ascending: true });
+          const fallback = (own ?? []).find((c: any) => c.is_default) ?? (own ?? [])[0];
+          if (fallback) {
+            setActiveChannelId(fallback.id);
+            setChannelName(fallback.name);
+            setIsRestricted(fallback.is_restricted);
+          }
+          return;
         }
+        setChannelName(data.name);
+        setIsRestricted(data.is_restricted);
       });
-  }, [activeChannelId]);
+  }, [activeChannelId, chatId]);
 
   useEffect(() => {
     if (channelId) setActiveChannelId(channelId);
   }, [channelId]);
 
   const { data: messagesPage, isLoading } = useChannelMessages(activeChannelId);
-  const { mutate: send } = useSendMessage(conversationId ?? '', activeChannelId, userId);
+  const { mutate: send } = useSendMessage(conversationId, activeChannelId, userId);
   const { mutate: deleteMsg } = useDeleteMessage(activeChannelId);
 
   useRealtimeMessages({
     channelId: activeChannelId,
-    conversationId: conversationId ?? '',
+    conversationId,
     onNewMessage: () => {
       queryClient.invalidateQueries({ queryKey: ['channelMessages', activeChannelId] });
     },
@@ -163,7 +188,10 @@ export default function ChannelThread() {
     Alert.alert('Add Channel', 'Channel creation is handled by club officers.');
   }
 
-  const displayName = chatDetails?.name ?? 'Group Chat';
+  // Route preview params render the header instantly on direct navigation
+  // from a club profile or the chat list (details load in parallel).
+  const displayName = chatDetails?.name ?? (pname || 'Group Chat');
+  const headerAvatarUrl = chatDetails?.avatar_url ?? (pavatar || null);
 
   if (isLoading) {
     return (
@@ -186,7 +214,7 @@ export default function ChannelThread() {
           onPress={() => router.push(`/(tabs)/messages/${chatId}/info?channelId=${activeChannelId}` as any)}
           activeOpacity={0.7}
         >
-          <Avatar uri={chatDetails?.avatar_url} size={chatSizes.avatarHeader} username={displayName} />
+          <Avatar uri={headerAvatarUrl} size={chatSizes.avatarHeader} username={displayName} />
           <Text style={styles.headerTitle} numberOfLines={1}>
             {displayName}
           </Text>
@@ -270,6 +298,7 @@ export default function ChannelThread() {
         <ChannelDrawer
           visible={drawerOpen}
           clubId={clubId}
+          conversationId={chatId}
           activeChannelId={activeChannelId}
           isOfficer={isOfficer}
           onSelectChannel={handleSelectChannel}

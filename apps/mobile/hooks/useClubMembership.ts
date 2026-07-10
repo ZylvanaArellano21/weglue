@@ -105,6 +105,10 @@ function applyOptimisticMembership(queryClient: QueryClient, clubId: string, joi
 function invalidateMembershipQueries(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
   queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
+  // Group-chat membership is synced by DB triggers on join/leave — the chat
+  // list and its notification must appear/disappear immediately.
+  queryClient.invalidateQueries({ queryKey: ['myChats'] });
+  queryClient.invalidateQueries({ queryKey: ['notifications'] });
   queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
   queryClient.invalidateQueries({ queryKey: ['myClubs'] });
   queryClient.invalidateQueries({ queryKey: ['calendarEvents'] });

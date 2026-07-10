@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,14 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
-import { createEvent } from '../../services/eventService';
+import { createEvent, updateEvent, getEventForEdit } from '../../services/eventService';
 import { getUserOfficerClubs, searchAllUsers, AppUser, UserClub } from '../../services/clubService';
+import { invalidateClubDataEverywhere } from '../../lib/clubCache';
 import { useToast } from '../../components/Toast';
 import { supabase } from '../../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -62,6 +63,11 @@ export default function NewEventScreen() {
   const userId = session?.user.id;
   const { show, ToastComponent } = useToast();
   const queryClient = useQueryClient();
+
+  // Edit mode: opened from Edit Club with an existing event to modify.
+  // Same form, same pickers — saving updates instead of creating.
+  const { editEventId } = useLocalSearchParams<{ editEventId?: string }>();
+  const isEditMode = !!editEventId;
 
   // Club selection
   const [selectedClub, setSelectedClub] = useState<UserClub | null>(null);
@@ -112,6 +118,37 @@ export default function NewEventScreen() {
     queryFn: () => getUserOfficerClubs(userId!),
     enabled: !!userId,
   });
+
+  // Prefill every field from the existing event when editing.
+  const [editLoaded, setEditLoaded] = useState(false);
+  const { data: editEvent } = useQuery({
+    queryKey: ['eventForEdit', editEventId],
+    queryFn: () => getEventForEdit(editEventId!),
+    enabled: isEditMode,
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (!editEvent || editLoaded) return;
+    setSelectedClub({ id: editEvent.club_id, name: editEvent.club_name, avatar_url: null });
+    setTitle(editEvent.title);
+    setAbout(editEvent.description ?? '');
+    setBuilding(editEvent.building ?? '');
+    setRoom(editEvent.room ?? '');
+    setImageUri(editEvent.cover_image_url);
+    setImageUrl(editEvent.cover_image_url);
+    setEventDate(new Date(`${editEvent.event_date}T00:00:00`));
+    const [sh, sm] = editEvent.start_time.split(':').map(Number);
+    const [eh, em] = editEvent.end_time.split(':').map(Number);
+    const start = new Date();
+    start.setHours(sh || 0, sm || 0, 0, 0);
+    const end = new Date();
+    end.setHours(eh || 0, em || 0, 0, 0);
+    setStartTime(start);
+    setEndTime(end);
+    setVisibility(editEvent.visibility);
+    setEditLoaded(true);
+  }, [editEvent, editLoaded]);
 
   const filteredClubs = officerClubs.filter((c) =>
     c.name.toLowerCase().includes(clubSearch.toLowerCase()),
@@ -187,6 +224,33 @@ export default function NewEventScreen() {
 
     setSubmitting(true);
     try {
+      if (isEditMode && editEventId) {
+        await updateEvent(userId, editEventId, {
+          title: title.trim(),
+          description: about.trim(),
+          cover_image_url: imageUrl,
+          event_date: toDateString(eventDate!),
+          start_time: toTimeString(startTime!),
+          end_time: toTimeString(endTime!),
+          building: building.trim(),
+          room: room.trim(),
+          visibility,
+          specific_user_ids:
+            visibility === 'specific' ? specificUsers.map((u) => u.id) : null,
+        });
+        // The event is embedded in many caches (club profile, Home, Calendar,
+        // Weekly Events, saved/RSVP'd lists) — refetch them all so every user
+        // surface shows the update immediately.
+        invalidateClubDataEverywhere(queryClient);
+        queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
+        queryClient.invalidateQueries({ queryKey: ['eventForEdit', editEventId] });
+        queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
+        queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
+        show('Event updated! 🎉');
+        setTimeout(() => router.back(), 700);
+        return;
+      }
+
       const newEventId = await createEvent(userId, {
         club_id: selectedClub!.id,
         title: title.trim(),
@@ -209,8 +273,11 @@ export default function NewEventScreen() {
       show('Event posted! 🎉');
       setTimeout(() => router.replace('/(tabs)'), 1000);
     } catch (err: unknown) {
-      console.error('[new-event] create failed', err);
-      show('Failed to create event. Please try again.', 'error');
+      console.error('[new-event] save failed', err);
+      show(
+        isEditMode ? 'Failed to update event. Please try again.' : 'Failed to create event. Please try again.',
+        'error',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -289,7 +356,7 @@ export default function NewEventScreen() {
               fontFamily: 'Zain_700Bold',
             }}
           >
-            New Event
+            {isEditMode ? 'Edit Event' : 'New Event'}
           </Text>
         </View>
 
@@ -304,6 +371,8 @@ export default function NewEventScreen() {
               Hosting by: @{' '}
               <Text
                 onPress={() => {
+                  // The hosting club is fixed when editing an existing event.
+                  if (isEditMode) return;
                   setClubSearch('');
                   setClubSelectorVisible(true);
                 }}
@@ -733,7 +802,7 @@ export default function NewEventScreen() {
                   fontFamily: 'Zain_700Bold',
                 }}
               >
-                Post it
+                {isEditMode ? 'Save changes' : 'Post it'}
               </Text>
             )}
           </TouchableOpacity>

@@ -36,23 +36,28 @@ export function ProfileConfirmationModal({
         <View style={styles.card}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
-          <View style={styles.row}>
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              onPress={onCancel}
-              activeOpacity={0.7}
-              disabled={loading}
-            >
-              <Text style={styles.cancelLabel}>{cancelLabel}</Text>
-            </TouchableOpacity>
+          {/* Stacked full-width buttons: long destructive labels ("Yes, delete
+              my account") always fit on one clean line — never clipped or
+              wrapped inside a half-width pill. Confirm on top, cancel below. */}
+          <View style={styles.buttonColumn}>
             <TouchableOpacity
               style={[styles.confirmBtn, destructive && styles.destructiveBtn]}
               onPress={onConfirm}
               activeOpacity={0.7}
               disabled={loading}
             >
-              <Text style={styles.confirmLabel}>
+              <Text style={styles.confirmLabel} numberOfLines={1}>
                 {loading ? '…' : confirmLabel}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={onCancel}
+              activeOpacity={0.7}
+              disabled={loading}
+            >
+              <Text style={styles.cancelLabel} numberOfLines={1}>
+                {cancelLabel}
               </Text>
             </TouchableOpacity>
           </View>
@@ -92,16 +97,15 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 24,
   },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
+  buttonColumn: {
+    gap: 10,
   },
   cancelBtn: {
-    flex: 1,
     borderWidth: 1,
     borderColor: profileColors.border,
     borderRadius: 40,
     paddingVertical: 13,
+    paddingHorizontal: 16,
     alignItems: 'center',
     backgroundColor: profileColors.bg,
   },
@@ -111,10 +115,10 @@ const styles = StyleSheet.create({
     color: profileColors.textDark,
   },
   confirmBtn: {
-    flex: 1,
     backgroundColor: profileColors.teal,
     borderRadius: 40,
     paddingVertical: 13,
+    paddingHorizontal: 16,
     alignItems: 'center',
     ...profileShadow,
   },

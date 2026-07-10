@@ -11,7 +11,7 @@ import {
   type ChangeUsernameResult,
   type UsernameAvailability,
 } from '../services/accountService';
-import { supabase } from '../lib/supabase';
+import { safeSignOut } from '../lib/support';
 
 // Username availability — debounced 400ms to avoid hammering the DB
 export function useUsernameAvailability(
@@ -89,8 +89,10 @@ export function useDeleteAccount(userId: string | undefined) {
       return deleteOwnAccount(userId);
     },
     onSuccess: () => {
+      // Local-first sign-out (never hangs on a bad connection) + full cache
+      // wipe so nothing of the deleted account survives on this device.
       queryClient.clear();
-      supabase.auth.signOut();
+      void safeSignOut();
     },
   });
 

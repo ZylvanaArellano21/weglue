@@ -14,7 +14,12 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 // all setup is wrapped so a realtime failure degrades to a log line instead
 // of an error-boundary crash. Screens keep working via normal query refetch.
 
+// Sequence + random suffix: the counter alone is not enough if this module
+// is ever instantiated twice (Metro/pnpm can resolve duplicate module copies,
+// each starting its own counter at 0 — two "notifications:USER:1" topics
+// would collide and re-trigger the postgres_changes-after-subscribe throw).
 let topicSeq = 0;
+const instanceSalt = Math.random().toString(36).slice(2, 8);
 
 export interface PostgresChangesBinding {
   event: '*' | 'INSERT' | 'UPDATE' | 'DELETE';
@@ -29,9 +34,18 @@ export function createSafeChannel(
   bindings: PostgresChangesBinding[],
 ): RealtimeChannel | null {
   try {
-    let channel = supabase.channel(`${topicBase}:${++topicSeq}`);
+    let channel = supabase.channel(`${topicBase}:${instanceSalt}:${++topicSeq}`);
     for (const { callback, ...filter } of bindings) {
-      channel = channel.on('postgres_changes', filter as any, callback);
+      // Wrap every callback so a subscriber's own error can never bubble up
+      // into the realtime socket handler and crash the error boundary.
+      const safeCallback = (payload: any) => {
+        try {
+          callback(payload);
+        } catch (e) {
+          console.warn(`[realtime] ${topicBase} callback error`, e);
+        }
+      };
+      channel = channel.on('postgres_changes', filter as any, safeCallback);
     }
     channel.subscribe((status, err) => {
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {

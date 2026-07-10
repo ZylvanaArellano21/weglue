@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
-  Alert,
   RefreshControl,
   StyleSheet,
 } from 'react-native';
@@ -22,12 +21,13 @@ import { Avatar } from '../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
-import { PhotoGalleryModal } from '../../../../components/club/PhotoGalleryModal';
 import { LeaveClubModals } from '../../../../components/club/LeaveClubModals';
+import { ReportButton } from '../../../../components/shared/ReportButton';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
 import { todayInAppTz } from '../../../../lib/timezone';
 import { formatEventLocation } from '../../../../lib/eventDisplay';
+import { parseMeetingSchedule, groupScheduleForDisplay } from '../../../../lib/meetingSchedule';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -56,12 +56,6 @@ function formatTime(timeStr: string): string {
   const ampm = h >= 12 ? 'pm' : 'am';
   const hour = h % 12 || 12;
   return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
-}
-
-function formatMeetingTime(start: string | null, end: string | null): string {
-  if (!start) return '';
-  const formatted = formatTime(start);
-  return end ? `${formatted} - ${formatTime(end)}` : formatted;
 }
 
 // ─── Section shell ────────────────────────────────────────────────────────────
@@ -490,9 +484,6 @@ export default function ClubProfileScreen() {
   const { show, ToastComponent } = useToast();
   const { officerClubIds } = useOfficerStore();
 
-  const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
-  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
-
   const { data: club, isLoading, isError, refetch } = useClubProfile(clubId, userId);
   const { mutate: join, isPending: joining } = useJoinClubMutation(userId);
   const {
@@ -581,15 +572,14 @@ export default function ClubProfileScreen() {
   // relocated to Past Events, never deleted, and always stay on the calendar.
   const allCalendarEvents = [...club.upcoming_events, ...club.past_events];
 
+  // Direct tap and "See all" both land in the SAME vertical post viewer —
+  // one stable post-viewing system, solid background, back returns exactly
+  // here (the old transparent PhotoGalleryModal is gone).
   function handlePhotoPress(photo: ClubPhoto) {
-    const idx = club!.photos.findIndex((p) => p.id === photo.id);
-    setSelectedPhotoIndex(idx >= 0 ? idx : 0);
-    setPhotoViewerVisible(true);
-  }
-
-  function handleOpenPost(postId: string) {
-    setPhotoViewerVisible(false);
-    router.push({ pathname: '/post/[postId]', params: { postId } });
+    router.push({
+      pathname: '/(tabs)/clubs/[clubId]/photos/viewer',
+      params: { clubId: clubId!, photoId: photo.id, clubName: club?.name ?? '' },
+    } as any);
   }
 
   function handleCalendarDayPress(eventId: string) {
@@ -638,24 +628,15 @@ export default function ClubProfileScreen() {
             <Ionicons name="chevron-back" size={22} color={INK} />
           </TouchableOpacity>
 
-          {/* Report ⋯ button */}
-          <TouchableOpacity
-            onPress={() => Alert.alert('Report', 'Do you want to report this club?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Report', style: 'destructive' },
-            ])}
-            activeOpacity={0.7}
-            style={{
-              position: 'absolute',
-              top: 12,
-              right: isOfficer ? 60 : 12,
-              backgroundColor: 'rgba(255,255,255,0.85)',
-              borderRadius: 20,
-              padding: 8,
-            }}
-          >
-            <Ionicons name="ellipsis-horizontal" size={20} color={INK} />
-          </TouchableOpacity>
+          {/* Report ⋯ menu — bottom-right of the banner, clear of the Edit
+              button (top-right) and the club avatar (bottom-left). */}
+          <ReportButton
+            entityType="club"
+            entityId={clubId!}
+            entityName={club.name}
+            clubId={clubId}
+            style={{ position: 'absolute', bottom: 12, right: 12 }}
+          />
 
           {/* Officer edit button */}
           {isOfficer && (
@@ -910,33 +891,65 @@ export default function ClubProfileScreen() {
           ))}
         </Section>
 
-        {/* ── Meeting Schedule — always visible ──────────────── */}
-        <Section title="Meeting Schedule" emptyText="No weekly events yet" isEmpty={!club.meeting_day}>
-          <View
-            style={{
-              backgroundColor: CREAM,
-              borderRadius: 10,
-              padding: 14,
-              ...CARD_SHADOW,
-            }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <Ionicons name="calendar-outline" size={16} color={TEAL} />
-              <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
-                {club.meeting_day}{' '}
-                {formatMeetingTime(club.meeting_time_start, club.meeting_time_end)}
-              </Text>
-            </View>
-            {formatEventLocation(club.meeting_building, club.meeting_room, club.meeting_location) ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="location-outline" size={16} color={TEAL} />
-                <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
-                  {formatEventLocation(club.meeting_building, club.meeting_room, club.meeting_location)}
-                </Text>
+        {/* ── Meeting Schedule — always visible; days sharing the same time
+            are grouped onto one line ("Monday and Tuesday 10:00 AM - 11:00 AM"),
+            location is one shared line for the whole schedule ──────────── */}
+        {(() => {
+          const scheduleSlots = parseMeetingSchedule(
+            club.meeting_schedule,
+            club.meeting_day,
+            club.meeting_time_start,
+            club.meeting_time_end,
+          );
+          const scheduleLines = groupScheduleForDisplay(scheduleSlots);
+          const locationText = formatEventLocation(
+            club.meeting_building,
+            club.meeting_room,
+            club.meeting_location,
+          );
+          return (
+            <Section
+              title="Meeting Schedule"
+              emptyText="No weekly events yet"
+              isEmpty={scheduleLines.length === 0}
+            >
+              <View
+                style={{
+                  backgroundColor: CREAM,
+                  borderRadius: 10,
+                  padding: 14,
+                  ...CARD_SHADOW,
+                }}
+              >
+                {scheduleLines.map((line, idx) => (
+                  <View
+                    key={`${line.daysLabel}-${idx}`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                      marginBottom: idx === scheduleLines.length - 1 && !locationText ? 0 : 6,
+                    }}
+                  >
+                    <Ionicons name="calendar-outline" size={16} color={TEAL} style={{ marginTop: 1 }} />
+                    <Text style={{ flex: 1, fontSize: 13, color: INK, fontFamily: 'Inter_700Bold', lineHeight: 18 }}>
+                      {line.daysLabel}
+                      {line.timeLabel ? ` ${line.timeLabel}` : ''}
+                    </Text>
+                  </View>
+                ))}
+                {locationText ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="location-outline" size={16} color={TEAL} />
+                    <Text style={{ fontSize: 13, color: INK, fontFamily: 'Inter_700Bold' }}>
+                      {locationText}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
-            ) : null}
-          </View>
-        </Section>
+            </Section>
+          );
+        })()}
 
         {/* ── Upcoming Events — always visible ───────────────── */}
         <Section
@@ -970,8 +983,8 @@ export default function ClubProfileScreen() {
               onPress={() =>
                 router.push({
                   pathname: '/(tabs)/clubs/[clubId]/photos',
-                  params: { clubId: clubId! },
-                })
+                  params: { clubId: clubId!, clubName: club?.name ?? '' },
+                } as any)
               }
               activeOpacity={0.7}
             >
@@ -1013,17 +1026,6 @@ export default function ClubProfileScreen() {
           </View>
         )}
       </ScrollView>
-
-      {/* ── Photo Gallery Modal — swipes through all "Photos that Glue", tagged-post
-          photos show caption/likes/comments and can open the full post ── */}
-      <PhotoGalleryModal
-        visible={photoViewerVisible}
-        photos={club.photos}
-        initialIndex={selectedPhotoIndex}
-        viewerUserId={userId ?? ''}
-        onClose={() => setPhotoViewerVisible(false)}
-        onOpenPost={handleOpenPost}
-      />
 
       <LeaveClubModals
         target={leaveTarget}

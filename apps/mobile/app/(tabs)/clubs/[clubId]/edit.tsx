@@ -9,31 +9,42 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
-  Pressable,
+  Platform,
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
 import { useOfficerStore } from '../../../../store/officerStore';
 import { useClubProfile } from '../../../../hooks/useClubProfile';
-import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
 import { Avatar } from '../../../../components/shared/Avatar';
+import { AddOfficerSheet } from '../../../../components/club/AddOfficerSheet';
 import * as ImagePicker from 'expo-image-picker';
 import {
   updateClubProfile,
   updateClubGoals,
   addOfficer,
   removeOfficer,
-  deleteClubPhoto,
-  uploadClubPhoto,
+  hideClubPhoto,
+  deleteClubPhotoEverywhere,
   type UpdateClubInput,
+  type UniversityUser,
 } from '../../../../services/clubService';
+import { deleteEvent } from '../../../../services/eventService';
 import { uploadImageToBucket } from '../../../../lib/imageUpload';
 import { invalidateClubDataEverywhere } from '../../../../lib/clubCache';
+import {
+  parseMeetingSchedule,
+  formatTime12h,
+  toDbTime,
+  dbTimeToDate,
+  type MeetingSlot,
+} from '../../../../lib/meetingSchedule';
 import type { ClubOfficer, ClubPhoto, ClubUpcomingEvent } from '../../../../services/clubService';
 
 export type EditClubParams = {
@@ -262,76 +273,208 @@ function GoalInputRow({
   );
 }
 
-// ─── Day Picker ───────────────────────────────────────────────────────────────
-function DayPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false);
+// ─── Multi-day Meeting Schedule Editor ───────────────────────────────────────
+// Clubs meet on multiple days: tap day chips to select days, then set each
+// day's start/end with the same scroll-style (spinner) time picker used when
+// creating events. Times always display as "1:00 PM" — never 13:00:00.
+const DEFAULT_START = '15:00:00';
+const DEFAULT_END = '16:00:00';
+
+function ScheduleEditor({
+  schedule,
+  onChange,
+}: {
+  schedule: MeetingSlot[];
+  onChange: (next: MeetingSlot[]) => void;
+}) {
+  const [picker, setPicker] = useState<{ day: string; field: 'start' | 'end' } | null>(null);
+  const [tempTime, setTempTime] = useState<Date>(new Date());
+
+  const selectedDays = new Set(schedule.map((s) => s.day));
+
+  function toggleDay(day: string) {
+    if (selectedDays.has(day)) {
+      onChange(schedule.filter((s) => s.day !== day));
+    } else {
+      // New days copy the last row's times so multi-day clubs with one
+      // shared time only pick it once.
+      const template = schedule[schedule.length - 1];
+      const next = [
+        ...schedule,
+        { day, start: template?.start ?? DEFAULT_START, end: template?.end ?? DEFAULT_END },
+      ];
+      next.sort((a, b) => DAYS_OF_WEEK.indexOf(a.day) - DAYS_OF_WEEK.indexOf(b.day));
+      onChange(next);
+    }
+  }
+
+  function openPicker(day: string, field: 'start' | 'end') {
+    const slot = schedule.find((s) => s.day === day);
+    setTempTime(dbTimeToDate(field === 'start' ? slot?.start ?? DEFAULT_START : slot?.end ?? DEFAULT_END));
+    setPicker({ day, field });
+  }
+
+  function commitTime(selected: Date) {
+    if (!picker) return;
+    onChange(
+      schedule.map((s) =>
+        s.day === picker.day ? { ...s, [picker.field]: toDbTime(selected) } : s,
+      ),
+    );
+  }
+
+  const onTimeChange = (_: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === 'android') {
+      setPicker(null);
+      if (selected) commitTime(selected);
+      return;
+    }
+    if (selected) setTempTime(selected);
+  };
 
   return (
-    <>
-      <TouchableOpacity
-        onPress={() => setOpen(true)}
-        activeOpacity={0.8}
-        style={{
-          backgroundColor: '#fff',
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: '#E5E7EB',
-          paddingHorizontal: 14,
-          paddingVertical: 12,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 15,
-            color: value ? '#111827' : '#9CA3AF',
-            fontFamily: 'Inter_400Regular',
-          }}
-        >
-          {value || 'Select day...'}
-        </Text>
-        <Ionicons name="chevron-down" size={18} color="#9CA3AF" />
-      </TouchableOpacity>
-
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', paddingHorizontal: 32 }}
-          onPress={() => setOpen(false)}
-        >
-          <Pressable
-            onPress={() => {}}
-            style={{ backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' }}
-          >
-            {DAYS_OF_WEEK.map((day) => (
-              <TouchableOpacity
-                key={day}
-                onPress={() => { onChange(day); setOpen(false); }}
-                activeOpacity={0.7}
+    <View>
+      {/* Day chips */}
+      <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_500Medium', marginBottom: 6 }}>
+        Days
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+        {DAYS_OF_WEEK.map((day) => {
+          const selected = selectedDays.has(day);
+          return (
+            <TouchableOpacity
+              key={day}
+              onPress={() => toggleDay(day)}
+              activeOpacity={0.75}
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: 20,
+                borderWidth: 1.5,
+                borderColor: selected ? TEAL : '#E5E7EB',
+                backgroundColor: selected ? 'rgba(15,166,166,0.1)' : '#fff',
+              }}
+            >
+              <Text
                 style={{
+                  fontSize: 13,
+                  color: selected ? TEAL : '#374151',
+                  fontFamily: selected ? 'Inter_600SemiBold' : 'Inter_400Regular',
+                }}
+              >
+                {day.slice(0, 3)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* One time row per selected day */}
+      {schedule.length === 0 ? (
+        <Text style={{ fontSize: 13, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginBottom: 14 }}>
+          Select the days your club meets.
+        </Text>
+      ) : (
+        schedule.map((slot) => (
+          <View
+            key={slot.day}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              marginBottom: 10,
+            }}
+          >
+            <Text
+              style={{
+                width: 86,
+                fontSize: 14,
+                color: '#111827',
+                fontFamily: 'Inter_600SemiBold',
+              }}
+            >
+              {slot.day}
+            </Text>
+            <TouchableOpacity
+              onPress={() => openPicker(slot.day, 'start')}
+              activeOpacity={0.7}
+              style={{ ...INPUT_STYLE, flex: 1, paddingVertical: 10, alignItems: 'center' }}
+            >
+              <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
+                {formatTime12h(slot.start) || 'Start'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={{ fontSize: 14, color: '#9CA3AF' }}>-</Text>
+            <TouchableOpacity
+              onPress={() => openPicker(slot.day, 'end')}
+              activeOpacity={0.7}
+              style={{ ...INPUT_STYLE, flex: 1, paddingVertical: 10, alignItems: 'center' }}
+            >
+              <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
+                {formatTime12h(slot.end) || 'End'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ))
+      )}
+
+      {/* Android native spinner */}
+      {Platform.OS === 'android' && picker !== null && (
+        <DateTimePicker value={tempTime} mode="time" is24Hour={false} onChange={onTimeChange} />
+      )}
+
+      {/* iOS spinner modal — same design as event creation */}
+      {Platform.OS === 'ios' && picker !== null && (
+        <Modal transparent animationType="slide" onRequestClose={() => setPicker(null)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
+            <SafeAreaView
+              style={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20 }}
+              edges={['bottom']}
+            >
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
                   paddingHorizontal: 20,
                   paddingVertical: 14,
                   borderBottomWidth: 1,
-                  borderBottomColor: '#F3F4F6',
-                  backgroundColor: value === day ? 'rgba(15,166,166,0.08)' : '#fff',
+                  borderBottomColor: '#E5E7EB',
                 }}
               >
-                <Text
-                  style={{
-                    fontSize: 15,
-                    color: value === day ? '#0FA6A6' : '#374151',
-                    fontFamily: value === day ? 'Inter_600SemiBold' : 'Inter_400Regular',
-                  }}
-                >
-                  {day}
+                <TouchableOpacity onPress={() => setPicker(null)} activeOpacity={0.7}>
+                  <Text style={{ color: '#6B7280', fontSize: 16, fontFamily: 'Inter_500Medium' }}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827', fontFamily: 'Inter_600SemiBold' }}>
+                  {picker.day} · {picker.field === 'start' ? 'Start Time' : 'End Time'}
                 </Text>
-              </TouchableOpacity>
-            ))}
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </>
+                <TouchableOpacity
+                  onPress={() => {
+                    commitTime(tempTime);
+                    setPicker(null);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ color: TEAL, fontSize: 16, fontFamily: 'Inter_600SemiBold' }}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={tempTime}
+                mode="time"
+                display="spinner"
+                is24Hour={false}
+                onChange={onTimeChange}
+                style={{ alignSelf: 'center' }}
+                themeVariant="light"
+                accentColor={TEAL}
+              />
+            </SafeAreaView>
+          </View>
+        </Modal>
+      )}
+    </View>
   );
 }
 
@@ -355,15 +498,14 @@ export default function EditClubScreen() {
   const [name, setName] = useState('');
   const [about, setAbout] = useState('');
   const [goals, setGoals] = useState<string[]>(['']);
-  const [meetingDay, setMeetingDay] = useState('');
-  const [meetingTimeStart, setMeetingTimeStart] = useState('');
-  const [meetingTimeEnd, setMeetingTimeEnd] = useState('');
+  const [schedule, setSchedule] = useState<MeetingSlot[]>([]);
   const [meetingLocation, setMeetingLocation] = useState('');
   const [meetingBuilding, setMeetingBuilding] = useState('');
   const [meetingRoom, setMeetingRoom] = useState('');
   const [officers, setOfficers] = useState<ClubOfficer[]>([]);
   const [photos, setPhotos] = useState<ClubPhoto[]>([]);
   const [events, setEvents] = useState<ClubUpcomingEvent[]>([]);
+  const [addOfficerVisible, setAddOfficerVisible] = useState(false);
 
   const [uploadingBanner, setUploadingBanner] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -378,9 +520,14 @@ export default function EditClubScreen() {
     setName(club.name);
     setAbout(club.description ?? '');
     setGoals(club.goals.map((g) => g.goal_text).concat(''));
-    setMeetingDay(club.meeting_day ?? '');
-    setMeetingTimeStart(club.meeting_time_start ?? '');
-    setMeetingTimeEnd(club.meeting_time_end ?? '');
+    setSchedule(
+      parseMeetingSchedule(
+        club.meeting_schedule,
+        club.meeting_day,
+        club.meeting_time_start,
+        club.meeting_time_end,
+      ),
+    );
     setMeetingLocation(club.meeting_location ?? '');
     setMeetingBuilding(club.meeting_building ?? '');
     setMeetingRoom(club.meeting_room ?? '');
@@ -479,17 +626,21 @@ export default function EditClubScreen() {
     }
     setSaving(true);
     try {
+      // Legacy single-day columns mirror the first schedule row so older
+      // builds keep rendering a schedule; meeting_schedule is authoritative.
+      const firstSlot = schedule[0] ?? null;
       const updates: UpdateClubInput = {
         name: name.trim(),
         description: about.trim(),
         avatar_url: avatarUri ?? undefined,
         banner_url: bannerUri ?? undefined,
-        meeting_day: meetingDay || null,
-        meeting_time_start: meetingTimeStart || null,
-        meeting_time_end: meetingTimeEnd || null,
+        meeting_day: firstSlot?.day ?? null,
+        meeting_time_start: firstSlot?.start ?? null,
+        meeting_time_end: firstSlot?.end ?? null,
         meeting_location: meetingLocation || null,
         meeting_building: meetingBuilding || null,
         meeting_room: meetingRoom || null,
+        meeting_schedule: schedule.length > 0 ? schedule : null,
       };
       await Promise.all([
         updateClubProfile(clubId!, updates),
@@ -522,7 +673,11 @@ export default function EditClubScreen() {
             try {
               await removeOfficer(clubId!, officer.user_id!);
               setOfficers((prev) => prev.filter((o) => o.id !== officer.id));
-              queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId, userId] });
+              // Demotion removes them from the officer chat (DB trigger) —
+              // refresh their chat list, officer state, and club displays.
+              queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId] });
+              queryClient.invalidateQueries({ queryKey: ['myChats'] });
+              queryClient.invalidateQueries({ queryKey: ['officerClubs'] });
             } catch {
               Alert.alert('Error', 'Could not remove officer. Try again.');
             }
@@ -532,26 +687,124 @@ export default function EditClubScreen() {
     );
   }
 
-  async function handleHidePhoto(photo: ClubPhoto) {
+  // Refreshes every surface a photo change touches: club profile preview,
+  // See-all grid + viewer, Home posts, and the poster's profile grids.
+  function invalidatePhotoQueries() {
+    queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
+    queryClient.invalidateQueries({ queryKey: ['clubPhotoFeed'] });
+    queryClient.invalidateQueries({ queryKey: ['homePostsFeed'] });
+    queryClient.invalidateQueries({ queryKey: ['userPostsFeed'] });
+    queryClient.invalidateQueries({ queryKey: ['userPosts'] });
+    queryClient.invalidateQueries({ queryKey: ['ownPosts'] });
+  }
+
+  function handlePhotoOptions(photo: ClubPhoto) {
     Alert.alert(
-      'Hide photo?',
-      'This photo will be hidden from the club profile. The original post is not deleted.',
+      'Remove this photo?',
+      'Choose what should happen to this photo.',
       [
-        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Hide',
+          text: 'Delete everywhere',
           style: 'destructive',
+          onPress: () => {
+            // Destructive second confirmation — this removes the whole post
+            // from the entire app, not just this club.
+            Alert.alert(
+              'Delete everywhere?',
+              'This permanently deletes the post for everyone — it disappears from this club, the poster’s profile, Home, and everywhere else. This cannot be undone.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete permanently',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await deleteClubPhotoEverywhere(photo.id);
+                      setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+                      invalidatePhotoQueries();
+                      show('Post deleted everywhere.');
+                    } catch {
+                      Alert.alert('Error', 'Could not delete the post. Try again.');
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+        {
+          text: 'Hide from this club',
           onPress: async () => {
             try {
-              await deleteClubPhoto(photo.id);
+              await hideClubPhoto(photo.id);
               setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+              invalidatePhotoQueries();
+              show('Photo hidden from this club.');
             } catch {
               Alert.alert('Error', 'Could not hide photo. Try again.');
             }
           },
         },
+        { text: 'Cancel', style: 'cancel' },
       ],
     );
+  }
+
+  function handleDeleteEvent(event: ClubUpcomingEvent) {
+    Alert.alert(
+      'Delete this event?',
+      `"${event.title}" will be permanently removed for everyone — club profile, Home, Calendar, Weekly Events, and all RSVPs.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteEvent(userId, event.id);
+              setEvents((prev) => prev.filter((e) => e.id !== event.id));
+              // Ghost-event prevention: every cache that lists events refetches.
+              invalidateClubDataEverywhere(queryClient);
+              queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
+              queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
+              queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
+              show('Event deleted.');
+            } catch {
+              Alert.alert('Error', 'Could not delete the event. Try again.');
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  async function handleAddOfficer(user: UniversityUser, roleTitle: string) {
+    await addOfficer(clubId!, user.id, roleTitle);
+    // The RPC + DB triggers handle membership, both group chats, and all
+    // three notifications; refetch everything that displays officer state.
+    queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId] });
+    queryClient.invalidateQueries({ queryKey: ['clubMembers'] });
+    queryClient.invalidateQueries({ queryKey: ['myChats'] });
+    queryClient.invalidateQueries({ queryKey: ['officerClubs'] });
+    queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+    setOfficers((prev) => {
+      if (prev.some((o) => o.user_id === user.id)) {
+        return prev.map((o) =>
+          o.user_id === user.id ? { ...o, role_title: roleTitle } : o,
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: `pending-${user.id}`,
+          user_id: user.id,
+          display_name: user.full_name || user.username,
+          role_title: roleTitle,
+          avatar_url: user.avatar_url,
+        },
+      ];
+    });
+    show(`${user.full_name || user.username} is now ${roleTitle}! 🎉`);
   }
 
   if (isLoading) {
@@ -730,34 +983,14 @@ export default function EditClubScreen() {
           </Text>
         </TouchableOpacity>
 
-        {/* ── Meeting Schedule ───────────────────────────── */}
+        {/* ── Meeting Schedule — multiple days, per-day times via the
+            scroll-style time picker; one shared Building/Room ───────── */}
         <SectionTitle title="Meeting Schedule" />
-        <View style={{ marginBottom: 12 }}>
-          <Text style={{ fontSize: 13, color: '#374151', fontFamily: 'Inter_500Medium', marginBottom: 6 }}>
-            Day
-          </Text>
-          <DayPicker value={meetingDay} onChange={(v) => { setMeetingDay(v); markDirty(); }} />
-        </View>
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-          <View style={{ flex: 1 }}>
-            <InputField
-              label="Start Time (HH:MM)"
-              value={meetingTimeStart}
-              onChangeText={(v) => { setMeetingTimeStart(v); markDirty(); }}
-              placeholder="09:00"
-              maxLength={5}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <InputField
-              label="End Time (HH:MM)"
-              value={meetingTimeEnd}
-              onChangeText={(v) => { setMeetingTimeEnd(v); markDirty(); }}
-              placeholder="10:00"
-              maxLength={5}
-            />
-          </View>
-        </View>
+        <ScheduleEditor
+          schedule={schedule}
+          onChange={(next) => { setSchedule(next); markDirty(); }}
+        />
+        <View style={{ height: 6 }} />
         <InputField
           label="Building"
           value={meetingBuilding}
@@ -804,28 +1037,21 @@ export default function EditClubScreen() {
                 <TouchableOpacity
                   onPress={() =>
                     router.push({
-                      pathname: '/(tabs)/clubs/[clubId]/events/[eventId]',
-                      params: { clubId: clubId!, eventId: event.id },
-                    })
+                      pathname: '/home/new-event',
+                      params: { editEventId: event.id },
+                    } as any)
                   }
                   activeOpacity={0.7}
                   style={{ padding: 6 }}
+                  accessibilityLabel={`Edit ${event.title}`}
                 >
                   <Ionicons name="pencil-outline" size={18} color="#6B7280" />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => {
-                    Alert.alert('Delete Event?', 'This will permanently delete the event.', [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Delete',
-                        style: 'destructive',
-                        onPress: () => setEvents((prev) => prev.filter((e) => e.id !== event.id)),
-                      },
-                    ]);
-                  }}
+                  onPress={() => handleDeleteEvent(event)}
                   activeOpacity={0.7}
                   style={{ padding: 6 }}
+                  accessibilityLabel={`Delete ${event.title}`}
                 >
                   <Ionicons name="trash-outline" size={18} color="#F02719" />
                 </TouchableOpacity>
@@ -852,7 +1078,7 @@ export default function EditClubScreen() {
                     resizeMode="cover"
                   />
                   <TouchableOpacity
-                    onPress={() => handleHidePhoto(photo)}
+                    onPress={() => handlePhotoOptions(photo)}
                     activeOpacity={0.8}
                     style={{
                       position: 'absolute',
@@ -927,9 +1153,9 @@ export default function EditClubScreen() {
           </View>
         ))}
 
-        {/* Add Officer button */}
+        {/* Add Officer button — opens the real assignment flow */}
         <TouchableOpacity
-          onPress={() => show('Add officer — select from members list', 'info')}
+          onPress={() => setAddOfficerVisible(true)}
           activeOpacity={0.8}
           style={{
             flexDirection: 'row',
@@ -950,6 +1176,14 @@ export default function EditClubScreen() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <AddOfficerSheet
+        visible={addOfficerVisible}
+        viewerUserId={userId}
+        existingOfficerIds={officers.map((o) => o.user_id).filter(Boolean) as string[]}
+        onAdd={handleAddOfficer}
+        onClose={() => setAddOfficerVisible(false)}
+      />
     </SafeAreaView>
   );
 }

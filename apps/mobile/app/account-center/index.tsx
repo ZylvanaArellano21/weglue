@@ -21,6 +21,7 @@ import {
   useUsernameAvailability,
 } from '../../hooks/useAccountCenter';
 import { useOwnProfile } from '../../hooks/useOwnProfile';
+import { SUPPORT_EMAIL } from '../../lib/support';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { ProfileConfirmationModal } from '../../components/profile/ProfileConfirmationModal';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
@@ -159,6 +160,9 @@ export default function AccountCenterScreen() {
   const handleFinalDelete = async () => {
     try {
       await executeDeletion();
+      // Data + auth record are gone and the local session is cleared —
+      // land on the welcome screen with a clean slate.
+      router.replace('/welcome');
     } catch {
       // deletionError surfaced below
     }
@@ -311,7 +315,7 @@ export default function AccountCenterScreen() {
 
         {deletionError && (
           <Text style={styles.feedbackError}>
-            Could not delete account. Please try again or contact support@weglue.app.
+            {`Could not delete account. Please try again or contact ${SUPPORT_EMAIL}.`}
           </Text>
         )}
 

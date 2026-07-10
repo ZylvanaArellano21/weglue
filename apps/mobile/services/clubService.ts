@@ -63,6 +63,28 @@ export interface ClubPhoto {
   url: string;
   source: 'officer_upload' | 'tagged_post';
   post_id: string | null;
+  caption: string | null;
+  created_at: string;
+}
+
+// One source of truth for every Photos that Glue surface (club profile
+// preview, Edit Club, See all grid, full viewer): visible photos of this
+// club, newest first, tagged rows only while their post still exists.
+// A photo hidden by an officer (is_visible=false) is filtered by RLS AND
+// by this predicate — it can never leak into any of those screens.
+const CLUB_PHOTOS_SELECT = 'id, url, source, post_id, caption, created_at';
+
+export async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
+  const { data, error } = await supabase
+    .from('club_photos')
+    .select(CLUB_PHOTOS_SELECT)
+    .eq('club_id', clubId)
+    .eq('is_visible', true)
+    .or('source.eq.officer_upload,post_id.not.is.null')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as ClubPhoto[];
 }
 
 export interface ClubGluemate {
@@ -84,6 +106,8 @@ export interface ClubProfileData {
   meeting_location: string | null;
   meeting_building: string | null;
   meeting_room: string | null;
+  /** JSONB array of { day, start, end } — multi-day schedule. */
+  meeting_schedule: { day: string; start: string | null; end: string | null }[] | null;
   member_count: number;
   is_member: boolean;
   goals: ClubGoal[];
@@ -111,7 +135,7 @@ export async function getClubProfile(
   ] = await Promise.all([
     supabase
       .from('clubs')
-      .select('id, name, handle, description, avatar_url, banner_url, meeting_day, meeting_time_start, meeting_time_end, meeting_location, meeting_building, meeting_room')
+      .select('id, name, handle, description, avatar_url, banner_url, meeting_day, meeting_time_start, meeting_time_end, meeting_location, meeting_building, meeting_room, meeting_schedule')
       .eq('id', clubId)
       .single(),
     supabase
@@ -143,10 +167,11 @@ export async function getClubProfile(
       .order('event_date', { ascending: true }),
     supabase
       .from('club_photos')
-      .select('id, url, source, post_id')
+      .select(CLUB_PHOTOS_SELECT)
       .eq('club_id', clubId)
-      .order('created_at', { ascending: false })
-      .limit(9),
+      .eq('is_visible', true)
+      .or('source.eq.officer_upload,post_id.not.is.null')
+      .order('created_at', { ascending: false }),
     getClubGluemates(clubId, userId),
   ]);
 
@@ -188,6 +213,7 @@ export async function getClubProfile(
     meeting_location: club.meeting_location,
     meeting_building: club.meeting_building,
     meeting_room: club.meeting_room,
+    meeting_schedule: (club as any).meeting_schedule ?? null,
     member_count: memberCount ?? 0,
     is_member: !!membership,
     goals: (goals ?? []) as ClubGoal[],
@@ -333,6 +359,7 @@ export interface UpdateClubInput {
   meeting_location?: string | null;
   meeting_building?: string | null;
   meeting_room?: string | null;
+  meeting_schedule?: { day: string; start: string | null; end: string | null }[] | null;
 }
 
 export async function updateClubProfile(
@@ -365,41 +392,23 @@ export async function updateClubGoals(clubId: string, goalTexts: string[]): Prom
   if (insertError) throw insertError;
 }
 
+// Adds (or promotes) an officer through the add_club_officer RPC — atomic,
+// permission-checked server-side, idempotent, and it makes the DB triggers
+// handle member+officer group chat adds and the three notifications
+// ("members group chat", "officers group chat", "added as [Role]").
+// The old client-side upsert path silently failed: club_members had no
+// UPDATE policy, so promoting an existing member updated zero rows.
 export async function addOfficer(
   clubId: string,
   userId: string,
   roleTitle: string,
-  displayName: string,
 ): Promise<void> {
-  // Elevate to officer in club_members
-  const { error: memberError } = await supabase
-    .from('club_members')
-    .upsert(
-      { club_id: clubId, user_id: userId, role: 'officer' },
-      { onConflict: 'club_id,user_id' },
-    );
-
-  if (memberError) throw memberError;
-
-  // Upsert into club_officers for display
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('avatar_url')
-    .eq('id', userId)
-    .single();
-
-  const { error: officerError } = await supabase.from('club_officers').upsert(
-    {
-      club_id: clubId,
-      user_id: userId,
-      role_title: roleTitle,
-      display_name: displayName,
-      avatar_url: profile?.avatar_url ?? null,
-    },
-    { onConflict: 'club_id,user_id' },
-  );
-
-  if (officerError) throw officerError;
+  const { error } = await supabase.rpc('add_club_officer', {
+    p_club_id: clubId,
+    p_user_id: userId,
+    p_role_title: roleTitle.trim(),
+  });
+  if (error) throw error;
 }
 
 export async function removeOfficer(clubId: string, userId: string): Promise<void> {
@@ -471,11 +480,59 @@ export async function searchAllUsers(query: string): Promise<AppUser[]> {
   return (data ?? []) as AppUser[];
 }
 
-export async function deleteClubPhoto(photoId: string): Promise<void> {
+export interface UniversityUser extends AppUser {
+  university: string | null;
+}
+
+// Officer assignment search: only people from the caller's own university
+// can be picked (clubs are university-scoped communities).
+export async function searchUniversityUsers(
+  viewerUserId: string,
+  query: string,
+): Promise<UniversityUser[]> {
+  const { data: me } = await supabase
+    .from('profiles')
+    .select('university')
+    .eq('id', viewerUserId)
+    .maybeSingle();
+
+  const myUniversity = (me as { university?: string | null } | null)?.university ?? null;
+
+  const q = query.trim();
+  let req = supabase
+    .from('profiles')
+    .select('id, username, full_name, avatar_url, university')
+    .neq('id', viewerUserId)
+    .order('username')
+    .limit(30);
+
+  if (myUniversity) req = req.eq('university', myUniversity);
+  if (q) req = req.or(`username.ilike.%${q}%,full_name.ilike.%${q}%`);
+
+  const { data, error } = await req;
+  if (error) throw error;
+  return (data ?? []) as UniversityUser[];
+}
+
+// "Hide from this club": the photo disappears from this club's Photos that
+// Glue only. The underlying post stays on the poster's profile, Home, and
+// every other surface. Durable (is_visible=false in Supabase) and respected
+// by every club photo query via the shared is_visible filter.
+export async function hideClubPhoto(photoId: string): Promise<void> {
   const { error } = await supabase
     .from('club_photos')
     .update({ is_visible: false })
     .eq('id', photoId);
 
+  if (error) throw error;
+}
+
+// "Delete everywhere": removes the entire post from the whole app (club
+// profile, poster's profile, Home, galleries, share messages) via the
+// officer-checked SECURITY DEFINER RPC. Destructive and irreversible.
+export async function deleteClubPhotoEverywhere(photoId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_club_photo_everywhere', {
+    p_photo_id: photoId,
+  });
   if (error) throw error;
 }

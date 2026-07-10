@@ -338,6 +338,124 @@ export async function createEvent(
   return event.id;
 }
 
+// ─── Raw event row for the edit form ─────────────────────────────────────────
+
+export interface EventForEdit {
+  id: string;
+  club_id: string;
+  club_name: string;
+  title: string;
+  emoji: string | null;
+  description: string | null;
+  cover_image_url: string | null;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  location: string | null;
+  building: string | null;
+  room: string | null;
+  visibility: 'everyone' | 'members' | 'specific';
+  specific_user_ids: string[];
+}
+
+export async function getEventForEdit(eventId: string): Promise<EventForEdit | null> {
+  const { data, error } = await supabase
+    .from('events')
+    .select(`
+      id, club_id, title, emoji, description, cover_image_url, event_date,
+      start_time, end_time, location, building, room, visibility, specific_user_ids,
+      clubs!inner(name)
+    `)
+    .eq('id', eventId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const e = data as any;
+  return {
+    id: e.id,
+    club_id: e.club_id,
+    club_name: e.clubs?.name ?? '',
+    title: e.title,
+    emoji: e.emoji,
+    description: e.description,
+    cover_image_url: e.cover_image_url,
+    event_date: e.event_date,
+    start_time: e.start_time,
+    end_time: e.end_time,
+    location: e.location,
+    building: e.building,
+    room: e.room,
+    visibility: (e.visibility ?? 'everyone') as 'everyone' | 'members' | 'specific',
+    specific_user_ids: e.specific_user_ids ?? [],
+  };
+}
+
+// ─── Update / Delete (officers only — also enforced by events RLS) ───────────
+
+export interface UpdateEventInput {
+  title?: string;
+  emoji?: string | null;
+  description?: string | null;
+  cover_image_url?: string | null;
+  event_date?: string;
+  start_time?: string;
+  end_time?: string;
+  location?: string | null;
+  building?: string | null;
+  room?: string | null;
+  visibility?: 'everyone' | 'members' | 'specific';
+  specific_user_ids?: string[] | null;
+}
+
+export async function updateEvent(
+  userId: string,
+  eventId: string,
+  updates: UpdateEventInput,
+): Promise<void> {
+  const { data: eventRow } = await supabase
+    .from('events')
+    .select('club_id')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (!eventRow) throw new Error('Event not found');
+
+  const { data: officerCheck } = await supabase
+    .from('club_members')
+    .select('id')
+    .eq('club_id', (eventRow as any).club_id)
+    .eq('user_id', userId)
+    .eq('role', 'officer')
+    .maybeSingle();
+  if (!officerCheck) throw new Error('Only club officers can edit events');
+
+  const { error } = await supabase.from('events').update(updates).eq('id', eventId);
+  if (error) throw error;
+}
+
+// Permanent delete. FK cascades remove RSVPs, saved-event rows, tags, and
+// share messages so no ghost events survive anywhere (Home, Calendar,
+// Weekly Events, club profile, other users' saved/RSVP lists).
+export async function deleteEvent(userId: string, eventId: string): Promise<void> {
+  const { data: eventRow } = await supabase
+    .from('events')
+    .select('club_id')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (!eventRow) return; // already gone — nothing to do
+
+  const { data: officerCheck } = await supabase
+    .from('club_members')
+    .select('id')
+    .eq('club_id', (eventRow as any).club_id)
+    .eq('user_id', userId)
+    .eq('role', 'officer')
+    .maybeSingle();
+  if (!officerCheck) throw new Error('Only club officers can delete events');
+
+  const { error } = await supabase.from('events').delete().eq('id', eventId);
+  if (error) throw error;
+}
+
 // ─── Event Detail ────────────────────────────────────────────────────────────
 
 export interface EventDetail {

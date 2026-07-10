@@ -356,6 +356,108 @@ export async function getUserPostsFeed(
   }));
 }
 
+// ─── Batch post lookup (club Photos that Glue viewer) ─────────────────────────
+//
+// Full FeedPost objects for an arbitrary id set, with the viewer's like/follow
+// state resolved — the club photo viewer renders these with the exact same
+// post block design as the profile post viewer. Posts deleted since the ids
+// were collected simply come back missing; callers drop them.
+export async function getPostsByIds(
+  viewerUserId: string,
+  postIds: string[],
+): Promise<Map<string, FeedPost>> {
+  const result = new Map<string, FeedPost>();
+  if (postIds.length === 0) return result;
+
+  const { data: rawPosts, error } = await supabase
+    .from('posts')
+    .select(`
+      id, image_url, caption, created_at, author_id, club_id,
+      profiles!inner(id, username, avatar_url),
+      clubs(id, name)
+    `)
+    .in('id', postIds);
+
+  if (error || !rawPosts || rawPosts.length === 0) return result;
+
+  const foundIds = (rawPosts as any[]).map((p) => p.id);
+  const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
+
+  const [
+    { data: likesRows },
+    { data: commentsRows },
+    { data: myFollows },
+    { data: followerRows },
+    { data: privacyRows },
+    { data: extraTagRows },
+  ] = await Promise.all([
+    supabase.from('post_likes').select('post_id, user_id').in('post_id', foundIds),
+    supabase.from('post_comments').select('post_id').in('post_id', foundIds),
+    supabase
+      .from('follows')
+      .select('following_id, status')
+      .eq('follower_id', viewerUserId)
+      .in('following_id', authorIds),
+    supabase
+      .from('follows')
+      .select('follower_id')
+      .eq('following_id', viewerUserId)
+      .eq('status', 'accepted')
+      .in('follower_id', authorIds),
+    supabase.from('user_privacy').select('user_id, is_private').in('user_id', authorIds),
+    supabase
+      .from('post_club_tags')
+      .select('post_id, club_id, clubs(id, name)')
+      .in('post_id', foundIds),
+  ]);
+
+  const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
+
+  const likesCountMap = new Map<string, number>();
+  const userLikedSet = new Set<string>();
+  for (const like of (likesRows as any[]) ?? []) {
+    likesCountMap.set(like.post_id, (likesCountMap.get(like.post_id) ?? 0) + 1);
+    if (like.user_id === viewerUserId) userLikedSet.add(like.post_id);
+  }
+
+  const commentsCountMap = new Map<string, number>();
+  for (const comment of (commentsRows as any[]) ?? []) {
+    commentsCountMap.set(comment.post_id, (commentsCountMap.get(comment.post_id) ?? 0) + 1);
+  }
+
+  const followingMap = new Map(
+    ((myFollows as any[]) ?? []).map((f) => [f.following_id, f.status as string]),
+  );
+  const followerSet = new Set(((followerRows as any[]) ?? []).map((f) => f.follower_id));
+  const privacyMap = new Map<string, boolean>(
+    ((privacyRows as any[]) ?? []).map((r) => [r.user_id, r.is_private]),
+  );
+
+  for (const p of rawPosts as any[]) {
+    result.set(p.id, {
+      id: p.id,
+      image_url: p.image_url,
+      caption: p.caption,
+      created_at: p.created_at,
+      author: {
+        id: p.profiles.id,
+        username: p.profiles.username,
+        avatar_url: p.profiles.avatar_url,
+        is_following: followingMap.get(p.author_id) === 'accepted',
+        is_requested: followingMap.get(p.author_id) === 'pending',
+        follows_me: followerSet.has(p.author_id),
+        profile_is_private: privacyMap.get(p.author_id) ?? false,
+      },
+      tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
+      likes_count: likesCountMap.get(p.id) ?? 0,
+      comments_count: commentsCountMap.get(p.id) ?? 0,
+      user_has_liked: userLikedSet.has(p.id),
+    });
+  }
+
+  return result;
+}
+
 // ─── Edit own post caption (RLS also enforces author-only updates) ───────────
 
 export async function updatePostCaption(

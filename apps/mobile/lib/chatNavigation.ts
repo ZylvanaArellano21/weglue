@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { getOrCreateDirectChat, getClubGroupConversationId, getClubOfficerConversationId } from '../services/chatService';
+import { getOrCreateDirectChat, getClubChatTarget } from '../services/chatService';
 
 // Module-level map persists across navigations within an app session.
 // Tracks the last channel the user was in per conversation.
@@ -21,14 +21,34 @@ export interface ChatPreviewParams {
   clubId?: string | null;
   name?: string | null;
   avatarUrl?: string | null;
+  /** When known, group chats push straight into this channel thread. */
+  defaultChannelId?: string | null;
 }
 
 /**
  * Opens a chat by conversation id.
- * Group chats: auto-navigate to last-visited or default channel (bypasses channel picker).
- * Direct chats: navigates directly to the DM thread.
+ * Group chats with a known channel: ONE push straight into the thread — the
+ * old push-then-replace redirect rendered an intermediate screen and slid two
+ * chat screens side by side (the double-chat flicker).
+ * Direct chats / unknown channel: the conversation screen resolves it.
  */
 export function openChat(chatId: string, preview?: ChatPreviewParams): void {
+  const isGroup = preview?.type === 'club_group' || preview?.type === 'officer_chat';
+  const channelId = isGroup
+    ? getLastVisitedChannel(chatId) ?? preview?.defaultChannelId ?? null
+    : null;
+
+  if (isGroup && channelId) {
+    router.push({
+      pathname: `/(tabs)/messages/${chatId}/${channelId}`,
+      params: {
+        pname: preview?.name ?? '',
+        pavatar: preview?.avatarUrl ?? '',
+      },
+    } as any);
+    return;
+  }
+
   router.push({
     pathname: `/(tabs)/messages/${chatId}`,
     params: {
@@ -50,21 +70,50 @@ export async function openDirectChatWith(otherUserId: string): Promise<void> {
 }
 
 /**
- * Opens the club_group conversation for a given club.
+ * Opens the club_group conversation for a given club — resolves the exact
+ * conversation + channel first so exactly one screen is pushed (back returns
+ * straight to the club profile) and the correct chat renders immediately.
  */
 export async function openClubChat(clubId: string): Promise<void> {
-  const conversationId = await getClubGroupConversationId(clubId);
-  if (!conversationId) return;
-  router.push(`/(tabs)/messages/${conversationId}` as any);
+  await openClubConversation(clubId, 'club_group');
 }
 
 /**
  * Opens the officer_chat conversation for a given club.
  */
 export async function openOfficerChat(clubId: string): Promise<void> {
-  const conversationId = await getClubOfficerConversationId(clubId);
-  if (!conversationId) return;
-  router.push(`/(tabs)/messages/${conversationId}` as any);
+  await openClubConversation(clubId, 'officer_chat');
+}
+
+async function openClubConversation(
+  clubId: string,
+  type: 'club_group' | 'officer_chat',
+): Promise<void> {
+  const target = await getClubChatTarget(clubId, type);
+  if (!target) return;
+
+  const channelId = getLastVisitedChannel(target.conversationId) ?? target.channelId;
+
+  if (channelId) {
+    router.push({
+      pathname: `/(tabs)/messages/${target.conversationId}/${channelId}`,
+      params: {
+        pname: target.name ?? '',
+        pavatar: target.avatarUrl ?? '',
+      },
+    } as any);
+    return;
+  }
+
+  router.push({
+    pathname: `/(tabs)/messages/${target.conversationId}`,
+    params: {
+      ptype: type,
+      pclub: clubId,
+      pname: target.name ?? '',
+      pavatar: target.avatarUrl ?? '',
+    },
+  } as any);
 }
 
 /**

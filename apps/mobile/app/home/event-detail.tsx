@@ -19,6 +19,7 @@ import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { LeaveClubModals } from '../../components/club/LeaveClubModals';
 import { ShareSheet } from '../../components/shared/ShareSheet';
+import { openReportFlow } from '../../components/shared/ReportButton';
 import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
 
 function formatDate(dateStr: string): string {
@@ -220,19 +221,39 @@ export default function EventDetailScreen() {
           </View>
 
           <View style={{ paddingHorizontal: 16, paddingTop: 18 }}>
-            {/* Title */}
-            <Text
-              style={{
-                fontSize: 24,
-                fontWeight: '800',
-                color: '#111827',
-                fontFamily: 'Zain_800ExtraBold',
-                marginBottom: 18,
-                lineHeight: 30,
-              }}
-            >
-              {event.emoji ? `${event.emoji} ` : ''}{event.title}
-            </Text>
+            {/* Title + report menu — the ⋯ sits beside the title, never over
+                the hero image or action buttons */}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 18 }}>
+              <Text
+                style={{
+                  flex: 1,
+                  fontSize: 24,
+                  fontWeight: '800',
+                  color: '#111827',
+                  fontFamily: 'Zain_800ExtraBold',
+                  lineHeight: 30,
+                }}
+              >
+                {event.emoji ? `${event.emoji} ` : ''}{event.title}
+              </Text>
+              <TouchableOpacity
+                onPress={() =>
+                  openReportFlow({
+                    entityType: 'event',
+                    entityId: event.id,
+                    entityName: event.title,
+                    clubId: event.club_id,
+                  })
+                }
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ paddingTop: 6 }}
+                accessibilityRole="button"
+                accessibilityLabel="Report this event"
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
 
             {/* Date & Time + Location card */}
             <View
