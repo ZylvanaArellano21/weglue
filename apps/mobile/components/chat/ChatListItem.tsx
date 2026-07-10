@@ -36,7 +36,11 @@ function lastMessagePreview(chat: ChatPreview): string {
 
 export function ChatListItem({ chat, onPress, channelTags = [] }: Props) {
   const isGroup = chat.type !== 'direct';
-  const displayName = chat.name ?? 'Unknown Chat';
+  // chat.name is live-resolved by chatService (other participant's display
+  // name for DMs, current club name for club chats, "Deleted account" when
+  // the other account is gone) — a missing name here means resolution
+  // itself failed, so fall back to a neutral label, never "Unknown Chat".
+  const displayName = chat.name ?? 'Conversation';
   const preset = parsePresetColor(chat.avatar_url);
 
   return (

@@ -77,7 +77,10 @@ export default function NotificationsScreen() {
     if (
       (item.type === 'club_chat_added' ||
         item.type === 'officer_chat_added' ||
-        item.type === 'officer_role') &&
+        item.type === 'officer_role' ||
+        item.type === 'officer_removed' ||
+        item.type === 'club_joined' ||
+        item.type === 'member_joined') &&
       item.reference_id
     ) {
       router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: item.reference_id } });

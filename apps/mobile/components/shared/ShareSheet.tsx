@@ -86,7 +86,7 @@ export function ShareSheet({ visible, onClose, userId, contentType, contentId, o
     if (!userId || sending) return;
     sendToUser(otherUserId, {
       onSuccess: () => {
-        onShowToast(`Sent to @${username}`);
+        onShowToast(`Sent to ${username}`);
         handleClose();
       },
       onError: () => onShowToast('Failed to send. Try again.', 'error'),
@@ -151,14 +151,14 @@ export function ShareSheet({ visible, onClose, userId, contentType, contentId, o
                   style={styles.personRow}
                   activeOpacity={0.7}
                   disabled={sending}
-                  onPress={() => handleSendToUser(item.user_id, item.username)}
+                  onPress={() => handleSendToUser(item.user_id, item.full_name?.trim() || item.username)}
                 >
-                  <Avatar uri={item.avatar_url} size={44} username={item.username} />
+                  <Avatar uri={item.avatar_url} size={44} username={item.full_name?.trim() || item.username} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.personName} numberOfLines={1}>
-                      @{item.username}
+                      {item.full_name?.trim() || item.username}
                     </Text>
-                    <Text style={styles.personHint}>Tap to send</Text>
+                    <Text style={styles.personHint}>@{item.username} · Tap to send</Text>
                   </View>
                   <View style={styles.sendCircle}>
                     <Ionicons name="paper-plane" size={16} color="#0FA6A6" />

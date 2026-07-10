@@ -15,13 +15,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useClubProfile } from '../../../../hooks/useClubProfile';
 import { useJoinClubMutation } from '../../../../hooks/useClubMembership';
-import { useLeaveClubFlow } from '../../../../hooks/useLeaveClubFlow';
 import { useOfficerStore } from '../../../../store/officerStore';
 import { Avatar } from '../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
-import { LeaveClubModals } from '../../../../components/club/LeaveClubModals';
+import { requestLeaveClub } from '../../../../store/leaveClubStore';
 import { ReportButton } from '../../../../components/shared/ReportButton';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
@@ -486,13 +485,8 @@ export default function ClubProfileScreen() {
 
   const { data: club, isLoading, isError, refetch } = useClubProfile(clubId, userId);
   const { mutate: join, isPending: joining } = useJoinClubMutation(userId);
-  const {
-    target: leaveTarget,
-    isPending: leaving,
-    requestLeave,
-    cancel: cancelLeave,
-    confirm: confirmLeave,
-  } = useLeaveClubFlow(userId, show);
+  // App-wide leave flow (LeaveClubHost in the root layout): eligibility is
+  // checked server-side before exactly one modal mounts.
 
   // Pull-to-refresh state kept separate from first-load state so a background
   // refetch never swaps rendered content back to skeletons.
@@ -510,7 +504,7 @@ export default function ClubProfileScreen() {
 
   const handleJoinLeave = () => {
     if (club?.is_member && clubId) {
-      void requestLeave(clubId, club.name);
+      requestLeaveClub({ clubId, clubName: club.name, onLeft: () => router.back() });
     } else if (clubId) {
       join(clubId, {
         onSuccess: () => show(`Joined ${club?.name ?? 'club'}! 🎉`),
@@ -719,7 +713,7 @@ export default function ClubProfileScreen() {
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: isOfficer ? 10 : 0 }}>
             <TouchableOpacity
               onPress={handleJoinLeave}
-              disabled={joining || leaving}
+              disabled={joining}
               activeOpacity={0.85}
               style={{
                 flex: 1,
@@ -730,7 +724,7 @@ export default function ClubProfileScreen() {
                 borderColor: TEAL,
                 alignItems: 'center',
                 justifyContent: 'center',
-                opacity: joining || leaving ? 0.65 : 1,
+                opacity: joining ? 0.65 : 1,
               }}
             >
               <Text
@@ -1027,12 +1021,6 @@ export default function ClubProfileScreen() {
         )}
       </ScrollView>
 
-      <LeaveClubModals
-        target={leaveTarget}
-        loading={leaving}
-        onConfirm={() => confirmLeave(() => router.back())}
-        onCancel={cancelLeave}
-      />
     </SafeAreaView>
   );
 }

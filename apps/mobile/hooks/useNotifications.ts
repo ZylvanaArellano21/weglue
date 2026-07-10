@@ -45,14 +45,21 @@ export function useRealtimeNotifications(userId: string | undefined) {
           if (
             type === 'club_chat_added' ||
             type === 'officer_chat_added' ||
-            type === 'officer_role'
+            type === 'officer_role' ||
+            type === 'officer_removed' ||
+            type === 'club_joined'
           ) {
-            // Membership/officer change: group chats appear in Messages and
-            // officer-gated UI unlocks in under a second, app-wide.
+            // Membership/officer change: group chats appear/disappear in
+            // Messages, officer-gated UI unlocks or revokes, and the role
+            // badge on profiles updates in under a second, app-wide —
+            // including on the affected user's own device.
             queryClient.invalidateQueries({ queryKey: ['myChats'] });
+            queryClient.invalidateQueries({ queryKey: ['chatDetails'] });
             queryClient.invalidateQueries({ queryKey: ['myClubs'] });
             queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
             queryClient.invalidateQueries({ queryKey: ['officerClubs'] });
+            queryClient.invalidateQueries({ queryKey: ['ownProfile'] });
+            queryClient.invalidateQueries({ queryKey: ['userProfile'] });
             void refreshOfficerStatus(userId);
           }
         },

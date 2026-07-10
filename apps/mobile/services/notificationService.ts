@@ -28,7 +28,10 @@ export interface AppNotification {
     | 'club_inactive'
     | 'club_chat_added'
     | 'officer_chat_added'
-    | 'officer_role';
+    | 'officer_role'
+    | 'officer_removed'
+    | 'club_joined'
+    | 'member_joined';
   sender: NotificationSender | null;
   reference_id: string | null;
   entity_type: 'event' | 'club' | 'message' | 'post' | null;

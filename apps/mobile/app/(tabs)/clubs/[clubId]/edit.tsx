@@ -30,7 +30,7 @@ import {
   updateClubGoals,
   addOfficer,
   removeOfficer,
-  hideClubPhoto,
+  removePostFromClub,
   deleteClubPhotoEverywhere,
   type UpdateClubInput,
   type UniversityUser,
@@ -505,6 +505,7 @@ export default function EditClubScreen() {
   const [officers, setOfficers] = useState<ClubOfficer[]>([]);
   const [photos, setPhotos] = useState<ClubPhoto[]>([]);
   const [events, setEvents] = useState<ClubUpcomingEvent[]>([]);
+  const [pastEvents, setPastEvents] = useState<ClubUpcomingEvent[]>([]);
   const [addOfficerVisible, setAddOfficerVisible] = useState(false);
 
   const [uploadingBanner, setUploadingBanner] = useState(false);
@@ -534,6 +535,7 @@ export default function EditClubScreen() {
     setOfficers(club.officers);
     setPhotos(club.photos);
     setEvents(club.upcoming_events);
+    setPastEvents(club.past_events);
   }, [club?.id]);
 
   // Guard: non-officers cannot access
@@ -671,13 +673,18 @@ export default function EditClubScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              // remove_club_officer RPC: atomic demotion + display-row delete
+              // + Officers-chat revocation (trigger) + notification. Only
+              // update the UI after the server confirms.
               await removeOfficer(clubId!, officer.user_id!);
               setOfficers((prev) => prev.filter((o) => o.id !== officer.id));
-              // Demotion removes them from the officer chat (DB trigger) —
-              // refresh their chat list, officer state, and club displays.
               queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId] });
               queryClient.invalidateQueries({ queryKey: ['myChats'] });
+              queryClient.invalidateQueries({ queryKey: ['chatDetails'] });
               queryClient.invalidateQueries({ queryKey: ['officerClubs'] });
+              // The role badge on their personal profile reads club_officers.
+              queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+              queryClient.invalidateQueries({ queryKey: ['ownProfile'] });
             } catch {
               Alert.alert('Error', 'Could not remove officer. Try again.');
             }
@@ -696,56 +703,63 @@ export default function EditClubScreen() {
     queryClient.invalidateQueries({ queryKey: ['userPostsFeed'] });
     queryClient.invalidateQueries({ queryKey: ['userPosts'] });
     queryClient.invalidateQueries({ queryKey: ['ownPosts'] });
+    // Post detail + shared-message cards resolve the same post by id — the
+    // removed club tag must disappear from every rendering.
+    queryClient.invalidateQueries({ queryKey: ['postDetail'] });
   }
 
   function handlePhotoOptions(photo: ClubPhoto) {
+    const clubName = club?.name ?? 'this club';
+
+    if (photo.source === 'tagged_post' && photo.post_id) {
+      // A student's tagged post: officers remove it from THIS CLUB only.
+      // The post, caption, image, owner, likes, comments and shares stay
+      // everywhere else — only this club's tag disappears app-wide.
+      Alert.alert(
+        `Remove this post from ${clubName}?`,
+        `The post will remain on the creator’s profile and anywhere it was shared, but the ${clubName} tag will be removed.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove from club',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await removePostFromClub(photo.post_id!, clubId!);
+                setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+                invalidatePhotoQueries();
+                show(`Post removed from ${clubName}.`);
+              } catch {
+                Alert.alert('Error', 'Could not remove the post from this club. Try again.');
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    // Officer-uploaded photo: no post behind it — deleting removes only the
+    // club_photos row.
     Alert.alert(
       'Remove this photo?',
-      'Choose what should happen to this photo.',
+      `This photo will be removed from ${clubName}’s Photos that Glue.`,
       [
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete everywhere',
+          text: 'Remove photo',
           style: 'destructive',
-          onPress: () => {
-            // Destructive second confirmation — this removes the whole post
-            // from the entire app, not just this club.
-            Alert.alert(
-              'Delete everywhere?',
-              'This permanently deletes the post for everyone — it disappears from this club, the poster’s profile, Home, and everywhere else. This cannot be undone.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete permanently',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await deleteClubPhotoEverywhere(photo.id);
-                      setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
-                      invalidatePhotoQueries();
-                      show('Post deleted everywhere.');
-                    } catch {
-                      Alert.alert('Error', 'Could not delete the post. Try again.');
-                    }
-                  },
-                },
-              ],
-            );
-          },
-        },
-        {
-          text: 'Hide from this club',
           onPress: async () => {
             try {
-              await hideClubPhoto(photo.id);
+              await deleteClubPhotoEverywhere(photo.id);
               setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
               invalidatePhotoQueries();
-              show('Photo hidden from this club.');
+              show('Photo removed.');
             } catch {
-              Alert.alert('Error', 'Could not hide photo. Try again.');
+              Alert.alert('Error', 'Could not remove the photo. Try again.');
             }
           },
         },
-        { text: 'Cancel', style: 'cancel' },
       ],
     );
   }
@@ -753,7 +767,7 @@ export default function EditClubScreen() {
   function handleDeleteEvent(event: ClubUpcomingEvent) {
     Alert.alert(
       'Delete this event?',
-      `"${event.title}" will be permanently removed for everyone — club profile, Home, Calendar, Weekly Events, and all RSVPs.`,
+      `"${event.title}" will be permanently removed for everyone — club profile, Home, Calendar, Weekly Events, and all RSVPs. Chats where it was shared will show "This event is no longer available."`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -763,11 +777,15 @@ export default function EditClubScreen() {
             try {
               await deleteEvent(userId, event.id);
               setEvents((prev) => prev.filter((e) => e.id !== event.id));
+              setPastEvents((prev) => prev.filter((e) => e.id !== event.id));
               // Ghost-event prevention: every cache that lists events refetches.
               invalidateClubDataEverywhere(queryClient);
               queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
               queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
               queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
+              // Shared-event cards + any open detail screen re-resolve the id
+              // and render "This event is no longer available."
+              queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
               show('Event deleted.');
             } catch {
               Alert.alert('Error', 'Could not delete the event. Try again.');
@@ -1047,6 +1065,50 @@ export default function EditClubScreen() {
                 >
                   <Ionicons name="pencil-outline" size={18} color="#6B7280" />
                 </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => handleDeleteEvent(event)}
+                  activeOpacity={0.7}
+                  style={{ padding: 6 }}
+                  accessibilityLabel={`Delete ${event.title}`}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#F02719" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </>
+        )}
+
+        {/* ── Past Events — delete only (past events are history:
+            they can be removed, never edited) ─────────────── */}
+        {pastEvents.length > 0 && (
+          <>
+            <SectionTitle title="Past Events" />
+            {pastEvents.map((event) => (
+              <View
+                key={event.id}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: '#fff',
+                  borderRadius: 12,
+                  padding: 12,
+                  marginBottom: 8,
+                  gap: 10,
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.05,
+                  shadowRadius: 3,
+                  elevation: 1,
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>
+                    {event.emoji ? `${event.emoji} ` : ''}{event.title}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginTop: 2 }}>
+                    {event.event_date}
+                  </Text>
+                </View>
                 <TouchableOpacity
                   onPress={() => handleDeleteEvent(event)}
                   activeOpacity={0.7}

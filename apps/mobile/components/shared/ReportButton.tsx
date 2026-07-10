@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   submitReport,
   REPORT_SUCCESS_MESSAGE,
+  REPORT_RECEIVED_MESSAGE,
   type ReportEntityType,
 } from '../../services/reportService';
 
@@ -53,8 +54,15 @@ export function openReportFlow(options: {
           entityName: options.entityName ?? null,
           clubId: options.clubId ?? null,
         })
-          .then(() => {
-            Alert.alert('Report sent', REPORT_SUCCESS_MESSAGE);
+          .then((result) => {
+            // Truthful state: "sent" only when the support email actually
+            // went out; otherwise confirm receipt (the report row is stored
+            // and the email failure is recorded server-side for retry).
+            if (result.emailed) {
+              Alert.alert('Report sent', REPORT_SUCCESS_MESSAGE);
+            } else {
+              Alert.alert('Report received', REPORT_RECEIVED_MESSAGE);
+            }
           })
           .catch(() => {
             Alert.alert(

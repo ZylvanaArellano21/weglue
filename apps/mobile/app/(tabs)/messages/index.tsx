@@ -121,10 +121,14 @@ export default function MessagesIndex() {
                 onPress={() => handlePressUser(item.user_id)}
                 activeOpacity={0.7}
               >
-                <Avatar uri={item.avatar_url} size={chatSizes.avatarSuggested} username={item.username} />
+                <Avatar
+                  uri={item.avatar_url}
+                  size={chatSizes.avatarSuggested}
+                  username={item.full_name?.trim() || item.username}
+                />
                 <View style={styles.searchRowText}>
-                  <Text style={styles.searchName}>{item.username}</Text>
-                  {item.full_name && <Text style={styles.searchSub}>{item.full_name}</Text>}
+                  <Text style={styles.searchName}>{item.full_name?.trim() || item.username}</Text>
+                  <Text style={styles.searchSub}>@{item.username}</Text>
                 </View>
               </TouchableOpacity>
             );

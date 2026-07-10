@@ -55,7 +55,7 @@ export default function AddPeopleScreen() {
           keyExtractor={(item) => item.user_id}
           renderItem={({ item }) => (
             <SuggestedPersonRow
-              username={item.username}
+              username={item.full_name?.trim() || item.username}
               avatarUrl={item.avatar_url}
               onPress={async () => {
                 await openDirectChatWith(item.user_id);

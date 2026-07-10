@@ -20,6 +20,7 @@ import { getClubPollHistory } from '../../../../services/clubPollService';
 import { followUser, unfollowUser } from '../../../../services/followService';
 import { useQuery } from '@tanstack/react-query';
 import { useOfficerStore } from '../../../../store/officerStore';
+import { requestLeaveClub } from '../../../../store/leaveClubStore';
 import { supabase } from '../../../../lib/supabase';
 import type { ClubPoll } from '../../../../services/clubPollService';
 import {
@@ -87,12 +88,9 @@ export default function ChatInfo() {
     );
   }
 
-  const displayName =
-    chatDetails.name ??
-    (isDirect
-      ? chatDetails.participants.find((p) => p.user_id !== userId)?.username
-      : 'Group Chat') ??
-    'Chat';
+  // chatDetails.name is live-resolved by chatService (display name for DMs,
+  // current club name for club chats, "Deleted account" when gone).
+  const displayName = chatDetails.name ?? 'Chat';
 
   const tabs: ContentTab[] = isDirect
     ? ['photos', 'calendar', 'files']
@@ -104,16 +102,22 @@ export default function ChatInfo() {
     return winner.option_text;
   }
 
-  async function handleLeave() {
+  // Leaving from a club chat goes through the same centralized flow as
+  // every other surface: server-side eligibility (sole officer blocked),
+  // one modal, and the leave_club RPC — never a raw club_members delete.
+  function handleLeave() {
     const cid = chatDetails?.club_id;
     if (!cid) return;
-    await supabase
-      .from('club_members')
-      .delete()
-      .eq('club_id', cid)
-      .eq('user_id', userId);
-    router.back();
-    router.back();
+    setConfirmAction(null);
+    requestLeaveClub({
+      clubId: cid,
+      onLeft: () => {
+        // Pop info + the chat itself — the conversation is gone from the
+        // user's list once membership ends.
+        router.back();
+        router.back();
+      },
+    });
   }
 
   async function handleDelete() {
@@ -220,7 +224,7 @@ export default function ChatInfo() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionItem}
-            onPress={() => setConfirmAction(isDirect ? 'delete' : 'leave')}
+            onPress={() => (isDirect ? setConfirmAction('delete') : handleLeave())}
           >
             <Ionicons
               name={isDirect ? 'trash-outline' : 'exit-outline'}
@@ -312,15 +316,6 @@ export default function ChatInfo() {
         {renderContentGrid()}
       </ScrollView>
 
-      <ConfirmationModal
-        visible={confirmAction === 'leave'}
-        title={`Leave ${displayName}?`}
-        message={`Are you sure you want to leave ${displayName}?`}
-        confirmLabel="Leave"
-        destructive
-        onConfirm={handleLeave}
-        onCancel={() => setConfirmAction(null)}
-      />
       <ConfirmationModal
         visible={confirmAction === 'delete'}
         title={`Delete ${displayName}?`}

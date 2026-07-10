@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '@weglue/shared';
 import {
   getMyChats,
   getChatDetails,
@@ -22,10 +23,13 @@ export function useMyChats(userId: string | undefined) {
 }
 
 export function useChatDetails(conversationId: string | undefined) {
+  // Identity resolution (DM titles/avatars) is viewer-relative, so the
+  // current user id is part of the query.
+  const userId = useAuthStore((s) => s.session?.user.id);
   return useQuery({
-    queryKey: ['chatDetails', conversationId],
-    queryFn: () => timedQuery('chatDetails', getChatDetails(conversationId!)),
-    enabled: !!conversationId,
+    queryKey: ['chatDetails', conversationId, userId],
+    queryFn: () => timedQuery('chatDetails', getChatDetails(conversationId!, userId!)),
+    enabled: !!conversationId && !!userId,
     staleTime: 60 * 1000,
   });
 }

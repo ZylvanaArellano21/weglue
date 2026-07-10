@@ -411,22 +411,18 @@ export async function addOfficer(
   if (error) throw error;
 }
 
+// Removes an officer through the remove_club_officer RPC — atomic and
+// permission-checked server-side. One call downgrades club_members.role
+// (which revokes Officers-chat access via the role-change trigger), deletes
+// the club_officers display row (so the role disappears from the club AND
+// the person's profile together), and notifies the removed officer. The old
+// two-step client path could partially fail and leave a stale role visible.
 export async function removeOfficer(clubId: string, userId: string): Promise<void> {
-  // Downgrade to member
-  const { error: memberError } = await supabase
-    .from('club_members')
-    .update({ role: 'member' })
-    .eq('club_id', clubId)
-    .eq('user_id', userId);
-
-  if (memberError) throw memberError;
-
-  // Remove from club_officers display table
-  await supabase
-    .from('club_officers')
-    .delete()
-    .eq('club_id', clubId)
-    .eq('user_id', userId);
+  const { error } = await supabase.rpc('remove_club_officer', {
+    p_club_id: clubId,
+    p_user_id: userId,
+  });
+  if (error) throw error;
 }
 
 export async function deleteClub(clubId: string): Promise<void> {
@@ -527,9 +523,22 @@ export async function hideClubPhoto(photoId: string): Promise<void> {
   if (error) throw error;
 }
 
-// "Delete everywhere": removes the entire post from the whole app (club
-// profile, poster's profile, Home, galleries, share messages) via the
-// officer-checked SECURITY DEFINER RPC. Destructive and irreversible.
+// "Remove from club": strips ONLY this club's association from a tagged
+// post — posts.club_id / post_club_tags row / club_photos row — via the
+// officer-checked SECURITY DEFINER RPC. The post itself (caption, image,
+// owner, likes, comments, shares, Home, profile, DMs) is untouched; every
+// rendering of the post simply stops showing this club's tag. Tracked by
+// the post's stable id + the club relationship, never by image comparison.
+export async function removePostFromClub(postId: string, clubId: string): Promise<void> {
+  const { error } = await supabase.rpc('remove_post_from_club', {
+    p_post_id: postId,
+    p_club_id: clubId,
+  });
+  if (error) throw error;
+}
+
+// Deletes an officer-uploaded photo row (club_photos only — no post exists
+// behind it) via the officer-checked SECURITY DEFINER RPC.
 export async function deleteClubPhotoEverywhere(photoId: string): Promise<void> {
   const { error } = await supabase.rpc('delete_club_photo_everywhere', {
     p_photo_id: photoId,

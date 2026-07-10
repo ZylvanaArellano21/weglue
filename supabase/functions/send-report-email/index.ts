@@ -2,9 +2,12 @@
 //
 // Called by the mobile app right after a row is inserted into `reports`.
 // The report row is the source of truth — this email is a best-effort
-// notification on top of it. If RESEND_API_KEY isn't configured (or the
-// send fails), the function returns { sent: false } and the report stays
-// safely in the table with status 'pending'.
+// notification on top of it. The function is idempotent: a report whose
+// email already went out (email_sent_at set) is never re-sent, so rapid
+// repeated taps / client retries cannot produce duplicate emails. Send
+// failures are recorded on the row (email_error) so they can be retried
+// and audited, and the structured JSON result lets the app show a
+// truthful state instead of a false success.
 //
 // Env (Supabase function secrets):
 //   SUPPORT_EMAIL    — recipient (defaults to the configured support inbox)
@@ -55,12 +58,19 @@ Deno.serve(async (req) => {
 
   if (reportError || !report) return json({ error: "Report not found" }, 404);
 
+  // Idempotency: one email per report, ever. Retries and duplicate
+  // invocations return success without contacting Resend again.
+  if (report.email_sent_at) {
+    return json({ sent: true, deduped: true }, 200);
+  }
+
   const resendKey = Deno.env.get("RESEND_API_KEY");
   const supportEmail = Deno.env.get("SUPPORT_EMAIL") ?? DEFAULT_SUPPORT_EMAIL;
   const fromAddress = Deno.env.get("REPORTS_FROM") ?? "We Glue Reports <onboarding@resend.dev>";
 
   if (!resendKey) {
     console.warn("[send-report-email] RESEND_API_KEY not set — report stored, email skipped");
+    await recordEmailError(admin, reportId, "RESEND_API_KEY not configured");
     return json({ sent: false, reason: "email_not_configured" }, 200);
   }
 
@@ -99,16 +109,41 @@ Deno.serve(async (req) => {
     });
 
     if (!res.ok) {
-      console.error("[send-report-email] Resend error:", res.status, await res.text());
-      return json({ sent: false, reason: "email_failed" }, 200);
+      // Resend's error body has no secrets — safe to persist for retry/audit.
+      const errText = (await res.text()).slice(0, 500);
+      console.error("[send-report-email] Resend error:", res.status, errText);
+      await recordEmailError(admin, reportId, `Resend ${res.status}: ${errText}`);
+      return json(
+        { sent: false, reason: "email_failed", resendStatus: res.status, resendError: errText },
+        200,
+      );
     }
+
+    const resendBody = await res.json().catch(() => null);
+    await admin
+      .from("reports")
+      .update({ email_sent_at: new Date().toISOString(), email_error: null })
+      .eq("id", reportId);
+
+    return json({ sent: true, resendId: resendBody?.id ?? null }, 200);
   } catch (e) {
     console.error("[send-report-email] Resend request threw:", e);
+    await recordEmailError(admin, reportId, `Request failed: ${String(e).slice(0, 300)}`);
     return json({ sent: false, reason: "email_failed" }, 200);
   }
-
-  return json({ sent: true }, 200);
 });
+
+async function recordEmailError(
+  admin: ReturnType<typeof createClient>,
+  reportId: string,
+  message: string,
+): Promise<void> {
+  try {
+    await admin.from("reports").update({ email_error: message }).eq("id", reportId);
+  } catch {
+    // bookkeeping only — never fail the request over it
+  }
+}
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {

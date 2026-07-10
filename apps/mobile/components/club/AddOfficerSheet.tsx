@@ -162,7 +162,7 @@ export function AddOfficerSheet({
                           </Text>
                         </View>
                         {alreadyOfficer ? (
-                          <Text style={styles.alreadyLabel}>Officer</Text>
+                          <Text style={styles.alreadyLabel}>Already an officer</Text>
                         ) : (
                           <Ionicons name="chevron-forward" size={18} color={MUTED} />
                         )}

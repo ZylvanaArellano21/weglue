@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,6 @@ import { MessageBubble } from '../../../../components/chat/MessageBubble';
 import { EventShareCard } from '../../../../components/chat/EventShareCard';
 import { PostShareCard } from '../../../../components/chat/PostShareCard';
 import { ChatInput } from '../../../../components/chat/ChatInput';
-import { ConfirmationModal } from '../../../../components/chat/ConfirmationModal';
 import {
   DateDivider,
   formatChatDateDivider,
@@ -31,7 +30,6 @@ import {
 import { Avatar } from '../../../../components/shared/Avatar';
 import { sendDirectMessage, markConversationRead } from '../../../../services/chatService';
 import { getLastVisitedChannel } from '../../../../lib/chatNavigation';
-import { supabase } from '../../../../lib/supabase';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
 export default function ChatRoom() {
@@ -100,18 +98,6 @@ export default function ChatRoom() {
     !isMember && isGroupWithChannels ? chatId : undefined,
   );
 
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  async function handleLeave() {
-    if (!chatDetails?.club_id) return;
-    await supabase
-      .from('club_members')
-      .delete()
-      .eq('club_id', chatDetails.club_id)
-      .eq('user_id', userId);
-    router.back();
-  }
-
   const messages = [...(dmPage?.messages ?? [])].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
@@ -150,12 +136,9 @@ export default function ChatRoom() {
     );
   }
 
-  const displayName =
-    chatDetails?.name ??
-    (isDirect
-      ? chatDetails?.participants.find((p) => p.user_id !== userId)?.username
-      : undefined) ??
-    (pname || 'Chat');
+  // chatDetails.name is live-resolved (display name for DMs, current club
+  // name for club chats); route-param pname only bridges the initial render.
+  const displayName = chatDetails?.name ?? (pname || 'Chat');
 
   // isMember === undefined means the membership check is still in flight;
   // fall through to the group header + inline spinner instead of flashing the
@@ -227,10 +210,10 @@ export default function ChatRoom() {
           <Avatar
             uri={otherUser?.avatar_url}
             size={chatSizes.avatarHeader}
-            username={otherUser?.username ?? displayName}
+            username={displayName}
           />
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {otherUser?.username ?? displayName}
+            {displayName}
           </Text>
           <Ionicons name="chevron-forward" size={18} color={chatColors.textMuted} />
         </TouchableOpacity>
@@ -265,9 +248,11 @@ export default function ChatRoom() {
                   isOwn={isOwn}
                   showSenderInfo={showSenderInfo}
                   cardSlot={
-                    item.message_type === 'shared_event' && item.shared_event_id ? (
+                    // A null shared id means the content was deleted — the
+                    // message survives and the card says so.
+                    item.message_type === 'shared_event' ? (
                       <EventShareCard eventId={item.shared_event_id} viewerUserId={userId} />
-                    ) : item.message_type === 'shared_post' && item.shared_post_id ? (
+                    ) : item.message_type === 'shared_post' ? (
                       <PostShareCard postId={item.shared_post_id} viewerUserId={userId} />
                     ) : undefined
                   }

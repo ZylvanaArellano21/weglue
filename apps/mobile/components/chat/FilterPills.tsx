@@ -21,6 +21,7 @@ export function FilterPills({ value, onChange }: Props) {
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
+            hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
           >
             <Text
               style={[
@@ -45,8 +46,9 @@ const styles = StyleSheet.create({
     marginLeft: 23,
   },
   pill: {
-    width: chatSizes.filterPillWidth,
+    minWidth: chatSizes.filterPillMinWidth,
     height: chatSizes.filterPillHeight,
+    paddingHorizontal: 18,
     borderRadius: chatSizes.filterPillRadius,
     alignItems: 'center',
     justifyContent: 'center',

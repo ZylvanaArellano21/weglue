@@ -14,9 +14,16 @@ export interface ChatParticipant {
 export interface ChatPreview {
   id: string;
   type: 'direct' | 'group' | 'club_group' | 'officer_chat';
+  /** Live display title: the other participant's current display name for
+   * DMs, "Club name · Members/Officers" from the clubs table for club chats.
+   * Never a stored snapshot, so renames and profile edits show immediately. */
   name: string | null;
+  /** Live avatar: other participant's current profile picture for DMs, the
+   * club's current profile picture (never the banner) for club chats. */
   avatar_url: string | null;
   club_id: string | null;
+  /** The other participant of a direct chat (stable user id). */
+  other_user_id: string | null;
   last_message: string | null;
   last_message_at: string | null;
   last_sender_username: string | null;
@@ -30,10 +37,85 @@ export interface ChatPreview {
 export interface ChatDetails {
   id: string;
   type: 'direct' | 'group' | 'club_group' | 'officer_chat';
+  /** Live display title (see ChatPreview.name). */
   name: string | null;
+  /** Live avatar (see ChatPreview.avatar_url). */
   avatar_url: string | null;
   club_id: string | null;
   participants: ChatParticipant[];
+}
+
+// ─── Live conversation identity ──────────────────────────────────────────────
+// Conversation identity is the immutable conversation/club/user IDs; what we
+// DISPLAY is always resolved from the current clubs/profiles rows. The
+// conversations.name column is only a fallback (a DB trigger keeps it synced
+// on club rename, but rendering never depends on it).
+
+const DELETED_ACCOUNT_LABEL = 'Deleted account';
+
+function clubConversationTitle(
+  clubName: string | null | undefined,
+  type: string,
+  storedName: string | null,
+): string | null {
+  if (!clubName) return storedName;
+  return `${clubName} · ${type === 'officer_chat' ? 'Officers' : 'Members'}`;
+}
+
+/** Display name for a person: full name when they entered one, otherwise
+ * their username. Usernames are never the *preferred* chat title. */
+function personDisplayName(p: { full_name?: string | null; username?: string | null } | null | undefined): string | null {
+  if (!p) return null;
+  const full = p.full_name?.trim();
+  if (full) return full;
+  const username = p.username?.trim();
+  return username || null;
+}
+
+interface ResolvedIdentity {
+  name: string | null;
+  avatar_url: string | null;
+  other_user_id: string | null;
+}
+
+function resolveConversationIdentity(
+  type: string,
+  storedName: string | null,
+  storedAvatar: string | null,
+  club: { name?: string | null; avatar_url?: string | null } | null,
+  participants: { user_id: string; profiles?: { username?: string | null; full_name?: string | null; avatar_url?: string | null } | null }[],
+  currentUserId: string,
+): ResolvedIdentity {
+  if (type === 'direct') {
+    const other = participants.find((p) => p.user_id !== currentUserId) ?? null;
+    if (!other) {
+      // The other account no longer exists (participants cascade on account
+      // deletion) — a valid conversation with an explicit label, never
+      // "Unknown Chat".
+      return { name: DELETED_ACCOUNT_LABEL, avatar_url: null, other_user_id: null };
+    }
+    const name = personDisplayName(other.profiles);
+    if (!name) {
+      // Malformed/incomplete profile: log for repair, show a safe fallback.
+      console.warn('[chatService] direct chat participant has no resolvable name', other.user_id);
+    }
+    return {
+      name: name ?? DELETED_ACCOUNT_LABEL,
+      avatar_url: other.profiles?.avatar_url ?? null,
+      other_user_id: other.user_id,
+    };
+  }
+
+  if (type === 'club_group' || type === 'officer_chat') {
+    return {
+      name: clubConversationTitle(club?.name, type, storedName),
+      // Club profile picture — never the banner.
+      avatar_url: club?.avatar_url ?? null,
+      other_user_id: null,
+    };
+  }
+
+  return { name: storedName, avatar_url: storedAvatar, other_user_id: null };
 }
 
 export interface DirectMessageThread {
@@ -84,6 +166,8 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       `conversation_id, last_read_at, joined_at,
        conversations!inner(
          id, type, name, avatar_url, club_id,
+         clubs(id, name, avatar_url),
+         conversation_participants(user_id, profiles!user_id(username, full_name, avatar_url)),
          conversation_channels(id, name, is_default, display_order),
          messages(id, content, message_type, created_at, profiles!sender_id(username))
        )`,
@@ -100,6 +184,14 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
   return rows.map((row) => {
     const conv = row.conversations;
     const msgs: any[] = conv.messages ?? [];
+    const identity = resolveConversationIdentity(
+      conv.type,
+      conv.name,
+      conv.avatar_url,
+      conv.clubs ?? null,
+      conv.conversation_participants ?? [],
+      userId,
+    );
 
     msgs.sort(
       (a: any, b: any) =>
@@ -120,9 +212,10 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
     return {
       id: conv.id,
       type: conv.type,
-      name: conv.name,
-      avatar_url: conv.avatar_url,
+      name: identity.name,
+      avatar_url: identity.avatar_url,
       club_id: conv.club_id,
+      other_user_id: identity.other_user_id,
       last_message: formatLastMessagePreview(lastMsg),
       last_message_at: lastMsg?.created_at ?? null,
       last_sender_username: lastMsg?.profiles?.username ?? null,
@@ -135,11 +228,14 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
 
 // ─── Chat Details ─────────────────────────────────────────────────────────────
 
-export async function getChatDetails(conversationId: string): Promise<ChatDetails | null> {
+export async function getChatDetails(
+  conversationId: string,
+  currentUserId: string,
+): Promise<ChatDetails | null> {
   const [{ data: conv }, { data: participants }] = await Promise.all([
     supabase
       .from('conversations')
-      .select('id, type, name, avatar_url, club_id')
+      .select('id, type, name, avatar_url, club_id, clubs(id, name, avatar_url)')
       .eq('id', conversationId)
       .single(),
     supabase
@@ -149,6 +245,15 @@ export async function getChatDetails(conversationId: string): Promise<ChatDetail
   ]);
 
   if (!conv) return null;
+
+  const identity = resolveConversationIdentity(
+    (conv as any).type,
+    (conv as any).name,
+    (conv as any).avatar_url,
+    (conv as any).clubs ?? null,
+    ((participants ?? []) as any[]),
+    currentUserId,
+  );
 
   const rolesMap = new Map<string, string>();
   if ((conv as any).club_id) {
@@ -181,7 +286,11 @@ export async function getChatDetails(conversationId: string): Promise<ChatDetail
   }));
 
   return {
-    ...(conv as any),
+    id: (conv as any).id,
+    type: (conv as any).type,
+    name: identity.name,
+    avatar_url: identity.avatar_url,
+    club_id: (conv as any).club_id,
     participants: parts,
   };
 }
@@ -375,9 +484,11 @@ export async function searchChats(
 
     supabase
       .from('conversation_participants')
-      .select('conversations!inner(id, name, type, club_id, avatar_url)')
+      .select('conversations!inner(id, name, type, club_id, avatar_url, clubs(id, name, avatar_url))')
       .eq('user_id', userId)
       .in('conversations.type', ['club_group', 'officer_chat', 'group'])
+      // conversations.name is kept in sync on club rename by a DB trigger,
+      // so matching against it finds the CURRENT club name.
       .ilike('conversations.name', `%${q}%`)
       .limit(20),
   ]);
@@ -393,10 +504,11 @@ export async function searchChats(
     const c = row.conversations;
     return {
       id: c.id,
-      name: c.name,
+      name: clubConversationTitle(c.clubs?.name, c.type, c.name),
       type: c.type,
       club_id: c.club_id,
-      avatar_url: c.avatar_url,
+      // Club profile picture — never the banner, never a stale snapshot.
+      avatar_url: c.clubs?.avatar_url ?? c.avatar_url,
     };
   });
 
@@ -501,7 +613,7 @@ export async function getClubChatTarget(
 ): Promise<ClubChatTarget | null> {
   const { data } = await supabase
     .from('conversations')
-    .select('id, name, avatar_url, conversation_channels(id, is_default, display_order)')
+    .select('id, name, avatar_url, clubs(id, name, avatar_url), conversation_channels(id, is_default, display_order)')
     .eq('club_id', clubId)
     .eq('type', type)
     .maybeSingle();
@@ -516,7 +628,8 @@ export async function getClubChatTarget(
   return {
     conversationId: (data as any).id,
     channelId: defaultChannel?.id ?? null,
-    name: (data as any).name ?? null,
-    avatarUrl: (data as any).avatar_url ?? null,
+    // Live club identity for the header (club profile picture, never banner).
+    name: clubConversationTitle((data as any).clubs?.name, type, (data as any).name),
+    avatarUrl: (data as any).clubs?.avatar_url ?? null,
   };
 }

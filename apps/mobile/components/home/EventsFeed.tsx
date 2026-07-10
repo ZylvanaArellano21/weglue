@@ -9,12 +9,11 @@ import {
   mergeEventFeedPages,
 } from '../../hooks/useHomeEventsFeed';
 import { useJoinClubMutation } from '../../hooks/useClubMembership';
-import { useLeaveClubFlow } from '../../hooks/useLeaveClubFlow';
 import { EventCard } from './EventCard';
 import { EventCardToday } from './EventCardToday';
 import { EventCardSkeleton } from '../shared/SkeletonLoader';
 import { useToast } from '../Toast';
-import { LeaveClubModals } from '../club/LeaveClubModals';
+import { requestLeaveClub } from '../../store/leaveClubStore';
 import type { HomeFeedEvent } from '../../services/eventService';
 
 type FeedItem =
@@ -113,13 +112,6 @@ export function EventsFeed() {
   const { mutate: toggleSave } = useToggleSaveEvent();
   const { mutate: joinClubMutate } = useJoinClubMutation(userId);
   const { show, ToastComponent } = useToast();
-  const {
-    target: leaveTarget,
-    isPending: leavingClub,
-    requestLeave,
-    cancel: cancelLeave,
-    confirm: confirmLeave,
-  } = useLeaveClubFlow(userId, show);
 
   const handleRsvp = useCallback(
     (eventId: string) => {
@@ -160,12 +152,12 @@ export function EventsFeed() {
     [userId, joinClubMutate, show],
   );
 
-  const handleRequestLeaveClub = useCallback(
-    (clubId: string, clubName: string) => {
-      void requestLeave(clubId, clubName);
-    },
-    [requestLeave],
-  );
+  // One app-wide leave flow (LeaveClubHost in the root layout) — this screen
+  // only raises the request; the host verifies eligibility and shows exactly
+  // one modal.
+  const handleRequestLeaveClub = useCallback((clubId: string, clubName: string) => {
+    requestLeaveClub({ clubId, clubName });
+  }, []);
 
   const renderItem: ListRenderItem<FeedItem> = useCallback(
     ({ item }) => {
@@ -312,13 +304,6 @@ export function EventsFeed() {
             colors={['#0FA6A6']}
           />
         }
-      />
-
-      <LeaveClubModals
-        target={leaveTarget}
-        loading={leavingClub}
-        onConfirm={() => confirmLeave()}
-        onCancel={cancelLeave}
       />
     </View>
   );

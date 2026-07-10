@@ -1,5 +1,16 @@
 import { ConfirmModal } from '../ConfirmModal';
-import type { LeaveTarget } from '../../hooks/useLeaveClubFlow';
+
+// Which confirmation a "leave club" tap should surface:
+//   normal  → plain member leave confirm
+//   officer → officer leave confirm (explains the permissions they'll lose)
+//   blocked → sole-officer note (leaving is not allowed yet)
+export type LeaveMode = 'normal' | 'officer' | 'blocked';
+
+export interface LeaveTarget {
+  clubId: string;
+  clubName: string;
+  mode: LeaveMode;
+}
 
 interface LeaveClubModalsProps {
   target: LeaveTarget | null;
@@ -12,8 +23,12 @@ interface LeaveClubModalsProps {
 // Shared by Home event cards and the Club Profile screen so the copy and
 // behavior stay in lockstep (iOS + Android identical).
 export function LeaveClubModals({ target, loading, onConfirm, onCancel }: LeaveClubModalsProps) {
-  const clubName = target?.clubName ?? 'this club';
-  const mode = target?.mode ?? 'normal';
+  // No target → nothing mounted at all. Never keep an invisible Modal
+  // around that a state change could expose underneath another one.
+  if (!target) return null;
+
+  const clubName = target.clubName || 'this club';
+  const mode = target.mode;
 
   if (mode === 'blocked') {
     // Task 13 — sole officer cannot leave until another officer exists.

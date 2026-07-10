@@ -216,7 +216,7 @@ export default function CalendarEventDetailScreen() {
       ) : !event ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: '#6B7280', fontSize: 15, fontFamily: 'Inter_400Regular' }}>
-            Event not found.
+            This event is no longer available.
           </Text>
         </View>
       ) : (

@@ -12,12 +12,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useEventDetail, useRsvpMutation, useSaveEventMutation } from '../../hooks/useEventDetail';
 import { useJoinClubMutation } from '../../hooks/useClubMembership';
-import { useLeaveClubFlow } from '../../hooks/useLeaveClubFlow';
 import { Avatar } from '../../components/shared/Avatar';
 import { AvatarStack } from '../../components/shared/AvatarStack';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
-import { LeaveClubModals } from '../../components/club/LeaveClubModals';
+import { requestLeaveClub } from '../../store/leaveClubStore';
 import { ShareSheet } from '../../components/shared/ShareSheet';
 import { openReportFlow } from '../../components/shared/ReportButton';
 import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
@@ -48,13 +47,6 @@ export default function EventDetailScreen() {
   // Shared officer-aware leave flow: shows exactly one modal (normal /
   // officer / sole-officer "blocked" note) and never lets a sole officer
   // leave — same behavior as Home cards and Club Profile.
-  const {
-    target: leaveTarget,
-    isPending: leavingClub,
-    requestLeave,
-    cancel: cancelLeave,
-    confirm: confirmLeave,
-  } = useLeaveClubFlow(userId, show);
 
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
@@ -75,7 +67,7 @@ export default function EventDetailScreen() {
   const handleJoinLeaveClub = () => {
     if (!event) return;
     if (event.user_has_joined_club) {
-      void requestLeave(event.club_id, event.club.name);
+      requestLeaveClub({ clubId: event.club_id, clubName: event.club.name });
     } else {
       joinClubMutate(event.club_id, {
         onSuccess: () => show('Joined club! 🎉'),
@@ -124,7 +116,7 @@ export default function EventDetailScreen() {
         </ScrollView>
       ) : !event ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#6B7280', fontSize: 15 }}>Event not found.</Text>
+          <Text style={{ color: '#6B7280', fontSize: 15 }}>This event is no longer available.</Text>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -146,7 +138,7 @@ export default function EventDetailScreen() {
                 {event.club.name}
               </Text>
             </TouchableOpacity>
-            {joiningClub || leavingClub ? (
+            {joiningClub ? (
               <View
                 style={{
                   paddingHorizontal: 16,
@@ -493,12 +485,6 @@ export default function EventDetailScreen() {
 
       {event && (
         <>
-          <LeaveClubModals
-            target={leaveTarget}
-            loading={leavingClub}
-            onConfirm={() => confirmLeave()}
-            onCancel={cancelLeave}
-          />
           <ShareSheet
             visible={shareSheetVisible}
             onClose={() => setShareSheetVisible(false)}

@@ -22,6 +22,7 @@ import {
 } from '../../../hooks/useCalendar';
 import type { CalendarEvent, CalendarSection } from '../../../services/calendarService';
 import { todayInAppTz } from '../../../lib/timezone';
+import { useHomeTabStore } from '../../../store/homeTabStore';
 
 export default function CalendarScreen() {
   const router = useRouter();
@@ -116,6 +117,9 @@ export default function CalendarScreen() {
   );
 
   const handleSearchPress = useCallback(() => {
+    // "Search for upcoming events" lands on Home → Events (the events feed),
+    // not Home → Posts.
+    useHomeTabStore.getState().setActiveTab('events');
     router.push('/(tabs)');
   }, [router]);
 

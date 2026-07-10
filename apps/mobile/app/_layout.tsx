@@ -23,6 +23,7 @@ import { AppState, Platform, Text, TouchableOpacity, View } from "react-native";
 import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
+import { LeaveClubHost } from "../components/club/LeaveClubHost";
 import { timedQuery } from "../lib/timedQuery";
 import {
   clearCachedProfile,
@@ -235,6 +236,10 @@ export default function RootLayout() {
           re-reconcile its children on every state change — which turned the
           sign-out <Redirect> into an infinite update loop (the logout freeze). */}
       <Stack screenOptions={{ headerShown: false }} />
+      {/* The single app-wide leave-club confirmation host: exactly one modal
+          can exist at a time, so the sole-officer note can never stack on a
+          leave confirmation (screens raise requests via requestLeaveClub). */}
+      <LeaveClubHost />
     </PersistQueryClientProvider>
   );
 }

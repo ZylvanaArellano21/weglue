@@ -7,7 +7,9 @@ import { Avatar } from '../shared/Avatar';
 import { chatColors, chatFonts, chatShadow } from './chatTheme';
 
 interface Props {
-  postId: string;
+  /** null = the post was deleted (messages.shared_post_id is SET NULL);
+   * the message survives and renders the unavailable card. */
+  postId: string | null;
   viewerUserId: string;
 }
 
@@ -15,11 +17,12 @@ export function PostShareCard({ postId, viewerUserId }: Props) {
   const router = useRouter();
   const { data: post, isLoading } = useQuery({
     queryKey: ['postDetail', postId, viewerUserId],
-    queryFn: () => getPostById(postId, viewerUserId),
+    queryFn: () => getPostById(postId!, viewerUserId),
+    enabled: !!postId,
     staleTime: 60 * 1000,
   });
 
-  if (isLoading) {
+  if (isLoading && postId) {
     return (
       <View style={styles.card}>
         <View style={styles.loadingRow}>

@@ -15,14 +15,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useEventDetail, useRsvpMutation, useSaveEventMutation } from '../../../../../hooks/useEventDetail';
 import { useJoinClubMutation } from '../../../../../hooks/useClubMembership';
-import { useLeaveClubFlow } from '../../../../../hooks/useLeaveClubFlow';
 import { useRealtimeEventRsvps } from '../../../../../hooks/useRealtimeChannel';
 import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../../components/Toast';
-import { LeaveClubModals } from '../../../../../components/club/LeaveClubModals';
+import { requestLeaveClub } from '../../../../../store/leaveClubStore';
 import { ShareSheet } from '../../../../../components/shared/ShareSheet';
 import { openReportFlow } from '../../../../../components/shared/ReportButton';
 import { formatEventLocation, isEventPast } from '../../../../../lib/eventDisplay';
@@ -64,15 +63,8 @@ export default function ClubEventDetailScreen() {
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);
   const { mutate: toggleSave, isPending: isSaving } = useSaveEventMutation(userId, eventId);
   const { mutate: joinClubMutate, isPending: joiningClub } = useJoinClubMutation(userId);
-  // Shared officer-aware leave flow: shows exactly one modal (normal /
-  // officer / sole-officer "blocked" note) and never lets a sole officer leave.
-  const {
-    target: leaveTarget,
-    isPending: leavingClub,
-    requestLeave,
-    cancel: cancelLeave,
-    confirm: confirmLeave,
-  } = useLeaveClubFlow(userId, show);
+  // App-wide leave flow: LeaveClubHost (root layout) verifies eligibility
+  // and renders exactly one modal (normal / officer / sole-officer note).
 
   useRealtimeEventRsvps({
     eventId: eventId!,
@@ -110,7 +102,7 @@ export default function ClubEventDetailScreen() {
   const handleJoinLeaveClub = () => {
     if (!event) return;
     if (event.user_has_joined_club) {
-      void requestLeave(event.club_id, event.club.name);
+      requestLeaveClub({ clubId: event.club_id, clubName: event.club.name });
     } else {
       joinClubMutate(event.club_id, {
         onSuccess: () => show(`Joined ${event.club.name}! 🎉`),
@@ -176,7 +168,7 @@ export default function ClubEventDetailScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
           <Ionicons name="calendar-outline" size={48} color="#D1D5DB" />
           <Text style={{ color: '#6B7280', fontSize: 15, fontFamily: 'Inter_400Regular' }}>
-            Event not found.
+            This event is no longer available.
           </Text>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -225,7 +217,7 @@ export default function ClubEventDetailScreen() {
             </TouchableOpacity>
 
             {/* Join/Joined button */}
-            {joiningClub || leavingClub ? (
+            {joiningClub ? (
               <ActivityIndicator size="small" color="#0FA6A6" />
             ) : (
               <TouchableOpacity
@@ -555,12 +547,6 @@ export default function ClubEventDetailScreen() {
 
       {event && (
         <>
-          <LeaveClubModals
-            target={leaveTarget}
-            loading={leavingClub}
-            onConfirm={() => confirmLeave()}
-            onCancel={cancelLeave}
-          />
           <ShareSheet
             visible={shareSheetVisible}
             onClose={() => setShareSheetVisible(false)}

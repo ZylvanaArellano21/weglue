@@ -44,7 +44,7 @@ export const chatTypography = {
   },
   filterPill: {
     fontFamily: chatFonts.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     letterSpacing: 0.38,
   },
   sectionHeader: {
@@ -132,8 +132,8 @@ export const chatTypography = {
 export const chatSizes = {
   searchBarHeight: 42,
   searchBarRadius: 40,
-  filterPillHeight: 24,
-  filterPillWidth: 61,
+  filterPillHeight: 34,
+  filterPillMinWidth: 78,
   filterPillRadius: 40,
   avatarSuggested: 35,
   avatarMessage: 25,

@@ -24,6 +24,9 @@ const CLUB_DATA_QUERY_KEYS = [
   'eventDetail',
   'userClubsList',
   'myChats',
+  // Chat headers + chat search derive club name/avatar live.
+  'chatDetails',
+  'chatSearch',
 ] as const;
 
 const CLUB_DATA_QUERY_KEY_SET = new Set<string>(CLUB_DATA_QUERY_KEYS);

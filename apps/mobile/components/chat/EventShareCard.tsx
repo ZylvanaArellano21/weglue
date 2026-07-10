@@ -6,7 +6,9 @@ import { getEventDetail } from '../../services/eventService';
 import { chatColors, chatFonts, chatShadow } from './chatTheme';
 
 interface Props {
-  eventId: string;
+  /** null = the event was deleted (messages.shared_event_id is SET NULL);
+   * the message survives and renders the unavailable card. */
+  eventId: string | null;
   viewerUserId: string;
 }
 
@@ -26,11 +28,12 @@ export function EventShareCard({ eventId, viewerUserId }: Props) {
   const router = useRouter();
   const { data: event, isLoading } = useQuery({
     queryKey: ['eventDetail', eventId, viewerUserId],
-    queryFn: () => getEventDetail(eventId, viewerUserId),
+    queryFn: () => getEventDetail(eventId!, viewerUserId),
+    enabled: !!eventId,
     staleTime: 60 * 1000,
   });
 
-  if (isLoading) {
+  if (isLoading && eventId) {
     return (
       <View style={styles.card}>
         <View style={styles.loadingRow}>
