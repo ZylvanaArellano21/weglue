@@ -220,7 +220,7 @@ export function useSendPipeline(opts: {
       if (draft.kind === 'file' && draft.size && draft.size > MAX_FILE_BYTES) {
         return {
           ok: false as const,
-          error: `This file is ${formatFileSize(draft.size)} — larger than the 25 MB limit. You can compress it, or paste a cloud-storage link into the message field instead.`,
+          error: 'This file is larger than 25 MB. Choose a smaller file and try again.',
         };
       }
       const msg: PendingMessage = {

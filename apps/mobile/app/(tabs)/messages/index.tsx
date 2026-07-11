@@ -1,4 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   View,
   Text,
@@ -29,6 +31,17 @@ export default function MessagesIndex() {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('single');
   const searching = query.trim().length > 0;
+
+  const queryClient = useQueryClient();
+  // Re-derive the conversation list from current authorized participation each
+  // time the tab regains focus: a club chat restored from the club profile
+  // (Bug 8), a chat left/joined elsewhere, or membership changes all show
+  // immediately without a stale cached list.
+  useFocusEffect(
+    useCallback(() => {
+      queryClient.invalidateQueries({ queryKey: ['myChats'] });
+    }, [queryClient]),
+  );
 
   const { data: chats, isLoading: chatsLoading } = useMyChats(userId);
   const { data: searchResults, isLoading: searchLoading } = useChatSearch(

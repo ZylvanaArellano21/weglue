@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useChatSearch, useSuggestedPeople } from '../../../hooks/useChats';
 import { Avatar } from '../../../components/shared/Avatar';
+import { displayNameOrFallback, isPlaceholderUsername } from '../../../lib/displayName';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
 
 // ─── New message ─────────────────────────────────────────────────────────────
@@ -38,7 +39,9 @@ export default function NewMessageScreen() {
   const isLoading = isTyping ? searchLoading : suggestLoading;
 
   function openDraftDm(p: { user_id: string; full_name: string | null; username: string; avatar_url: string | null }) {
-    const name = p.full_name?.trim() || p.username;
+    // Never carry a placeholder `user_<hex>` username into the DM header
+    // (correction IMG_1568 showed "user_6d4c4487"). Falls back to "We Glue member".
+    const name = displayNameOrFallback(p);
     router.replace(
       `/(tabs)/messages/new?draftUserId=${p.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(p.avatar_url ?? '')}` as any,
     );
@@ -104,8 +107,10 @@ export default function NewMessageScreen() {
                 username={item.full_name?.trim() || item.username}
               />
               <View style={styles.personText}>
-                <Text style={styles.personName}>{item.full_name?.trim() || item.username}</Text>
-                <Text style={styles.personSub}>@{item.username}</Text>
+                <Text style={styles.personName}>{displayNameOrFallback(item)}</Text>
+                {!isPlaceholderUsername(item.username) && (
+                  <Text style={styles.personSub}>@{item.username}</Text>
+                )}
               </View>
             </TouchableOpacity>
           )}

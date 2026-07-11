@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import { getOrCreateDirectChat, getClubChatTarget } from '../services/chatService';
+import { reopenClubChat } from '../services/messagingService';
 
 // Module-level map persists across navigations within an app session.
 // Tracks the last channel the user was in per conversation.
@@ -89,6 +90,19 @@ async function openClubConversation(
   clubId: string,
   type: 'club_group' | 'officer_chat',
 ): Promise<void> {
+  // Restore participation server-side FIRST (Bug 8): if the user previously
+  // left this club chat, reopen_club_chat re-adds their participant row and
+  // clears hidden_at (validating current club role), so the conversation and
+  // its full history return to the Group section of the Message tab and they
+  // land in the real thread instead of the non-member preview. Idempotent and
+  // never duplicates a participant. A role failure (e.g. not a member) is
+  // swallowed so the non-member preview still renders.
+  try {
+    await reopenClubChat(clubId, type);
+  } catch {
+    // Not authorized to participate — fall through to plain navigation.
+  }
+
   const target = await getClubChatTarget(clubId, type);
   if (!target) return;
 

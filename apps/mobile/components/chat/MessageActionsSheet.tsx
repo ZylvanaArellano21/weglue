@@ -37,7 +37,9 @@ interface Props {
   onClose: () => void;
   onUnsend: (messageId: string) => void;
   onDeleteForMe: (messageId: string) => void;
-  onReport: (messageId: string, reason: string, details?: string) => void;
+  /** Resolves true when the report is durably saved; false keeps the sheet
+   * open with the reason + details preserved so the user can retry. */
+  onReport: (messageId: string, reason: string, details?: string) => Promise<boolean>;
   onSaveMedia?: (messageId: string) => void;
 }
 
@@ -54,6 +56,9 @@ export function MessageActionsSheet({
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const [details, setDetails] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const visible = !!message;
   const isText = message?.message_type === 'text';
@@ -63,6 +68,9 @@ export function MessageActionsSheet({
     setReporting(false);
     setReason(null);
     setDetails('');
+    setSubmitting(false);
+    setSubmitError(false);
+    setSubmitted(false);
     onClose();
   }
 
@@ -71,10 +79,20 @@ export function MessageActionsSheet({
     close();
   }
 
-  function submitReport() {
-    if (!message || !reason) return;
-    onReport(message.id, reason, details.trim() || undefined);
-    close();
+  async function submitReport() {
+    // Prevent duplicate reports from repeated taps; keep the user's work on
+    // failure and offer retry rather than closing and erasing it.
+    if (!message || !reason || submitting || submitted) return;
+    setSubmitting(true);
+    setSubmitError(false);
+    const ok = await onReport(message.id, reason, details.trim() || undefined);
+    setSubmitting(false);
+    if (ok) {
+      setSubmitted(true);
+      setTimeout(close, 1100);
+    } else {
+      setSubmitError(true);
+    }
   }
 
   return (
@@ -155,13 +173,28 @@ export function MessageActionsSheet({
                   onChangeText={setDetails}
                   multiline
                   maxLength={500}
+                  editable={!submitting && !submitted}
                 />
+                {submitError && (
+                  <Text style={styles.reportError}>
+                    Couldn't submit right now. Your report was kept — tap Try again.
+                  </Text>
+                )}
+                {submitted && <Text style={styles.reportSuccess}>Report submitted.</Text>}
                 <TouchableOpacity
-                  style={[styles.submitBtn, !reason && styles.submitBtnDisabled]}
-                  disabled={!reason}
+                  style={[styles.submitBtn, (!reason || submitting || submitted) && styles.submitBtnDisabled]}
+                  disabled={!reason || submitting || submitted}
                   onPress={submitReport}
                 >
-                  <Text style={styles.submitLabel}>Submit report</Text>
+                  <Text style={styles.submitLabel}>
+                    {submitting
+                      ? 'Submitting…'
+                      : submitted
+                        ? 'Report submitted'
+                        : submitError
+                          ? 'Try again'
+                          : 'Submit report'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -297,6 +330,18 @@ const styles = StyleSheet.create({
   },
   submitBtnDisabled: {
     opacity: 0.5,
+  },
+  reportError: {
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
+    color: '#C62828',
+    marginTop: 10,
+  },
+  reportSuccess: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 12,
+    color: chatColors.teal,
+    marginTop: 10,
   },
   submitLabel: {
     fontFamily: chatFonts.semiBold,

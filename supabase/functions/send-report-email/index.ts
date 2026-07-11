@@ -93,6 +93,28 @@ Deno.serve(async (req) => {
     `Created at:   ${report.created_at}`,
   ];
 
+  // Message reports carry a tamper-proof moderation snapshot. Only the storage
+  // PATH is included — never a signed URL — so the email leaks no direct media
+  // access. Investigators open the report row (RLS-protected) to view content.
+  if (report.entity_type === "message") {
+    const att = report.attachment_snapshot as
+      | { name?: string; mime?: string; size?: number; url?: string }
+      | null;
+    lines.push(
+      ``,
+      `── Message snapshot ──`,
+      `Conversation id:   ${report.conversation_id ?? "—"}`,
+      `Conversation type: ${report.conversation_type ?? "—"}`,
+      `Message id:        ${report.message_id ?? "—"}`,
+      `Message type:      ${report.message_type ?? "—"}`,
+      `Sender user id:    ${report.message_sender_id ?? "—"}`,
+      `Content snapshot:  ${report.content_snapshot ?? "—"}`,
+      `Attachment:        ${
+        att ? `${att.name ?? "file"} (${att.mime ?? "?"}, path: ${att.url ?? "?"})` : "—"
+      }`,
+    );
+  }
+
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",

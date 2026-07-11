@@ -219,11 +219,22 @@ export function ConversationThread({
     [invalidate, currentUserId],
   );
 
-  const handleReport = useCallback((messageId: string, reason: string, details?: string) => {
-    reportMessage(messageId, reason, details)
-      .then(() => Alert.alert('Report submitted', 'Thanks — our team will review it.'))
-      .catch(() => Alert.alert('Could not submit the report. Please try again.'));
-  }, []);
+  // Returns true only when the report is durably saved. The action sheet keeps
+  // the user's reason + details and offers retry on false; on true it shows
+  // "Report submitted." and closes — the thread and its scroll position are
+  // untouched (the sheet is a modal over it), the content stays visible, and
+  // the sender is neither blocked nor notified.
+  const handleReport = useCallback(
+    async (messageId: string, reason: string, details?: string): Promise<boolean> => {
+      try {
+        await reportMessage(messageId, reason, details);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
 
   // ── Polls ──
   const [pollOpen, setPollOpen] = useState(false);
@@ -354,6 +365,7 @@ export function ConversationThread({
         items={mediaItems}
         initialIndex={viewerIndex ?? 0}
         onClose={() => setViewerIndex(null)}
+        currentUserId={currentUserId}
       />
 
       <MessageActionsSheet

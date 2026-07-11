@@ -622,12 +622,17 @@ export default function ChatInfo() {
           </TouchableOpacity>
         </View>
 
-        {/* People — participants of THIS conversation (no old Invite Link row). */}
+        {/* People — a PREVIEW of at most four other participants (never the
+            current user); the full, searchable, virtualized roster lives on the
+            participants screen. */}
         {!isDirect && (
           <>
-            <Text style={styles.peopleHeader}>People</Text>
-            {chatDetails.participants.map((member) => {
-              const isSelf = member.user_id === userId;
+            <View style={styles.peopleHeaderRow}>
+              <Text style={styles.peopleHeader}>People</Text>
+              <Text style={styles.peopleCount}>{chatDetails.participants.length}</Text>
+            </View>
+            {others.slice(0, 4).map((member) => {
+              const isSelf = false;
               const displayPersonName = displayNameOrFallback(member);
               return (
                 <View key={member.user_id} style={styles.memberRow}>
@@ -682,6 +687,16 @@ export default function ChatInfo() {
                 </View>
               );
             })}
+            {others.length > 4 && (
+              <TouchableOpacity
+                style={styles.seeAllRow}
+                onPress={() => router.push(`/(tabs)/messages/${chatId}/participants` as any)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.seeAllText}>See all {chatDetails.participants.length} people</Text>
+                <Ionicons name="chevron-forward" size={16} color={chatColors.teal} />
+              </TouchableOpacity>
+            )}
           </>
         )}
 
@@ -720,6 +735,7 @@ export default function ChatInfo() {
         items={viewerItems}
         initialIndex={viewerIndex ?? 0}
         onClose={() => setViewerIndex(null)}
+        currentUserId={userId}
       />
 
       <ShareInviteSheet
@@ -1022,10 +1038,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  peopleHeader: {
-    ...chatTypography.infoRow,
+  peopleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  peopleHeader: {
+    ...chatTypography.infoRow,
+  },
+  peopleCount: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 13,
+    color: chatColors.textMuted,
+  },
+  seeAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  seeAllText: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 14,
+    color: chatColors.teal,
   },
   memberRow: {
     flexDirection: 'row',

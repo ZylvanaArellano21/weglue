@@ -4,7 +4,6 @@ import {
   Text,
   Modal,
   StyleSheet,
-  Dimensions,
   FlatList,
   TouchableOpacity,
   Animated,
@@ -14,13 +13,16 @@ import {
   ActivityIndicator,
   Image,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { resolveAttachmentUrl } from '../../lib/chatAttachments';
+import { ShareSheet } from '../shared/ShareSheet';
+import { useToast } from '../Toast';
 import { chatFonts } from './chatTheme';
 
 // ─── Reusable full-screen media viewer ───────────────────────────────────────
@@ -42,9 +44,10 @@ interface Props {
   items: ViewerMediaItem[];
   initialIndex: number;
   onClose: () => void;
+  /** Enables the internal We Glue share sheet from the viewer's Share button.
+   * When absent, Share falls back to the OS file share. */
+  currentUserId?: string;
 }
-
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 function formatViewerTime(iso: string): string {
   const d = new Date(iso);
@@ -68,8 +71,19 @@ function useResolvedUrl(source: string): string | null {
 }
 
 // Pinch-to-zoom + double-tap + pan, implemented with core PanResponder so no
-// new native module is required.
-function ZoomableImage({ url, onSingleTap }: { url: string; onSingleTap: () => void }) {
+// new native module is required. Dimensions come from the live window (props)
+// so rotation and every device size are handled — never a fixed capture.
+function ZoomableImage({
+  url,
+  width,
+  height,
+  onSingleTap,
+}: {
+  url: string;
+  width: number;
+  height: number;
+  onSingleTap: () => void;
+}) {
   const scale = useRef(new Animated.Value(1)).current;
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
@@ -89,8 +103,8 @@ function ZoomableImage({ url, onSingleTap }: { url: string; onSingleTap: () => v
   const clampAndApply = useCallback(
     (nextScale: number, nextTx: number, nextTy: number, animated = false) => {
       const s = Math.max(1, Math.min(4, nextScale));
-      const maxTx = (SCREEN_W * (s - 1)) / 2;
-      const maxTy = (SCREEN_H * (s - 1)) / 2;
+      const maxTx = (width * (s - 1)) / 2;
+      const maxTy = (height * (s - 1)) / 2;
       const tx = Math.max(-maxTx, Math.min(maxTx, nextTx));
       const ty = Math.max(-maxTy, Math.min(maxTy, nextTy));
       state.scale = s;
@@ -108,7 +122,7 @@ function ZoomableImage({ url, onSingleTap }: { url: string; onSingleTap: () => v
         translateY.setValue(ty);
       }
     },
-    [scale, translateX, translateY, state],
+    [scale, translateX, translateY, state, width, height],
   );
 
   const responder = useRef(
@@ -170,11 +184,11 @@ function ZoomableImage({ url, onSingleTap }: { url: string; onSingleTap: () => v
   ).current;
 
   return (
-    <View style={styles.page} {...responder.panHandlers}>
+    <View style={[styles.page, { width, height }]} {...responder.panHandlers}>
       <Animated.Image
         source={{ uri: url }}
         style={[
-          styles.media,
+          { width, height },
           { transform: [{ translateX }, { translateY }, { scale }] },
         ]}
         resizeMode="contain"
@@ -183,15 +197,15 @@ function ZoomableImage({ url, onSingleTap }: { url: string; onSingleTap: () => v
   );
 }
 
-function VideoPage({ url }: { url: string }) {
+function VideoPage({ url, width, height }: { url: string; width: number; height: number }) {
   const player = useVideoPlayer(url, (p) => {
     p.loop = false;
   });
   return (
-    <View style={styles.page}>
+    <View style={[styles.page, { width, height }]}>
       <VideoView
         player={player}
-        style={styles.media}
+        style={{ width, height }}
         contentFit="contain"
         allowsFullscreen={false}
         nativeControls
@@ -202,27 +216,39 @@ function VideoPage({ url }: { url: string }) {
 
 function ViewerPage({
   item,
+  width,
+  height,
   onSingleTap,
 }: {
   item: ViewerMediaItem;
+  width: number;
+  height: number;
   onSingleTap: () => void;
 }) {
   const url = useResolvedUrl(item.source);
   if (!url) {
     return (
-      <View style={styles.page}>
+      <View style={[styles.page, { width, height }]}>
         <ActivityIndicator color="#fff" />
       </View>
     );
   }
-  if (item.kind === 'video') return <VideoPage url={url} />;
-  return <ZoomableImage url={url} onSingleTap={onSingleTap} />;
+  if (item.kind === 'video') return <VideoPage url={url} width={width} height={height} />;
+  return <ZoomableImage url={url} width={width} height={height} onSingleTap={onSingleTap} />;
 }
 
-export function MediaViewer({ visible, items, initialIndex, onClose }: Props) {
+export function MediaViewer({ visible, items, initialIndex, onClose, currentUserId }: Props) {
+  // Live window size (rotation-safe) + safe-area insets computed here rather
+  // than from a module-level Dimensions snapshot, so the viewer and its chrome
+  // always fit the actual device — notch, Dynamic Island, Android status bar,
+  // gesture bar and 3-button nav all accounted for.
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(initialIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const toast = useToast();
   const listRef = useRef<FlatList>(null);
 
   useEffect(() => {
@@ -239,14 +265,23 @@ export function MediaViewer({ visible, items, initialIndex, onClose }: Props) {
     return resolveAttachmentUrl(current.source);
   }
 
-  async function handleShare() {
-    const url = await resolveCurrent();
-    if (!url) return;
-    try {
-      await Share.share(Platform.OS === 'ios' ? { url } : { message: url });
-    } catch {
-      // User dismissed the share sheet — nothing to do.
+  function handleShare() {
+    // Bug 3: open the We Glue share sheet (internal destinations + secure
+    // external file share) — never dump the raw signed URL into a native share.
+    if (currentUserId && current) {
+      setShareOpen(true);
+      return;
     }
+    // No user context (shouldn't happen in-app) → OS file share of the file.
+    void (async () => {
+      const url = await resolveCurrent();
+      if (!url) return;
+      try {
+        await Share.share(Platform.OS === 'ios' ? { url } : { message: url });
+      } catch {
+        // dismissed
+      }
+    })();
   }
 
   async function handleSave() {
@@ -283,24 +318,35 @@ export function MediaViewer({ visible, items, initialIndex, onClose }: Props) {
       <View style={styles.container}>
         <FlatList
           ref={listRef}
+          // key forces a clean re-layout on rotation so getItemLayout / paging
+          // math always match the current width.
+          key={`w${Math.round(width)}`}
           data={items}
           horizontal
           pagingEnabled
           initialScrollIndex={Math.max(0, Math.min(initialIndex, items.length - 1))}
-          getItemLayout={(_d, i) => ({ length: SCREEN_W, offset: SCREEN_W * i, index: i })}
+          getItemLayout={(_d, i) => ({ length: width, offset: width * i, index: i })}
           keyExtractor={(item) => item.messageId}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(e) => {
-            setIndex(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W));
+            setIndex(Math.round(e.nativeEvent.contentOffset.x / width));
           }}
           renderItem={({ item }) => (
-            <ViewerPage item={item} onSingleTap={() => setChromeVisible((v) => !v)} />
+            <ViewerPage
+              item={item}
+              width={width}
+              height={height}
+              onSingleTap={() => setChromeVisible((v) => !v)}
+            />
           )}
         />
 
         {chromeVisible && (
           <>
-            <SafeAreaView style={styles.topBar} edges={['top']} pointerEvents="box-none">
+            <View
+              style={[styles.topBar, { paddingTop: Math.max(insets.top, 12) + 4 }]}
+              pointerEvents="box-none"
+            >
               <TouchableOpacity onPress={onClose} style={styles.chromeBtn} accessibilityLabel="Close">
                 <Ionicons name="close" size={26} color="#fff" />
               </TouchableOpacity>
@@ -311,9 +357,12 @@ export function MediaViewer({ visible, items, initialIndex, onClose }: Props) {
                 <Text style={styles.sentAt}>{current ? formatViewerTime(current.sentAt) : ''}</Text>
               </View>
               <View style={{ width: 42 }} />
-            </SafeAreaView>
+            </View>
 
-            <SafeAreaView style={styles.bottomBar} edges={['bottom']} pointerEvents="box-none">
+            <View
+              style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}
+              pointerEvents="box-none"
+            >
               <TouchableOpacity onPress={handleSave} style={styles.chromeBtn} accessibilityLabel="Save">
                 {saving ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -329,9 +378,29 @@ export function MediaViewer({ visible, items, initialIndex, onClose }: Props) {
               <TouchableOpacity onPress={handleShare} style={styles.chromeBtn} accessibilityLabel="Share">
                 <Ionicons name="share-outline" size={24} color="#fff" />
               </TouchableOpacity>
-            </SafeAreaView>
+            </View>
           </>
         )}
+
+        {current && (
+          <ShareSheet
+            visible={shareOpen}
+            onClose={() => setShareOpen(false)}
+            userId={currentUserId}
+            contentType="media"
+            contentId={current.source}
+            // Internal copy needs a private storage path; if this row is a
+            // legacy http/local source, only external file share applies.
+            media={{
+              sourcePath: current.source,
+              kind: current.kind,
+              mime: null,
+              name: null,
+            }}
+            onShowToast={(m, t) => toast.show(m, t)}
+          />
+        )}
+        {toast.ToastComponent}
       </View>
     </Modal>
   );
@@ -364,15 +433,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   page: {
-    width: SCREEN_W,
-    height: SCREEN_H,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-  },
-  media: {
-    width: SCREEN_W,
-    height: SCREEN_H,
   },
   topBar: {
     position: 'absolute',

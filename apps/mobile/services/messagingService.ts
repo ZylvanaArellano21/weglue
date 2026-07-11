@@ -203,17 +203,43 @@ export async function hideMessageForMe(messageId: string, userId: string): Promi
   if (error) throw error;
 }
 
+export interface ReportMessageResult {
+  /** The report row (with a tamper-proof server-side content/attachment/poll
+   * snapshot) exists in Supabase — the durable, primary action. */
+  saved: true;
+  /** The courtesy notification email to SUPPORT_EMAIL was accepted. A false
+   * here never means the report was lost: the row is the source of truth and
+   * records email_error for retry. */
+  emailed: boolean;
+}
+
 export async function reportMessage(
   messageId: string,
   reason: string,
   details?: string,
-): Promise<void> {
-  const { error } = await supabase.rpc('report_message', {
+): Promise<ReportMessageResult> {
+  // 1) Durable insert + moderation snapshot (server-side, so a later unsend
+  //    can't destroy the evidence; the snapshot stores the storage PATH, never
+  //    a signed URL). Must succeed — a throw here surfaces as retry in the UI.
+  const { data: reportId, error } = await supabase.rpc('report_message', {
     p_message_id: messageId,
     p_reason: reason,
     p_details: details ?? null,
   });
   if (error) throw error;
+
+  // 2) Notify SUPPORT_EMAIL. Idempotent per report (email_sent_at); a delivery
+  //    failure is recorded server-side and never fails the stored report.
+  try {
+    const { data, error: fnError } = await supabase.functions.invoke('send-report-email', {
+      body: { reportId },
+    });
+    if (fnError) throw fnError;
+    return { saved: true, emailed: (data as { sent?: boolean } | null)?.sent === true };
+  } catch (e) {
+    console.warn('[reportMessage] report email failed (report stored)', e);
+    return { saved: true, emailed: false };
+  }
 }
 
 // ─── Conversation inbox state ────────────────────────────────────────────────

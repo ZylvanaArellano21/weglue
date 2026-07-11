@@ -71,6 +71,10 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
     if (!question.trim()) return 'Add a question.';
     const opts = options.map((o) => o.trim()).filter(Boolean);
     if (opts.length < 2) return 'Add at least 2 options.';
+    // Blank start+end = poll starts now, never expires (matches helper text).
+    // 60s grace so "now" isn't rejected as past.
+    if (startAt && startAt.getTime() < Date.now() - 60_000) return "Start can't be in the past.";
+    if (endAt && !startAt && endAt.getTime() <= Date.now()) return 'End must be in the future.';
     if (startAt && endAt && endAt <= startAt) return 'End must be after start.';
     return null;
   }
@@ -271,6 +275,9 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
               value={(picker.field === 'start' ? startAt : endAt) ?? new Date()}
               mode={picker.mode}
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              // Never let the wheel land on a past instant: start ≥ now, end ≥
+              // start (or now). Date mode only meaningfully bounds the day.
+              minimumDate={picker.field === 'end' ? startAt ?? new Date() : new Date()}
               onChange={onPickerChange}
             />
           </View>

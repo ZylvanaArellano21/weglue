@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { resolveDisplayName, MEMBER_FALLBACK } from '../lib/displayName';
+import { CHAT_ATTACHMENTS_BUCKET, clientUuid } from '../lib/chatAttachments';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,13 @@ export interface ChatPreview {
   other_user_id: string | null;
   last_message: string | null;
   last_message_at: string | null;
-  last_sender_username: string | null;
+  /** Sender of the newest visible message (null when it's a deletion
+   * placeholder or has no sender). Drives the "You: " vs "Name: " preview
+   * prefix and must never be shown as raw text. */
+  last_sender_id: string | null;
+  /** Resolved display name of the newest message's sender (null for own
+   * messages or deletion placeholders). */
+  last_sender_name: string | null;
   unread_count: number;
   channel_names: string[];
   /** Default channel of THIS conversation — lets taps open the thread
@@ -170,6 +177,17 @@ export interface DirectMessagesPage {
   next_cursor: string | null;
 }
 
+/** Every message the user deleted-for-me, so those are excluded from the
+ * Message-tab preview and unread count. Bounded by the viewer's own hides
+ * (small), so this stays one lightweight query regardless of inbox size. */
+async function getHiddenMessageIdsForUser(userId: string): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('message_hides')
+    .select('message_id')
+    .eq('user_id', userId);
+  return new Set(((data ?? []) as any[]).map((r) => r.message_id));
+}
+
 function formatLastMessagePreview(lastMsg: { content: string | null; message_type: string } | null): string | null {
   if (!lastMsg) return null;
   if (lastMsg.message_type === 'shared_event') return '📅 Shared an event';
@@ -200,7 +218,7 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
          clubs(id, name, avatar_url),
          conversation_participants(user_id, profiles!user_id(username, full_name, avatar_url)),
          conversation_channels(id, name, is_default, display_order),
-         messages(id, content, message_type, created_at, deleted_at, profiles!sender_id(username))
+         messages(id, sender_id, content, message_type, created_at, deleted_at, deleted_by, profiles!sender_id(username, full_name))
        )`,
     )
     .eq('user_id', userId)
@@ -216,15 +234,24 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
     (row) => !row.hidden_at && !row.conversations?.deleted_at,
   );
 
+  // Delete-for-me messages must also disappear from the Message-tab preview
+  // (not just inside the thread), so load the viewer's hides once.
+  const hiddenIds = await getHiddenMessageIdsForUser(userId);
+
   return rows.flatMap((row) => {
     const conv = row.conversations;
     const clearedBefore = row.cleared_before ? new Date(row.cleared_before) : null;
-    const msgs: any[] = (conv.messages ?? []).filter(
-      (m: any) => !m.deleted_at && (!clearedBefore || new Date(m.created_at) > clearedBefore),
+    // Candidates = everything visible to this viewer (excludes cleared history
+    // and delete-for-me), but KEEPS delete-for-everyone rows so the newest one
+    // can render its "… deleted a message" placeholder instead of silently
+    // reverting to an older message.
+    const candidates: any[] = (conv.messages ?? []).filter(
+      (m: any) =>
+        !hiddenIds.has(m.id) && (!clearedBefore || new Date(m.created_at) > clearedBefore),
     );
     // Draft/emptied DMs never occupy the Message tab: a direct thread exists
-    // for the viewer only once it has a visible message.
-    if (conv.type === 'direct' && msgs.length === 0) return [];
+    // for the viewer only once it has at least one message it can show.
+    if (conv.type === 'direct' && candidates.length === 0) return [];
     const identity = resolveConversationIdentity(
       conv.type,
       conv.name,
@@ -234,16 +261,26 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       userId,
     );
 
-    msgs.sort(
+    candidates.sort(
       (a: any, b: any) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-    const lastMsg = msgs[0] ?? null;
+    const lastMsg = candidates[0] ?? null;
+    const lastIsDeleted = !!lastMsg?.deleted_at;
 
+    // Unread never counts the viewer's OWN messages or globally-deleted rows —
+    // sending your own message must not light up your own unread badge.
+    const liveIncoming = candidates.filter((m: any) => !m.deleted_at && m.sender_id !== userId);
     const lastReadAt: string | null = row.last_read_at ?? row.joined_at ?? null;
     const unreadCount = lastReadAt
-      ? msgs.filter((m: any) => new Date(m.created_at) > new Date(lastReadAt)).length
-      : msgs.length;
+      ? liveIncoming.filter((m: any) => new Date(m.created_at) > new Date(lastReadAt)).length
+      : liveIncoming.length;
+
+    const lastPreview = lastIsDeleted
+      ? lastMsg.deleted_by === userId
+        ? 'You deleted a message'
+        : 'A message was deleted'
+      : formatLastMessagePreview(lastMsg);
 
     const channels: any[] = [...(conv.conversation_channels ?? [])].sort(
       (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0),
@@ -257,9 +294,15 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       avatar_url: identity.avatar_url,
       club_id: conv.club_id,
       other_user_id: identity.other_user_id,
-      last_message: formatLastMessagePreview(lastMsg),
+      last_message: lastPreview,
       last_message_at: lastMsg?.created_at ?? null,
-      last_sender_username: lastMsg?.profiles?.username ?? null,
+      // No sender attribution for deletion placeholders or the viewer's own
+      // last message (rendered as "You: …" by the caller).
+      last_sender_id: lastIsDeleted ? null : lastMsg?.sender_id ?? null,
+      last_sender_name:
+        lastIsDeleted || !lastMsg || lastMsg.sender_id === userId
+          ? null
+          : personDisplayName(lastMsg.profiles),
       unread_count: unreadCount,
       channel_names: channels.map((c: any) => c.name),
       default_channel_id: defaultChannel?.id ?? null,
@@ -602,6 +645,160 @@ export async function getSuggestedPeople(userId: string): Promise<PeopleResult[]
     }
   }
   return result.slice(0, 20);
+}
+
+// ─── Internal sharing (people + groups + club chats) ────────────────────────
+// One destination model for the Share sheet: individual people (each resolving
+// to their DM) plus every multi-person conversation the user belongs to
+// (custom groups, club Members chats, club Officers chats), each a DISTINCT,
+// clearly-labelled destination ("Clay Club · Members" vs "Clay Club · Officers").
+
+/** My group/club/officer conversations, newest-active first, for the Share
+ * sheet's Suggested section (multi-person destinations only — people come from
+ * getSuggestedPeople / searchChats). */
+export async function getMyGroupChats(userId: string): Promise<ChatResult[]> {
+  const { data } = await supabase
+    .from('conversation_participants')
+    .select('conversations!inner(id, name, type, club_id, avatar_url, deleted_at, clubs(id, name, avatar_url))')
+    .eq('user_id', userId)
+    .in('conversations.type', ['group', 'club_group', 'officer_chat'])
+    .limit(40);
+
+  return ((data ?? []) as any[])
+    .map((row) => row.conversations)
+    .filter((c) => c && !c.deleted_at)
+    .map((c) => ({
+      id: c.id,
+      name: clubConversationTitle(c.clubs?.name, c.type, c.name),
+      type: c.type,
+      club_id: c.club_id,
+      avatar_url: c.clubs?.avatar_url ?? c.avatar_url,
+    }));
+}
+
+/** Default channel of a club chat (share messages must land in a real channel
+ * thread, not channel_id=null which no channel view renders). Null for DMs and
+ * custom groups, which have no channels. */
+async function getDefaultChannelId(conversationId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('conversation_channels')
+    .select('id, is_default, display_order')
+    .eq('conversation_id', conversationId)
+    .order('display_order', { ascending: true });
+  const channels = (data ?? []) as any[];
+  if (channels.length === 0) return null;
+  return (channels.find((c) => c.is_default) ?? channels[0]).id;
+}
+
+export type ShareContent =
+  | { type: 'event'; eventId: string }
+  | { type: 'post'; postId: string }
+  | { type: 'media'; sourcePath: string; kind: 'image' | 'video'; name?: string | null; mime?: string | null };
+
+/** A single share destination: an existing conversation, or a person (resolved
+ * to their DM at send time). */
+export interface ShareTarget {
+  conversationId?: string;
+  userId?: string;
+}
+
+/**
+ * Delivers shared content to one conversation as a REAL message (never a text
+ * URL). For media, the private object is server-side copied into the
+ * destination conversation's storage folder so recipient RLS grants access —
+ * no signed URL is ever exposed, and unauthorized users can't read it.
+ */
+async function shareToConversation(
+  senderId: string,
+  conversationId: string,
+  content: ShareContent,
+): Promise<void> {
+  const channelId = await getDefaultChannelId(conversationId);
+
+  if (content.type === 'event') {
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      channel_id: channelId,
+      sender_id: senderId,
+      message_type: 'shared_event',
+      shared_event_id: content.eventId,
+    });
+    if (error) throw error;
+    return;
+  }
+  if (content.type === 'post') {
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      channel_id: channelId,
+      sender_id: senderId,
+      message_type: 'shared_post',
+      shared_post_id: content.postId,
+    });
+    if (error) throw error;
+    return;
+  }
+
+  // Media: copy the private object into the destination folder (server-side,
+  // no download) so the new message references media the recipients can read.
+  const ext = content.sourcePath.includes('.') ? content.sourcePath.split('.').pop() : content.kind === 'video' ? 'mp4' : 'jpg';
+  const destPath = `${conversationId}/${clientUuid()}.${ext}`;
+  const { error: copyErr } = await supabase.storage
+    .from(CHAT_ATTACHMENTS_BUCKET)
+    .copy(content.sourcePath, destPath);
+  if (copyErr) throw copyErr;
+
+  const { error } = await supabase.from('messages').insert({
+    conversation_id: conversationId,
+    channel_id: channelId,
+    sender_id: senderId,
+    message_type: content.kind,
+    attachment_url: destPath,
+    attachment_name: content.name ?? null,
+    attachment_mime: content.mime ?? null,
+  });
+  if (error) throw error;
+}
+
+export interface ShareResult {
+  sent: number;
+  failed: number;
+}
+
+/**
+ * Fan-out share to many destinations at once. Dedupes destinations (never two
+ * sends to the same conversation), resolves people to their DM, and reports
+ * partial failures so the UI can be truthful. Idempotency across taps is the
+ * caller's responsibility (it disables Send while pending).
+ */
+export async function shareContentToTargets(
+  senderId: string,
+  targets: ShareTarget[],
+  content: ShareContent,
+): Promise<ShareResult> {
+  // Resolve people → DM conversation ids, then dedupe.
+  const conversationIds = new Set<string>();
+  for (const t of targets) {
+    try {
+      const convId = t.conversationId ?? (t.userId ? await getOrCreateDirectChat(t.userId) : null);
+      if (convId) conversationIds.add(convId);
+    } catch {
+      // A resolution failure counts as a failed destination below.
+    }
+  }
+
+  let sent = 0;
+  let failed = 0;
+  for (const convId of conversationIds) {
+    try {
+      await shareToConversation(senderId, convId, content);
+      sent += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  // Destinations that never resolved to a conversation id are failures too.
+  failed += Math.max(0, targets.length - conversationIds.size - failed);
+  return { sent, failed };
 }
 
 // ─── Membership check ─────────────────────────────────────────────────────────

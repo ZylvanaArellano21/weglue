@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import type { AttachmentDraft } from '../../hooks/useConversation';
+import { MAX_FILE_BYTES } from '../../lib/chatAttachments';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
 
 interface Props {
@@ -69,24 +70,35 @@ export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) 
 
   async function pickFile() {
     onClose();
+    let result: DocumentPicker.DocumentPickerResult;
     try {
-      const result = await DocumentPicker.getDocumentAsync({
+      // '*/*' lets iOS browse Files / iCloud Drive / On My iPhone / providers
+      // and Android its document provider. copyToCacheDirectory gives us a
+      // stable file:// uri to upload from.
+      result = await DocumentPicker.getDocumentAsync({
         multiple: false,
         copyToCacheDirectory: true,
         type: '*/*',
       });
-      if (result.canceled || !result.assets?.[0]) return;
-      const a = result.assets[0];
-      onPicked({
-        localUri: a.uri,
-        kind: 'file',
-        name: a.name,
-        size: a.size ?? null,
-        mime: a.mimeType ?? 'application/octet-stream',
-      });
     } catch {
+      // Genuine failure to present the picker (never fires on a normal cancel).
       onError('Could not open the file picker. Please try again.');
+      return;
     }
+    // Cancelling quietly closes — not an error.
+    if (result.canceled || !result.assets?.[0]) return;
+    const a = result.assets[0];
+    if (a.size != null && a.size > MAX_FILE_BYTES) {
+      onError('This file is larger than 25 MB. Choose a smaller file and try again.');
+      return;
+    }
+    onPicked({
+      localUri: a.uri,
+      kind: 'file',
+      name: a.name,
+      size: a.size ?? null,
+      mime: a.mimeType ?? 'application/octet-stream',
+    });
   }
 
   return (

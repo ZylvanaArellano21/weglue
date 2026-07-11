@@ -147,10 +147,24 @@ export default function ChatRoom() {
 
   const onFirstSend = useCallback(
     (conversationId: string) => {
-      // Swap the draft route for the real conversation without stacking.
-      router.replace(`/(tabs)/messages/${conversationId}` as any);
+      // Swap the draft route for the real conversation in place (replace, never
+      // push — no second entry in the back stack). Carry the already-known
+      // identity as params so the real screen paints its header instantly with
+      // no blank flash or second header (Bug 10). The thread itself never
+      // reloads: the send pipeline's materializedRef already points the open
+      // ConversationThread at the real id before this fires.
+      router.replace({
+        pathname: `/(tabs)/messages/${conversationId}`,
+        params: isDraftGroup
+          ? { ptype: 'group', pname: params.draftGroupName || params.draftNames || '' }
+          : {
+              ptype: 'direct',
+              pname: params.draftName || '',
+              pavatar: params.draftAvatar || '',
+            },
+      } as any);
     },
-    [router],
+    [router, isDraftGroup, params.draftGroupName, params.draftNames, params.draftName, params.draftAvatar],
   );
 
   // ── Identity ──
@@ -255,10 +269,12 @@ export default function ChatRoom() {
           <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          {/* DM identity: avatar and name both open the person's profile. */}
+          {/* Header identity → Chat Info (Direct Message Info for DMs). The
+              person's profile is reached from INSIDE the info screen. Draft DMs
+              have no info screen yet, so they preview the person's profile. */}
           <TouchableOpacity
             onPress={() => {
-              if (isDirect && otherUserId) openProfile(otherUserId);
+              if (isDraftDm && otherUserId) openProfile(otherUserId);
               else if (!isDraft) router.push(`/(tabs)/messages/${chatId}/info` as any);
             }}
             disabled={isDraftGroup}

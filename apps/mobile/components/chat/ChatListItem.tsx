@@ -26,15 +26,21 @@ function formatTime(isoString: string | null): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function lastMessagePreview(chat: ChatPreview): string {
+function lastMessagePreview(chat: ChatPreview, currentUserId: string): string {
   if (!chat.last_message) return 'No messages yet';
-  const prefix = chat.last_sender_username ? `${chat.last_sender_username}: ` : '';
+  // "You: Hey" for the viewer's own newest message; "Jordan: Hey" for others.
+  // Deletion placeholders ("A message was deleted") carry no sender and get no
+  // prefix. Own messages are flagged by last_sender_id === currentUserId.
+  let prefix = '';
+  if (chat.last_sender_id) {
+    prefix = chat.last_sender_id === currentUserId ? 'You: ' : chat.last_sender_name ? `${chat.last_sender_name}: ` : '';
+  }
   const text =
     chat.last_message.length > 60 ? chat.last_message.slice(0, 60) + '…' : chat.last_message;
   return prefix + text;
 }
 
-export function ChatListItem({ chat, onPress, channelTags = [] }: Props) {
+export function ChatListItem({ chat, currentUserId, onPress, channelTags = [] }: Props) {
   const isGroup = chat.type !== 'direct';
   // chat.name is live-resolved by chatService (other participant's display
   // name for DMs, current club name for club chats, "Deleted account" when
@@ -46,14 +52,22 @@ export function ChatListItem({ chat, onPress, channelTags = [] }: Props) {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
       <View style={styles.imageWrap}>
-        {preset ? (
-          <View style={[styles.groupImage, { backgroundColor: preset }]} />
-        ) : chat.avatar_url ? (
-          <Image source={{ uri: chat.avatar_url }} style={styles.groupImage} />
+        {isGroup ? (
+          // Clubs & custom groups keep the rounded-square icon (corrections
+          // IMG_1565/1566). People are always circular.
+          preset ? (
+            <View style={[styles.groupImage, { backgroundColor: preset }]} />
+          ) : chat.avatar_url ? (
+            <Image source={{ uri: chat.avatar_url }} style={styles.groupImage} />
+          ) : (
+            <View style={styles.groupImageFallback}>
+              <Avatar uri={null} size={48} username={displayName} />
+            </View>
+          )
         ) : (
-          <View style={styles.groupImageFallback}>
-            <Avatar uri={null} size={44} username={displayName} />
-          </View>
+          // Direct messages: true circular avatar via the shared component
+          // (corrections IMG_1573/1575 headers + people lists).
+          <Avatar uri={chat.avatar_url} size={48} username={displayName} />
         )}
       </View>
 
@@ -77,7 +91,7 @@ export function ChatListItem({ chat, onPress, channelTags = [] }: Props) {
 
         <View style={styles.bottomRow}>
           <Text style={styles.preview} numberOfLines={1}>
-            {lastMessagePreview(chat)}
+            {lastMessagePreview(chat, currentUserId)}
           </Text>
           {chat.unread_count > 0 && (
             <View style={styles.badge}>
