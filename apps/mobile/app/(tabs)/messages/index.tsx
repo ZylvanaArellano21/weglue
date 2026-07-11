@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
-import { openChat, openDirectChatWith } from '../../../lib/chatNavigation';
+import { openChat } from '../../../lib/chatNavigation';
 import { navigateToDiscover } from '../../../lib/discoverNavigation';
 import { useMyChats, useChatSearch } from '../../../hooks/useChats';
 import { ChatListItem } from '../../../components/chat/ChatListItem';
@@ -77,9 +77,17 @@ export default function MessagesIndex() {
     [],
   );
 
-  const handlePressUser = useCallback(async (otherUserId: string) => {
-    await openDirectChatWith(otherUserId);
-  }, []);
+  // Tapping a person in search opens a DRAFT DM — nothing is saved until the
+  // first message is sent (no empty conversations, no duplicate threads).
+  const handlePressUser = useCallback(
+    (person: { user_id: string; full_name: string | null; username: string; avatar_url: string | null }) => {
+      const name = person.full_name?.trim() || person.username;
+      router.push(
+        `/(tabs)/messages/new?draftUserId=${person.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(person.avatar_url ?? '')}` as any,
+      );
+    },
+    [router],
+  );
 
   function renderGlobalSearch() {
     if (searchLoading) {
@@ -118,7 +126,7 @@ export default function MessagesIndex() {
             return (
               <TouchableOpacity
                 style={styles.searchRow}
-                onPress={() => handlePressUser(item.user_id)}
+                onPress={() => handlePressUser(item)}
                 activeOpacity={0.7}
               >
                 <Avatar
@@ -180,7 +188,7 @@ export default function MessagesIndex() {
       return (
         <GroupEmptyState
           onBrowseClubs={() => navigateToDiscover()}
-          onNewGroupChat={() => router.push('/(tabs)/messages/add-people' as any)}
+          onNewGroupChat={() => router.push('/(tabs)/messages/new-group' as any)}
         />
       );
     }
@@ -224,7 +232,7 @@ export default function MessagesIndex() {
           <FilterPills value={filter} onChange={setFilter} />
           <TouchableOpacity
             style={styles.newChatBtn}
-            onPress={() => router.push('/(tabs)/messages/add-people' as any)}
+            onPress={() => router.push('/(tabs)/messages/new-message' as any)}
             accessibilityLabel="New chat"
           >
             <Ionicons name="add" size={26} color={chatColors.text} />

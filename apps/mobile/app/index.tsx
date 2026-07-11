@@ -11,6 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@weglue/shared";
 import { getPendingSignupEmail } from "../lib/authFlow";
+import { getPendingInvite } from "../lib/pendingInvite";
 
 export default function WelcomeScreen() {
   const { session, isLoading, profile } = useAuthStore();
@@ -59,8 +60,16 @@ export default function WelcomeScreen() {
       return;
     }
 
-    // Fully onboarded — go to the main app
-    router.replace("/(tabs)");
+    // Fully onboarded. A deferred chat invite (opened before signing up, or
+    // survived onboarding) is consumed exactly here so the invited chat is the
+    // first destination shown — then normal app entry.
+    getPendingInvite().then((token) => {
+      if (token) {
+        router.replace(`/invite/${token}` as any);
+      } else {
+        router.replace("/(tabs)");
+      }
+    });
   }, [isLoading, session, profile, pendingSignupEmail]);
 
   if (isLoading || pendingSignupEmail === null) {

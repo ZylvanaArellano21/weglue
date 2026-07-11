@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { resolveDisplayName, MEMBER_FALLBACK } from '../lib/displayName';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,9 +40,13 @@ export interface ChatDetails {
   type: 'direct' | 'group' | 'club_group' | 'officer_chat';
   /** Live display title (see ChatPreview.name). */
   name: string | null;
+  /** Custom-group stored name (null → title is auto-derived). */
+  stored_name: string | null;
   /** Live avatar (see ChatPreview.avatar_url). */
   avatar_url: string | null;
   club_id: string | null;
+  /** Custom-group administrator (creator). */
+  created_by: string | null;
   participants: ChatParticipant[];
 }
 
@@ -62,14 +67,11 @@ function clubConversationTitle(
   return `${clubName} · ${type === 'officer_chat' ? 'Officers' : 'Members'}`;
 }
 
-/** Display name for a person: full name when they entered one, otherwise
- * their username. Usernames are never the *preferred* chat title. */
+/** Display name for a person: full name when they entered one, otherwise a
+ * real username. Placeholder `user_<hex>` usernames resolve to null so callers
+ * never render the internal-looking id as someone's name. */
 function personDisplayName(p: { full_name?: string | null; username?: string | null } | null | undefined): string | null {
-  if (!p) return null;
-  const full = p.full_name?.trim();
-  if (full) return full;
-  const username = p.username?.trim();
-  return username || null;
+  return resolveDisplayName(p);
 }
 
 interface ResolvedIdentity {
@@ -95,12 +97,11 @@ function resolveConversationIdentity(
       return { name: DELETED_ACCOUNT_LABEL, avatar_url: null, other_user_id: null };
     }
     const name = personDisplayName(other.profiles);
-    if (!name) {
-      // Malformed/incomplete profile: log for repair, show a safe fallback.
-      console.warn('[chatService] direct chat participant has no resolvable name', other.user_id);
-    }
     return {
-      name: name ?? DELETED_ACCOUNT_LABEL,
+      // The account exists (participant row present) but hasn't set a name and
+      // still has the placeholder username — show "We Glue member", never the
+      // internal id and never "Deleted account".
+      name: name ?? MEMBER_FALLBACK,
       avatar_url: other.profiles?.avatar_url ?? null,
       other_user_id: other.user_id,
     };
@@ -115,7 +116,35 @@ function resolveConversationIdentity(
     };
   }
 
+  if (type === 'group') {
+    // Custom groups: explicit name wins; otherwise derive from participant
+    // display names ("Ana, Marcus, Liam" / "Ana, Marcus and 4 others") and
+    // keep deriving as membership changes.
+    if (storedName?.trim()) {
+      return { name: storedName.trim(), avatar_url: storedAvatar, other_user_id: null };
+    }
+    return {
+      name: autoGroupTitle(participants, currentUserId),
+      avatar_url: storedAvatar,
+      other_user_id: null,
+    };
+  }
+
   return { name: storedName, avatar_url: storedAvatar, other_user_id: null };
+}
+
+/** Fallback title for unnamed custom groups, derived from display names. */
+export function autoGroupTitle(
+  participants: { user_id: string; profiles?: { username?: string | null; full_name?: string | null } | null }[],
+  currentUserId: string,
+): string {
+  const names = participants
+    .filter((p) => p.user_id !== currentUserId)
+    .map((p) => personDisplayName(p.profiles))
+    .filter((n): n is string => !!n);
+  if (names.length === 0) return 'Group chat';
+  if (names.length <= 3) return names.join(', ');
+  return `${names[0]}, ${names[1]} and ${names.length - 2} others`;
 }
 
 export interface DirectMessageThread {
@@ -147,6 +176,8 @@ function formatLastMessagePreview(lastMsg: { content: string | null; message_typ
   if (lastMsg.message_type === 'shared_post') return '🖼️ Shared a post';
   if (lastMsg.message_type === 'poll') return '📊 Started a poll';
   if (lastMsg.message_type === 'image') return lastMsg.content ?? '📷 Photo';
+  if (lastMsg.message_type === 'video') return lastMsg.content ?? '🎬 Video';
+  if (lastMsg.message_type === 'file') return lastMsg.content ?? '📎 File';
   return lastMsg.content;
 }
 
@@ -163,13 +194,13 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
   const { data, error } = await supabase
     .from('conversation_participants')
     .select(
-      `conversation_id, last_read_at, joined_at,
+      `conversation_id, last_read_at, joined_at, hidden_at, cleared_before,
        conversations!inner(
-         id, type, name, avatar_url, club_id,
+         id, type, name, avatar_url, club_id, created_by, deleted_at,
          clubs(id, name, avatar_url),
          conversation_participants(user_id, profiles!user_id(username, full_name, avatar_url)),
          conversation_channels(id, name, is_default, display_order),
-         messages(id, content, message_type, created_at, profiles!sender_id(username))
+         messages(id, content, message_type, created_at, deleted_at, profiles!sender_id(username))
        )`,
     )
     .eq('user_id', userId)
@@ -179,11 +210,21 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
 
   if (error) throw error;
 
-  const rows = (data ?? []) as any[];
+  const rows = ((data ?? []) as any[]).filter(
+    // Hidden-for-me and deleted-for-everyone conversations stay out of the
+    // Message tab. hidden_at clears automatically when a new message arrives.
+    (row) => !row.hidden_at && !row.conversations?.deleted_at,
+  );
 
-  return rows.map((row) => {
+  return rows.flatMap((row) => {
     const conv = row.conversations;
-    const msgs: any[] = conv.messages ?? [];
+    const clearedBefore = row.cleared_before ? new Date(row.cleared_before) : null;
+    const msgs: any[] = (conv.messages ?? []).filter(
+      (m: any) => !m.deleted_at && (!clearedBefore || new Date(m.created_at) > clearedBefore),
+    );
+    // Draft/emptied DMs never occupy the Message tab: a direct thread exists
+    // for the viewer only once it has a visible message.
+    if (conv.type === 'direct' && msgs.length === 0) return [];
     const identity = resolveConversationIdentity(
       conv.type,
       conv.name,
@@ -235,7 +276,7 @@ export async function getChatDetails(
   const [{ data: conv }, { data: participants }] = await Promise.all([
     supabase
       .from('conversations')
-      .select('id, type, name, avatar_url, club_id, clubs(id, name, avatar_url)')
+      .select('id, type, name, avatar_url, club_id, created_by, deleted_at, clubs(id, name, avatar_url)')
       .eq('id', conversationId)
       .single(),
     supabase
@@ -289,8 +330,10 @@ export async function getChatDetails(
     id: (conv as any).id,
     type: (conv as any).type,
     name: identity.name,
+    stored_name: (conv as any).name ?? null,
     avatar_url: identity.avatar_url,
     club_id: (conv as any).club_id,
+    created_by: (conv as any).created_by ?? null,
     participants: parts,
   };
 }

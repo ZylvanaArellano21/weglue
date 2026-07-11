@@ -4,7 +4,9 @@ export default function MessagesLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
-      <Stack.Screen name="add-people" />
+      <Stack.Screen name="new-message" />
+      <Stack.Screen name="new-group" />
+      <Stack.Screen name="manage-people" />
       <Stack.Screen name="[chatId]/index" />
       <Stack.Screen name="[chatId]/[channelId]" />
       <Stack.Screen name="[chatId]/info" />

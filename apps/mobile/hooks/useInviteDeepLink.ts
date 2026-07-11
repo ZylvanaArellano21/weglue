@@ -1,0 +1,45 @@
+import { useEffect } from 'react';
+import * as Linking from 'expo-linking';
+import { router } from 'expo-router';
+import { useAuthStore } from '@weglue/shared';
+import { parseInviteToken, setPendingInvite } from '../lib/pendingInvite';
+
+// ─── Invite deep-link capture ────────────────────────────────────────────────
+// Captures invite tokens from cold-start and warm-start deep links. The token
+// is ALWAYS persisted first (so it survives onboarding / app restart), then:
+//   • signed-in + onboarded  → open the invite screen now
+//   • otherwise              → leave it persisted; index.tsx routing consumes
+//                              it once onboarding completes.
+// Non-invite links are ignored (auth links are handled by useAuthDeepLink).
+
+async function handleUrl(url: string, isOnboarded: boolean, hasSession: boolean) {
+  const token = parseInviteToken(url);
+  if (!token) return;
+
+  // Persist immediately — the whole point of a deferred invite.
+  await setPendingInvite(token);
+
+  if (hasSession && isOnboarded) {
+    router.push(`/invite/${token}` as any);
+  }
+  // Else: onboarding/login flow runs; index.tsx picks the token up at the end.
+}
+
+export function useInviteDeepLink() {
+  const session = useAuthStore((s) => s.session);
+  const profile = useAuthStore((s) => s.profile);
+  const isOnboarded = profile?.onboarding_completed === true && !!profile?.avatar_url;
+  const hasSession = !!session?.user?.email_confirmed_at;
+
+  useEffect(() => {
+    Linking.getInitialURL().then((url) => {
+      if (url) void handleUrl(url, isOnboarded, hasSession);
+    });
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      void handleUrl(url, isOnboarded, hasSession);
+    });
+
+    return () => subscription.remove();
+  }, [isOnboarded, hasSession]);
+}

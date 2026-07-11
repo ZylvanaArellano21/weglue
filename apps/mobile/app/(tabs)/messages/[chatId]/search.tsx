@@ -6,39 +6,61 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
-import { useChatDetails, useDirectMessages } from '../../../../hooks/useChats';
-import { useChannelMessages } from '../../../../hooks/useClubChannels';
-import { ChatSearchBar } from '../../../../components/chat/ChatSearchBar';
 import { Avatar } from '../../../../components/shared/Avatar';
+import { searchConversation, type ConversationSearchHit } from '../../../../services/messagingService';
+import { displayNameOrFallback } from '../../../../lib/displayName';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
-interface SearchHit {
-  id: string;
-  senderId: string;
-  senderName: string;
-  senderAvatar: string | null;
-  content: string;
-  createdAt: string;
-  highlight: string;
+// ─── In-conversation search ─────────────────────────────────────────────────
+// Full-screen, keyboard-safe. Searches the WHOLE accessible history server-side
+// (text · file names · poll questions · shared event/post titles) — not just
+// the messages currently loaded in the thread. Selecting a result jumps to the
+// exact message; Back returns to the results + the query.
+
+function typeIndicator(field: ConversationSearchHit['matchField']): { icon: keyof typeof Ionicons.glyphMap; label: string } {
+  switch (field) {
+    case 'file_name':
+      return { icon: 'document-outline', label: 'File' };
+    case 'poll_question':
+      return { icon: 'checkbox-outline', label: 'Poll' };
+    case 'shared_event':
+      return { icon: 'calendar-outline', label: 'Event' };
+    case 'shared_post':
+      return { icon: 'image-outline', label: 'Post' };
+    default:
+      return { icon: 'chatbubble-outline', label: 'Message' };
+  }
 }
 
-function highlightMatch(text: string, query: string): { before: string; match: string; after: string } {
+function Highlighted({ text, query }: { text: string; query: string }) {
   const idx = text.toLowerCase().indexOf(query.toLowerCase());
-  if (idx === -1) return { before: text, match: '', after: '' };
-  return {
-    before: text.slice(0, idx),
-    match: text.slice(idx, idx + query.length),
-    after: text.slice(idx + query.length),
-  };
-}
-
-function formatResultDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  if (idx === -1) {
+    return (
+      <Text style={styles.preview} numberOfLines={2}>
+        {text}
+      </Text>
+    );
+  }
+  // Show a little context before the match on long strings.
+  const start = Math.max(0, idx - 20);
+  const prefix = start > 0 ? '…' : '';
+  return (
+    <Text style={styles.preview} numberOfLines={2}>
+      {prefix}
+      {text.slice(start, idx)}
+      <Text style={styles.match}>{text.slice(idx, idx + query.length)}</Text>
+      {text.slice(idx + query.length)}
+    </Text>
+  );
 }
 
 export default function SearchInChatScreen() {
@@ -48,137 +70,183 @@ export default function SearchInChatScreen() {
   const userId = user?.id ?? '';
 
   const [query, setQuery] = useState('');
+  const trimmed = query.trim();
 
-  const { data: chatDetails } = useChatDetails(chatId);
-  const isDirect = chatDetails?.type === 'direct';
+  const { data: hits, isFetching } = useQuery({
+    queryKey: ['conversationSearch', chatId, trimmed],
+    queryFn: () => searchConversation(chatId, userId, trimmed),
+    enabled: !!chatId && trimmed.length > 0,
+    staleTime: 10 * 1000,
+  });
 
-  const { data: dmPage, isLoading: dmLoading } = useDirectMessages(isDirect ? chatId : undefined);
-  const { data: channelPage, isLoading: channelLoading } = useChannelMessages(
-    !isDirect && channelId ? channelId : undefined,
-  );
+  const results = useMemo(() => hits ?? [], [hits]);
 
-  const isLoading = dmLoading || channelLoading;
-
-  const results = useMemo((): SearchHit[] => {
-    const q = query.trim();
-    if (!q) return [];
-
-    const raw = isDirect
-      ? (dmPage?.messages ?? [])
-      : (channelPage?.messages ?? []);
-
-    return raw
-      .filter((m) => m.content?.toLowerCase().includes(q.toLowerCase()))
-      .map((m) => ({
-        id: m.id,
-        senderId: m.sender_id,
-        senderName: m.sender.username,
-        senderAvatar: m.sender.avatar_url,
-        content: m.content ?? '',
-        createdAt: m.created_at,
-        highlight: q,
-      }));
-  }, [query, isDirect, dmPage, channelPage]);
-
-  const grouped = useMemo(() => {
-    const map = new Map<string, SearchHit[]>();
-    for (const hit of results) {
-      const list = map.get(hit.senderId) ?? [];
-      list.push(hit);
-      map.set(hit.senderId, list);
+  function openHit(hit: ConversationSearchHit) {
+    const m = hit.message;
+    if (m.channel_id) {
+      router.push({
+        pathname: `/(tabs)/messages/${chatId}/${m.channel_id}` as any,
+        params: { jumpToMessageId: m.id },
+      });
+    } else {
+      router.push({
+        pathname: `/(tabs)/messages/${chatId}` as any,
+        params: { jumpToMessageId: m.id },
+      });
     }
-    return Array.from(map.entries());
-  }, [results]);
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
           <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
-      </View>
-
-      <View style={styles.searchWrap}>
-        <ChatSearchBar value={query} onChangeText={setQuery} onClear={() => setQuery('')} />
-      </View>
-
-      {isLoading ? (
-        <ActivityIndicator color={chatColors.teal} style={{ marginTop: 32 }} />
-      ) : (
-        <FlatList
-          data={grouped}
-          keyExtractor={([senderId]) => senderId}
-          renderItem={({ item: [senderId, hits] }) => (
-            <View style={styles.group}>
-              <Text style={styles.groupHeader}>{hits[0]?.senderName}</Text>
-              {hits.map((hit) => {
-                const parts = highlightMatch(hit.content, query.trim());
-                return (
-                  <View key={hit.id} style={styles.resultRow}>
-                    <Avatar
-                      uri={hit.senderAvatar}
-                      size={chatSizes.avatarSuggested}
-                      username={hit.senderName}
-                    />
-                    <View style={styles.resultText}>
-                      <Text style={styles.senderName}>{hit.senderName}</Text>
-                      <Text style={styles.preview} numberOfLines={2}>
-                        {parts.before}
-                        <Text style={styles.match}>{parts.match}</Text>
-                        {parts.after}
-                      </Text>
-                      <Text style={styles.date}>{formatResultDate(hit.createdAt)}</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color={chatColors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search this chat"
+            placeholderTextColor={chatColors.textMuted}
+            value={query}
+            onChangeText={setQuery}
+            autoFocus
+            autoCorrect={false}
+          />
+          {trimmed.length > 0 && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}>
+              <Ionicons name="close-circle" size={16} color={chatColors.textMuted} />
+            </TouchableOpacity>
           )}
-          ListEmptyComponent={
-            query.trim() ? (
-              <Text style={styles.empty}>No messages found.</Text>
-            ) : (
-              <Text style={styles.empty}>Type to search this chat.</Text>
-            )
-          }
-        />
-      )}
+        </View>
+      </View>
+
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {isFetching ? (
+          <ActivityIndicator color={chatColors.teal} style={{ marginTop: 32 }} />
+        ) : (
+          <FlatList
+            data={results}
+            keyExtractor={(item) => item.message.id}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            contentContainerStyle={styles.list}
+            renderItem={({ item }) => {
+              const ind = typeIndicator(item.matchField);
+              const senderName = displayNameOrFallback(item.message.sender);
+              return (
+                <TouchableOpacity style={styles.resultRow} onPress={() => openHit(item)} activeOpacity={0.7}>
+                  <Avatar
+                    uri={item.message.sender.avatar_url}
+                    size={chatSizes.avatarSuggested}
+                    username={senderName}
+                  />
+                  <View style={styles.resultText}>
+                    <View style={styles.resultTop}>
+                      <Text style={styles.senderName} numberOfLines={1}>
+                        {senderName}
+                      </Text>
+                      <View style={styles.typeChip}>
+                        <Ionicons name={ind.icon} size={11} color={chatColors.textMuted} />
+                        <Text style={styles.typeLabel}>{ind.label}</Text>
+                      </View>
+                    </View>
+                    <Highlighted text={item.matchText} query={trimmed} />
+                    <Text style={styles.date}>
+                      {new Date(item.message.created_at).toLocaleDateString('en-US', {
+                        month: 'long',
+                        day: 'numeric',
+                      })}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            }}
+            ListEmptyComponent={
+              <Text style={styles.empty}>
+                {trimmed ? `No matches for "${trimmed}"` : 'Search messages, files, polls, and shared items.'}
+              </Text>
+            }
+          />
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: chatColors.bg },
-  header: { paddingHorizontal: 12, paddingVertical: 8 },
-  backBtn: { padding: 4, alignSelf: 'flex-start' },
-  searchWrap: { paddingVertical: 8 },
-  group: { marginBottom: 8 },
-  groupHeader: {
-    ...chatTypography.sectionHeader,
-    paddingHorizontal: 23,
-    paddingVertical: 6,
+  flex: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
+  backBtn: { padding: 4 },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: chatColors.white,
+    borderRadius: chatSizes.searchBarRadius,
+    paddingHorizontal: 14,
+    height: chatSizes.searchBarHeight,
+    borderWidth: 1,
+    borderColor: chatColors.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: chatFonts.regular,
+    fontSize: 14,
+    color: chatColors.text,
+  },
+  list: { paddingVertical: 6 },
   resultRow: {
     flexDirection: 'row',
-    paddingHorizontal: 23,
-    paddingVertical: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     gap: 12,
   },
   resultText: { flex: 1 },
+  resultTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   senderName: {
     fontFamily: chatFonts.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     color: chatColors.text,
+    flex: 1,
+  },
+  typeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: chatColors.tagBg,
+    borderRadius: 20,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  typeLabel: {
+    fontFamily: chatFonts.regular,
+    fontSize: 10,
+    color: chatColors.textMuted,
   },
   preview: {
     fontFamily: chatFonts.regular,
-    fontSize: 12,
+    fontSize: 13,
     color: chatColors.textMuted,
-    marginTop: 2,
+    marginTop: 3,
   },
   match: {
     fontFamily: chatFonts.semiBold,
     color: chatColors.text,
+    backgroundColor: 'rgba(15,166,166,0.18)',
   },
   date: {
     ...chatTypography.timestamp,
@@ -189,6 +257,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: chatColors.textMuted,
     textAlign: 'center',
-    marginTop: 32,
+    marginTop: 40,
+    paddingHorizontal: 32,
   },
 });

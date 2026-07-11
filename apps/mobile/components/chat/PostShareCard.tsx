@@ -50,7 +50,6 @@ export function PostShareCard({ postId, viewerUserId }: Props) {
       activeOpacity={0.85}
       onPress={() => router.push({ pathname: '/post/[postId]', params: { postId: post.id } })}
     >
-      <View style={styles.accentBar} />
       <View style={styles.content}>
         <View style={styles.badgeRow}>
           <Ionicons name="image" size={12} color={chatColors.teal} />
@@ -89,10 +88,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flexDirection: 'row',
     ...chatShadow,
-  },
-  accentBar: {
-    width: 4,
-    backgroundColor: chatColors.teal,
   },
   content: {
     flex: 1,

@@ -23,6 +23,7 @@ import { AppState, Platform, Text, TouchableOpacity, View } from "react-native";
 import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
+import { useInviteDeepLink } from "../hooks/useInviteDeepLink";
 import { LeaveClubHost } from "../components/club/LeaveClubHost";
 import { timedQuery } from "../lib/timedQuery";
 import {
@@ -128,6 +129,7 @@ export default function RootLayout() {
   const { setSession, setProfile, setOnboarded, setLoading } = useAuthStore();
 
   useAuthDeepLink();
+  useInviteDeepLink();
 
   useEffect(() => {
     if (fontsLoaded) SplashScreen.hideAsync();

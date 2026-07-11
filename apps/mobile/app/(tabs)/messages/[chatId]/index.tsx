@@ -1,83 +1,93 @@
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useChatDetails, useConversationMembership, useNonMemberPreview, useDirectMessages } from '../../../../hooks/useChats';
+import {
+  useChatDetails,
+  useConversationMembership,
+  useNonMemberPreview,
+} from '../../../../hooks/useChats';
 import { useClubChannels } from '../../../../hooks/useClubChannels';
-import { useRealtimeDirectMessages, useRealtimeParticipants } from '../../../../hooks/useRealtimeMessages';
+import { useRealtimeParticipants } from '../../../../hooks/useRealtimeMessages';
 import { useQueryClient } from '@tanstack/react-query';
 import { NonMemberPreview } from '../../../../components/chat/NonMemberPreview';
-import { MessageBubble } from '../../../../components/chat/MessageBubble';
-import { EventShareCard } from '../../../../components/chat/EventShareCard';
-import { PostShareCard } from '../../../../components/chat/PostShareCard';
-import { ChatInput } from '../../../../components/chat/ChatInput';
-import {
-  DateDivider,
-  formatChatDateDivider,
-  isSameChatDay,
-} from '../../../../components/chat/DateDivider';
+import { ConversationThread } from '../../../../components/chat/ConversationThread';
 import { Avatar } from '../../../../components/shared/Avatar';
-import { sendDirectMessage, markConversationRead } from '../../../../services/chatService';
+import { getOrCreateDirectChat } from '../../../../services/chatService';
+import { createGroupChat } from '../../../../services/messagingService';
 import { getLastVisitedChannel } from '../../../../lib/chatNavigation';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
+// ─── Conversation screen ────────────────────────────────────────────────────
+// direct + custom group threads render here; official club chats redirect to
+// their channel thread. Draft modes (nothing saved until the first message):
+//   chatId = "new"        + draftUserId/draftName/draftAvatar  → draft DM
+//   chatId = "new-group"  + draftParticipantIds/draftNames/draftGroupName → draft group
+
 export default function ChatRoom() {
-  const { chatId, ptype, pclub, pname, pavatar } = useLocalSearchParams<{
+  const params = useLocalSearchParams<{
     chatId: string;
     ptype?: string;
     pclub?: string;
     pname?: string;
     pavatar?: string;
+    jumpToMessageId?: string;
+    draftUserId?: string;
+    draftName?: string;
+    draftAvatar?: string;
+    draftParticipantIds?: string;
+    draftNames?: string;
+    draftGroupName?: string;
   }>();
+  const { chatId, ptype, pclub, pname, pavatar, jumpToMessageId } = params;
   const router = useRouter();
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
   const queryClient = useQueryClient();
-  const listRef = useRef<FlatList>(null);
 
-  const { data: chatDetails, isLoading: detailsLoading } = useChatDetails(chatId);
-  const { data: isMember, refetch: refetchMembership } = useConversationMembership(chatId, userId);
+  const isDraftDm = chatId === 'new';
+  const isDraftGroup = chatId === 'new-group';
+  const isDraft = isDraftDm || isDraftGroup;
+  const realChatId = isDraft ? undefined : chatId;
 
-  // The chat list already knows the conversation type/club/name, passed along
-  // as route params. Using them here means the header renders instantly and
-  // the channel/message queries start in parallel with the details fetch
-  // instead of serially after it.
-  const effectiveType = chatDetails?.type ?? (ptype || undefined);
+  const { data: chatDetails, isLoading: detailsLoading } = useChatDetails(realChatId);
+  const { data: isMember, refetch: refetchMembership } = useConversationMembership(realChatId, userId);
+
+  const effectiveType = isDraftDm
+    ? 'direct'
+    : isDraftGroup
+      ? 'group'
+      : (chatDetails?.type ?? (ptype || undefined));
   const effectiveClubId = chatDetails?.club_id ?? (pclub || undefined);
-  const effectiveAvatarUrl = chatDetails?.avatar_url ?? (pavatar || null);
+  const effectiveAvatarUrl = isDraftDm
+    ? (params.draftAvatar || null)
+    : (chatDetails?.avatar_url ?? (pavatar || null));
 
   const isDirect = effectiveType === 'direct';
-  const isGroupWithChannels =
-    effectiveType === 'club_group' || effectiveType === 'officer_chat';
+  const isCustomGroup = effectiveType === 'group';
+  const isGroupWithChannels = effectiveType === 'club_group' || effectiveType === 'officer_chat';
 
   const handleJoined = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['conversationMember', chatId, userId] });
+    queryClient.invalidateQueries({ queryKey: ['conversationMember', realChatId, userId] });
     queryClient.invalidateQueries({ queryKey: ['myChats', userId] });
     refetchMembership();
-  }, [chatId, userId, queryClient, refetchMembership]);
+  }, [realChatId, userId, queryClient, refetchMembership]);
 
-  useRealtimeParticipants(chatId, userId, handleJoined);
+  useRealtimeParticipants(realChatId, userId, handleJoined);
 
   const { data: channels } = useClubChannels(
     isGroupWithChannels && effectiveClubId ? effectiveClubId : undefined,
   );
 
-  // Auto-navigate to last-visited or default channel, bypassing the channel
-  // picker. CRITICAL: a club has TWO conversations (members + officers) and
-  // useClubChannels returns the channels of BOTH — only channels belonging to
-  // THIS conversation may be considered, otherwise the redirect lands in the
-  // wrong chat (the "opens the member chat first" flicker bug).
+  // Official chats auto-forward into the right channel thread.
   useEffect(() => {
     if (!isGroupWithChannels || !isMember || !channels || channels.length === 0) return;
     const ownChannels = channels.filter((c) => c.conversation_id === chatId);
@@ -91,28 +101,78 @@ export default function ChatRoom() {
     }
   }, [isGroupWithChannels, isMember, channels, chatId]);
 
-  const { data: dmPage } = useDirectMessages(isDirect ? chatId : undefined);
-  useRealtimeDirectMessages(isDirect ? chatId : undefined);
-
   const { data: previewMessages } = useNonMemberPreview(
-    !isMember && isGroupWithChannels ? chatId : undefined,
+    !isDraft && isMember === false && isGroupWithChannels ? chatId : undefined,
   );
 
-  const messages = [...(dmPage?.messages ?? [])].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  // ── Draft materialization ──
+  const draftParticipantIds = useMemo(
+    () => (params.draftParticipantIds ? params.draftParticipantIds.split(',').filter(Boolean) : []),
+    [params.draftParticipantIds],
   );
+  const materializedRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (isDirect && messages.length > 0) {
-      listRef.current?.scrollToEnd({ animated: false });
-      // Mark as read when DM messages are visible
-      void markConversationRead(chatId);
+  const ensureConversation = useCallback(async () => {
+    if (materializedRef.current) return materializedRef.current;
+    if (isDraftDm && params.draftUserId) {
+      const id = await getOrCreateDirectChat(params.draftUserId);
+      materializedRef.current = id;
+      return id;
     }
-  }, [isDirect, messages.length, chatId]);
+    if (isDraftGroup && draftParticipantIds.length > 0) {
+      const id = await createGroupChat({
+        name: params.draftGroupName || null,
+        participantIds: draftParticipantIds,
+      });
+      materializedRef.current = id;
+      return id;
+    }
+    throw new Error('Conversation not ready');
+  }, [isDraftDm, isDraftGroup, params.draftUserId, params.draftGroupName, draftParticipantIds]);
 
-  // Only block on a spinner when we know nothing at all about this chat
-  // (e.g. opened from a deep link without preview params).
-  if (!chatDetails && !effectiveType) {
+  const createGroupWithFirstMessage = useCallback(
+    async (text: string, clientTag: string) => {
+      if (materializedRef.current) throw new Error('already-created');
+      const id = await createGroupChat({
+        name: params.draftGroupName || null,
+        participantIds: draftParticipantIds,
+        firstMessage: text,
+        clientTag,
+      });
+      materializedRef.current = id;
+      return id;
+    },
+    [params.draftGroupName, draftParticipantIds],
+  );
+
+  const onFirstSend = useCallback(
+    (conversationId: string) => {
+      // Swap the draft route for the real conversation without stacking.
+      router.replace(`/(tabs)/messages/${conversationId}` as any);
+    },
+    [router],
+  );
+
+  // ── Identity ──
+  const displayName = isDraftDm
+    ? (params.draftName || 'New message')
+    : isDraftGroup
+      ? (params.draftGroupName || params.draftNames || 'New group')
+      : (chatDetails?.name ?? (pname || (detailsLoading ? '' : 'Conversation')));
+
+  const otherUser = isDirect && !isDraft
+    ? chatDetails?.participants.find((p) => p.user_id !== userId)
+    : undefined;
+  const otherUserId = isDraftDm ? params.draftUserId : otherUser?.user_id;
+
+  const openProfile = useCallback(
+    (uid: string) => {
+      router.push(`/profile/${uid}` as any);
+    },
+    [router],
+  );
+
+  if (!isDraft && !chatDetails && !effectiveType) {
     if (!detailsLoading) {
       return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -136,14 +196,7 @@ export default function ChatRoom() {
     );
   }
 
-  // chatDetails.name is live-resolved (display name for DMs, current club
-  // name for club chats); route-param pname only bridges the initial render.
-  const displayName = chatDetails?.name ?? (pname || 'Chat');
-
-  // isMember === undefined means the membership check is still in flight;
-  // fall through to the group header + inline spinner instead of flashing the
-  // non-member preview at people who are members.
-  if (isMember === false && isGroupWithChannels) {
+  if (!isDraft && isMember === false && isGroupWithChannels) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
@@ -180,7 +233,6 @@ export default function ChatRoom() {
             </Text>
           </View>
         </View>
-        {/* Spinner while auto-redirect fires in useEffect; shows "No channels" if club has none */}
         {!channels || channels.length > 0 ? (
           <View style={styles.center}>
             <ActivityIndicator color={chatColors.teal} />
@@ -194,7 +246,7 @@ export default function ChatRoom() {
     );
   }
 
-  const otherUser = chatDetails?.participants.find((p) => p.user_id !== userId);
+  const headerAvatarUri = isDirect ? (otherUser?.avatar_url ?? effectiveAvatarUrl) : effectiveAvatarUrl;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -202,81 +254,53 @@ export default function ChatRoom() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.headerCenter}
-          onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
-          activeOpacity={0.7}
-        >
-          <Avatar
-            uri={otherUser?.avatar_url}
-            size={chatSizes.avatarHeader}
-            username={displayName}
-          />
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {displayName}
-          </Text>
-          <Ionicons name="chevron-forward" size={18} color={chatColors.textMuted} />
-        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          {/* DM identity: avatar and name both open the person's profile. */}
+          <TouchableOpacity
+            onPress={() => {
+              if (isDirect && otherUserId) openProfile(otherUserId);
+              else if (!isDraft) router.push(`/(tabs)/messages/${chatId}/info` as any);
+            }}
+            disabled={isDraftGroup}
+            style={styles.identityTap}
+            activeOpacity={0.7}
+          >
+            <Avatar uri={headerAvatarUri} size={chatSizes.avatarHeader} username={displayName} />
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {displayName}
+            </Text>
+          </TouchableOpacity>
+          {!isDraft && (
+            <TouchableOpacity
+              onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
+              hitSlop={8}
+              accessibilityLabel="Chat information"
+            >
+              <Ionicons name="chevron-forward" size={18} color={chatColors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messageList}
-          renderItem={({ item, index }) => {
-            const prev = messages[index - 1];
-            const showSenderInfo = !prev || prev.sender_id !== item.sender_id;
-            const showDateDivider = !prev || !isSameChatDay(prev.created_at, item.created_at);
-            const isOwn = item.sender_id === userId;
-            return (
-              <View>
-                {showDateDivider && <DateDivider label={formatChatDateDivider(item.created_at)} />}
-                <MessageBubble
-                  id={item.id}
-                  senderId={item.sender_id}
-                  senderUsername={item.sender.username}
-                  senderAvatarUrl={item.sender.avatar_url}
-                  content={item.content}
-                  attachmentUrl={item.attachment_url}
-                  messageType={item.message_type}
-                  createdAt={item.created_at}
-                  isOwn={isOwn}
-                  showSenderInfo={showSenderInfo}
-                  cardSlot={
-                    // A null shared id means the content was deleted — the
-                    // message survives and the card says so.
-                    item.message_type === 'shared_event' ? (
-                      <EventShareCard eventId={item.shared_event_id} viewerUserId={userId} />
-                    ) : item.message_type === 'shared_post' ? (
-                      <PostShareCard postId={item.shared_post_id} viewerUserId={userId} />
-                    ) : undefined
-                  }
-                />
-              </View>
-            );
-          }}
-        />
-
-        <ChatInput
-          mode="direct"
-          onSend={async ({ content, attachmentUrl, attachmentType }) => {
-            await sendDirectMessage(chatId, userId, content, attachmentUrl, attachmentType);
-            queryClient.invalidateQueries({ queryKey: ['directMessages', chatId] });
-          }}
-        />
-      </KeyboardAvoidingView>
+      <ConversationThread
+        conversationId={materializedRef.current ?? realChatId}
+        channelId={null}
+        currentUserId={userId}
+        canModerate={isCustomGroup && chatDetails?.created_by === userId}
+        allowPolls={isCustomGroup || isDraftGroup}
+        ensureConversation={isDraft ? ensureConversation : undefined}
+        createWithFirstMessage={isDraftGroup ? createGroupWithFirstMessage : undefined}
+        onFirstSend={isDraft ? onFirstSend : undefined}
+        onOpenProfile={openProfile}
+        jumpToMessageId={jumpToMessageId}
+        emptyLabel={isDraft ? 'Say hi — nothing is saved until you send.' : 'No messages yet'}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: chatColors.bg },
-  flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
@@ -294,43 +318,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
+  identityTap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
   headerTitle: {
     ...chatTypography.chatTitle,
     flexShrink: 1,
   },
-  channelList: { paddingVertical: 8 },
-  channelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: chatColors.border,
-  },
-  channelHash: {
-    fontFamily: chatFonts.semiBold,
-    fontSize: 14,
-    color: chatColors.teal,
-  },
-  channelName: {
-    ...chatTypography.channelName,
-    flex: 1,
-  },
-  leaveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    marginTop: 8,
-  },
-  leaveLabel: {
-    fontFamily: chatFonts.regular,
-    fontSize: 15,
-    color: '#C62828',
-  },
-  messageList: { paddingVertical: 8, flexGrow: 1 },
   emptyText: {
     fontFamily: chatFonts.regular,
     fontSize: 14,

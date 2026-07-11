@@ -84,6 +84,34 @@
         },
         {
           "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "weglue.app",
+              "pathPrefix": "/invite"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "weglue",
+              "host": "invite"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
           "data": [
             {
               "scheme": "weglue",
@@ -136,10 +164,20 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "We Glue needs access to your photo library to share photos in posts, events, and your profile.",
-          "cameraPermission": "We Glue needs access to your camera to take photos for posts, events, and your profile."
+          "photosPermission": "We Glue needs access to your photo library to share photos and videos in chats, posts, events, and your profile.",
+          "cameraPermission": "We Glue needs access to your camera to take photos to share in chats, posts, events, and your profile."
         }
       ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "We Glue needs access to your photo library to save photos and videos from your chats.",
+          "savePhotosPermission": "We Glue needs permission to save photos and videos from your chats.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      "expo-video",
+      "expo-document-picker",
       "expo-font",
       "@react-native-community/datetimepicker"
     ],

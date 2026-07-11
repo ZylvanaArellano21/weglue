@@ -1,0 +1,158 @@
+import { supabase } from './supabase';
+import { compressImageForUpload } from './imageUpload';
+
+// ─── Private chat attachment storage ─────────────────────────────────────────
+// Bucket `chat-attachments` is PRIVATE. Objects live at
+//   <conversation_id>/<random>.<ext>
+// and RLS grants read/write only to current conversation participants
+// (migration 040). messages.attachment_url stores the STORAGE PATH, never a
+// public URL — rendering always goes through short-lived signed URLs.
+
+export const CHAT_ATTACHMENTS_BUCKET = 'chat-attachments';
+export const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB document cap
+
+/** Non-cryptographic v4-format UUID (client send tags + storage names). */
+export function clientUuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function extFromNameOrMime(name?: string | null, mime?: string | null): string {
+  const fromName = name?.includes('.') ? name.split('.').pop() : undefined;
+  if (fromName && fromName.length <= 5) return fromName.toLowerCase();
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'application/pdf': 'pdf',
+  };
+  return map[mime ?? ''] ?? 'bin';
+}
+
+export interface UploadResult {
+  /** Storage path inside the bucket (what messages.attachment_url stores). */
+  path: string;
+  mime: string;
+  size: number;
+}
+
+/**
+ * Uploads a local file to the private chat bucket with upload progress.
+ * Uses a signed upload URL + XMLHttpRequest so React Native reports
+ * `upload.onprogress` (supabase-js uploads cannot).
+ */
+export async function uploadChatAttachment(opts: {
+  conversationId: string;
+  localUri: string;
+  mime: string;
+  fileName?: string | null;
+  kind: 'image' | 'video' | 'file';
+  onProgress?: (fraction: number) => void;
+}): Promise<UploadResult> {
+  const { conversationId, kind, onProgress } = opts;
+  let { localUri, mime } = opts;
+
+  // Images: recompress large captures; keeps aspect ratio, JPEG output.
+  if (kind === 'image') {
+    try {
+      localUri = await compressImageForUpload(localUri, 1600);
+      mime = 'image/jpeg';
+    } catch {
+      // Fall back to the original file rather than failing the send.
+    }
+  }
+
+  const ext = extFromNameOrMime(kind === 'image' ? 'photo.jpg' : opts.fileName, mime);
+  const path = `${conversationId}/${clientUuid()}.${ext}`;
+
+  const { data: signed, error: signErr } = await supabase.storage
+    .from(CHAT_ATTACHMENTS_BUCKET)
+    .createSignedUploadUrl(path);
+  if (signErr || !signed) throw signErr ?? new Error('Could not start upload');
+
+  const size = await new Promise<number>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', signed.signedUrl);
+    xhr.setRequestHeader('Content-Type', mime);
+    xhr.setRequestHeader('x-upsert', 'false');
+    let sent = 0;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        sent = e.total;
+        onProgress?.(Math.min(0.99, e.loaded / e.total));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(1);
+        resolve(sent);
+      } else {
+        reject(new Error(`Upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Upload failed — check your connection'));
+    // RN XHR accepts { uri, type, name } file descriptors as the body.
+    xhr.send({ uri: localUri, type: mime, name: opts.fileName ?? `upload.${ext}` } as any);
+  });
+
+  return { path, mime, size };
+}
+
+// ─── Signed URL resolution + cache ───────────────────────────────────────────
+
+const SIGNED_TTL_SECONDS = 60 * 60;
+const signedCache = new Map<string, { url: string; expiresAt: number }>();
+
+/** True when the stored attachment value is a private-bucket storage path. */
+export function isStoragePath(value: string | null | undefined): boolean {
+  return !!value && !value.startsWith('http') && !value.startsWith('file:') && !value.startsWith('content:');
+}
+
+/**
+ * Resolves a messages.attachment_url value to something an <Image>/player can
+ * load: passes through http(s)/local URIs (legacy rows, optimistic sends) and
+ * signs private storage paths with an in-memory cache.
+ */
+export async function resolveAttachmentUrl(value: string | null | undefined): Promise<string | null> {
+  if (!value) return null;
+  if (!isStoragePath(value)) return value;
+
+  const cached = signedCache.get(value);
+  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.url;
+
+  const { data, error } = await supabase.storage
+    .from(CHAT_ATTACHMENTS_BUCKET)
+    .createSignedUrl(value, SIGNED_TTL_SECONDS);
+  if (error || !data) return null;
+
+  signedCache.set(value, {
+    url: data.signedUrl,
+    expiresAt: Date.now() + SIGNED_TTL_SECONDS * 1000,
+  });
+  return data.signedUrl;
+}
+
+export function formatFileSize(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function fileTypeLabel(name?: string | null, mime?: string | null): string {
+  const ext = name?.includes('.') ? name.split('.').pop()?.toUpperCase() : undefined;
+  if (ext && ext.length <= 5) return ext;
+  if (mime?.includes('pdf')) return 'PDF';
+  if (mime?.includes('word')) return 'DOCX';
+  if (mime?.includes('presentation')) return 'PPTX';
+  if (mime?.includes('sheet') || mime?.includes('excel')) return 'XLSX';
+  if (mime?.startsWith('text/')) return 'TXT';
+  return 'FILE';
+}

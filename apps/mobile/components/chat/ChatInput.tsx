@@ -5,50 +5,49 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Platform,
-  KeyboardAvoidingView,
-  Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import { PollSheet, type SendPollPayload } from './PollSheet';
-import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from './chatTheme';
-
-interface SendPayload {
-  content: string;
-  attachmentUrl?: string;
-  attachmentType?: 'image' | 'file';
-}
+import { AttachmentSheet } from './AttachmentSheet';
+import type { AttachmentDraft } from '../../hooks/useConversation';
+import { chatColors, chatFonts, chatShadow, chatSizes } from './chatTheme';
 
 interface Props {
   mode?: 'group' | 'direct';
   isRestricted?: boolean;
   isOfficer?: boolean;
   disabled?: boolean;
-  onSend: (payload: SendPayload) => Promise<void>;
-  onSendPoll?: (payload: SendPollPayload) => Promise<void>;
+  /** Must return immediately (optimistic pipeline handles delivery). */
+  onSendText: (content: string) => void;
+  /** Returns {ok:false,error} for rejected files (size cap etc.). */
+  onSendAttachment: (draft: AttachmentDraft) => { ok: boolean; error?: string };
+  onAttachmentError?: (message: string) => void;
+  onOpenPoll?: () => void;
 }
 
 /**
- * Chat input bar — NO microphone icon (store compliance).
- * Group: clip + poll (officers) + image. Direct: clip + image only.
+ * Chat composer — no microphone (store compliance).
+ * Empty input → attachment controls (paperclip / poll / image shortcut).
+ * Typed text → the attachment icons give way to a Send button.
+ * Sending never blocks the input: the field clears immediately, the keyboard
+ * stays open, and delivery/retry is the send pipeline's job.
  */
 export function ChatInput({
   mode = 'group',
   isRestricted = false,
   isOfficer = false,
   disabled = false,
-  onSend,
-  onSendPoll,
+  onSendText,
+  onSendAttachment,
+  onAttachmentError,
+  onOpenPoll,
 }: Props) {
   const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  const [pollVisible, setPollVisible] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   const canPost = isRestricted ? isOfficer : true;
-  const showPoll = mode === 'group' && !!onSendPoll;
+  const showPoll = mode === 'group' && !!onOpenPoll;
+  const hasText = text.trim().length > 0;
 
   if (!canPost) {
     return (
@@ -59,65 +58,16 @@ export function ChatInput({
     );
   }
 
-  async function handleSend(content?: string) {
-    const trimmed = (content ?? text).trim();
-    if (!trimmed || sending) return;
-    setSending(true);
-    try {
-      await onSend({ content: trimmed });
-      setText('');
-    } catch {
-      Alert.alert('Failed to send message');
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function handlePickImage(source: 'camera' | 'library') {
-    const perm =
-      source === 'camera'
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!perm.granted) {
-      Alert.alert(
-        `${source === 'camera' ? 'Camera' : 'Photo library'} access needed`,
-        'Please enable access in Settings.',
-      );
-      return;
-    }
-
-    const result =
-      source === 'camera'
-        ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
-        : await ImagePicker.launchImageLibraryAsync({ quality: 0.8 });
-
-    if (!result.canceled && result.assets[0]) {
-      setSending(true);
-      try {
-        await onSend({
-          content: '',
-          attachmentUrl: result.assets[0].uri,
-          attachmentType: 'image',
-        });
-      } catch {
-        Alert.alert('Failed to send image');
-      } finally {
-        setSending(false);
-      }
-    }
-  }
-
-  function showAttachMenu() {
-    Alert.alert('Attach', 'Choose source', [
-      { text: 'Camera', onPress: () => handlePickImage('camera') },
-      { text: 'Photo Library', onPress: () => handlePickImage('library') },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  function handleSend() {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setText('');
+    // Keyboard stays open: no blur, no await.
+    onSendText(trimmed);
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <>
       <View style={styles.bar}>
         <TextInput
           ref={inputRef}
@@ -128,55 +78,56 @@ export function ChatInput({
           onChangeText={setText}
           multiline
           maxLength={2000}
-          editable={!disabled && !sending}
-          onSubmitEditing={() => handleSend()}
-          blurOnSubmit={false}
+          editable={!disabled}
         />
 
         <View style={styles.actions}>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={showAttachMenu}
-            disabled={disabled || sending}
-            accessibilityLabel="Attach file"
-          >
-            <Ionicons name="attach" size={20} color={chatColors.text} />
-          </TouchableOpacity>
-
-          {showPoll && (
+          {hasText ? (
             <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={() => setPollVisible(true)}
-              disabled={disabled || sending}
-              accessibilityLabel="Create poll"
+              style={styles.sendBtn}
+              onPress={handleSend}
+              disabled={disabled}
+              accessibilityLabel="Send message"
             >
-              <Ionicons name="list" size={20} color={chatColors.text} />
+              <Ionicons name="arrow-up" size={18} color={chatColors.cream} />
             </TouchableOpacity>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={() => setAttachOpen(true)}
+                disabled={disabled}
+                accessibilityLabel="Attach"
+              >
+                <Ionicons name="attach" size={20} color={chatColors.text} />
+              </TouchableOpacity>
+
+              {showPoll && (
+                <TouchableOpacity
+                  style={styles.iconBtn}
+                  onPress={onOpenPoll}
+                  disabled={disabled}
+                  accessibilityLabel="Create poll"
+                >
+                  <Ionicons name="list" size={20} color={chatColors.text} />
+                </TouchableOpacity>
+              )}
+            </>
           )}
-
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => handlePickImage('library')}
-            disabled={disabled || sending}
-            accessibilityLabel="Send image"
-          >
-            <Ionicons name="image-outline" size={20} color={chatColors.text} />
-          </TouchableOpacity>
-
-          {sending && <ActivityIndicator size="small" color={chatColors.teal} />}
         </View>
       </View>
 
-      {showPoll && (
-        <PollSheet
-          visible={pollVisible}
-          onClose={() => setPollVisible(false)}
-          onSubmit={async (payload) => {
-            await onSendPoll!(payload);
-          }}
-        />
-      )}
-    </KeyboardAvoidingView>
+      <AttachmentSheet
+        visible={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        onPicked={(draft) => {
+          setAttachOpen(false);
+          const res = onSendAttachment(draft);
+          if (!res.ok && res.error) onAttachmentError?.(res.error);
+        }}
+        onError={(message) => onAttachmentError?.(message)}
+      />
+    </>
   );
 }
 
@@ -195,8 +146,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontFamily: chatFonts.regular,
-    fontSize: 12,
-    fontStyle: 'italic',
+    fontSize: 14,
     letterSpacing: 0.38,
     color: chatColors.text,
     maxHeight: 100,
@@ -210,6 +160,14 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     padding: 6,
+  },
+  sendBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: chatColors.teal,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   restrictedBanner: {
     flexDirection: 'row',

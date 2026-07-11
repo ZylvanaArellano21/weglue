@@ -61,7 +61,6 @@ export function EventShareCard({ eventId, viewerUserId }: Props) {
       activeOpacity={0.85}
       onPress={() => router.push({ pathname: '/home/event-detail', params: { eventId: event.id } })}
     >
-      <View style={styles.accentBar} />
       <View style={styles.content}>
         <View style={styles.badgeRow}>
           <Ionicons name="calendar" size={12} color={chatColors.teal} />
@@ -104,10 +103,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flexDirection: 'row',
     ...chatShadow,
-  },
-  accentBar: {
-    width: 4,
-    backgroundColor: chatColors.teal,
   },
   content: {
     flex: 1,
