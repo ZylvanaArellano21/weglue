@@ -7,6 +7,8 @@ import {
   TextInput,
   RefreshControl,
   ActivityIndicator,
+  Modal,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -20,6 +22,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { followUser, unfollowUser } from '../../../../services/followService';
 import type { MemberWithFollowStatus } from '../../../../services/clubTabService';
 import { openDirectChatWith } from '../../../../lib/chatNavigation';
+import { useOfficerStore } from '../../../../store/officerStore';
+import { ConfirmationModal } from '../../../../components/chat/ConfirmationModal';
+import { openReportFlow } from '../../../../components/shared/ReportButton';
+import { demoteClubOfficer, removeClubMemberByOfficer } from '../../../../services/messagingService';
 
 export type MembersParams = {
   clubId: string;
@@ -124,12 +130,16 @@ function MemberRow({
   member,
   viewerId,
   clubId,
+  viewerIsOfficer,
   onFollowChange,
+  onOpenMenu,
 }: {
   member: MemberWithFollowStatus;
   viewerId: string;
   clubId: string;
+  viewerIsOfficer: boolean;
   onFollowChange: () => void;
+  onOpenMenu: (member: MemberWithFollowStatus) => void;
 }) {
   const router = useRouter();
   const isOwnProfile = member.id === viewerId;
@@ -205,6 +215,20 @@ function MemberRow({
           onFollowChange={onFollowChange}
         />
       )}
+
+      {/* Officer moderation menu (Bug 14). Never on your own row; tapping name/
+          avatar already opens the profile, so there is no "View Profile" item. */}
+      {viewerIsOfficer && !isOwnProfile && (
+        <TouchableOpacity
+          onPress={() => onOpenMenu(member)}
+          activeOpacity={0.7}
+          style={{ padding: 4, marginLeft: 2 }}
+          hitSlop={6}
+          accessibilityLabel={`Manage ${member.full_name || member.username}`}
+        >
+          <Ionicons name="ellipsis-vertical" size={18} color="#9CA3AF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -218,9 +242,51 @@ export default function ClubMembersScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { show, ToastComponent } = useToast();
+  const viewerIsOfficer = useOfficerStore((s) => (clubId ? s.officerClubIds.includes(clubId) : false));
 
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
+  const [menuMember, setMenuMember] = useState<MemberWithFollowStatus | null>(null);
+  const [confirm, setConfirm] = useState<null | { kind: 'demote' | 'remove'; member: MemberWithFollowStatus }>(null);
+
+  function refreshMembers() {
+    queryClient.invalidateQueries({ queryKey: ['clubMembers', clubId] });
+    queryClient.invalidateQueries({ queryKey: ['clubDetail', clubId] });
+    queryClient.invalidateQueries({ queryKey: ['myChats'] });
+    refetch();
+  }
+  async function doDemote(m: MemberWithFollowStatus) {
+    setConfirm(null);
+    try {
+      await demoteClubOfficer(clubId!, m.id);
+      refreshMembers();
+      show('Officer role removed');
+    } catch (e: any) {
+      show(
+        e?.message?.includes('cannot_remove_self')
+          ? "You can't remove your own officer role here."
+          : e?.message?.includes('last_officer')
+            ? 'Assign another officer first.'
+            : 'Could not remove officer role.',
+      );
+    }
+  }
+  async function doRemove(m: MemberWithFollowStatus) {
+    setConfirm(null);
+    try {
+      await removeClubMemberByOfficer(clubId!, m.id);
+      refreshMembers();
+      show('Removed from club');
+    } catch (e: any) {
+      show(
+        e?.message?.includes('demote_officer_first')
+          ? 'Remove their officer role first.'
+          : e?.message?.includes('use_leave_club')
+            ? 'Use Leave club for your own membership.'
+            : 'Could not remove from club.',
+      );
+    }
+  }
 
   const { data, isLoading, refetch, isFetching } = useClubMembers(
     clubId,
@@ -357,7 +423,9 @@ export default function ClubMembersScreen() {
               member={item}
               viewerId={userId}
               clubId={clubId!}
+              viewerIsOfficer={viewerIsOfficer}
               onFollowChange={handleFollowChange}
+              onOpenMenu={setMenuMember}
             />
           )}
           refreshControl={
@@ -401,6 +469,75 @@ export default function ClubMembersScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* ── Officer moderation menu (Bug 14) ── */}
+      <Modal visible={!!menuMember} transparent animationType="fade" onRequestClose={() => setMenuMember(null)}>
+        <TouchableOpacity style={menuStyles.overlay} activeOpacity={1} onPress={() => setMenuMember(null)}>
+          <View style={menuStyles.card}>
+            {menuMember?.role === 'officer' && (
+              <TouchableOpacity
+                style={menuStyles.row}
+                onPress={() => {
+                  const m = menuMember;
+                  setMenuMember(null);
+                  setConfirm({ kind: 'demote', member: m });
+                }}
+              >
+                <Ionicons name="remove-circle-outline" size={19} color="#C62828" />
+                <Text style={[menuStyles.label, { color: '#C62828' }]}>Remove officer role</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={menuStyles.row}
+              onPress={() => {
+                const m = menuMember!;
+                setMenuMember(null);
+                setConfirm({ kind: 'remove', member: m });
+              }}
+            >
+              <Ionicons name="person-remove-outline" size={19} color="#C62828" />
+              <Text style={[menuStyles.label, { color: '#C62828' }]}>Remove from club</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={menuStyles.row}
+              onPress={() => {
+                const m = menuMember!;
+                setMenuMember(null);
+                openReportFlow({ entityType: 'user', entityId: m.id, entityName: m.full_name || m.username });
+              }}
+            >
+              <Ionicons name="flag-outline" size={19} color="#111827" />
+              <Text style={menuStyles.label}>Report</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <ConfirmationModal
+        visible={confirm?.kind === 'demote'}
+        title="Remove officer role?"
+        message={`${confirm?.member.full_name || confirm?.member.username || 'This person'} will stay a club member but lose officer access, including the Officers chat and its channels.`}
+        confirmLabel="Remove officer role"
+        destructive
+        onConfirm={() => confirm && doDemote(confirm.member)}
+        onCancel={() => setConfirm(null)}
+      />
+      <ConfirmationModal
+        visible={confirm?.kind === 'remove'}
+        title="Remove from club?"
+        message={`${confirm?.member.full_name || confirm?.member.username || 'This person'} will be removed from the club and all of its chats. Their We Glue account, posts and other clubs are not affected.`}
+        confirmLabel="Remove from club"
+        destructive
+        onConfirm={() => confirm && doRemove(confirm.member)}
+        onCancel={() => setConfirm(null)}
+      />
     </SafeAreaView>
   );
 }
+
+const menuStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  card: { backgroundColor: '#FEFCF0', borderRadius: 16, paddingVertical: 6, minWidth: 260 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 13 },
+  label: { fontFamily: 'Inter_500Medium', fontSize: 14, color: '#111827' },
+});

@@ -28,28 +28,12 @@ export interface ChatPreviewParams {
 
 /**
  * Opens a chat by conversation id.
- * Group chats with a known channel: ONE push straight into the thread — the
- * old push-then-replace redirect rendered an intermediate screen and slid two
- * chat screens side by side (the double-chat flicker).
- * Direct chats / unknown channel: the conversation screen resolves it.
+ * Club Members/Officers conversations land on the full-screen conversation hub
+ * (Bug 1) — the user picks Main chat or a hashtag there. Direct chats / custom
+ * groups render their single thread. One push in all cases, so Back returns
+ * exactly to the previous screen (Bug 16).
  */
 export function openChat(chatId: string, preview?: ChatPreviewParams): void {
-  const isGroup = preview?.type === 'club_group' || preview?.type === 'officer_chat';
-  const channelId = isGroup
-    ? getLastVisitedChannel(chatId) ?? preview?.defaultChannelId ?? null
-    : null;
-
-  if (isGroup && channelId) {
-    router.push({
-      pathname: `/(tabs)/messages/${chatId}/${channelId}`,
-      params: {
-        pname: preview?.name ?? '',
-        pavatar: preview?.avatarUrl ?? '',
-      },
-    } as any);
-    return;
-  }
-
   router.push({
     pathname: `/(tabs)/messages/${chatId}`,
     params: {
@@ -106,19 +90,8 @@ async function openClubConversation(
   const target = await getClubChatTarget(clubId, type);
   if (!target) return;
 
-  const channelId = getLastVisitedChannel(target.conversationId) ?? target.channelId;
-
-  if (channelId) {
-    router.push({
-      pathname: `/(tabs)/messages/${target.conversationId}/${channelId}`,
-      params: {
-        pname: target.name ?? '',
-        pavatar: target.avatarUrl ?? '',
-      },
-    } as any);
-    return;
-  }
-
+  // Land on the conversation hub (Bug 1). Back returns straight to the club
+  // profile because this is a single push.
   router.push({
     pathname: `/(tabs)/messages/${target.conversationId}`,
     params: {
