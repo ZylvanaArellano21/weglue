@@ -6,8 +6,9 @@ import {
   deleteMessage,
   createChannel,
   deleteChannel,
+  renameChannel,
   getClubConversationId,
-  type CreateChannelInput,
+  getConversationHub,
   type Attachment,
 } from '../services/channelService';
 import { timedQuery } from '../lib/timedQuery';
@@ -18,6 +19,19 @@ export function useClubChannels(clubId: string | undefined) {
     queryFn: () => timedQuery('clubChannels', getClubChannels(clubId!)),
     enabled: !!clubId,
     staleTime: 30 * 1000,
+  });
+}
+
+/** Conversation hub: Main chat + hashtag threads with previews + unread. */
+export function useConversationHub(
+  conversationId: string | undefined,
+  userId: string | undefined,
+) {
+  return useQuery({
+    queryKey: ['conversationHub', conversationId, userId],
+    queryFn: () => getConversationHub(conversationId!, userId!),
+    enabled: !!conversationId && !!userId,
+    staleTime: 10 * 1000,
   });
 }
 
@@ -69,10 +83,11 @@ export function useDeleteMessage(channelId: string) {
   });
 }
 
-export function useCreateChannel(clubId: string, createdBy: string) {
+export function useCreateChannel(clubId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateChannelInput) => createChannel(clubId, createdBy, input),
+    mutationFn: ({ conversationId, name }: { conversationId: string; name: string }) =>
+      createChannel(conversationId, name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clubChannels', clubId] });
     },
@@ -82,7 +97,18 @@ export function useCreateChannel(clubId: string, createdBy: string) {
 export function useDeleteChannel(clubId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (channelId: string) => deleteChannel(channelId, clubId),
+    mutationFn: (channelId: string) => deleteChannel(channelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clubChannels', clubId] });
+    },
+  });
+}
+
+export function useRenameChannel(clubId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ channelId, name }: { channelId: string; name: string }) =>
+      renameChannel(channelId, name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clubChannels', clubId] });
     },

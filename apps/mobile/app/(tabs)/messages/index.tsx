@@ -30,6 +30,7 @@ export default function MessagesIndex() {
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('single');
+  const [showArchived, setShowArchived] = useState(false);
   const searching = query.trim().length > 0;
 
   const queryClient = useQueryClient();
@@ -215,19 +216,47 @@ export default function MessagesIndex() {
       const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
       return tb - ta;
     });
+    // Archived conversations leave the normal list and live in their own
+    // collapsible section; a new message never pulls them back (Bug 7).
+    const activeChats = sorted.filter((c) => !c.archived);
+    const archivedChats = sorted.filter((c) => c.archived);
 
     return (
       <FlatList
-        data={sorted}
+        data={activeChats}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
-          <ChatListItem
-            chat={item}
-            currentUserId={userId}
-            onPress={() => handlePressChat(item.id, item)}
-          />
+          <ChatListItem chat={item} currentUserId={userId} onPress={() => handlePressChat(item.id, item)} />
         )}
+        ListFooterComponent={
+          archivedChats.length > 0 ? (
+            <View>
+              <TouchableOpacity
+                style={styles.archivedHeader}
+                onPress={() => setShowArchived((v) => !v)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="archive-outline" size={18} color={chatColors.textMuted} />
+                <Text style={styles.archivedHeaderText}>Archived ({archivedChats.length})</Text>
+                <Ionicons
+                  name={showArchived ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={chatColors.textMuted}
+                />
+              </TouchableOpacity>
+              {showArchived &&
+                archivedChats.map((item) => (
+                  <ChatListItem
+                    key={item.id}
+                    chat={item}
+                    currentUserId={userId}
+                    onPress={() => handlePressChat(item.id, item)}
+                  />
+                ))}
+            </View>
+          ) : null
+        }
       />
     );
   }
@@ -291,6 +320,22 @@ const styles = StyleSheet.create({
   listContent: {
     paddingTop: 4,
     paddingBottom: 16,
+  },
+  archivedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 23,
+    paddingVertical: 14,
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: chatColors.border,
+  },
+  archivedHeaderText: {
+    flex: 1,
+    fontFamily: chatFonts.semiBold,
+    fontSize: 13,
+    color: chatColors.textMuted,
   },
   suggestedWrap: {
     paddingTop: 16,

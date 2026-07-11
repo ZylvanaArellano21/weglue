@@ -132,6 +132,7 @@ export interface MemberWithFollowStatus {
   is_following: boolean;
   is_gluemate: boolean;
   joined_at: string;
+  role: 'member' | 'officer';
 }
 
 export interface ClubMembersResult {
@@ -175,7 +176,7 @@ export async function getClubMembers(
 
   let query = supabase
     .from('club_members')
-    .select('user_id, joined_at, profiles!inner(id, username, full_name, avatar_url)', {
+    .select('user_id, joined_at, role, profiles!inner(id, username, full_name, avatar_url)', {
       count: 'exact',
     })
     .eq('club_id', clubId)
@@ -232,6 +233,7 @@ export async function getClubMembers(
       is_following: isFollowing,
       is_gluemate: isFollowing && isFollowedBy,
       joined_at: m.joined_at,
+      role: m.role === 'officer' ? 'officer' : 'member',
     };
   });
 

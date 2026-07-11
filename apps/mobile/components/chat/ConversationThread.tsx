@@ -53,6 +53,9 @@ interface Props {
   /** Officers-only posting in restricted channels. */
   isRestricted?: boolean;
   isOfficer?: boolean;
+  /** Authoritative per-channel posting permission (Bug 19). */
+  canPost?: boolean;
+  blockedReason?: string;
   /** Polls are available in group-style chats. */
   allowPolls?: boolean;
   /** Draft conversations materialize on first send. */
@@ -74,6 +77,8 @@ export function ConversationThread({
   canModerate = false,
   isRestricted = false,
   isOfficer = false,
+  canPost,
+  blockedReason,
   allowPolls = false,
   ensureConversation,
   createWithFirstMessage,
@@ -354,6 +359,8 @@ export function ConversationThread({
         mode={allowPolls ? 'group' : 'direct'}
         isRestricted={isRestricted}
         isOfficer={isOfficer}
+        canPost={canPost}
+        blockedReason={blockedReason}
         onSendText={pipeline.sendText}
         onSendAttachment={(draft) => pipeline.sendAttachment(draft)}
         onAttachmentError={(message) => Alert.alert('Attachment', message)}

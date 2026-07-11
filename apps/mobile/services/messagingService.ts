@@ -282,6 +282,38 @@ export async function leaveChatOnly(conversationId: string, userId: string): Pro
   if (error) throw error;
 }
 
+// ─── Parent-conversation mute + archive (per user; Bug 7) ───────────────────
+
+export async function setConversationMuted(conversationId: string, muted: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_conversation_muted', {
+    p_conversation_id: conversationId,
+    p_muted: muted,
+  });
+  if (error) throw error;
+}
+
+export async function setConversationArchived(conversationId: string, archived: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_conversation_archived', {
+    p_conversation_id: conversationId,
+    p_archived: archived,
+  });
+  if (error) throw error;
+}
+
+/** Current user's mute/archive flags for a conversation. */
+export async function getMyConversationFlags(
+  conversationId: string,
+  userId: string,
+): Promise<{ muted: boolean; archived: boolean }> {
+  const { data } = await supabase
+    .from('conversation_participants')
+    .select('muted_at, archived_at')
+    .eq('conversation_id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  return { muted: !!(data as any)?.muted_at, archived: !!(data as any)?.archived_at };
+}
+
 /** Reopen an official club chat from the club profile (validates club role server-side). */
 export async function reopenClubChat(clubId: string, type: 'club_group' | 'officer_chat'): Promise<string> {
   const { data, error } = await supabase.rpc('reopen_club_chat', { p_club_id: clubId, p_type: type });
@@ -408,16 +440,20 @@ export async function joinInvite(token: string): Promise<InviteJoinResult> {
 
 // ─── Chat Information history (derived from canonical messages) ─────────────
 
-export async function getConversationMedia(conversationId: string, userId: string): Promise<ThreadMessage[]> {
+export async function getConversationMedia(
+  conversationId: string,
+  userId: string,
+  channelId?: string | null,
+): Promise<ThreadMessage[]> {
+  let q = supabase
+    .from('messages')
+    .select(MESSAGE_SELECT)
+    .eq('conversation_id', conversationId)
+    .is('deleted_at', null)
+    .in('message_type', ['image', 'video']);
+  if (channelId) q = q.eq('channel_id', channelId);
   const [{ data, error }, hiddenIds, clearedBefore] = await Promise.all([
-    supabase
-      .from('messages')
-      .select(MESSAGE_SELECT)
-      .eq('conversation_id', conversationId)
-      .is('deleted_at', null)
-      .in('message_type', ['image', 'video'])
-      .order('created_at', { ascending: false })
-      .limit(200),
+    q.order('created_at', { ascending: false }).limit(200),
     getHiddenMessageIds(conversationId),
     getClearedBefore(conversationId, userId),
   ]);
@@ -427,16 +463,20 @@ export async function getConversationMedia(conversationId: string, userId: strin
     .map(mapMessage);
 }
 
-export async function getConversationFiles(conversationId: string, userId: string): Promise<ThreadMessage[]> {
+export async function getConversationFiles(
+  conversationId: string,
+  userId: string,
+  channelId?: string | null,
+): Promise<ThreadMessage[]> {
+  let q = supabase
+    .from('messages')
+    .select(MESSAGE_SELECT)
+    .eq('conversation_id', conversationId)
+    .is('deleted_at', null)
+    .eq('message_type', 'file');
+  if (channelId) q = q.eq('channel_id', channelId);
   const [{ data, error }, hiddenIds, clearedBefore] = await Promise.all([
-    supabase
-      .from('messages')
-      .select(MESSAGE_SELECT)
-      .eq('conversation_id', conversationId)
-      .is('deleted_at', null)
-      .eq('message_type', 'file')
-      .order('created_at', { ascending: false })
-      .limit(200),
+    q.order('created_at', { ascending: false }).limit(200),
     getHiddenMessageIds(conversationId),
     getClearedBefore(conversationId, userId),
   ]);
@@ -468,19 +508,20 @@ export interface SharedCalendarEvent {
 export async function getConversationSharedEvents(
   conversationId: string,
   userId: string,
+  channelId?: string | null,
 ): Promise<SharedCalendarEvent[]> {
+  let evq = supabase
+    .from('messages')
+    .select(
+      'id, created_at, shared_event_id, events!shared_event_id(id, title, emoji, cover_image_url, event_date, start_time, end_time, location, clubs(name))',
+    )
+    .eq('conversation_id', conversationId)
+    .is('deleted_at', null)
+    .eq('message_type', 'shared_event')
+    .not('shared_event_id', 'is', null);
+  if (channelId) evq = evq.eq('channel_id', channelId);
   const [{ data, error }, hiddenIds, clearedBefore] = await Promise.all([
-    supabase
-      .from('messages')
-      .select(
-        'id, created_at, shared_event_id, events!shared_event_id(id, title, emoji, cover_image_url, event_date, start_time, end_time, location, clubs(name))',
-      )
-      .eq('conversation_id', conversationId)
-      .is('deleted_at', null)
-      .eq('message_type', 'shared_event')
-      .not('shared_event_id', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(200),
+    evq.order('created_at', { ascending: false }).limit(200),
     getHiddenMessageIds(conversationId),
     getClearedBefore(conversationId, userId),
   ]);
@@ -542,12 +583,15 @@ export async function createPollAtomic(params: CreatePollParams): Promise<{ mess
 /** Poll history for ANY conversation (date-ordered, excludes unsent). */
 export async function getConversationPollIds(
   conversationId: string,
+  channelId?: string | null,
 ): Promise<Array<{ poll_id: string; message_id: string; channel_id: string | null; created_at: string }>> {
-  const { data, error } = await supabase
+  let q = supabase
     .from('polls')
     .select('id, message_id, created_at, messages!inner(conversation_id, channel_id, deleted_at)')
     .eq('messages.conversation_id', conversationId)
-    .is('messages.deleted_at', null)
+    .is('messages.deleted_at', null);
+  if (channelId) q = q.eq('messages.channel_id', channelId);
+  const { data, error } = await q
     .order('created_at', { ascending: false })
     .limit(100);
   if (error) throw error;
@@ -687,6 +731,7 @@ export async function demoteClubOfficer(clubId: string, userId: string): Promise
 export async function getEligibleUniversityPeople(
   viewerUserId: string,
   query: string,
+  excludeClubId?: string | null,
 ): Promise<Array<{ user_id: string; username: string; full_name: string | null; avatar_url: string | null }>> {
   const { data: me } = await supabase
     .from('profiles')
@@ -696,11 +741,22 @@ export async function getEligibleUniversityPeople(
   const univ = (me as any)?.university;
   if (!univ) return [];
 
+  // Add Person must only show same-university users who are NOT already members
+  // of this club (Bug 4).
+  let excludeIds: string[] = [viewerUserId];
+  if (excludeClubId) {
+    const { data: members } = await supabase
+      .from('club_members')
+      .select('user_id')
+      .eq('club_id', excludeClubId);
+    excludeIds = excludeIds.concat(((members ?? []) as any[]).map((m) => m.user_id));
+  }
+
   let q = supabase
     .from('profiles')
     .select('id, username, full_name, avatar_url')
     .eq('university', univ)
-    .neq('id', viewerUserId)
+    .not('id', 'in', `(${excludeIds.join(',')})`)
     .limit(30);
   const term = query.trim();
   if (term) q = q.or(`username.ilike.%${term}%,full_name.ilike.%${term}%`);

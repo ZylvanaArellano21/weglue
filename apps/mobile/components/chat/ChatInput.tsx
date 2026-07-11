@@ -15,6 +15,11 @@ interface Props {
   mode?: 'group' | 'direct';
   isRestricted?: boolean;
   isOfficer?: boolean;
+  /** Authoritative per-channel posting permission (Bug 19). When provided it
+   * overrides the isRestricted/isOfficer fallback. */
+  canPost?: boolean;
+  /** Explanation shown to blocked users in place of the composer. */
+  blockedReason?: string;
   disabled?: boolean;
   /** Must return immediately (optimistic pipeline handles delivery). */
   onSendText: (content: string) => void;
@@ -35,6 +40,8 @@ export function ChatInput({
   mode = 'group',
   isRestricted = false,
   isOfficer = false,
+  canPost,
+  blockedReason,
   disabled = false,
   onSendText,
   onSendAttachment,
@@ -45,15 +52,15 @@ export function ChatInput({
   const [attachOpen, setAttachOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
-  const canPost = isRestricted ? isOfficer : true;
+  const effectiveCanPost = canPost !== undefined ? canPost : isRestricted ? isOfficer : true;
   const showPoll = mode === 'group' && !!onOpenPoll;
   const hasText = text.trim().length > 0;
 
-  if (!canPost) {
+  if (!effectiveCanPost) {
     return (
       <View style={styles.restrictedBanner}>
         <Ionicons name="megaphone-outline" size={16} color={chatColors.textMuted} />
-        <Text style={styles.restrictedText}>Officers only</Text>
+        <Text style={styles.restrictedText}>{blockedReason ?? 'Officers only'}</Text>
       </View>
     );
   }

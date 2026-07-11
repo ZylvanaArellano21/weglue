@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
 import { SidebarProvider } from "../../context/SidebarContext";
 import { useRealtimeNotifications } from "../../hooks/useNotifications";
+import { useClubRealtimeSync } from "../../hooks/useClubRealtimeSync";
 
 export default function TabsLayout() {
   const { session, isLoading, profile } = useAuthStore();
@@ -14,6 +15,11 @@ export default function TabsLayout() {
   // profile relationship state (Requested → Following) in under a second
   // when a follow request is accepted, on whatever screen is open.
   useRealtimeNotifications(session?.user.id);
+
+  // App-wide club/role/channel sync (Bug 19): officer promote/demote, member
+  // add/remove, club renames and channel changes propagate live to every
+  // screen and device without a manual refresh.
+  useClubRealtimeSync(session?.user.id);
 
   if (isLoading) {
     return (

@@ -48,8 +48,9 @@ export default function ManagePeopleScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const { data: people, isLoading } = useQuery({
-    queryKey: ['eligiblePeople', userId, query.trim()],
-    queryFn: () => getEligibleUniversityPeople(userId, query.trim()),
+    queryKey: ['eligiblePeople', userId, query.trim(), mode, clubId],
+    // Members mode excludes existing club members (Bug 4).
+    queryFn: () => getEligibleUniversityPeople(userId, query.trim(), mode === 'members' ? clubId : undefined),
     enabled: !!userId,
     staleTime: 10 * 1000,
   });
@@ -104,6 +105,9 @@ export default function ManagePeopleScreen() {
       queryClient.invalidateQueries({ queryKey: ['chatDetails', conversationId] });
       queryClient.invalidateQueries({ queryKey: ['myChats'] });
       queryClient.invalidateQueries({ queryKey: ['clubMembers', clubId] });
+      queryClient.invalidateQueries({ queryKey: ['conversationHub', conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['clubChannels', clubId] });
+      queryClient.invalidateQueries({ queryKey: ['eligiblePeople', userId] });
       router.back();
     } catch (e: any) {
       Alert.alert(

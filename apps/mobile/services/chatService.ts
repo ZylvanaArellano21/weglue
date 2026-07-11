@@ -40,6 +40,11 @@ export interface ChatPreview {
   /** Default channel of THIS conversation — lets taps open the thread
    * directly with a single navigation (no intermediate redirect screen). */
   default_channel_id: string | null;
+  /** Viewer-specific: muted / archived (Bug 7). Archived chats move to the
+   * Archived section and stay there until manually unarchived (a new message
+   * must NOT unarchive). */
+  muted: boolean;
+  archived: boolean;
 }
 
 export interface ChatDetails {
@@ -212,7 +217,7 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
   const { data, error } = await supabase
     .from('conversation_participants')
     .select(
-      `conversation_id, last_read_at, joined_at, hidden_at, cleared_before,
+      `conversation_id, last_read_at, joined_at, hidden_at, cleared_before, muted_at, archived_at,
        conversations!inner(
          id, type, name, avatar_url, club_id, created_by, deleted_at,
          clubs(id, name, avatar_url),
@@ -306,6 +311,8 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       unread_count: unreadCount,
       channel_names: channels.map((c: any) => c.name),
       default_channel_id: defaultChannel?.id ?? null,
+      muted: !!row.muted_at,
+      archived: !!row.archived_at,
     } as ChatPreview;
   });
 }

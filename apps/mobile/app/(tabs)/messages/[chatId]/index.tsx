@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Modal,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,16 +20,18 @@ import {
   useConversationMembership,
   useNonMemberPreview,
 } from '../../../../hooks/useChats';
-import { useClubChannels } from '../../../../hooks/useClubChannels';
 import { useRealtimeParticipants } from '../../../../hooks/useRealtimeMessages';
 import { useQueryClient } from '@tanstack/react-query';
 import { NonMemberPreview } from '../../../../components/chat/NonMemberPreview';
 import { ConversationThread } from '../../../../components/chat/ConversationThread';
+import { ConversationHub } from '../../../../components/chat/ConversationHub';
 import { Avatar } from '../../../../components/shared/Avatar';
+import { useOfficerStore } from '../../../../store/officerStore';
 import { getOrCreateDirectChat } from '../../../../services/chatService';
 import { createGroupChat } from '../../../../services/messagingService';
-import { getLastVisitedChannel } from '../../../../lib/chatNavigation';
-import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
+import { createChannel, type HubThread } from '../../../../services/channelService';
+import { recordChannelVisit } from '../../../../lib/chatNavigation';
+import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
 
 // ─── Conversation screen ────────────────────────────────────────────────────
 // direct + custom group threads render here; official club chats redirect to
@@ -83,23 +90,46 @@ export default function ChatRoom() {
 
   useRealtimeParticipants(realChatId, userId, handleJoined);
 
-  const { data: channels } = useClubChannels(
-    isGroupWithChannels && effectiveClubId ? effectiveClubId : undefined,
+  // Officer state for the hub's Add Channel affordance.
+  const isOfficer = useOfficerStore((s) =>
+    effectiveClubId ? s.officerClubIds.includes(effectiveClubId) : false,
+  );
+  const [addChannelOpen, setAddChannelOpen] = useState(false);
+  const [newChannelName, setNewChannelName] = useState('');
+  const [creatingChannel, setCreatingChannel] = useState(false);
+
+  const openThreadFromHub = useCallback(
+    (t: HubThread) => {
+      recordChannelVisit(chatId, t.id);
+      router.push({
+        pathname: `/(tabs)/messages/${chatId}/${t.id}`,
+        params: { pname: chatDetails?.name ?? pname ?? '', pavatar: effectiveAvatarUrl ?? '' },
+      } as any);
+    },
+    [chatId, router, effectiveAvatarUrl],
   );
 
-  // Official chats auto-forward into the right channel thread.
-  useEffect(() => {
-    if (!isGroupWithChannels || !isMember || !channels || channels.length === 0) return;
-    const ownChannels = channels.filter((c) => c.conversation_id === chatId);
-    if (ownChannels.length === 0) return;
-    const saved = getLastVisitedChannel(chatId);
-    const target = (saved && ownChannels.find((c) => c.id === saved))
-      ? saved
-      : (ownChannels.find((c) => c.is_default) ?? ownChannels[0])?.id;
-    if (target) {
-      router.replace(`/(tabs)/messages/${chatId}/${target}` as any);
+  const submitNewChannel = useCallback(async () => {
+    const name = newChannelName.trim();
+    if (!name || creatingChannel) return;
+    setCreatingChannel(true);
+    try {
+      await createChannel(chatId, name);
+      queryClient.invalidateQueries({ queryKey: ['conversationHub', chatId, userId] });
+      queryClient.invalidateQueries({ queryKey: ['clubChannels', effectiveClubId] });
+      setAddChannelOpen(false);
+      setNewChannelName('');
+    } catch (e: any) {
+      Alert.alert(
+        'Could not create channel',
+        e?.message?.includes('not_authorized')
+          ? 'Only club officers can create channels.'
+          : 'Please try again.',
+      );
+    } finally {
+      setCreatingChannel(false);
     }
-  }, [isGroupWithChannels, isMember, channels, chatId]);
+  }, [newChannelName, creatingChannel, chatId, queryClient, userId, effectiveClubId]);
 
   const { data: previewMessages } = useNonMemberPreview(
     !isDraft && isMember === false && isGroupWithChannels ? chatId : undefined,
@@ -234,28 +264,87 @@ export default function ChatRoom() {
   }
 
   if (isGroupWithChannels) {
+    // Full-screen conversation hub (Bug 1). The parent title + chevron open the
+    // parent Conversation Info (Bug 2); there is intentionally no auto-redirect
+    // into a channel — the user chooses Main chat or a hashtag from here.
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
-          <View style={styles.headerCenter}>
+          <TouchableOpacity
+            style={styles.headerCenter}
+            activeOpacity={0.7}
+            onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
+            accessibilityLabel={`${displayName} information`}
+          >
             <Avatar uri={effectiveAvatarUrl} size={chatSizes.avatarHeader} username={displayName} />
             <Text style={styles.headerTitle} numberOfLines={1}>
               {displayName}
             </Text>
-          </View>
+            <Ionicons name="chevron-forward" size={18} color={chatColors.textMuted} />
+          </TouchableOpacity>
         </View>
-        {!channels || channels.length > 0 ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={chatColors.teal} />
-          </View>
-        ) : (
-          <View style={styles.center}>
-            <Text style={styles.emptyText}>No channels yet</Text>
-          </View>
-        )}
+
+        <ConversationHub
+          conversationId={chatId}
+          userId={userId}
+          isOfficer={isOfficer}
+          onOpenThread={openThreadFromHub}
+          onAddChannel={() => setAddChannelOpen(true)}
+        />
+
+        <Modal
+          visible={addChannelOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setAddChannelOpen(false)}
+        >
+          <KeyboardAvoidingView
+            style={styles.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>New channel</Text>
+              <View style={styles.channelInputRow}>
+                <Text style={styles.hashPrefix}>#</Text>
+                <TextInput
+                  style={styles.channelInput}
+                  value={newChannelName}
+                  onChangeText={setNewChannelName}
+                  placeholder="event-planning"
+                  placeholderTextColor={chatColors.textMuted}
+                  autoFocus
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={40}
+                  onSubmitEditing={submitNewChannel}
+                />
+              </View>
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setAddChannelOpen(false);
+                    setNewChannelName('');
+                  }}
+                  style={styles.modalBtn}
+                >
+                  <Text style={styles.modalCancel}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={submitNewChannel}
+                  style={[styles.modalBtn, styles.modalSave]}
+                  disabled={creatingChannel || !newChannelName.trim()}
+                >
+                  <Text style={styles.modalSaveLabel}>
+                    {creatingChannel ? 'Creating…' : 'Create'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -348,5 +437,70 @@ const styles = StyleSheet.create({
     fontFamily: chatFonts.regular,
     fontSize: 14,
     color: chatColors.textMuted,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  modalCard: {
+    backgroundColor: chatColors.bg,
+    borderRadius: 16,
+    padding: 18,
+    width: '100%',
+    ...chatShadow,
+  },
+  modalTitle: {
+    ...chatTypography.chatTitle,
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  channelInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: chatColors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: chatColors.border,
+    paddingHorizontal: 12,
+  },
+  hashPrefix: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 16,
+    color: chatColors.textMuted,
+    marginRight: 4,
+  },
+  channelInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontFamily: chatFonts.regular,
+    fontSize: 14,
+    color: chatColors.text,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 14,
+  },
+  modalBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+  },
+  modalSave: {
+    backgroundColor: chatColors.teal,
+  },
+  modalCancel: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 13,
+    color: chatColors.textMuted,
+  },
+  modalSaveLabel: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 13,
+    color: chatColors.cream,
   },
 });
