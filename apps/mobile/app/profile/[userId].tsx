@@ -263,7 +263,7 @@ export default function UserProfileScreen() {
                   onPress={() => {
                     // Guard: never route to a missing/deleted club id.
                     if (!role.club_id) return;
-                    router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: role.club_id } });
+                    router.push({ pathname: '/club/[clubId]', params: { clubId: role.club_id } });
                   }}
                   activeOpacity={0.7}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
@@ -585,7 +585,7 @@ export default function UserProfileScreen() {
                 if (!club.club_id) return;
                 setClubsSheetOpen(false);
                 router.push({
-                  pathname: '/(tabs)/clubs/[clubId]',
+                  pathname: '/club/[clubId]',
                   params: { clubId: club.club_id },
                 } as any);
               }}

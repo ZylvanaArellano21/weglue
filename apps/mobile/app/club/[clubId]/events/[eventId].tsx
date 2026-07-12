@@ -13,18 +13,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useEventDetail, useRsvpMutation, useSaveEventMutation } from '../../../../../hooks/useEventDetail';
-import { useJoinClubMutation } from '../../../../../hooks/useClubMembership';
-import { useRealtimeEventRsvps } from '../../../../../hooks/useRealtimeChannel';
+import { useEventDetail, useRsvpMutation, useSaveEventMutation } from '../../../../hooks/useEventDetail';
+import { useJoinClubMutation } from '../../../../hooks/useClubMembership';
+import { useRealtimeEventRsvps } from '../../../../hooks/useRealtimeChannel';
 import { useQueryClient } from '@tanstack/react-query';
-import { Avatar } from '../../../../../components/shared/Avatar';
-import { AvatarStack } from '../../../../../components/shared/AvatarStack';
-import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
-import { useToast } from '../../../../../components/Toast';
-import { requestLeaveClub } from '../../../../../store/leaveClubStore';
-import { ShareSheet } from '../../../../../components/shared/ShareSheet';
-import { openReportFlow } from '../../../../../components/shared/ReportButton';
-import { formatEventLocation, isEventPast } from '../../../../../lib/eventDisplay';
+import { Avatar } from '../../../../components/shared/Avatar';
+import { AvatarStack } from '../../../../components/shared/AvatarStack';
+import { Skeleton } from '../../../../components/shared/SkeletonLoader';
+import { useToast } from '../../../../components/Toast';
+import { requestLeaveClub } from '../../../../store/leaveClubStore';
+import { openReportFlow } from '../../../../components/shared/ReportButton';
+import { formatEventLocation, isEventPast } from '../../../../lib/eventDisplay';
 
 export type ClubEventDetailParams = {
   clubId: string;
@@ -53,7 +52,6 @@ export default function ClubEventDetailScreen() {
   const queryClient = useQueryClient();
   const { show, ToastComponent } = useToast();
 
-  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   // Spring animation that fires once when RSVP buttons transition from locked → enabled
   const rsvpEnableAnim = useRef(new Animated.Value(1)).current;
@@ -113,7 +111,7 @@ export default function ClubEventDetailScreen() {
 
   const handlePressClub = () => {
     if (event?.club_id) {
-      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: event.club_id } });
+      router.push({ pathname: '/club/[clubId]', params: { clubId: event.club_id } });
     }
   };
 
@@ -408,7 +406,7 @@ export default function ClubEventDetailScreen() {
 
             {/* ── Share + Bookmark row ──────────────────── */}
             <View style={{ flexDirection: 'row', gap: 16, marginBottom: 20 }}>
-              <TouchableOpacity onPress={() => setShareSheetVisible(true)} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => event && router.push({ pathname: '/share', params: { contentType: 'event', contentId: event.id } })} activeOpacity={0.7}>
                 <Ionicons name="paper-plane-outline" size={26} color="#0FA6A6" />
               </TouchableOpacity>
               <TouchableOpacity onPress={handleToggleSave} disabled={isSaving} activeOpacity={0.7}>
@@ -545,18 +543,6 @@ export default function ClubEventDetailScreen() {
         </ScrollView>
       )}
 
-      {event && (
-        <>
-          <ShareSheet
-            visible={shareSheetVisible}
-            onClose={() => setShareSheetVisible(false)}
-            userId={userId}
-            contentType="event"
-            contentId={event.id}
-            onShowToast={show}
-          />
-        </>
-      )}
     </SafeAreaView>
   );
 }

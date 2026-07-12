@@ -13,20 +13,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useClubProfile } from '../../../../hooks/useClubProfile';
-import { useJoinClubMutation } from '../../../../hooks/useClubMembership';
-import { useOfficerStore } from '../../../../store/officerStore';
-import { Avatar } from '../../../../components/shared/Avatar';
-import { AvatarStack } from '../../../../components/shared/AvatarStack';
-import { Skeleton } from '../../../../components/shared/SkeletonLoader';
-import { useToast } from '../../../../components/Toast';
-import { requestLeaveClub } from '../../../../store/leaveClubStore';
-import { ReportButton } from '../../../../components/shared/ReportButton';
-import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../../services/clubService';
-import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../../lib/chatNavigation';
-import { todayInAppTz } from '../../../../lib/timezone';
-import { formatEventLocation } from '../../../../lib/eventDisplay';
-import { parseMeetingSchedule, groupScheduleForDisplay } from '../../../../lib/meetingSchedule';
+import { useClubProfile } from '../../../hooks/useClubProfile';
+import { useJoinClubMutation } from '../../../hooks/useClubMembership';
+import { useOfficerStore } from '../../../store/officerStore';
+import { Avatar } from '../../../components/shared/Avatar';
+import { AvatarStack } from '../../../components/shared/AvatarStack';
+import { Skeleton } from '../../../components/shared/SkeletonLoader';
+import { useToast } from '../../../components/Toast';
+import { requestLeaveClub } from '../../../store/leaveClubStore';
+import { ReportButton } from '../../../components/shared/ReportButton';
+import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../services/clubService';
+import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../lib/chatNavigation';
+import { todayInAppTz } from '../../../lib/timezone';
+import { formatEventLocation } from '../../../lib/eventDisplay';
+import { parseMeetingSchedule, groupScheduleForDisplay } from '../../../lib/meetingSchedule';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -326,7 +326,7 @@ function ClubEventCard({ event, clubId }: { event: ClubUpcomingEvent; clubId: st
     <TouchableOpacity
       onPress={() =>
         router.push({
-          pathname: '/(tabs)/clubs/[clubId]/events/[eventId]',
+          pathname: '/club/[clubId]/events/[eventId]',
           params: { clubId, eventId: event.id },
         })
       }
@@ -571,14 +571,14 @@ export default function ClubProfileScreen() {
   // here (the old transparent PhotoGalleryModal is gone).
   function handlePhotoPress(photo: ClubPhoto) {
     router.push({
-      pathname: '/(tabs)/clubs/[clubId]/photos/viewer',
+      pathname: '/club/[clubId]/photos/viewer',
       params: { clubId: clubId!, photoId: photo.id, clubName: club?.name ?? '' },
     } as any);
   }
 
   function handleCalendarDayPress(eventId: string) {
     router.push({
-      pathname: '/(tabs)/clubs/[clubId]/events/[eventId]',
+      pathname: '/club/[clubId]/events/[eventId]',
       params: { clubId: clubId!, eventId },
     });
   }
@@ -637,7 +637,7 @@ export default function ClubProfileScreen() {
             <TouchableOpacity
               onPress={() =>
                 router.push({
-                  pathname: '/(tabs)/clubs/[clubId]/edit',
+                  pathname: '/club/[clubId]/edit',
                   params: { clubId: clubId! },
                 })
               }
@@ -687,7 +687,7 @@ export default function ClubProfileScreen() {
           </Text>
           <TouchableOpacity
             onPress={() =>
-              router.push({ pathname: '/(tabs)/clubs/[clubId]/members', params: { clubId: clubId! } })
+              router.push({ pathname: '/club/[clubId]/members', params: { clubId: clubId! } })
             }
             activeOpacity={0.7}
             hitSlop={{ top: 4, bottom: 4, left: 0, right: 20 }}
@@ -812,7 +812,7 @@ export default function ClubProfileScreen() {
             activeOpacity={0.7}
             onPress={() =>
               router.push({
-                pathname: '/(tabs)/clubs/[clubId]/members',
+                pathname: '/club/[clubId]/members',
                 params: { clubId: clubId!, filter: 'gluemates' },
               })
             }
@@ -976,7 +976,7 @@ export default function ClubProfileScreen() {
             <TouchableOpacity
               onPress={() =>
                 router.push({
-                  pathname: '/(tabs)/clubs/[clubId]/photos',
+                  pathname: '/club/[clubId]/photos',
                   params: { clubId: clubId!, clubName: club?.name ?? '' },
                 } as any)
               }

@@ -5,17 +5,17 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
-import { useChatDetails } from '../../../../hooks/useChats';
-import { ConversationThread } from '../../../../components/chat/ConversationThread';
-import { useOfficerStore } from '../../../../store/officerStore';
+import { useChatDetails } from '../../../hooks/useChats';
+import { ConversationThread } from '../../../components/chat/ConversationThread';
+import { useOfficerStore } from '../../../store/officerStore';
 import {
   getChannelMeta,
   canPostInChannel,
   markChannelRead,
   type ChannelMeta,
-} from '../../../../services/channelService';
-import { recordChannelVisit } from '../../../../lib/chatNavigation';
-import { chatColors, chatFonts, chatTypography } from '../../../../components/chat/chatTheme';
+} from '../../../services/channelService';
+import { recordChannelVisit } from '../../../lib/chatNavigation';
+import { chatColors, chatFonts, chatTypography } from '../../../components/chat/chatTheme';
 
 // ─── Official club chat channel thread (Members + Officers chats) ───────────
 // Rendering / sending / viewer / polls all come from the shared
@@ -59,7 +59,7 @@ export default function ChannelThread() {
       const m = await getChannelMeta(channelId);
       if (cancelled) return;
       if (!m || (m.conversation_id && m.conversation_id !== chatId)) {
-        router.replace(`/(tabs)/messages/${chatId}` as any);
+        router.replace(`/chat/${chatId}` as any);
         return;
       }
       setMeta(m);
@@ -113,7 +113,7 @@ export default function ChannelThread() {
         : undefined;
 
   const openInfo = () =>
-    router.push(`/(tabs)/messages/${chatId}/info?channelId=${channelId}` as any);
+    router.push(`/chat/${chatId}/info?channelId=${channelId}` as any);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

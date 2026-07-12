@@ -60,9 +60,9 @@ export default function InviteScreen() {
 
         // Open the destination chat immediately.
         if (result.type === 'club_group' && result.default_channel_id) {
-          router.replace(`/(tabs)/messages/${result.conversation_id}/${result.default_channel_id}` as any);
+          router.replace(`/chat/${result.conversation_id}/${result.default_channel_id}` as any);
         } else {
-          router.replace(`/(tabs)/messages/${result.conversation_id}` as any);
+          router.replace(`/chat/${result.conversation_id}` as any);
         }
       } catch (e: any) {
         if (!alive) return;

@@ -35,7 +35,7 @@ export interface ChatPreviewParams {
  */
 export function openChat(chatId: string, preview?: ChatPreviewParams): void {
   router.push({
-    pathname: `/(tabs)/messages/${chatId}`,
+    pathname: `/chat/${chatId}`,
     params: {
       ptype: preview?.type ?? '',
       pclub: preview?.clubId ?? '',
@@ -51,7 +51,7 @@ export function openChat(chatId: string, preview?: ChatPreviewParams): void {
  */
 export async function openDirectChatWith(otherUserId: string): Promise<void> {
   const conversationId = await getOrCreateDirectChat(otherUserId);
-  router.push(`/(tabs)/messages/${conversationId}` as any);
+  router.push(`/chat/${conversationId}` as any);
 }
 
 /**
@@ -93,7 +93,7 @@ async function openClubConversation(
   // Land on the conversation hub (Bug 1). Back returns straight to the club
   // profile because this is a single push.
   router.push({
-    pathname: `/(tabs)/messages/${target.conversationId}`,
+    pathname: `/chat/${target.conversationId}`,
     params: {
       ptype: type,
       pclub: clubId,
@@ -108,7 +108,7 @@ async function openClubConversation(
  */
 export function jumpToMessage(chatId: string, channelId: string, messageId: string): void {
   router.push({
-    pathname: `/(tabs)/messages/${chatId}/${channelId}` as any,
+    pathname: `/chat/${chatId}/${channelId}` as any,
     params: { jumpToMessageId: messageId },
   });
 }

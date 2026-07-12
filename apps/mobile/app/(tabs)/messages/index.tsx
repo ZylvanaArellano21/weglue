@@ -97,7 +97,7 @@ export default function MessagesIndex() {
     (person: { user_id: string; full_name: string | null; username: string; avatar_url: string | null }) => {
       const name = person.full_name?.trim() || person.username;
       router.push(
-        `/(tabs)/messages/new?draftUserId=${person.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(person.avatar_url ?? '')}` as any,
+        `/chat/new?draftUserId=${person.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(person.avatar_url ?? '')}` as any,
       );
     },
     [router],
@@ -202,7 +202,7 @@ export default function MessagesIndex() {
       return (
         <GroupEmptyState
           onBrowseClubs={() => navigateToDiscover()}
-          onNewGroupChat={() => router.push('/(tabs)/messages/new-group' as any)}
+          onNewGroupChat={() => router.push('/chat/new-group' as any)}
         />
       );
     }
@@ -274,7 +274,7 @@ export default function MessagesIndex() {
           <FilterPills value={filter} onChange={setFilter} />
           <TouchableOpacity
             style={styles.newChatBtn}
-            onPress={() => router.push('/(tabs)/messages/new-message' as any)}
+            onPress={() => router.push('/chat/new-message' as any)}
             accessibilityLabel="New chat"
           >
             <Ionicons name="add" size={26} color={chatColors.text} />

@@ -4,10 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useClubChannels } from '../../../../../hooks/useClubChannels';
-import { useClubProfile } from '../../../../../hooks/useClubProfile';
-import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
-import type { Channel } from '../../../../../services/channelService';
+import { useClubChannels } from '../../../../hooks/useClubChannels';
+import { useClubProfile } from '../../../../hooks/useClubProfile';
+import { Skeleton } from '../../../../components/shared/SkeletonLoader';
+import type { Channel } from '../../../../services/channelService';
 
 export type ChannelsParams = {
   clubId: string;
@@ -33,7 +33,7 @@ export default function ClubChannelsScreen() {
 
   function handleChannelPress(channel: Channel) {
     router.push({
-      pathname: '/(tabs)/clubs/[clubId]/channels/[channelId]',
+      pathname: '/club/[clubId]/channels/[channelId]',
       params: { clubId: clubId!, channelId: channel.id },
     });
   }

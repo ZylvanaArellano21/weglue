@@ -11,8 +11,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
-import { ShareSheet } from '../shared/ShareSheet';
-import { CommentsSheet } from './CommentsSheet';
 import { getResizedImageUrl } from '../../lib/imageResize';
 import type { FeedPost } from '../../services/postService';
 
@@ -47,8 +45,6 @@ export const PostCard = memo(function PostCard({
   onShowToast,
 }: PostCardProps) {
   const router = useRouter();
-  const [commentsVisible, setCommentsVisible] = useState(false);
-  const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [sharePressed, setSharePressed] = useState(false);
 
   const handlePressAuthor = () => {
@@ -56,7 +52,7 @@ export const PostCard = memo(function PostCard({
   };
 
   const handlePressClub = (clubId: string) => {
-    router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId } });
+    router.push({ pathname: '/club/[clubId]', params: { clubId } });
   };
 
   const isOwnPost = post.author.id === viewerUserId;
@@ -185,7 +181,7 @@ export const PostCard = memo(function PostCard({
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => setCommentsVisible(true)}
+          onPress={() => router.push({ pathname: '/comments/[postId]', params: { postId: post.id } })}
           activeOpacity={0.7}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
           hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
@@ -196,7 +192,7 @@ export const PostCard = memo(function PostCard({
           </Text>
         </TouchableOpacity>
         <Pressable
-          onPress={() => setShareSheetVisible(true)}
+          onPress={() => router.push({ pathname: '/share', params: { contentType: 'post', contentId: post.id } })}
           onPressIn={() => setSharePressed(true)}
           onPressOut={() => setSharePressed(false)}
           hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
@@ -218,21 +214,6 @@ export const PostCard = memo(function PostCard({
         </Pressable>
       </View>
 
-      <CommentsSheet
-        visible={commentsVisible}
-        postId={post.id}
-        viewerUserId={viewerUserId}
-        onClose={() => setCommentsVisible(false)}
-      />
-
-      <ShareSheet
-        visible={shareSheetVisible}
-        onClose={() => setShareSheetVisible(false)}
-        userId={viewerUserId}
-        contentType="post"
-        contentId={post.id}
-        onShowToast={onShowToast}
-      />
 
       {/* Caption */}
       <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 }}>

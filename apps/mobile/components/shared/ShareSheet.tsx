@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
   TextInput,
   FlatList,
   StyleSheet,
@@ -44,21 +43,29 @@ import type { ToastType } from '../Toast';
 
 export type ShareContentType = 'event' | 'post' | 'media';
 
-export interface ShareSheetProps {
-  visible: boolean;
-  onClose: () => void;
+export type ShareMedia = { sourcePath: string; kind: 'image' | 'video'; mime?: string | null; name?: string | null };
+
+export interface ShareSheetContentProps {
+  /** Called to dismiss the Share layer (route pop). */
+  onDone: () => void;
   userId: string | undefined;
   contentType: ShareContentType;
   /** eventId / postId. For media, any stable identity string (unused for send). */
   contentId: string;
   /** Required when contentType === 'media'. */
-  media?: { sourcePath: string; kind: 'image' | 'video'; mime?: string | null; name?: string | null };
+  media?: ShareMedia;
   onShowToast: (message: string, type?: ToastType) => void;
 }
 
 type Selected = { key: string; target: ShareTarget; label: string };
 
-export function ShareSheet({ visible, onClose, userId, contentType, contentId, media, onShowToast }: ShareSheetProps) {
+/**
+ * Share body (no Modal wrapper). Rendered by the root-level `/share` route
+ * (app/share.tsx) as a transparent-modal layer so it covers/disables the tab
+ * bar and stays a real entry in the navigation history — dismissing returns to
+ * the exact originating content, and sending never jumps to the Messages tab.
+ */
+export function ShareSheetContent({ onDone, userId, contentType, contentId, media, onShowToast }: ShareSheetContentProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Record<string, Selected>>({});
   const [sending, setSending] = useState(false);
@@ -69,19 +76,19 @@ export function ShareSheet({ visible, onClose, userId, contentType, contentId, m
   const { data: suggestedPeople, isLoading: suggestLoading } = useQuery({
     queryKey: ['suggestedPeople', userId],
     queryFn: () => getSuggestedPeople(userId!),
-    enabled: visible && !!userId && !isTyping,
+    enabled: !!userId && !isTyping,
     staleTime: 5 * 60 * 1000,
   });
   const { data: suggestedChats } = useQuery({
     queryKey: ['suggestedShareChats', userId],
     queryFn: () => getMyGroupChats(userId!),
-    enabled: visible && !!userId && !isTyping,
+    enabled: !!userId && !isTyping,
     staleTime: 5 * 60 * 1000,
   });
   const { data: searchResults, isLoading: searchLoading } = useQuery({
     queryKey: ['chatSearch', userId, query],
     queryFn: () => searchChats(userId!, query),
-    enabled: visible && !!userId && isTyping,
+    enabled: !!userId && isTyping,
     staleTime: 30 * 1000,
   });
 
@@ -178,7 +185,7 @@ export function ShareSheet({ visible, onClose, userId, contentType, contentId, m
   function handleClose() {
     setQuery('');
     setSelected({});
-    onClose();
+    onDone();
   }
 
   const linkTargets = [
@@ -193,7 +200,6 @@ export function ShareSheet({ visible, onClose, userId, contentType, contentId, m
   const externalTargets = isMedia ? mediaTargets : linkTargets;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={styles.overlay}>
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={handleClose} />
         <View style={styles.sheet}>
@@ -312,7 +318,6 @@ export function ShareSheet({ visible, onClose, userId, contentType, contentId, m
           </View>
         </View>
       </View>
-    </Modal>
   );
 }
 

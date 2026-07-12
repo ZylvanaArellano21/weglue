@@ -17,7 +17,6 @@ import { AvatarStack } from '../../components/shared/AvatarStack';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { requestLeaveClub } from '../../store/leaveClubStore';
-import { ShareSheet } from '../../components/shared/ShareSheet';
 import { openReportFlow } from '../../components/shared/ReportButton';
 import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
 
@@ -48,7 +47,6 @@ export default function EventDetailScreen() {
   // officer / sole-officer "blocked" note) and never lets a sole officer
   // leave — same behavior as Home cards and Club Profile.
 
-  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   const handleRsvp = (status: 'going' | 'cant') => {
     rsvp(status, {
@@ -78,7 +76,7 @@ export default function EventDetailScreen() {
 
   const handlePressClub = () => {
     if (event?.club_id) {
-      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: event.club_id } });
+      router.push({ pathname: '/club/[clubId]', params: { clubId: event.club_id } });
     }
   };
 
@@ -360,7 +358,7 @@ export default function EventDetailScreen() {
             {/* Share + Bookmark row */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24 }}>
               <TouchableOpacity
-                onPress={() => setShareSheetVisible(true)}
+                onPress={() => router.push({ pathname: '/share', params: { contentType: 'event', contentId: eventId } })}
                 activeOpacity={0.7}
                 style={{
                   width: 44,
@@ -481,19 +479,6 @@ export default function EventDetailScreen() {
             )}
           </View>
         </ScrollView>
-      )}
-
-      {event && (
-        <>
-          <ShareSheet
-            visible={shareSheetVisible}
-            onClose={() => setShareSheetVisible(false)}
-            userId={userId}
-            contentType="event"
-            contentId={event.id}
-            onShowToast={show}
-          />
-        </>
       )}
     </SafeAreaView>
   );

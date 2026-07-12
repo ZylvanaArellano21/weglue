@@ -60,7 +60,7 @@ export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
     <TouchableOpacity
       style={styles.card}
       onPress={() =>
-        router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: club.id } })
+        router.push({ pathname: '/club/[clubId]', params: { clubId: club.id } })
       }
       activeOpacity={0.85}
     >
@@ -80,17 +80,24 @@ export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
       </View>
 
       <View style={styles.body}>
-        <Text style={styles.name} numberOfLines={1}>
+        <Text style={styles.name} numberOfLines={2}>
           {club.name}
         </Text>
 
-        {(club.meeting_day || timeStr || location) && (
-          <View style={styles.metaBlock}>
-            {club.meeting_day ? <Text style={styles.meta}>{club.meeting_day}</Text> : null}
-            {timeStr ? <Text style={styles.meta}>{timeStr}</Text> : null}
-            {location ? <Text style={styles.meta}>{location}</Text> : null}
-          </View>
-        )}
+        <View style={styles.metaBlock}>
+          {club.meeting_day ? (
+            <Text style={styles.meta} numberOfLines={1}>{club.meeting_day}</Text>
+          ) : null}
+          {timeStr ? (
+            <Text style={styles.meta} numberOfLines={1}>{timeStr}</Text>
+          ) : null}
+          {location ? (
+            <Text style={styles.meta} numberOfLines={2}>{location}</Text>
+          ) : null}
+          {!club.meeting_day && !timeStr && !location ? (
+            <Text style={styles.metaEmpty} numberOfLines={1}>Schedule coming soon</Text>
+          ) : null}
+        </View>
 
         {club.is_member ? (
           <View style={styles.joinedBadge}>
@@ -104,7 +111,7 @@ export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
             style={styles.joinBtn}
           >
             {joining ? (
-              <ActivityIndicator size="small" color={searchColors.cream} />
+              <ActivityIndicator size="small" color={searchColors.white} />
             ) : (
               <Text style={styles.joinText}>Join</Text>
             )}
@@ -118,7 +125,9 @@ export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
 const styles = StyleSheet.create({
   card: {
     width: CLUB_CARD_WIDTH,
-    backgroundColor: searchColors.cream,
+    // White body so the raised card pops off the cream page (was `cream`,
+    // which blended into the background and killed the 3D look).
+    backgroundColor: searchColors.cardBg,
     borderRadius: searchSizes.clubCardRadius,
     overflow: 'hidden',
     ...searchCardShadow,
@@ -142,45 +151,53 @@ const styles = StyleSheet.create({
     backgroundColor: searchColors.imagePlaceholder,
   },
   body: {
-    paddingHorizontal: 6,
-    paddingTop: 4,
-    paddingBottom: 10,
-    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 12,
+    // Left-align the text block to match the design (was centered).
+    alignItems: 'stretch',
   },
   name: {
     ...searchTypography.clubName,
-    textAlign: 'center',
-    marginBottom: 2,
+    textAlign: 'left',
+    marginBottom: 4,
   },
   metaBlock: {
-    alignItems: 'center',
-    marginBottom: 6,
+    alignItems: 'flex-start',
+    marginBottom: 10,
   },
   meta: {
     ...searchTypography.clubMeta,
-    textAlign: 'center',
+    textAlign: 'left',
+  },
+  metaEmpty: {
+    ...searchTypography.clubMeta,
+    fontStyle: 'italic',
+    textAlign: 'left',
   },
   joinBtn: {
-    minWidth: 55,
+    alignSelf: 'center',
+    minWidth: 88,
     height: searchSizes.joinBtnHeight,
-    paddingHorizontal: 12,
+    paddingHorizontal: 18,
     borderRadius: searchSizes.joinBtnRadius,
     backgroundColor: searchColors.teal,
     alignItems: 'center',
     justifyContent: 'center',
-    ...searchCardShadow,
   },
   joinText: {
     ...searchTypography.joinBtn,
+    color: searchColors.white,
   },
   joinedBadge: {
-    minWidth: 55,
+    alignSelf: 'center',
+    minWidth: 88,
     height: searchSizes.joinBtnHeight,
-    paddingHorizontal: 10,
+    paddingHorizontal: 18,
     borderRadius: searchSizes.joinBtnRadius,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: searchColors.teal,
-    backgroundColor: searchColors.cream,
+    backgroundColor: searchColors.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
   },

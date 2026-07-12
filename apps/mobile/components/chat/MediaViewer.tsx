@@ -21,7 +21,7 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { resolveAttachmentUrl } from '../../lib/chatAttachments';
-import { ShareSheet } from '../shared/ShareSheet';
+import { ShareSheetContent } from '../shared/ShareSheet';
 import { useToast } from '../Toast';
 import { chatFonts } from './chatTheme';
 
@@ -382,23 +382,28 @@ export function MediaViewer({ visible, items, initialIndex, onClose, currentUser
           </>
         )}
 
-        {current && (
-          <ShareSheet
-            visible={shareOpen}
-            onClose={() => setShareOpen(false)}
-            userId={currentUserId}
-            contentType="media"
-            contentId={current.source}
-            // Internal copy needs a private storage path; if this row is a
-            // legacy http/local source, only external file share applies.
-            media={{
-              sourcePath: current.source,
-              kind: current.kind,
-              mime: null,
-              name: null,
-            }}
-            onShowToast={(m, t) => toast.show(m, t)}
-          />
+        {/* MediaViewer is itself a full-screen Modal, so a pushed /share route
+            would render underneath it. Here the Share body is rendered as an
+            in-modal overlay instead — it doesn't navigate away, so it needs no
+            route. Every other Share entry point uses the /share route. */}
+        {current && shareOpen && (
+          <View style={StyleSheet.absoluteFill}>
+            <ShareSheetContent
+              onDone={() => setShareOpen(false)}
+              userId={currentUserId}
+              contentType="media"
+              contentId={current.source}
+              // Internal copy needs a private storage path; if this row is a
+              // legacy http/local source, only external file share applies.
+              media={{
+                sourcePath: current.source,
+                kind: current.kind,
+                mime: null,
+                name: null,
+              }}
+              onShowToast={(m, t) => toast.show(m, t)}
+            />
+          </View>
         )}
         {toast.ToastComponent}
       </View>

@@ -15,23 +15,23 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChatDetails } from '../../../../hooks/useChats';
-import { Avatar } from '../../../../components/shared/Avatar';
-import { FollowStateButton } from '../../../../components/shared/FollowStateButton';
-import { ConfirmationModal } from '../../../../components/chat/ConfirmationModal';
-import { useFollowStates } from '../../../../hooks/useFollowStates';
-import { useOfficerStore } from '../../../../store/officerStore';
-import { openReportFlow } from '../../../../components/shared/ReportButton';
+import { useChatDetails } from '../../../hooks/useChats';
+import { Avatar } from '../../../components/shared/Avatar';
+import { FollowStateButton } from '../../../components/shared/FollowStateButton';
+import { ConfirmationModal } from '../../../components/chat/ConfirmationModal';
+import { useFollowStates } from '../../../hooks/useFollowStates';
+import { useOfficerStore } from '../../../store/officerStore';
+import { openReportFlow } from '../../../components/shared/ReportButton';
 import {
   removeClubMemberByOfficer,
   demoteClubOfficer,
   addClubOfficerCanonical,
   removeGroupParticipant,
-} from '../../../../services/messagingService';
-import { supabase } from '../../../../lib/supabase';
-import { displayNameOrFallback, isPlaceholderUsername } from '../../../../lib/displayName';
-import type { ChatParticipant } from '../../../../services/chatService';
-import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
+} from '../../../services/messagingService';
+import { supabase } from '../../../lib/supabase';
+import { displayNameOrFallback, isPlaceholderUsername } from '../../../lib/displayName';
+import type { ChatParticipant } from '../../../services/chatService';
+import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
 
 // ─── Full participant roster ─────────────────────────────────────────────────
 // The complete, searchable, virtualized list behind Chat Info's "See all N
@@ -181,7 +181,7 @@ export default function ChatParticipants() {
             <TouchableOpacity
               onPress={() =>
                 router.push(
-                  `/(tabs)/messages/new?draftUserId=${item.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(item.avatar_url ?? '')}` as any,
+                  `/chat/new?draftUserId=${item.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(item.avatar_url ?? '')}` as any,
                 )
               }
               style={styles.iconBtn}

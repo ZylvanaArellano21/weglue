@@ -36,6 +36,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.weglue.app",
+      "softwareKeyboardLayoutMode": "resize",
       "intentFilters": [
         {
           "action": "VIEW",

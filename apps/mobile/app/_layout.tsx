@@ -237,7 +237,25 @@ export default function RootLayout() {
           routes are "profile/[userId]", "profile/own", …) makes the navigator
           re-reconcile its children on every state change — which turned the
           sign-out <Redirect> into an infinite update loop (the logout freeze). */}
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false }}>
+        {/* Restorable overlay layers — real routes so a screen pushed from them
+            (a profile, a chat) sits ABOVE them and Back reveals them intact,
+            with the tab bar covered. transparentModal keeps the screen beneath
+            visible through the dim backdrop. Names match real files, so the
+            navigator does not re-reconcile (the historical logout-freeze). */}
+        <Stack.Screen
+          name="sidebar"
+          options={{ presentation: 'transparentModal', animation: 'fade', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="comments/[postId]"
+          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="share"
+          options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', gestureEnabled: true }}
+        />
+      </Stack>
       {/* The single app-wide leave-club confirmation host: exactly one modal
           can exist at a time, so the sole-officer note can never stack on a
           leave confirmation (screens raise requests via requestLeaveClub). */}

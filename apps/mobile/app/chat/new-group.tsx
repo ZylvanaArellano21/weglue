@@ -14,9 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useChatSearch, useSuggestedPeople } from '../../../hooks/useChats';
-import { Avatar } from '../../../components/shared/Avatar';
-import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
+import { useChatSearch, useSuggestedPeople } from '../../hooks/useChats';
+import { Avatar } from '../../components/shared/Avatar';
+import { chatColors, chatFonts, chatSizes, chatTypography } from '../../components/chat/chatTheme';
 
 // ─── New group chat ──────────────────────────────────────────────────────────
 // Full-screen keyboard-safe creation flow. The group stays a LOCAL DRAFT until
@@ -63,7 +63,7 @@ export default function NewGroupScreen() {
     const ids = selected.map((s) => s.user_id).join(',');
     const names = selected.map((s) => s.name).join(', ');
     router.replace(
-      (`/(tabs)/messages/new?` +
+      (`/chat/new?` +
         `draftParticipantIds=${ids}` +
         `&draftNames=${encodeURIComponent(names)}` +
         `&draftGroupName=${encodeURIComponent(groupName.trim())}`) as any,

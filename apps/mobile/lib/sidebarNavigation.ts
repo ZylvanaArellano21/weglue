@@ -30,16 +30,15 @@ export interface SidebarActionHandlers {
 
 // ─── Build sidebar items with navigation callbacks ────────────────────────────
 //
-// Call this inside a component that has access to expo-router's useRouter().
-// Pass closeSidebar so each action closes the drawer before navigating.
+// Call this inside the /sidebar route. Each item PUSHES its destination above
+// the sidebar route (no close-first) so Back returns to the still-open sidebar,
+// per the required Home → Sidebar → Destination → Back → Sidebar journey.
 //
 export function buildSidebarItems(
   router: Router,
-  closeSidebar: () => void,
   handlers: SidebarActionHandlers,
 ): SidebarItem[] {
   function navigate(path: string) {
-    closeSidebar();
     router.push(path as any);
   }
 
@@ -61,7 +60,6 @@ export function buildSidebarItems(
       label: 'Interests',
       icon: 'heart-outline',
       onPress: () => {
-        closeSidebar();
         // Existing edit flow: interests survey → activities survey
         router.push({
           pathname: '/profile/edit-interests',

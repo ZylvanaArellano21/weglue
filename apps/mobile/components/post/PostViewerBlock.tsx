@@ -1,11 +1,8 @@
-import { useState } from 'react';
 import { View, Text, Image, TouchableOpacity, Dimensions, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
-import { CommentsSheet } from '../home/CommentsSheet';
-import { ShareSheet } from '../shared/ShareSheet';
 import { timeAgo } from '../home/PostCard';
 import { getResizedImageUrl } from '../../lib/imageResize';
 import { openReportFlow } from '../shared/ReportButton';
@@ -37,8 +34,6 @@ export function PostViewerBlock({
   onShowToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }) {
   const router = useRouter();
-  const [commentsVisible, setCommentsVisible] = useState(false);
-  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   const isOwnPost = post.author.id === viewerUserId;
 
@@ -65,7 +60,7 @@ export function PostViewerBlock({
                     key={club.id}
                     onPress={() =>
                       router.push({
-                        pathname: '/(tabs)/clubs/[clubId]',
+                        pathname: '/club/[clubId]',
                         params: { clubId: club.id },
                       } as any)
                     }
@@ -169,7 +164,7 @@ export function PostViewerBlock({
           <Text style={styles.actionCount}>{post.likes_count}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => setCommentsVisible(true)}
+          onPress={() => router.push({ pathname: '/comments/[postId]', params: { postId: post.id } })}
           activeOpacity={0.7}
           style={styles.actionItem}
           hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
@@ -178,7 +173,7 @@ export function PostViewerBlock({
           <Text style={styles.actionCount}>{post.comments_count}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => setShareSheetVisible(true)}
+          onPress={() => router.push({ pathname: '/share', params: { contentType: 'post', contentId: post.id } })}
           activeOpacity={0.7}
           style={styles.actionItem}
           hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
@@ -198,21 +193,6 @@ export function PostViewerBlock({
       {/* Timestamp */}
       <Text style={styles.timestamp}>{timeAgo(post.created_at)}</Text>
 
-      <CommentsSheet
-        visible={commentsVisible}
-        postId={post.id}
-        viewerUserId={viewerUserId}
-        onClose={() => setCommentsVisible(false)}
-      />
-
-      <ShareSheet
-        visible={shareSheetVisible}
-        onClose={() => setShareSheetVisible(false)}
-        userId={viewerUserId}
-        contentType="post"
-        contentId={post.id}
-        onShowToast={onShowToast}
-      />
     </View>
   );
 }

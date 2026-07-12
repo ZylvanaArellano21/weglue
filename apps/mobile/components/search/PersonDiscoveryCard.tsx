@@ -10,7 +10,7 @@ interface Props {
 
 export function PersonDiscoveryCard({ person }: Props) {
   const router = useRouter();
-  const displayName = person.full_name ?? person.username;
+  const displayName = person.full_name?.trim() || person.username?.trim() || 'Member';
 
   return (
     <TouchableOpacity
@@ -42,11 +42,13 @@ export function PersonDiscoveryCard({ person }: Props) {
 const styles = StyleSheet.create({
   card: {
     width: searchSizes.personCardWidth,
-    height: searchSizes.personCardHeight,
-    backgroundColor: searchColors.cream,
+    minHeight: searchSizes.personCardHeight,
+    // White so the card is visible/raised against the cream page (was cream).
+    backgroundColor: searchColors.cardBg,
     borderRadius: searchSizes.clubCardRadius,
     alignItems: 'center',
-    paddingTop: 14,
+    justifyContent: 'center',
+    paddingVertical: 14,
     paddingHorizontal: 8,
     ...searchCardShadow,
   },

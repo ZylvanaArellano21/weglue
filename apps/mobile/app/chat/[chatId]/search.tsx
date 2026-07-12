@@ -15,10 +15,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
-import { Avatar } from '../../../../components/shared/Avatar';
-import { searchConversation, type ConversationSearchHit } from '../../../../services/messagingService';
-import { displayNameOrFallback } from '../../../../lib/displayName';
-import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
+import { Avatar } from '../../../components/shared/Avatar';
+import { searchConversation, type ConversationSearchHit } from '../../../services/messagingService';
+import { displayNameOrFallback } from '../../../lib/displayName';
+import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
 
 // ─── In-conversation search ─────────────────────────────────────────────────
 // Full-screen, keyboard-safe. Searches the WHOLE accessible history server-side
@@ -85,12 +85,12 @@ export default function SearchInChatScreen() {
     const m = hit.message;
     if (m.channel_id) {
       router.push({
-        pathname: `/(tabs)/messages/${chatId}/${m.channel_id}` as any,
+        pathname: `/chat/${chatId}/${m.channel_id}` as any,
         params: { jumpToMessageId: m.id },
       });
     } else {
       router.push({
-        pathname: `/(tabs)/messages/${chatId}` as any,
+        pathname: `/chat/${chatId}` as any,
         params: { jumpToMessageId: m.id },
       });
     }

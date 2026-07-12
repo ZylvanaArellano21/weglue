@@ -18,7 +18,7 @@ export function SearchResultRow({ item, onJoin, joiningId }: Props) {
     if (item.result_type === 'person') {
       router.push({ pathname: '/profile/[userId]', params: { userId: item.id } });
     } else {
-      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: item.id } });
+      router.push({ pathname: '/club/[clubId]', params: { clubId: item.id } });
     }
   };
 

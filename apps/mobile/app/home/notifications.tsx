@@ -83,7 +83,7 @@ export default function NotificationsScreen() {
         item.type === 'member_joined') &&
       item.reference_id
     ) {
-      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: item.reference_id } });
+      router.push({ pathname: '/club/[clubId]', params: { clubId: item.reference_id } });
       return;
     }
     if (item.sender?.id) {

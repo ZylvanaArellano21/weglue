@@ -2,12 +2,19 @@ import { memo, useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, Image, Dimensions, RefreshControl, ListRenderItem } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useMyClubs } from '../../../hooks/useClubTab';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import type { ClubWithNextEvent } from '../../../services/clubTabService';
 import { navigateToDiscover } from '../../../lib/discoverNavigation';
+import { useTabBarBottomPadding } from '../../../lib/tabBar';
 import { getResizedImageUrl } from '../../../lib/imageResize';
+
+// Darkened meeting text for high contrast (was #9CA3AF light gray, which the
+// design brief explicitly forbids for meeting schedules).
+const META_COLOR = '#4A4A4A';
+const ALERT_COLOR = '#F02719';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = (SCREEN_WIDTH - 32 - 10) / 2;
@@ -43,7 +50,7 @@ const ClubCard = memo(function ClubCard({ club }: { club: ClubWithNextEvent }) {
   return (
     <TouchableOpacity
       onPress={() =>
-        router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: club.id } })
+        router.push({ pathname: '/club/[clubId]', params: { clubId: club.id } })
       }
       activeOpacity={0.85}
       style={{
@@ -51,11 +58,13 @@ const ClubCard = memo(function ClubCard({ club }: { club: ClubWithNextEvent }) {
         backgroundColor: '#fff',
         borderRadius: 12,
         overflow: 'hidden',
+        // Stronger, softer raised shadow so the whole card reads as 3D on iOS,
+        // with matching Android elevation (iOS shadow* props are ignored there).
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 6,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.18,
+        shadowRadius: 10,
+        elevation: 6,
       }}
     >
       {/* Cover image */}
@@ -120,41 +129,51 @@ const ClubCard = memo(function ClubCard({ club }: { club: ClubWithNextEvent }) {
         {/* Event this week — red alert state */}
         {hasEventThisWeek && club.next_event ? (
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginBottom: 2 }}>
-            <Text style={{ fontSize: 11, color: '#F02719', lineHeight: 16 }}>⚠</Text>
+            <Text style={{ fontSize: 12, color: ALERT_COLOR, lineHeight: 16 }}>⚠</Text>
             <View style={{ flex: 1 }}>
               <Text
                 style={{
-                  fontSize: 11,
-                  color: '#F02719',
-                  fontFamily: 'Inter_500Medium',
+                  fontSize: 11.5,
+                  color: ALERT_COLOR,
+                  fontFamily: 'Inter_600SemiBold',
                   lineHeight: 16,
                 }}
-                numberOfLines={1}
+                numberOfLines={2}
               >
                 {club.next_event.emoji ? `${club.next_event.emoji} ` : ''}{club.next_event.title}
               </Text>
-              <Text style={{ fontSize: 10, color: '#F02719', fontFamily: 'Inter_400Regular' }}>
+              <Text style={{ fontSize: 10.5, color: ALERT_COLOR, fontFamily: 'Inter_500Medium', marginTop: 1 }}>
                 {formatEventDate(club.next_event.event_date)}
               </Text>
             </View>
+            {/* Small event indicator, bottom-right of the card */}
+            <Ionicons name="notifications" size={14} color={ALERT_COLOR} style={{ marginTop: 1 }} />
           </View>
         ) : club.meeting_schedule ? (
-          /* No event — gray meeting info */
+          /* No event — darkened, high-contrast meeting info: day / time / place */
           <View>
-            <Text style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }} numberOfLines={1}>
-              {club.meeting_schedule.day}s{' '}
-              {formatTime(club.meeting_schedule.time_start)}
-              {club.meeting_schedule.time_end ? ` - ${formatTime(club.meeting_schedule.time_end)}` : ''}
+            <Text style={{ fontSize: 11.5, color: META_COLOR, fontFamily: 'Inter_500Medium', lineHeight: 16 }} numberOfLines={1}>
+              {club.meeting_schedule.day}
             </Text>
-            {club.meeting_schedule.room && (
-              <Text style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }} numberOfLines={1}>
-                {club.meeting_schedule.building
-                  ? `${club.meeting_schedule.building} ${club.meeting_schedule.room}`
-                  : club.meeting_schedule.room}
+            {club.meeting_schedule.time_start ? (
+              <Text style={{ fontSize: 11.5, color: META_COLOR, fontFamily: 'Inter_500Medium', lineHeight: 16 }} numberOfLines={1}>
+                {formatTime(club.meeting_schedule.time_start)}
+                {club.meeting_schedule.time_end ? ` - ${formatTime(club.meeting_schedule.time_end)}` : ''}
               </Text>
-            )}
+            ) : null}
+            {club.meeting_schedule.room ? (
+              <Text style={{ fontSize: 11.5, color: META_COLOR, fontFamily: 'Inter_500Medium', lineHeight: 16 }} numberOfLines={2}>
+                {club.meeting_schedule.building
+                  ? `Building ${club.meeting_schedule.building}, Room ${club.meeting_schedule.room}`
+                  : `Room ${club.meeting_schedule.room}`}
+              </Text>
+            ) : null}
           </View>
-        ) : null}
+        ) : (
+          <Text style={{ fontSize: 11.5, color: META_COLOR, fontFamily: 'Inter_500Medium', fontStyle: 'italic', lineHeight: 16 }} numberOfLines={1}>
+            Schedule coming soon
+          </Text>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -214,6 +233,7 @@ export default function ClubsTabScreen() {
   const router = useRouter();
   const { session } = useAuthStore();
   const userId = session?.user.id;
+  const bottomPad = useTabBarBottomPadding();
   const { data, isLoading, refetch } = useMyClubs(userId);
 
   // Pull-to-refresh state kept separate from first-load state so refreshing
@@ -322,7 +342,7 @@ export default function ClubsTabScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40, paddingTop: 16 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: bottomPad, paddingTop: 16 }}
           windowSize={7}
           maxToRenderPerBatch={6}
           initialNumToRender={6}

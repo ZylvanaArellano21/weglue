@@ -143,7 +143,7 @@ export default function OwnProfileScreen() {
                   key={role.club_id}
                   onPress={() =>
                     router.push({
-                      pathname: '/(tabs)/clubs/[clubId]',
+                      pathname: '/club/[clubId]',
                       params: { clubId: role.club_id },
                     } as any)
                   }
@@ -291,7 +291,7 @@ export default function OwnProfileScreen() {
             onPress={() => {
               setClubsSheetOpen(false);
               router.push({
-                pathname: '/(tabs)/clubs/[clubId]',
+                pathname: '/club/[clubId]',
                 params: { clubId: club.club_id },
               } as any);
             }}

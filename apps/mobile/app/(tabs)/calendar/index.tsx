@@ -90,7 +90,7 @@ export default function CalendarScreen() {
       const isPast = date < today;
 
       router.push({
-        pathname: '/(tabs)/calendar/event-detail',
+        pathname: '/event/event-detail',
         params: {
           date,
           initialEventId: dayEvents[0].id,
@@ -105,7 +105,7 @@ export default function CalendarScreen() {
     (event: CalendarEvent) => {
       const isPast = event.event_date < today;
       router.push({
-        pathname: '/(tabs)/calendar/event-detail',
+        pathname: '/event/event-detail',
         params: {
           date: event.event_date,
           initialEventId: event.id,

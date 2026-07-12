@@ -3,7 +3,6 @@ import { ActivityIndicator, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
-import { SidebarProvider } from "../../context/SidebarContext";
 import { useRealtimeNotifications } from "../../hooks/useNotifications";
 import { useClubRealtimeSync } from "../../hooks/useClubRealtimeSync";
 
@@ -52,63 +51,70 @@ export default function TabsLayout() {
   }
 
   return (
-    <SidebarProvider>
     <Tabs
       screenOptions={{
         headerShown: false,
+        // Shorter teal bar with larger icons, matching the We Glue design
+        // (previously 67pt with default ~24pt icons — too tall, icons too
+        // small). Height 54 + safe-area inset keeps the home-indicator clear
+        // on iPhone and honours Android navigation-bar insets, so equivalent
+        // devices render at the same visible height.
         tabBarStyle: {
           backgroundColor: "#0FA6A6",
           borderTopWidth: 0,
-          height: 67 + insets.bottom,
+          height: 54 + insets.bottom,
           paddingBottom: insets.bottom,
-          paddingTop: 4,
+          paddingTop: 6,
         },
-        tabBarActiveTintColor: "#fff",
-        tabBarInactiveTintColor: "rgba(255,255,255,0.6)",
+        // Dark icons on teal, per the design references. Active is solid
+        // black; inactive keeps a clearly-visible darker tint (not the old
+        // washed-out white) so the selected tab stays obvious.
+        tabBarActiveTintColor: "#111111",
+        tabBarInactiveTintColor: "rgba(0,0,0,0.45)",
         tabBarShowLabel: false,
+        tabBarIconStyle: { marginTop: 2 },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "home" : "home-outline"} size={28} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="clubs"
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="people" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "people" : "people-outline"} size={30} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={size} color={color} />
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="search" size={28} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="messages"
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble-outline" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "chatbubble" : "chatbubble-outline"} size={27} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="calendar"
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "calendar" : "calendar-outline"} size={27} color={color} />
           ),
         }}
       />
     </Tabs>
-    </SidebarProvider>
   );
 }

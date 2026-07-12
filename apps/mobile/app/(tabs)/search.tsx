@@ -30,11 +30,13 @@ import {
   useJoinFromSearch,
 } from '../../hooks/useSearch';
 import { consumeSearchReset } from '../../lib/discoverNavigation';
+import { useTabBarBottomPadding } from '../../lib/tabBar';
 import type { DiscoveryPerson, SearchResult } from '../../services/searchService';
 
 export default function SearchTab() {
   const { session } = useAuthStore();
   const userId = session?.user.id ?? '';
+  const bottomPad = useTabBarBottomPadding();
 
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -121,7 +123,7 @@ export default function SearchTab() {
                 />
               );
             }}
-            contentContainerStyle={styles.searchListContent}
+            contentContainerStyle={[styles.searchListContent, { paddingBottom: bottomPad }]}
             keyboardShouldPersistTaps="handled"
           />
         )}
@@ -170,7 +172,7 @@ export default function SearchTab() {
           keyExtractor={(item) => item.id}
           numColumns={2}
           columnWrapperStyle={styles.gridRow}
-          contentContainerStyle={styles.gridContent}
+          contentContainerStyle={[styles.gridContent, { paddingBottom: bottomPad }]}
           ListHeaderComponent={browseHeader}
           renderItem={({ item }) => (
             <ClubDiscoveryCard

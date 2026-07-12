@@ -20,14 +20,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
-import { useChatDetails } from '../../../../hooks/useChats';
-import { Avatar } from '../../../../components/shared/Avatar';
-import { ConfirmationModal } from '../../../../components/chat/ConfirmationModal';
-import { MediaViewer, type ViewerMediaItem } from '../../../../components/chat/MediaViewer';
-import { ShareInviteSheet } from '../../../../components/chat/ShareInviteSheet';
-import { FollowStateButton } from '../../../../components/shared/FollowStateButton';
-import { useFollowStates } from '../../../../hooks/useFollowStates';
-import { useOfficerStore } from '../../../../store/officerStore';
+import { useChatDetails } from '../../../hooks/useChats';
+import { Avatar } from '../../../components/shared/Avatar';
+import { ConfirmationModal } from '../../../components/chat/ConfirmationModal';
+import { MediaViewer, type ViewerMediaItem } from '../../../components/chat/MediaViewer';
+import { ShareInviteSheet } from '../../../components/chat/ShareInviteSheet';
+import { FollowStateButton } from '../../../components/shared/FollowStateButton';
+import { useFollowStates } from '../../../hooks/useFollowStates';
+import { useOfficerStore } from '../../../store/officerStore';
 import {
   getConversationMedia,
   getConversationFiles,
@@ -42,7 +42,7 @@ import {
   setConversationMuted,
   setConversationArchived,
   getMyConversationFlags,
-} from '../../../../services/messagingService';
+} from '../../../services/messagingService';
 import {
   getChannelMeta,
   setChannelAvatar,
@@ -54,12 +54,12 @@ import {
   deleteChannel,
   type ChannelMeta,
   type PostPermission,
-} from '../../../../services/channelService';
-import { openReportFlow } from '../../../../components/shared/ReportButton';
-import { getClubPoll, type ClubPoll } from '../../../../services/clubPollService';
-import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../../../lib/chatAttachments';
-import { displayNameOrFallback, isPlaceholderUsername } from '../../../../lib/displayName';
-import { uploadImageToBucket } from '../../../../lib/imageUpload';
+} from '../../../services/channelService';
+import { openReportFlow } from '../../../components/shared/ReportButton';
+import { getClubPoll, type ClubPoll } from '../../../services/clubPollService';
+import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../../lib/chatAttachments';
+import { displayNameOrFallback, isPlaceholderUsername } from '../../../lib/displayName';
+import { uploadImageToBucket } from '../../../lib/imageUpload';
 import { Linking } from 'react-native';
 import {
   chatColors,
@@ -67,7 +67,7 @@ import {
   chatShadow,
   chatSizes,
   chatTypography,
-} from '../../../../components/chat/chatTheme';
+} from '../../../components/chat/chatTheme';
 
 // ─── Chat Information ────────────────────────────────────────────────────────
 // Three distinct screens behind one route, selected by conversation type and
@@ -323,7 +323,7 @@ export default function ChatInfo() {
       await deleteChannel(channelId);
       invalidateAll();
       // Back to the hub — the channel no longer exists.
-      router.dismissTo?.(`/(tabs)/messages/${chatId}` as any) ?? router.replace(`/(tabs)/messages/${chatId}` as any);
+      router.dismissTo?.(`/chat/${chatId}` as any) ?? router.replace(`/chat/${chatId}` as any);
     } catch (e: any) {
       Alert.alert('Could not delete channel', e?.message?.includes('cannot_delete_main') ? 'The Main chat cannot be deleted.' : 'Please try again.');
     }
@@ -425,7 +425,7 @@ export default function ChatInfo() {
 
   function openAddPeople() {
     // Members Info Add Person: officer-driven, atomic membership add (Bug 4).
-    router.push(`/(tabs)/messages/manage-people?mode=members&clubId=${clubId}&conversationId=${chatId}` as any);
+    router.push(`/chat/manage-people?mode=members&clubId=${clubId}&conversationId=${chatId}` as any);
   }
 
   // ── Content renderers (shared) ──
@@ -669,7 +669,7 @@ export default function ChatInfo() {
             <>
               <TouchableOpacity
                 style={styles.actionItem}
-                onPress={() => router.push(`/(tabs)/messages/${chatId}/search?channelId=${channelId}` as any)}
+                onPress={() => router.push(`/chat/${chatId}/search?channelId=${channelId}` as any)}
               >
                 <Ionicons name="search-outline" size={22} color={chatColors.text} />
                 <Text style={chatTypography.infoAction}>Search</Text>
@@ -691,12 +691,12 @@ export default function ChatInfo() {
           {!isOfficialChat && (
             <>
               {isCustomGroup && isGroupAdmin && (
-                <TouchableOpacity style={styles.actionItem} onPress={() => router.push(`/(tabs)/messages/manage-people?mode=group&conversationId=${chatId}` as any)}>
+                <TouchableOpacity style={styles.actionItem} onPress={() => router.push(`/chat/manage-people?mode=group&conversationId=${chatId}` as any)}>
                   <Ionicons name="person-add-outline" size={22} color={chatColors.text} />
                   <Text style={chatTypography.infoAction}>Add</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity style={styles.actionItem} onPress={() => router.push(`/(tabs)/messages/${chatId}/search` as any)}>
+              <TouchableOpacity style={styles.actionItem} onPress={() => router.push(`/chat/${chatId}/search` as any)}>
                 <Ionicons name="search-outline" size={22} color={chatColors.text} />
                 <Text style={chatTypography.infoAction}>Search</Text>
               </TouchableOpacity>
@@ -734,7 +734,7 @@ export default function ChatInfo() {
                   <TouchableOpacity
                     onPress={() =>
                       router.push(
-                        `/(tabs)/messages/new?draftUserId=${member.user_id}&draftName=${encodeURIComponent(displayPersonName)}&draftAvatar=${encodeURIComponent(member.avatar_url ?? '')}` as any,
+                        `/chat/new?draftUserId=${member.user_id}&draftName=${encodeURIComponent(displayPersonName)}&draftAvatar=${encodeURIComponent(member.avatar_url ?? '')}` as any,
                       )
                     }
                     style={styles.msgIcon}
@@ -755,7 +755,7 @@ export default function ChatInfo() {
               );
             })}
             {others.length > 4 && (
-              <TouchableOpacity style={styles.seeAllRow} onPress={() => router.push(`/(tabs)/messages/${chatId}/participants` as any)} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.seeAllRow} onPress={() => router.push(`/chat/${chatId}/participants` as any)} activeOpacity={0.7}>
                 <Text style={styles.seeAllText}>See all {chatDetails.participants.length} people</Text>
                 <Ionicons name="chevron-forward" size={16} color={chatColors.teal} />
               </TouchableOpacity>

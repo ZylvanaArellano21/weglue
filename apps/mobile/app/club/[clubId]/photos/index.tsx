@@ -3,8 +3,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useClubPhotoFeed } from '../../../../../hooks/useClubPhotos';
-import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
+import { useClubPhotoFeed } from '../../../../hooks/useClubPhotos';
+import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 
 export type PhotoGridParams = {
   clubId: string;
@@ -73,7 +73,7 @@ export default function ClubPhotosScreen() {
               activeOpacity={0.85}
               onPress={() =>
                 router.push({
-                  pathname: '/(tabs)/clubs/[clubId]/photos/viewer',
+                  pathname: '/club/[clubId]/photos/viewer',
                   params: { clubId: clubId!, photoId: item.photo.id, clubName: clubName ?? '' },
                 } as any)
               }

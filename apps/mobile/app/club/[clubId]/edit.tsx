@@ -17,13 +17,13 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
-import { useOfficerStore } from '../../../../store/officerStore';
-import { useClubProfile } from '../../../../hooks/useClubProfile';
+import { useOfficerStore } from '../../../store/officerStore';
+import { useClubProfile } from '../../../hooks/useClubProfile';
 import { useQueryClient } from '@tanstack/react-query';
-import { Skeleton } from '../../../../components/shared/SkeletonLoader';
-import { useToast } from '../../../../components/Toast';
-import { Avatar } from '../../../../components/shared/Avatar';
-import { AddOfficerSheet } from '../../../../components/club/AddOfficerSheet';
+import { Skeleton } from '../../../components/shared/SkeletonLoader';
+import { useToast } from '../../../components/Toast';
+import { Avatar } from '../../../components/shared/Avatar';
+import { AddOfficerSheet } from '../../../components/club/AddOfficerSheet';
 import * as ImagePicker from 'expo-image-picker';
 import {
   updateClubProfile,
@@ -34,18 +34,18 @@ import {
   deleteClubPhotoEverywhere,
   type UpdateClubInput,
   type UniversityUser,
-} from '../../../../services/clubService';
-import { deleteEvent } from '../../../../services/eventService';
-import { uploadImageToBucket } from '../../../../lib/imageUpload';
-import { invalidateClubDataEverywhere } from '../../../../lib/clubCache';
+} from '../../../services/clubService';
+import { deleteEvent } from '../../../services/eventService';
+import { uploadImageToBucket } from '../../../lib/imageUpload';
+import { invalidateClubDataEverywhere } from '../../../lib/clubCache';
 import {
   parseMeetingSchedule,
   formatTime12h,
   toDbTime,
   dbTimeToDate,
   type MeetingSlot,
-} from '../../../../lib/meetingSchedule';
-import type { ClubOfficer, ClubPhoto, ClubUpcomingEvent } from '../../../../services/clubService';
+} from '../../../lib/meetingSchedule';
+import type { ClubOfficer, ClubPhoto, ClubUpcomingEvent } from '../../../services/clubService';
 
 export type EditClubParams = {
   clubId: string;

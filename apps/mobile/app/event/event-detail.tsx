@@ -47,15 +47,14 @@ import { useAuthStore } from '@weglue/shared';
 import {
   useCalendarDayEvents,
   useCalendarRsvp,
-} from '../../../hooks/useCalendar';
-import { useSaveEventMutation } from '../../../hooks/useEventDetail';
-import { Avatar } from '../../../components/shared/Avatar';
-import { AvatarStack } from '../../../components/shared/AvatarStack';
-import { Skeleton } from '../../../components/shared/SkeletonLoader';
-import { DotNavigator } from '../../../components/calendar/DotNavigator';
-import { useToast } from '../../../components/Toast';
-import { ShareSheet } from '../../../components/shared/ShareSheet';
-import { formatEventLocation, isEventPast } from '../../../lib/eventDisplay';
+} from '../../hooks/useCalendar';
+import { useSaveEventMutation } from '../../hooks/useEventDetail';
+import { Avatar } from '../../components/shared/Avatar';
+import { AvatarStack } from '../../components/shared/AvatarStack';
+import { Skeleton } from '../../components/shared/SkeletonLoader';
+import { DotNavigator } from '../../components/calendar/DotNavigator';
+import { useToast } from '../../components/Toast';
+import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -159,7 +158,6 @@ export default function CalendarEventDetailScreen() {
   }, [toggleSave, show]);
 
   // ─── Share ────────────────────────────────────────────────────────────────
-  const [shareSheetVisible, setShareSheetVisible] = useState(false);
 
   // ─── Back arrow — return to wherever the user came from ──────────────────
   // Fall back to the Calendar tab only when there is no navigation history.
@@ -174,7 +172,7 @@ export default function CalendarEventDetailScreen() {
   // ─── Club press ───────────────────────────────────────────────────────────
   const handlePressClub = useCallback(() => {
     if (event?.club.id) {
-      router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: event.club.id } });
+      router.push({ pathname: '/club/[clubId]', params: { clubId: event.club.id } });
     }
   }, [event, router]);
 
@@ -368,7 +366,7 @@ export default function CalendarEventDetailScreen() {
 
             {/* Share + Bookmark row */}
             <View style={{ flexDirection: 'row', gap: 16, marginBottom: 20 }}>
-              <TouchableOpacity onPress={() => setShareSheetVisible(true)} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => event && router.push({ pathname: '/share', params: { contentType: 'event', contentId: event.id } })} activeOpacity={0.7}>
                 <Ionicons name="paper-plane-outline" size={26} color="#0FA6A6" />
               </TouchableOpacity>
               <TouchableOpacity onPress={handleToggleSave} disabled={isSaving} activeOpacity={0.7}>
@@ -456,16 +454,6 @@ export default function CalendarEventDetailScreen() {
         </ScrollView>
       )}
 
-      {event && (
-        <ShareSheet
-          visible={shareSheetVisible}
-          onClose={() => setShareSheetVisible(false)}
-          userId={userId}
-          contentType="event"
-          contentId={event.id}
-          onShowToast={show}
-        />
-      )}
     </SafeAreaView>
   );
 }

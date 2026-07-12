@@ -19,19 +19,19 @@ import {
   useChatDetails,
   useConversationMembership,
   useNonMemberPreview,
-} from '../../../../hooks/useChats';
-import { useRealtimeParticipants } from '../../../../hooks/useRealtimeMessages';
+} from '../../../hooks/useChats';
+import { useRealtimeParticipants } from '../../../hooks/useRealtimeMessages';
 import { useQueryClient } from '@tanstack/react-query';
-import { NonMemberPreview } from '../../../../components/chat/NonMemberPreview';
-import { ConversationThread } from '../../../../components/chat/ConversationThread';
-import { ConversationHub } from '../../../../components/chat/ConversationHub';
-import { Avatar } from '../../../../components/shared/Avatar';
-import { useOfficerStore } from '../../../../store/officerStore';
-import { getOrCreateDirectChat } from '../../../../services/chatService';
-import { createGroupChat } from '../../../../services/messagingService';
-import { createChannel, type HubThread } from '../../../../services/channelService';
-import { recordChannelVisit } from '../../../../lib/chatNavigation';
-import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from '../../../../components/chat/chatTheme';
+import { NonMemberPreview } from '../../../components/chat/NonMemberPreview';
+import { ConversationThread } from '../../../components/chat/ConversationThread';
+import { ConversationHub } from '../../../components/chat/ConversationHub';
+import { Avatar } from '../../../components/shared/Avatar';
+import { useOfficerStore } from '../../../store/officerStore';
+import { getOrCreateDirectChat } from '../../../services/chatService';
+import { createGroupChat } from '../../../services/messagingService';
+import { createChannel, type HubThread } from '../../../services/channelService';
+import { recordChannelVisit } from '../../../lib/chatNavigation';
+import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
 
 // ─── Conversation screen ────────────────────────────────────────────────────
 // direct + custom group threads render here; official club chats redirect to
@@ -102,7 +102,7 @@ export default function ChatRoom() {
     (t: HubThread) => {
       recordChannelVisit(chatId, t.id);
       router.push({
-        pathname: `/(tabs)/messages/${chatId}/${t.id}`,
+        pathname: `/chat/${chatId}/${t.id}`,
         params: { pname: chatDetails?.name ?? pname ?? '', pavatar: effectiveAvatarUrl ?? '' },
       } as any);
     },
@@ -184,7 +184,7 @@ export default function ChatRoom() {
       // reloads: the send pipeline's materializedRef already points the open
       // ConversationThread at the real id before this fires.
       router.replace({
-        pathname: `/(tabs)/messages/${conversationId}`,
+        pathname: `/chat/${conversationId}`,
         params: isDraftGroup
           ? { ptype: 'group', pname: params.draftGroupName || params.draftNames || '' }
           : {
@@ -256,7 +256,7 @@ export default function ChatRoom() {
           messages={previewMessages ?? []}
           chatName={displayName}
           onJoin={() => {
-            if (effectiveClubId) router.push(`/(tabs)/clubs/${effectiveClubId}`);
+            if (effectiveClubId) router.push(`/club/${effectiveClubId}`);
           }}
         />
       </SafeAreaView>
@@ -276,7 +276,7 @@ export default function ChatRoom() {
           <TouchableOpacity
             style={styles.headerCenter}
             activeOpacity={0.7}
-            onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
+            onPress={() => router.push(`/chat/${chatId}/info` as any)}
             accessibilityLabel={`${displayName} information`}
           >
             <Avatar uri={effectiveAvatarUrl} size={chatSizes.avatarHeader} username={displayName} />
@@ -364,7 +364,7 @@ export default function ChatRoom() {
           <TouchableOpacity
             onPress={() => {
               if (isDraftDm && otherUserId) openProfile(otherUserId);
-              else if (!isDraft) router.push(`/(tabs)/messages/${chatId}/info` as any);
+              else if (!isDraft) router.push(`/chat/${chatId}/info` as any);
             }}
             disabled={isDraftGroup}
             style={styles.identityTap}
@@ -377,7 +377,7 @@ export default function ChatRoom() {
           </TouchableOpacity>
           {!isDraft && (
             <TouchableOpacity
-              onPress={() => router.push(`/(tabs)/messages/${chatId}/info` as any)}
+              onPress={() => router.push(`/chat/${chatId}/info` as any)}
               hitSlop={8}
               accessibilityLabel="Chat information"
             >

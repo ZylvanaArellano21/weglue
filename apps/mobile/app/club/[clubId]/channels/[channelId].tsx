@@ -20,18 +20,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useClubChannels, useChannelMessages, useSendMessage, useClubConversationId } from '../../../../../hooks/useClubChannels';
-import { useClubProfile } from '../../../../../hooks/useClubProfile';
-import { useRealtimeMessages } from '../../../../../hooks/useRealtimeChannel';
-import { useOfficerStore } from '../../../../../store/officerStore';
+import { useClubChannels, useChannelMessages, useSendMessage, useClubConversationId } from '../../../../hooks/useClubChannels';
+import { useClubProfile } from '../../../../hooks/useClubProfile';
+import { useRealtimeMessages } from '../../../../hooks/useRealtimeChannel';
+import { useOfficerStore } from '../../../../store/officerStore';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
-import { Avatar } from '../../../../../components/shared/Avatar';
-import { Skeleton } from '../../../../../components/shared/SkeletonLoader';
-import { useToast } from '../../../../../components/Toast';
+import { Avatar } from '../../../../components/shared/Avatar';
+import { Skeleton } from '../../../../components/shared/SkeletonLoader';
+import { useToast } from '../../../../components/Toast';
 import * as ImagePicker from 'expo-image-picker';
-import { sendPoll, getClubPoll, votePoll } from '../../../../../services/clubPollService';
-import type { MessageWithSender } from '../../../../../services/channelService';
-import type { ClubPoll } from '../../../../../services/clubPollService';
+import { sendPoll, getClubPoll, votePoll } from '../../../../services/clubPollService';
+import type { MessageWithSender } from '../../../../services/channelService';
+import type { ClubPoll } from '../../../../services/clubPollService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.72;
@@ -941,7 +941,7 @@ export default function ChannelChatScreen() {
         <TouchableOpacity
           style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}
           onPress={() =>
-            router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: clubId! } })
+            router.push({ pathname: '/club/[clubId]', params: { clubId: clubId! } })
           }
           activeOpacity={0.7}
         >
@@ -957,7 +957,7 @@ export default function ChannelChatScreen() {
         {/* Right arrow to club profile */}
         <TouchableOpacity
           onPress={() =>
-            router.push({ pathname: '/(tabs)/clubs/[clubId]', params: { clubId: clubId! } })
+            router.push({ pathname: '/club/[clubId]', params: { clubId: clubId! } })
           }
           activeOpacity={0.7}
           style={{ marginLeft: 12 }}

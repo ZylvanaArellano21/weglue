@@ -14,16 +14,16 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
-import { useClubPhotoFeed, type ClubPhotoFeedItem } from '../../../../../hooks/useClubPhotos';
-import { useLikePost } from '../../../../../hooks/useHomePostsFeed';
-import { followUser, unfollowUser } from '../../../../../services/followService';
-import { PostViewerBlock } from '../../../../../components/post/PostViewerBlock';
-import { ProfileConfirmationModal } from '../../../../../components/profile/ProfileConfirmationModal';
-import { Avatar } from '../../../../../components/shared/Avatar';
-import { useToast } from '../../../../../components/Toast';
-import { timeAgo } from '../../../../../components/home/PostCard';
-import { profileColors, profileFonts } from '../../../../../components/profile/profileTheme';
-import type { FeedPost } from '../../../../../services/postService';
+import { useClubPhotoFeed, type ClubPhotoFeedItem } from '../../../../hooks/useClubPhotos';
+import { useLikePost } from '../../../../hooks/useHomePostsFeed';
+import { followUser, unfollowUser } from '../../../../services/followService';
+import { PostViewerBlock } from '../../../../components/post/PostViewerBlock';
+import { ProfileConfirmationModal } from '../../../../components/profile/ProfileConfirmationModal';
+import { Avatar } from '../../../../components/shared/Avatar';
+import { useToast } from '../../../../components/Toast';
+import { timeAgo } from '../../../../components/home/PostCard';
+import { profileColors, profileFonts } from '../../../../components/profile/profileTheme';
+import type { FeedPost } from '../../../../services/postService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 

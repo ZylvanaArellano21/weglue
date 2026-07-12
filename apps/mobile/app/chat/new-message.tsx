@@ -12,10 +12,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useChatSearch, useSuggestedPeople } from '../../../hooks/useChats';
-import { Avatar } from '../../../components/shared/Avatar';
-import { displayNameOrFallback, isPlaceholderUsername } from '../../../lib/displayName';
-import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
+import { useChatSearch, useSuggestedPeople } from '../../hooks/useChats';
+import { Avatar } from '../../components/shared/Avatar';
+import { displayNameOrFallback, isPlaceholderUsername } from '../../lib/displayName';
+import { chatColors, chatFonts, chatSizes, chatTypography } from '../../components/chat/chatTheme';
 
 // ─── New message ─────────────────────────────────────────────────────────────
 // Structure follows the reference interaction hierarchy (search · group-chat
@@ -43,7 +43,7 @@ export default function NewMessageScreen() {
     // (correction IMG_1568 showed "user_6d4c4487"). Falls back to "We Glue member".
     const name = displayNameOrFallback(p);
     router.replace(
-      `/(tabs)/messages/new?draftUserId=${p.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(p.avatar_url ?? '')}` as any,
+      `/chat/new?draftUserId=${p.user_id}&draftName=${encodeURIComponent(name)}&draftAvatar=${encodeURIComponent(p.avatar_url ?? '')}` as any,
     );
   }
 
@@ -79,7 +79,7 @@ export default function NewMessageScreen() {
       {!isTyping && (
         <TouchableOpacity
           style={styles.groupRow}
-          onPress={() => router.push('/(tabs)/messages/new-group' as any)}
+          onPress={() => router.push('/chat/new-group' as any)}
           activeOpacity={0.7}
         >
           <View style={styles.groupIcon}>

@@ -16,14 +16,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
-import { Avatar } from '../../../components/shared/Avatar';
+import { Avatar } from '../../components/shared/Avatar';
 import {
   getEligibleUniversityPeople,
   addClubMemberByOfficer,
   addClubOfficerCanonical,
   addGroupParticipants,
-} from '../../../services/messagingService';
-import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
+} from '../../services/messagingService';
+import { chatColors, chatFonts, chatSizes, chatTypography } from '../../components/chat/chatTheme';
 
 // ─── Add people (members chat / officers chat / custom group) ───────────────
 // Full-screen, keyboard-safe. Search at the top, multiple selection, an Add
