@@ -50,3 +50,6 @@ weglue-a5631ceb0d14.json
 
 # Claude Code local settings
 .claude/
+
+# Local verification screenshots / screen recordings — not shipped
+Corrections/
