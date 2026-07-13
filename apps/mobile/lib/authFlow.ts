@@ -32,6 +32,91 @@ export async function clearPendingSignup(): Promise<void> {
   await AsyncStorage.removeItem(PENDING_EMAIL_KEY);
 }
 
+// ─── Resend cooldown (shared by Confirm Email and Login) ─────────────────────
+
+const RESEND_COOLDOWN_KEY = "@weglue/resend_cooldown_until";
+
+/**
+ * The resend cooldown lives in storage, not in a screen's state, because the
+ * SAME cooldown has to hold across BOTH screens that can send a verification
+ * email: tapping "Verify now" on Login starts a cooldown that Confirm Email
+ * must already be counting down when it opens, and navigating back and forth
+ * must not hand the user a fresh 60 seconds. Keyed by email so a different
+ * account isn't silently blocked.
+ */
+export async function startResendCooldown(email: string): Promise<void> {
+  const until = Date.now() + RESEND_COOLDOWN_SECONDS * 1000;
+  await AsyncStorage.setItem(
+    RESEND_COOLDOWN_KEY,
+    JSON.stringify({ email: email.trim().toLowerCase(), until }),
+  );
+}
+
+/** Seconds left on the active cooldown for this email (0 when free to send). */
+export async function getResendCooldownRemaining(email: string): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(RESEND_COOLDOWN_KEY);
+    if (!raw) return 0;
+    const { email: storedEmail, until } = JSON.parse(raw) as {
+      email: string;
+      until: number;
+    };
+    if (storedEmail !== email.trim().toLowerCase()) return 0;
+    const remaining = Math.ceil((until - Date.now()) / 1000);
+    return remaining > 0 ? Math.min(remaining, RESEND_COOLDOWN_SECONDS) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export type ResendResult =
+  | { ok: true }
+  | { ok: false; cooldown: number }
+  | { ok: false; message: string };
+
+/**
+ * Sends exactly ONE verification email and opens the 60s cooldown.
+ *
+ * The cooldown is claimed BEFORE the network call, so a double tap (or a tap
+ * on Login's "Verify now" followed immediately by one on Confirm Email) cannot
+ * put two emails in flight. A genuine failure releases the cooldown so the
+ * user isn't locked out of retrying by an error that sent nothing.
+ */
+export async function sendVerificationEmail(email: string): Promise<ResendResult> {
+  const userEmail = email.trim().toLowerCase();
+  if (!userEmail) return { ok: false, message: "Enter your email address first." };
+
+  const remaining = await getResendCooldownRemaining(userEmail);
+  if (remaining > 0) return { ok: false, cooldown: remaining };
+
+  await startResendCooldown(userEmail);
+
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email: userEmail,
+    options: { emailRedirectTo: CONFIRM_EMAIL_REDIRECT },
+  });
+
+  if (error) {
+    const code = (error.code ?? "").toLowerCase();
+    const msg = (error.message ?? "").toLowerCase();
+    const throttled =
+      code === "over_email_send_rate_limit" ||
+      error.status === 429 ||
+      msg.includes("rate limit") ||
+      msg.includes("you can only request this after");
+
+    // A throttle means the provider is still holding us off — keep the
+    // cooldown. Any other failure sent nothing, so release it and let the
+    // user retry immediately rather than serving a pointless 60s wait.
+    if (!throttled) await AsyncStorage.removeItem(RESEND_COOLDOWN_KEY);
+
+    return { ok: false, message: friendlyEmailSendError(error) };
+  }
+
+  return { ok: true };
+}
+
 // ─── Backend status probes (SECURITY DEFINER RPCs, rate-limited) ─────────────
 
 export type EmailStatus = "available" | "exists_verified" | "exists_unverified";

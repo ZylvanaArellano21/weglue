@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -17,13 +17,22 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
 import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
-import { checkSignupStatus, clearPendingSignup } from "../../lib/authFlow";
+import {
+  checkSignupStatus,
+  clearPendingSignup,
+  sendVerificationEmail,
+  setPendingSignupEmail,
+} from "../../lib/authFlow";
 
 type LoginError =
   | null
   | "wrong_password"
   | "no_account"
-  | "unfinished"
+  // Credentials are VALID; the email is simply not verified yet. Only ever set
+  // from GoTrue's email_not_confirmed, which is issued after the password has
+  // already been checked — so this state can never leak account existence for
+  // a wrong password.
+  | "unverified"
   | "generic";
 
 export default function LoginScreen() {
@@ -46,10 +55,9 @@ export default function LoginScreen() {
 
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [loginError, setLoginError] = useState<LoginError>(null);
-  // True only when GoTrue returned email_not_confirmed — that error is issued
-  // AFTER password validation, so the typed password is known to be correct.
-  const [unfinishedPasswordOk, setUnfinishedPasswordOk] = useState(false);
   const [showVerifiedBanner] = useState(verified === "1");
+  const [verifying, setVerifying] = useState(false);
+  const verifyingRef = useRef(false);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -60,18 +68,45 @@ export default function LoginScreen() {
   function clearAllErrors() {
     setFieldErrors({});
     setLoginError(null);
-    setUnfinishedPasswordOk(false);
   }
 
   /**
-   * Routes an unfinished (unverified) signup back into the onboarding flow
-   * with the same email. If the password they just typed was correct
-   * (knownGoodPassword), carry it so the confirm-email step can auto-detect
-   * verification.
+   * "Verify now" — sends exactly ONE verification email, opens the shared 60s
+   * cooldown, then opens Confirm Email, which adopts that same cooldown rather
+   * than starting a fresh one. Double taps are swallowed by verifyingRef.
    */
-  function continueCreatingAccount(knownGoodPassword?: string) {
+  async function handleVerifyNow() {
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
+    setVerifying(true);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    try {
+      const result = await sendVerificationEmail(normalizedEmail);
+
+      if (!result.ok && "message" in result) {
+        show(result.message, "error");
+        return;
+      }
+
+      // Sent, or a cooldown from a very recent send is already running — either
+      // way Confirm Email is the right destination and it will show the
+      // remaining countdown plus the success state.
+      await setPendingSignupEmail(normalizedEmail);
+      router.push({
+        pathname: "/auth/verify-email",
+        params: { email: normalizedEmail },
+      });
+    } finally {
+      verifyingRef.current = false;
+      setVerifying(false);
+    }
+  }
+
+  /** Both "Create an account" entry points start the survey at Interests. */
+  function startNewAccount() {
     setPendingEmail(email.trim().toLowerCase());
-    setPendingPassword(knownGoodPassword ?? "");
+    setPendingPassword("");
     router.replace("/onboarding/interests");
   }
 
@@ -115,11 +150,11 @@ export default function LoginScreen() {
       const code = (error.code ?? "").toLowerCase();
 
       if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
-        // The password was correct (GoTrue validates it before this error) —
-        // the account just never finished signup/verification.
+        // GoTrue validates the password BEFORE issuing this error, so the
+        // account exists, the password is right, and verification is the only
+        // blocker. That is exactly — and only — when we may say so.
         setLoading(false);
-        setUnfinishedPasswordOk(true);
-        setLoginError("unfinished");
+        setLoginError("unverified");
         return;
       }
 
@@ -137,9 +172,11 @@ export default function LoginScreen() {
         if (status.kind === "ok") {
           if (status.emailStatus === "available") {
             setLoginError("no_account");
-          } else if (status.emailStatus === "exists_unverified") {
-            setLoginError("unfinished");
           } else {
+            // The account exists but the password was rejected. Whether it is
+            // verified or not, the blocker here is the password — say only
+            // that, and never surface the unverified state (which would
+            // confirm the account exists to someone guessing passwords).
             setLoginError("wrong_password");
           }
         } else {
@@ -180,7 +217,12 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.topBar}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            {/* Always Welcome — never router.back(), which could reveal a
+                half-completed signup form or a deleted onboarding screen. */}
+            <TouchableOpacity
+              onPress={() => router.replace("/welcome")}
+              style={styles.backBtn}
+            >
               <Text style={styles.backArrow}>‹</Text>
             </TouchableOpacity>
           </View>
@@ -255,23 +297,22 @@ export default function LoginScreen() {
             {loginError === "no_account" && (
               <Text style={styles.generalError}>
                 No account found with that email.{" "}
-                <Text style={styles.resendLink} onPress={() => continueCreatingAccount()}>
+                <Text style={styles.resendLink} onPress={startNewAccount}>
                   Create one.
                 </Text>
               </Text>
             )}
 
-            {loginError === "unfinished" && (
+            {loginError === "unverified" && (
               <Text style={styles.generalError}>
-                This account was not finished.{" "}
-                <Text
-                  style={styles.resendLink}
-                  onPress={() =>
-                    continueCreatingAccount(unfinishedPasswordOk ? password : undefined)
-                  }
-                >
-                  Continue creating your account.
-                </Text>
+                You haven&apos;t verified your email.{" "}
+                {verifying ? (
+                  <Text style={styles.resendLink}>Sending…</Text>
+                ) : (
+                  <Text style={styles.resendLink} onPress={handleVerifyNow}>
+                    Verify now
+                  </Text>
+                )}
               </Text>
             )}
 
@@ -314,7 +355,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => router.replace("/onboarding/interests")}
+              onPress={startNewAccount}
               style={{ alignSelf: "center", marginTop: 20 }}
             >
               <Text style={styles.footerText}>

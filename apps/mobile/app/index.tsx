@@ -14,7 +14,7 @@ import { getPendingSignupEmail } from "../lib/authFlow";
 import { getPendingInvite } from "../lib/pendingInvite";
 
 export default function WelcomeScreen() {
-  const { session, isLoading, profile } = useAuthStore();
+  const { session, isLoading } = useAuthStore();
   const router = useRouter();
   // null = still checking AsyncStorage; "" = no pending signup
   const [pendingSignupEmail, setPendingSignupEmail] = useState<string | null>(null);
@@ -48,21 +48,13 @@ export default function WelcomeScreen() {
       return;
     }
 
-    if (!profile?.avatar_url) {
-      // Confirmed but no profile picture — complete that step first
-      router.replace("/onboarding/profile-pic");
-      return;
-    }
-
-    if (profile.onboarding_completed === false) {
-      // Profile picture done but the club-matches step never finished
-      router.replace("/onboarding/matches");
-      return;
-    }
-
-    // Fully onboarded. A deferred chat invite (opened before signing up, or
-    // survived onboarding) is consumed exactly here so the invited chat is the
-    // first destination shown — then normal app entry.
+    // A verified user ALWAYS goes straight to Home. There is no mandatory
+    // onboarding left: no profile picture is required, no club catalog, no
+    // club selection, no "Done" step. Accounts stranded mid-way through the
+    // old flow (no avatar / onboarding_completed = false) therefore land on
+    // Home like everyone else — migration 042 also backfilled that flag.
+    // A deferred chat invite is consumed exactly here so the invited chat is
+    // the first destination shown — then normal app entry.
     getPendingInvite().then((token) => {
       if (token) {
         router.replace(`/invite/${token}` as any);
@@ -70,7 +62,7 @@ export default function WelcomeScreen() {
         router.replace("/(tabs)");
       }
     });
-  }, [isLoading, session, profile, pendingSignupEmail]);
+  }, [isLoading, session, pendingSignupEmail]);
 
   if (isLoading || pendingSignupEmail === null) {
     return (

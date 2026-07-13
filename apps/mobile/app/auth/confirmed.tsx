@@ -46,20 +46,12 @@ export default function AuthConfirmedScreen() {
 
     clearPendingSignup();
 
-    supabase
-      .from("profiles")
-      .select("avatar_url, onboarding_completed")
-      .eq("id", session.user.id)
-      .single()
-      .then(({ data }) => {
-        if (!data?.avatar_url) {
-          router.replace("/onboarding/profile-pic");
-        } else if (data.onboarding_completed === false) {
-          router.replace("/onboarding/matches");
-        } else {
-          router.replace("/(tabs)");
-        }
-      });
+    // Verification is the last onboarding step there is — go straight to the
+    // normal Home experience. No profile picture, no club catalog, no club
+    // selection, no "Done" step. The user's club matches are already waiting
+    // in their recommendation batch (created server-side at signup) and appear
+    // inside Home → Events.
+    router.replace("/(tabs)");
   }, [session]);
 
   return (

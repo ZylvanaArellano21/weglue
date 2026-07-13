@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
 import { useOwnProfile, useUpdateInterests } from '../../hooks/useOwnProfile';
+import { useRegenerateClubRecommendations } from '../../hooks/useClubRecommendations';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { SelectionChipGrid } from '../../components/profile/SelectionChipGrid';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
@@ -59,6 +60,8 @@ export default function EditInterestsScreen() {
   }, [profile?.interests]);
 
   const updateInterests = useUpdateInterests(userId);
+  const regenerate = useRegenerateClubRecommendations(userId);
+  const saving = updateInterests.isPending || regenerate.isPending;
 
   const onToggle = (interest: string) => {
     dirtyRef.current = true;
@@ -69,11 +72,29 @@ export default function EditInterestsScreen() {
 
   const onSave = async () => {
     await updateInterests.mutateAsync(selected);
+
+    // Mid-survey: Activities is the next step and owns the final Save.
     if (continueTo === 'activities') {
       router.replace('/profile/edit-activities' as any);
-    } else {
-      router.back();
+      return;
     }
+
+    // Standalone Save (from the profile screen) is a final survey save too —
+    // it supersedes the old batch and celebrates the new matches.
+    try {
+      const batch = await regenerate.mutateAsync();
+      if (batch && batch.count > 0) {
+        router.replace({
+          pathname: '/profile/match-results',
+          params: { count: String(batch.count) },
+        } as never);
+        return;
+      }
+    } catch {
+      // Recommendations are a bonus — never block saving interests on them.
+    }
+
+    router.back();
   };
 
   return (
@@ -97,12 +118,12 @@ export default function EditInterestsScreen() {
 
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.saveBtn, updateInterests.isPending && styles.saveBtnDisabled]}
+          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
           onPress={onSave}
-          disabled={updateInterests.isPending}
+          disabled={saving}
           activeOpacity={0.85}
         >
-          {updateInterests.isPending ? (
+          {saving ? (
             <ActivityIndicator color={profileColors.bg} />
           ) : (
             <Text style={styles.saveBtnText}>

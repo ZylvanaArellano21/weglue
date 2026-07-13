@@ -1,6 +1,10 @@
 import { useMutation, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { joinClub, leaveClub, type ClubProfileData, type LeaveClubResult } from '../services/clubService';
 import type { EventDetail, HomeEventsFeedSection } from '../services/eventService';
+import {
+  clubRecommendationsKey,
+  type ClubRecommendationBatch,
+} from './useClubRecommendations';
 
 // Centralizes join/leave so Home (event cards), Club Profile, and both
 // Event Details screens never disagree about membership state. Each screen
@@ -124,19 +128,39 @@ function invalidateMembershipQueries(queryClient: QueryClient): void {
 
 export function useJoinClubMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
+  const recommendationsKey = clubRecommendationsKey(userId);
+
   return useMutation<void, Error, string, MembershipSnapshot>({
     mutationFn: (clubId: string) => joinClub(userId!, clubId),
     onMutate: async (clubId) => {
       await queryClient.cancelQueries({ queryKey: ['clubProfile'] });
       await queryClient.cancelQueries({ queryKey: ['homeEventsFeed'] });
+      await queryClient.cancelQueries({ queryKey: recommendationsKey });
       const snapshot = snapshotMembershipQueries(queryClient);
       applyOptimisticMembership(queryClient, clubId, true);
+
+      // Joining ANY club in the active match batch completes the WHOLE batch —
+      // the entire matches section disappears at once, never just the one card.
+      // A DB trigger does this server-side so it holds no matter where the join
+      // happened (matched card, Club Profile, Discovery, another device); this
+      // is only the optimistic mirror of that.
+      const batch = queryClient.getQueryData<ClubRecommendationBatch | null>(
+        recommendationsKey,
+      );
+      if (batch?.clubs.some((c) => c.id === clubId)) {
+        queryClient.setQueryData(recommendationsKey, null);
+      }
+
       return snapshot;
     },
     onError: (_err, _clubId, snapshot) => {
       if (snapshot) restoreMembershipSnapshot(queryClient, snapshot);
+      void queryClient.invalidateQueries({ queryKey: recommendationsKey });
     },
-    onSuccess: () => invalidateMembershipQueries(queryClient),
+    onSuccess: () => {
+      invalidateMembershipQueries(queryClient);
+      void queryClient.invalidateQueries({ queryKey: recommendationsKey });
+    },
   });
 }
 

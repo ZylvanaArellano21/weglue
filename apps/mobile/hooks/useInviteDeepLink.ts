@@ -27,9 +27,10 @@ async function handleUrl(url: string, isOnboarded: boolean, hasSession: boolean)
 
 export function useInviteDeepLink() {
   const session = useAuthStore((s) => s.session);
-  const profile = useAuthStore((s) => s.profile);
-  const isOnboarded = profile?.onboarding_completed === true && !!profile?.avatar_url;
+  // A verified email is the only thing that makes an account usable now — a
+  // missing profile picture no longer means "still onboarding".
   const hasSession = !!session?.user?.email_confirmed_at;
+  const isOnboarded = hasSession;
 
   useEffect(() => {
     Linking.getInitialURL().then((url) => {

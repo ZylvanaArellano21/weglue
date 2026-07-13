@@ -9,6 +9,8 @@ import {
   mergeEventFeedPages,
 } from '../../hooks/useHomeEventsFeed';
 import { useJoinClubMutation } from '../../hooks/useClubMembership';
+import { useClubRecommendations } from '../../hooks/useClubRecommendations';
+import { ClubMatchesSection } from './ClubMatchesSection';
 import { EventCard } from './EventCard';
 import { EventCardToday } from './EventCardToday';
 import { EventCardSkeleton } from '../shared/SkeletonLoader';
@@ -33,6 +35,9 @@ export function EventsFeed() {
     isFetchingNextPage,
     refetch,
   } = useHomeEventsFeed(userId);
+
+  // null once the batch is dismissed, completed by a join, or never created.
+  const { data: batch } = useClubRecommendations(userId);
 
   // Pull-to-refresh state kept separate from background refetches (RSVPs,
   // invalidations) so the spinner only shows for a real pull.
@@ -227,55 +232,47 @@ export function EventsFeed() {
     [handleRsvp, handleToggleSave, handleJoinClub, handleRequestLeaveClub],
   );
 
+  // The temporary club-match section. It is the FIRST thing inside the Events
+  // tab — directly below the Posts/Events selector and above the existing
+  // "Your Clubs" / "Recommended for you" event sections, whose order and
+  // behaviour are untouched. It must also render when the user has no events
+  // at all, so it cannot live behind the feed's empty/loading/error returns.
+  const matchesHeader = batch ? (
+    <ClubMatchesSection
+      batch={batch}
+      userId={userId}
+      onJoined={() => show('Joined club! 🎉')}
+      onJoinError={() => show('Failed to join club.', 'error')}
+    />
+  ) : null;
+
   if (isLoading) {
     return (
-      <View style={{ paddingTop: 8 }}>
-        {[1, 2, 3].map((k) => (
-          <EventCardSkeleton key={k} />
-        ))}
+      <View style={{ flex: 1 }}>
+        {matchesHeader}
+        <View style={{ paddingTop: 8 }}>
+          {[1, 2, 3].map((k) => (
+            <EventCardSkeleton key={k} />
+          ))}
+        </View>
       </View>
     );
   }
 
   if (isError) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <Text style={{ color: '#6B7280', textAlign: 'center', fontSize: 15 }}>
-          Something went wrong loading events.
-        </Text>
+      <View style={{ flex: 1 }}>
+        {matchesHeader}
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+          <Text style={{ color: '#6B7280', textAlign: 'center', fontSize: 15 }}>
+            Something went wrong loading events.
+          </Text>
+        </View>
       </View>
     );
   }
 
-  if (!sections || sections.every((s) => s.data.length === 0)) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-        <Text style={{ fontSize: 40, marginBottom: 16 }}>🌟</Text>
-        <Text
-          style={{
-            fontSize: 16,
-            fontWeight: '600',
-            color: '#374151',
-            textAlign: 'center',
-            fontFamily: 'Zain_700Bold',
-            marginBottom: 8,
-          }}
-        >
-          No events yet.
-        </Text>
-        <Text
-          style={{
-            fontSize: 14,
-            color: '#9CA3AF',
-            textAlign: 'center',
-            fontFamily: 'Inter_400Regular',
-          }}
-        >
-          Explore clubs to get started!
-        </Text>
-      </View>
-    );
-  }
+  const isEmpty = flatItems.length === 0;
 
   return (
     <View style={{ flex: 1 }}>
@@ -286,7 +283,15 @@ export function EventsFeed() {
         keyExtractor={(item) => item.id}
         onScrollToIndexFailed={handleScrollToIndexFailed}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
+        ListHeaderComponent={matchesHeader}
+        ListEmptyComponent={<EmptyEvents centered={!matchesHeader} />}
+        contentContainerStyle={{
+          paddingTop: 8,
+          paddingBottom: 24,
+          // Only stretch to centre the empty state when it is the ONLY thing on
+          // screen; with the match section present it sits below it instead.
+          ...(isEmpty && !matchesHeader ? { flexGrow: 1 } : null),
+        }}
         showsVerticalScrollIndicator={false}
         onEndReached={() => {
           if (hasNextPage && !isFetchingNextPage) fetchNextPage();
@@ -305,6 +310,42 @@ export function EventsFeed() {
           />
         }
       />
+    </View>
+  );
+}
+
+function EmptyEvents({ centered }: { centered: boolean }) {
+  return (
+    <View
+      style={
+        centered
+          ? { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }
+          : { alignItems: 'center', paddingHorizontal: 40, paddingVertical: 48 }
+      }
+    >
+      <Text style={{ fontSize: 40, marginBottom: 16 }}>🌟</Text>
+      <Text
+        style={{
+          fontSize: 16,
+          fontWeight: '600',
+          color: '#374151',
+          textAlign: 'center',
+          fontFamily: 'Zain_700Bold',
+          marginBottom: 8,
+        }}
+      >
+        No events yet.
+      </Text>
+      <Text
+        style={{
+          fontSize: 14,
+          color: '#9CA3AF',
+          textAlign: 'center',
+          fontFamily: 'Inter_400Regular',
+        }}
+      >
+        Explore clubs to get started!
+      </Text>
     </View>
   );
 }

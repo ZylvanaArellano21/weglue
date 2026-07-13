@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
 import { useOwnProfile, useUpdateActivities } from '../../hooks/useOwnProfile';
+import { useRegenerateClubRecommendations } from '../../hooks/useClubRecommendations';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { SelectionChipGrid } from '../../components/profile/SelectionChipGrid';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
@@ -46,6 +47,8 @@ export default function EditActivitiesScreen() {
   }, [profile?.activities]);
 
   const updateActivities = useUpdateActivities(userId);
+  const regenerate = useRegenerateClubRecommendations(userId);
+  const saving = updateActivities.isPending || regenerate.isPending;
 
   const onToggle = (activity: string) => {
     dirtyRef.current = true;
@@ -56,6 +59,24 @@ export default function EditActivitiesScreen() {
 
   const onSave = async () => {
     await updateActivities.mutateAsync(selected);
+
+    // Saving the survey supersedes any previous batch — dismissed, completed,
+    // or still active — so the matches section comes back with fresh clubs.
+    // The celebratory screen shows the count from the batch we just created, so
+    // it can never disagree with what Home → Events renders.
+    try {
+      const batch = await regenerate.mutateAsync();
+      if (batch && batch.count > 0) {
+        router.replace({
+          pathname: '/profile/match-results',
+          params: { count: String(batch.count) },
+        } as never);
+        return;
+      }
+    } catch {
+      // Recommendations are a bonus — never block saving the survey on them.
+    }
+
     router.back();
   };
 
@@ -79,13 +100,15 @@ export default function EditActivitiesScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
+        {/* Disabled while the batch regenerates too, so repeated Save taps
+            cannot race each other into duplicate batches. */}
         <TouchableOpacity
-          style={[styles.saveBtn, updateActivities.isPending && styles.saveBtnDisabled]}
+          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
           onPress={onSave}
-          disabled={updateActivities.isPending}
+          disabled={saving}
           activeOpacity={0.85}
         >
-          {updateActivities.isPending ? (
+          {saving ? (
             <ActivityIndicator color={profileColors.bg} />
           ) : (
             <Text style={styles.saveBtnText}>Save</Text>

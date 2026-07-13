@@ -34,20 +34,19 @@ export default function ActivitiesScreen() {
   async function handleFindMatches() {
     setLoading(true);
     try {
-      let count = 0;
-      if (selectedInterests.length > 0) {
-        const { data } = await supabase
-          .from("club_interests")
-          .select("club_id")
-          .in("interest", selectedInterests);
-
-        if (data && data.length > 0) {
-          const uniqueClubIds = new Set(data.map((r) => r.club_id));
-          count = uniqueClubIds.size;
-        }
-      }
-      setMatchCount(count);
+      // The count comes from the SAME server-side ranking that will persist the
+      // user's recommendation batch at signup, so the number shown here is the
+      // number of clubs they actually get. It can never be 0 or 1 while the
+      // campus has at least two eligible clubs — the server tops the batch up
+      // with the best-ranked active clubs.
+      const { data, error } = await supabase.rpc("preview_club_match_count", {
+        p_interests: selectedInterests,
+      });
+      if (error) throw error;
+      setMatchCount(typeof data === "number" ? data : 0);
     } catch {
+      // Never strand the user on a network blip — the real batch is built
+      // server-side at signup regardless of what we managed to preview here.
       setMatchCount(0);
     } finally {
       setLoading(false);

@@ -18,9 +18,11 @@ import { chatColors, chatFonts, chatShadow } from '../../components/chat/chatThe
 export default function InviteScreen() {
   const { token } = useLocalSearchParams<{ token: string }>();
   const router = useRouter();
-  const { session, profile, isLoading } = useAuthStore();
-  const isOnboarded = profile?.onboarding_completed === true && !!profile?.avatar_url;
+  const { session, isLoading } = useAuthStore();
+  // A verified email is the only requirement — a missing profile picture no
+  // longer means "still onboarding", so invites resolve straight away.
   const signedIn = !!session?.user?.email_confirmed_at;
+  const isOnboarded = signedIn;
 
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [state, setState] = useState<'loading' | 'joining' | 'ready' | 'error'>('loading');

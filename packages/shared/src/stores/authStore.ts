@@ -9,7 +9,20 @@ export interface Profile {
   major: string | null;
   bio: string | null;
   is_seed: boolean;
+  /**
+   * Legacy flag from the old mandatory onboarding. Nothing gates on it any
+   * more — migration 042 set it true for every account — but the column is
+   * still selected, so it stays on the type.
+   */
   onboarding_completed?: boolean;
+  /** Canonical campus (single-campus launch mode assigns this server-side). */
+  university_id?: string | null;
+  /**
+   * "pending" only for genuinely new accounts that have not yet tapped or
+   * dismissed the Home "Personalize your picture!" prompt. Persisted
+   * server-side so it survives logout, reinstall, and a second device.
+   */
+  picture_prompt_status?: "pending" | "hidden";
   created_at: string;
   updated_at: string;
 }

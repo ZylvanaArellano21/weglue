@@ -27,6 +27,8 @@ export default function OnboardingSignupScreen() {
   const router = useRouter();
   const {
     matchCount,
+    selectedInterests,
+    selectedActivities,
     setPendingUsername,
     setPendingEmail,
     setPendingPassword,
@@ -134,6 +136,12 @@ export default function OnboardingSignupScreen() {
         // "replaced" or "not_found" → proceed with a fresh signup below.
       }
 
+      // The survey answers travel in the user's OWN signup metadata. Email
+      // confirmation is ON, so there is no session yet — the auth trigger
+      // (migration 042) is what persists the interests, the activities and the
+      // ranked recommendation batch, server-side, at the moment the account is
+      // created. That is what makes the match count survive verifying on a
+      // different device, reinstalling, or closing the app before verifying.
       const { data, error } = await supabase.auth.signUp({
         email: normalizedEmail,
         password,
@@ -141,6 +149,8 @@ export default function OnboardingSignupScreen() {
           data: {
             username: cleanUsername,
             full_name: cleanUsername,
+            interests: selectedInterests,
+            activities: selectedActivities,
           },
           emailRedirectTo: CONFIRM_EMAIL_REDIRECT,
         },
@@ -170,16 +180,12 @@ export default function OnboardingSignupScreen() {
       setPendingPassword(password);
       await setPendingSignupEmail(normalizedEmail);
 
-      if (data.session) {
-        // Email confirmation is OFF — user is logged in immediately
-        router.push("/onboarding/profile-pic");
-      } else {
-        // Email confirmation is ON — send to a waiting screen
-        router.push({
-          pathname: "/auth/verify-email",
-          params: { email: normalizedEmail, from: "signup" },
-        });
-      }
+      // Confirm Email is the only next step, whether or not a session came
+      // back. There is no profile-picture step and no club catalog any more.
+      router.push({
+        pathname: "/auth/verify-email",
+        params: { email: normalizedEmail, from: "signup" },
+      });
     } finally {
       setLoading(false);
     }

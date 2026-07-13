@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useOfficerStore, refreshOfficerStatus } from '../../store/officerStore';
 import { useHomeTabStore } from '../../store/homeTabStore';
+import { useDismissPicturePrompt } from '../../hooks/usePicturePrompt';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
 import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
@@ -24,6 +25,7 @@ export default function HomeScreen() {
   const { session, profile } = useAuthStore();
   const { isOfficer } = useOfficerStore();
   const { activeTab, setActiveTab } = useHomeTabStore();
+  const dismissPicturePrompt = useDismissPicturePrompt();
   const router = useRouter();
 
   const [dropdownVisible, setDropdownVisible] = useState(false);
@@ -78,6 +80,24 @@ export default function HomeScreen() {
     router.push('/sidebar');
   };
 
+  // Shown only for genuinely new accounts that still have no custom picture.
+  // The status is stored server-side (profiles.picture_prompt_status), so the
+  // prompt survives logout/login and reinstalls until it is acted on, and
+  // existing accounts — backfilled to 'hidden' — never see it at all.
+  const showPicturePrompt =
+    profile?.picture_prompt_status === 'pending' && !profile?.avatar_url;
+
+  const handlePicturePromptPress = () => {
+    // Tapping counts as interaction: hide it permanently, then open the side
+    // menu (deliberately NOT the photo picker).
+    void dismissPicturePrompt();
+    router.push('/sidebar');
+  };
+
+  const handleDismissPicturePrompt = () => {
+    void dismissPicturePrompt();
+  };
+
   const handleNotificationsPress = () => {
     router.push('/home/notifications');
   };
@@ -86,7 +106,7 @@ export default function HomeScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }}>
       {/* Header */}
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             {/* Avatar */}
             <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8}>
               <HeaderAvatar
@@ -94,6 +114,49 @@ export default function HomeScreen() {
                 initial={firstName.slice(0, 1).toUpperCase() || '?'}
               />
             </TouchableOpacity>
+
+            {/* "Personalize your Picture!" — new accounts only, and only until
+                they act on it. Tapping it opens the side menu (NOT the photo
+                picker) and counts as interaction, so it never comes back. */}
+            {showPicturePrompt && (
+              <TouchableOpacity
+                onPress={handlePicturePromptPress}
+                activeOpacity={0.85}
+                style={{
+                  marginLeft: 10,
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  backgroundColor: '#fff',
+                  borderRadius: 20,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 6,
+                  elevation: 3,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: '700',
+                    color: '#0FA6A6',
+                    fontFamily: 'Inter_700Bold',
+                  }}
+                >
+                  Personalize{'\n'}your Picture!
+                </Text>
+                <TouchableOpacity
+                  onPress={handleDismissPicturePrompt}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityLabel="Dismiss profile picture prompt"
+                >
+                  <Ionicons name="close" size={14} color="#9CA3AF" />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            )}
 
             <View style={{ flex: 1 }} />
 

@@ -44,11 +44,8 @@ export default function TabsLayout() {
     );
   }
 
-  if (!profile?.avatar_url) return <Redirect href="/onboarding/profile-pic" />;
-
-  if (profile.onboarding_completed === false) {
-    return <Redirect href="/onboarding/matches" />;
-  }
+  // Email confirmation is the ONLY gate into the tabs. A missing profile
+  // picture or an unfinished old onboarding flag must never block Home.
 
   return (
     <Tabs
