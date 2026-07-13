@@ -100,6 +100,12 @@ export function useSendPipeline(opts: {
   // Tags currently inside sendOne — a second retry tap while a send is
   // in flight must be a no-op (duplicate prevention at the UI layer too).
   const inFlight = useRef<Set<string>>(new Set());
+  // The single in-flight conversation-creation promise for a draft thread.
+  // Two rapid sends both see materializedId === null; without this they would
+  // each create a conversation, producing two groups (or two DMs) and two
+  // "first" messages. Whoever starts first owns the creation; everyone else
+  // awaits the SAME promise and then sends into the conversation it returns.
+  const creating = useRef<Promise<string> | null>(null);
 
   const patch = useCallback((tag: string, updates: Partial<PendingMessage>) => {
     setPending((prev) => prev.map((p) => (p.clientTag === tag ? { ...p, ...updates } : p)));
@@ -117,32 +123,80 @@ export function useSendPipeline(opts: {
     [queryClient],
   );
 
+  /**
+   * Returns the conversation to send into, creating it on first send.
+   * `createdWithMessage` means the server already stored THIS message as part
+   * of the creation transaction — the caller must not send it again.
+   *
+   * Exactly one creation can be in flight at a time (see `creating`), so rapid
+   * double-taps can never produce a duplicate conversation or a duplicate first
+   * message.
+   */
+  const resolveConversation = useCallback(
+    async (msg: PendingMessage): Promise<{ id: string; createdWithMessage: boolean }> => {
+      if (materializedId.current) {
+        return { id: materializedId.current, createdWithMessage: false };
+      }
+
+      // Someone else is already creating this conversation — join them.
+      if (creating.current) {
+        const id = await creating.current;
+        materializedId.current = id;
+        return { id, createdWithMessage: false };
+      }
+
+      // Atomic draft-group path: conversation + first TEXT message in one
+      // server transaction (no partial groups). A retry reuses the same
+      // clientTag, and create_group_chat returns the existing conversation for
+      // a tag it has already stored — so retrying never makes a second group.
+      if (opts.createWithFirstMessage && msg.messageType === 'text' && msg.content) {
+        const p = opts.createWithFirstMessage(msg.content, msg.clientTag);
+        creating.current = p;
+        try {
+          const id = await p;
+          materializedId.current = id;
+          return { id, createdWithMessage: true };
+        } finally {
+          creating.current = null;
+        }
+      }
+
+      // Draft DM (and non-text first sends in a draft group): materialize the
+      // conversation, then send normally. get_or_create_direct_chat reuses an
+      // existing DM, so a second one-to-one conversation can never be created.
+      if (opts.ensureConversation) {
+        const p = opts.ensureConversation();
+        creating.current = p;
+        try {
+          const id = await p;
+          materializedId.current = id;
+          return { id, createdWithMessage: false };
+        } finally {
+          creating.current = null;
+        }
+      }
+
+      if (msg.conversationId) {
+        return { id: msg.conversationId, createdWithMessage: false };
+      }
+      throw new Error('Conversation not ready');
+    },
+    [opts],
+  );
+
   const sendOne = useCallback(
     async (msg: PendingMessage) => {
       if (inFlight.current.has(msg.clientTag)) return;
       inFlight.current.add(msg.clientTag);
       try {
-        // Atomic draft-group path: conversation + first text message in one
-        // server transaction. Retries reuse the clientTag (RPC dedupes).
-        if (
-          !materializedId.current &&
-          opts.createWithFirstMessage &&
-          msg.messageType === 'text' &&
-          msg.content
-        ) {
-          const createdId = await opts.createWithFirstMessage(msg.content, msg.clientTag);
-          materializedId.current = createdId;
+        const { id: convId, createdWithMessage } = await resolveConversation(msg);
+
+        if (createdWithMessage) {
           removePending(msg.clientTag);
-          finish(createdId);
-          opts.onFirstSend?.(createdId);
+          finish(convId);
+          opts.onFirstSend?.(convId);
           return;
         }
-
-        const convId =
-          materializedId.current ??
-          (opts.ensureConversation ? await opts.ensureConversation() : msg.conversationId);
-        if (!convId) throw new Error('Conversation not ready');
-        materializedId.current = convId;
 
         let attachmentPath: string | null = null;
         let size = msg.attachmentSize ?? null;
@@ -190,7 +244,7 @@ export function useSendPipeline(opts: {
         inFlight.current.delete(msg.clientTag);
       }
     },
-    [opts, patch, removePending, finish],
+    [opts, patch, removePending, finish, resolveConversation],
   );
 
   /** Immediate-return text send: the message appears locally before any I/O. */

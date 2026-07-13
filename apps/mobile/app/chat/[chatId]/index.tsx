@@ -60,22 +60,44 @@ export default function ChatRoom() {
   const userId = user?.id ?? '';
   const queryClient = useQueryClient();
 
-  const isDraftDm = chatId === 'new';
-  const isDraftGroup = chatId === 'new-group';
+  // Which draft the ROUTE is. These never change while mounted, so the header,
+  // avatar and conversation type stay rock-stable across the first send.
+  const isDraftDmRoute = chatId === 'new';
+  const isDraftGroupRoute = chatId === 'new-group';
+  const isDraftRoute = isDraftDmRoute || isDraftGroupRoute;
+
+  // The id the first send materializes. Setting this HYDRATES THIS SAME SCREEN
+  // — we deliberately do not navigate.
+  //
+  // The old code called router.replace('/chat/<newId>') here. replace does not
+  // add a back-stack entry, which is why it looked safe, but [chatId] is a
+  // dynamic segment: replacing "new" with a uuid is a different route, so the
+  // draft screen UNMOUNTS and a brand-new chat screen MOUNTS, with a stack
+  // transition. That remount is the slide/flash, the second header, and the
+  // strip of the previous chat visible on the left (correction IMG_0073).
+  // Holding the id in state instead keeps one screen mounted for the whole
+  // first-message experience: same header, same input, same keyboard.
+  const [resolvedChatId, setResolvedChatId] = useState<string | null>(null);
+
+  const isDraftDm = isDraftDmRoute && !resolvedChatId;
+  const isDraftGroup = isDraftGroupRoute && !resolvedChatId;
   const isDraft = isDraftDm || isDraftGroup;
-  const realChatId = isDraft ? undefined : chatId;
+  const realChatId = resolvedChatId ?? (isDraftRoute ? undefined : chatId);
 
   const { data: chatDetails, isLoading: detailsLoading } = useChatDetails(realChatId);
   const { data: isMember, refetch: refetchMembership } = useConversationMembership(realChatId, userId);
 
-  const effectiveType = isDraftDm
+  // Derived from the ROUTE, not the draft flags, so they survive resolution
+  // unchanged — a draft DM stays a DM the instant it becomes a real one, with
+  // no re-render into a "loading conversation" state.
+  const effectiveType = isDraftDmRoute
     ? 'direct'
-    : isDraftGroup
+    : isDraftGroupRoute
       ? 'group'
       : (chatDetails?.type ?? (ptype || undefined));
   const effectiveClubId = chatDetails?.club_id ?? (pclub || undefined);
-  const effectiveAvatarUrl = isDraftDm
-    ? (params.draftAvatar || null)
+  const effectiveAvatarUrl = isDraftDmRoute
+    ? (params.draftAvatar || chatDetails?.avatar_url || null)
     : (chatDetails?.avatar_url ?? (pavatar || null));
 
   const isDirect = effectiveType === 'direct';
@@ -175,33 +197,26 @@ export default function ChatRoom() {
     [params.draftGroupName, draftParticipantIds],
   );
 
-  const onFirstSend = useCallback(
-    (conversationId: string) => {
-      // Swap the draft route for the real conversation in place (replace, never
-      // push — no second entry in the back stack). Carry the already-known
-      // identity as params so the real screen paints its header instantly with
-      // no blank flash or second header (Bug 10). The thread itself never
-      // reloads: the send pipeline's materializedRef already points the open
-      // ConversationThread at the real id before this fires.
-      router.replace({
-        pathname: `/chat/${conversationId}`,
-        params: isDraftGroup
-          ? { ptype: 'group', pname: params.draftGroupName || params.draftNames || '' }
-          : {
-              ptype: 'direct',
-              pname: params.draftName || '',
-              pavatar: params.draftAvatar || '',
-            },
-      } as any);
-    },
-    [router, isDraftGroup, params.draftGroupName, params.draftNames, params.draftName, params.draftAvatar],
-  );
+  const onFirstSend = useCallback((conversationId: string) => {
+    // NO NAVIGATION. Hydrate the mounted screen with the real conversation id.
+    // Everything downstream (useChatDetails, useThread, realtime) is keyed off
+    // realChatId, so they simply start resolving against the real conversation
+    // while the header, message list and text input stay exactly where they
+    // are. See the note on resolvedChatId above for why router.replace was
+    // wrong here.
+    setResolvedChatId((prev) => prev ?? conversationId);
+  }, []);
 
   // ── Identity ──
-  const displayName = isDraftDm
-    ? (params.draftName || 'New message')
-    : isDraftGroup
-      ? (params.draftGroupName || params.draftNames || 'New group')
+  // Route-based, so the title never flickers when the draft resolves. For an
+  // unnamed group the server-derived title (autoGroupTitle: "Camila, Jordan" /
+  // "Camila, Jordan and 3 others", never including you) becomes canonical as
+  // soon as chatDetails lands; until then we show the same names we already
+  // know locally, so the two agree.
+  const displayName = isDraftDmRoute
+    ? (params.draftName || chatDetails?.name || 'New message')
+    : isDraftGroupRoute
+      ? (params.draftGroupName || chatDetails?.name || params.draftNames || 'New group')
       : (chatDetails?.name ?? (pname || (detailsLoading ? '' : 'Conversation')));
 
   const otherUser = isDirect && !isDraft
@@ -388,7 +403,7 @@ export default function ChatRoom() {
       </View>
 
       <ConversationThread
-        conversationId={materializedRef.current ?? realChatId}
+        conversationId={realChatId ?? materializedRef.current ?? undefined}
         channelId={null}
         currentUserId={userId}
         canModerate={isCustomGroup && chatDetails?.created_by === userId}

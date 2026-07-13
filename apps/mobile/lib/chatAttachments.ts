@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from './supabase';
 import { compressImageForUpload } from './imageUpload';
 
@@ -58,6 +59,29 @@ export async function uploadChatAttachment(opts: {
 }): Promise<UploadResult> {
   const { conversationId, kind, onProgress } = opts;
   let { localUri, mime } = opts;
+
+  // Preflight: the picked file lives in the OS cache, which the system can
+  // evict — so by the time a user taps Retry on a failed send, the source may
+  // be gone. Uploading it then produces a 0-byte object and an attachment
+  // nobody can open. Fail here instead, with an error that tells the user the
+  // one thing that actually helps: pick the file again.
+  if (localUri.startsWith('file://')) {
+    let info: { exists: boolean; size?: number };
+    try {
+      info = (await FileSystem.getInfoAsync(localUri)) as { exists: boolean; size?: number };
+    } catch {
+      throw new Error('This file is no longer available. Choose it again to send it.');
+    }
+    if (!info.exists) {
+      throw new Error('This file is no longer available. Choose it again to send it.');
+    }
+    if (info.size === 0) {
+      throw new Error("This file is empty or couldn't be read. Choose it again to send it.");
+    }
+    if (info.size != null && info.size > MAX_FILE_BYTES) {
+      throw new Error('This file is larger than 25 MB. Choose a smaller file and try again.');
+    }
+  }
 
   // Images: recompress large captures; keeps aspect ratio, JPEG output.
   if (kind === 'image') {

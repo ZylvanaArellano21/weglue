@@ -1,4 +1,14 @@
-import { View, Text, TouchableOpacity, Modal, Pressable, StyleSheet, Alert } from 'react-native';
+import { useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Alert,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -19,8 +29,62 @@ interface Props {
  * Shared by all four conversation types.
  */
 export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) {
+  // ─── Why pickers are deferred until the sheet is really gone ───────────────
+  //
+  // This sheet is a react-native <Modal>, which on iOS is a real
+  // UIViewController presented over the app. expo-document-picker presents its
+  // UIDocumentPickerViewController from `currentViewController()` — i.e. the
+  // TOPMOST one, which is this sheet.
+  //
+  // The old code called onClose() and then immediately awaited
+  // getDocumentAsync(). onClose() only *starts* the modal's animated dismissal,
+  // so the picker was asked to present from a view controller that was already
+  // being dismissed. UIKit silently refuses: the picker never appears and its
+  // promise never settles. Worse, the native module had already stored its
+  // `pickingContext`, and it only clears that in the delegate callbacks — which
+  // now never fire. So `pickingContext` stays non-nil forever and EVERY later
+  // tap on Files throws PickingInProgressException. That is the "Files does
+  // nothing, then the app breaks" report.
+  //
+  // Fix: never present a picker in the same tick as the dismissal. Park the
+  // action and run it only once the modal is genuinely gone — on iOS that is
+  // Modal's onDismiss (fired after the dismissal animation completes). Android
+  // pickers are Intent-based and have no presenting-VC to race, so they run as
+  // soon as the sheet closes.
+  //
+  // All three rows go through this path, not just Files: Camera and Photo
+  // Library present view controllers the same way and were racing the same
+  // dismissal.
+  const pendingAction = useRef<(() => Promise<void>) | null>(null);
+  const busy = useRef(false);
+
+  const flushPending = useCallback(() => {
+    const action = pendingAction.current;
+    pendingAction.current = null;
+    if (!action) return;
+    void action().finally(() => {
+      busy.current = false;
+    });
+  }, []);
+
+  /** Closes the sheet, then runs `action` once it is fully dismissed. */
+  const runAfterDismiss = useCallback(
+    (action: () => Promise<void>) => {
+      // Re-entrancy guard: a double tap must not queue two pickers.
+      if (busy.current) return;
+      busy.current = true;
+      pendingAction.current = action;
+      onClose();
+      if (Platform.OS !== 'ios') {
+        // Android: no presenting view controller to race.
+        flushPending();
+      }
+      // iOS: flushed by <Modal onDismiss>.
+    },
+    [onClose, flushPending],
+  );
+
   async function pickCamera() {
-    onClose();
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
       Alert.alert(
@@ -42,7 +106,6 @@ export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) 
   }
 
   async function pickLibrary() {
-    onClose();
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert(
@@ -69,29 +132,43 @@ export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) 
   }
 
   async function pickFile() {
-    onClose();
     let result: DocumentPicker.DocumentPickerResult;
     try {
       // '*/*' lets iOS browse Files / iCloud Drive / On My iPhone / providers
-      // and Android its document provider. copyToCacheDirectory gives us a
-      // stable file:// uri to upload from.
+      // and Android its document provider (Drive, Downloads, local storage).
+      // copyToCacheDirectory copies the selection into our own cache and hands
+      // back a stable file:// uri — without it Android returns a content:// uri
+      // backed by a provider we may lose permission to read, and iOS returns a
+      // security-scoped url that goes stale.
       result = await DocumentPicker.getDocumentAsync({
         multiple: false,
         copyToCacheDirectory: true,
         type: '*/*',
       });
     } catch {
-      // Genuine failure to present the picker (never fires on a normal cancel).
+      // A genuine failure to present the picker. Never fires on a normal
+      // cancel — cancellation resolves with { canceled: true }.
       onError('Could not open the file picker. Please try again.');
       return;
     }
-    // Cancelling quietly closes — not an error.
+
+    // Cancelling quietly closes — that is not an error.
     if (result.canceled || !result.assets?.[0]) return;
+
     const a = result.assets[0];
+
     if (a.size != null && a.size > MAX_FILE_BYTES) {
       onError('This file is larger than 25 MB. Choose a smaller file and try again.');
       return;
     }
+    // A 0-byte result means the provider (Drive, a cloud file, a removed SD
+    // card) could not actually give us the contents. Uploading it would create
+    // an empty, unopenable attachment.
+    if (a.size === 0) {
+      onError("This file is empty or couldn't be read. Try choosing it again.");
+      return;
+    }
+
     onPicked({
       localUri: a.uri,
       kind: 'file',
@@ -102,26 +179,47 @@ export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) 
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      // iOS only: fires once the sheet's view controller is fully dismissed, so
+      // the picker presents from a stable top view controller instead of one
+      // that is mid-dismissal.
+      onDismiss={flushPending}
+    >
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.handle} />
 
-          <TouchableOpacity style={styles.row} onPress={pickCamera} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => runAfterDismiss(pickCamera)}
+            activeOpacity={0.7}
+          >
             <View style={styles.iconWrap}>
               <Ionicons name="camera-outline" size={22} color={chatColors.teal} />
             </View>
             <Text style={styles.rowLabel}>Camera</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.row} onPress={pickLibrary} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => runAfterDismiss(pickLibrary)}
+            activeOpacity={0.7}
+          >
             <View style={styles.iconWrap}>
               <Ionicons name="images-outline" size={22} color={chatColors.teal} />
             </View>
             <Text style={styles.rowLabel}>Photo Library</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.row} onPress={pickFile} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => runAfterDismiss(pickFile)}
+            activeOpacity={0.7}
+          >
             <View style={styles.iconWrap}>
               <Ionicons name="document-outline" size={22} color={chatColors.teal} />
             </View>

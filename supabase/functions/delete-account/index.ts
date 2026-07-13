@@ -1,25 +1,39 @@
-// Deletes the calling user's account end-to-end:
-//   1. Verifies the caller's JWT (service client → auth.getUser).
-//   2. Collects the user's Storage objects (avatar, post images) BEFORE the
-//      rows that point at them are deleted.
-//   3. Runs delete_own_user_data() AS THE USER so auth.uid() applies —
-//      anonymizes shared-conversation messages, deletes owned rows.
-//   4. Removes those Storage objects with the service-role client.
-//   5. Deletes the auth.users record with the admin API.
+// Deletes the calling user's account end-to-end.
 //
-// The service-role key never leaves this function. The mobile app calls this
-// via supabase.functions.invoke('delete-account') with the user's own access
-// token — the user id comes from the verified JWT, never from the request body,
-// so a user can only ever delete themself.
+//   1. Verify the caller's JWT (service client → auth.getUser). The user id is
+//      taken from the verified token, NEVER from the request body, so a caller
+//      can only ever delete themself.
+//   2. Collect the user's Storage object paths while the rows still exist.
+//   3. delete_own_account_atomic() — ONE transaction: hard-deletes solo-thread
+//      messages, then DELETE FROM auth.users, which cascades through profiles
+//      to every owned table and anonymizes shared messages (SET NULL).
+//   4. Only after that succeeds, remove the Storage objects (service role).
 //
-// IDEMPOTENT: every step is a delete. Retrying after a partial failure
-// re-runs cleanly rather than wedging the account in a half-deleted state.
+// The service-role key never leaves this function; the client never sees one.
 //
-// Storage cleanup used to run on the CLIENT, before this function was even
-// called — so a failure here left the account alive with its images already
-// destroyed (the "ghost account": empty profile, Unknown User in the sidebar,
-// still signed in). It is server-side now, and only runs once the data
-// deletion has actually succeeded.
+// WHY IT LOOKS LIKE THIS
+//
+// The previous version ran delete_own_user_data() and then called
+// admin.auth.admin.deleteUser() as a SEPARATE API call. Those do not share a
+// transaction. When the auth deletion failed, the data deletion had already
+// COMMITTED — profile, interests, activities, memberships and posts gone, while
+// auth.users survived and could still sign in. An authenticated user with no
+// profile is the "Unknown User" ghost account, and returning HTTP 500 does not
+// undo it. Confirmed on the live project by forcing a failure at the auth step:
+// auth.users=1, profiles=0, interests=0, login still worked.
+//
+// Step 3 is now a single transaction, so the outcome is binary: the account is
+// entirely gone, or entirely intact. Partial deletion is structurally
+// impossible, not merely unlikely. Retrying a failed attempt is therefore
+// always safe — it starts from a fully intact account.
+//
+// STORAGE IS DELIBERATELY OUTSIDE THE TRANSACTION
+//
+// Object storage is not transactional. If storage cleanup fails AFTER the
+// account is gone, we log it and STILL report success: the account really is
+// deleted, and reporting failure would trap the user in an account that no
+// longer exists (and would make them retry forever). The cost of that choice is
+// orphaned files, which are a recoverable cleanup task — never a ghost account.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -51,7 +65,9 @@ Deno.serve(async (req) => {
 
   const userId = user.id;
 
-  // ── Phase 1: gather Storage paths while the rows still exist ──────────────
+  // ── 1. Collect Storage paths while the rows still point at them ───────────
+  // Best effort: losing track of an object must not block the deletion. An
+  // orphaned file is recoverable; a half-deleted account is not.
   const avatarPaths: string[] = [];
   const postPaths: string[] = [];
   try {
@@ -77,44 +93,42 @@ Deno.serve(async (req) => {
       if (p) postPaths.push(p);
     }
   } catch (e) {
-    // Non-fatal: losing track of a few objects must not block the deletion of
-    // the account itself. Orphaned objects are recoverable; a ghost account is
-    // not.
-    console.error("[delete-account] storage path collection failed:", e);
+    console.error("[delete-account] storage path collection failed (continuing):", e);
   }
 
-  // ── Phase 2: delete the user's data AS the user (RPC checks auth.uid()) ───
+  // ── 2. Delete the account atomically, as the user (RPC checks auth.uid()) ──
   const asUser = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
-  const { error: rpcError } = await asUser.rpc("delete_own_user_data");
+
+  const { error: rpcError } = await asUser.rpc("delete_own_account_atomic");
   if (rpcError) {
-    console.error("[delete-account] delete_own_user_data failed:", rpcError);
-    // Nothing destructive has happened yet on the client, and the account is
-    // still fully intact and usable. Report the failure honestly.
-    return json({ error: "Could not delete account data" }, 500);
-  }
-
-  // ── Phase 3: remove Storage objects (service role, best effort) ───────────
-  await removeAll(admin, "avatars", avatarPaths);
-  await removeAll(admin, "posts", postPaths);
-
-  // ── Phase 4: remove the auth record ───────────────────────────────────────
-  const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
-  if (deleteError) {
-    console.error("[delete-account] admin.deleteUser failed:", deleteError);
-    // The account is NOT deleted — the auth record still exists and can still
-    // sign in. Previously this returned success:true, so the app signed the
-    // user out believing the account was gone while it was very much alive.
-    // It is an error, and the client must keep the session and surface it.
-    // Retrying is safe: the data deletion above is idempotent.
+    console.error("[delete-account] delete_own_account_atomic failed:", rpcError);
+    // The transaction rolled back: the account and ALL of its data are fully
+    // intact and still usable. Nothing destructive has happened anywhere —
+    // the client keeps the session and surfaces the error. Retry is safe.
     return json(
-      { error: "Could not complete account deletion. Please try again." },
+      { error: "Could not delete your account. Please try again." },
       500,
     );
   }
 
-  return json({ success: true, dataDeleted: true, authDeleted: true }, 200);
+  // ── 3. The account is gone. Storage cleanup can no longer endanger it. ────
+  const orphanedAvatars = await removeAll(admin, "avatars", avatarPaths);
+  const orphanedPosts = await removeAll(admin, "posts", postPaths);
+  const orphaned = orphanedAvatars + orphanedPosts;
+  if (orphaned > 0) {
+    // Loud, greppable, and NOT an error to the caller: the deletion succeeded.
+    console.error(
+      `[delete-account] ORPHANED_STORAGE user=${userId} objects=${orphaned} ` +
+        `— account deleted successfully; these objects need sweeping.`,
+    );
+  }
+
+  return json(
+    { success: true, dataDeleted: true, authDeleted: true, orphanedObjects: orphaned },
+    200,
+  );
 });
 
 /** `.../storage/v1/object/public/<bucket>/<path>` → `<path>` (null if not ours). */
@@ -126,17 +140,23 @@ function storagePathFromPublicUrl(url: string, bucket: string): string | null {
   return path.length > 0 ? decodeURIComponent(path) : null;
 }
 
+/** Removes objects; returns how many could NOT be removed (orphans). */
 async function removeAll(
   admin: ReturnType<typeof createClient>,
   bucket: string,
   paths: string[],
-): Promise<void> {
-  if (paths.length === 0) return;
+): Promise<number> {
+  if (paths.length === 0) return 0;
   try {
     const { error } = await admin.storage.from(bucket).remove(paths);
-    if (error) console.error(`[delete-account] storage remove ${bucket}:`, error);
+    if (error) {
+      console.error(`[delete-account] storage remove ${bucket} failed:`, error);
+      return paths.length;
+    }
+    return 0;
   } catch (e) {
     console.error(`[delete-account] storage remove ${bucket} threw:`, e);
+    return paths.length;
   }
 }
 

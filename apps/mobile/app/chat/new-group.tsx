@@ -62,8 +62,16 @@ export default function NewGroupScreen() {
     if (selected.length === 0) return;
     const ids = selected.map((s) => s.user_id).join(',');
     const names = selected.map((s) => s.name).join(', ');
+    // MUST be /chat/new-group, not /chat/new. The conversation screen decides
+    // draft type purely from this segment: "new" => draft DM, "new-group" =>
+    // draft group. Sending a group to /chat/new made it isDraftDm, so
+    // createWithFirstMessage (the atomic create_group_chat RPC) was never
+    // wired up and ensureConversation found no draftUserId — it threw
+    // "Conversation not ready", which is the "Didn't send." on the first
+    // message, and it threw again on every retry. The group was never created
+    // at all, which is also why the title never persisted.
     router.replace(
-      (`/chat/new?` +
+      (`/chat/new-group?` +
         `draftParticipantIds=${ids}` +
         `&draftNames=${encodeURIComponent(names)}` +
         `&draftGroupName=${encodeURIComponent(groupName.trim())}`) as any,
