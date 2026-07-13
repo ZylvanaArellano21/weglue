@@ -24,9 +24,15 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
 import { buildSidebarItems, type SidebarItemKey } from '../lib/sidebarNavigation';
-import { openSupportEmail, safeSignOut, SUPPORT_EMAIL } from '../lib/support';
+import { openSupportEmail, SUPPORT_EMAIL } from '../lib/support';
+import { supabase } from '../lib/supabase';
+import {
+  rememberTokenForRevocation,
+  tearDownAuthenticatedSession,
+} from '../lib/sessionCleanup';
 import { useOwnProfile } from '../hooks/useOwnProfile';
 import { useToast } from '../components/Toast';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -56,6 +62,7 @@ export default function SidebarScreen() {
 
   const { data: profile } = useOwnProfile(userId);
   const { show, ToastComponent } = useToast();
+  const queryClient = useQueryClient();
 
   const [helpFallbackVisible, setHelpFallbackVisible] = useState(false);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
@@ -74,13 +81,25 @@ export default function SidebarScreen() {
   const handleLogoutConfirm = async () => {
     if (signingOut) return;
     setSigningOut(true);
+
+    // Capture the token before teardown clears the session, so the background
+    // revocation still has something to revoke.
+    const { data } = await supabase.auth.getSession();
+    rememberTokenForRevocation(data.session?.access_token);
+
+    // Close the sidebar first so the user never sits staring at it while
+    // cleanup runs, then tear the session down through the ONE shared path
+    // (identical to account deletion). Clearing the session unmounts the whole
+    // authenticated tree and the root guard lands on /welcome — which also
+    // means there is no authenticated route left behind for iOS swipe-back or
+    // Android Back to return to.
+    setLogoutConfirmVisible(false);
+    close();
+
     try {
-      await safeSignOut();
-      // Session flips to null → the tab guard redirects to welcome and this
-      // whole tree unmounts. No manual navigation needed.
+      await tearDownAuthenticatedSession(queryClient, userId);
     } finally {
       setSigningOut(false);
-      setLogoutConfirmVisible(false);
     }
   };
 

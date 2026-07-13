@@ -1,0 +1,155 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { QueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '@weglue/shared';
+import { supabase } from './supabase';
+import { clearCachedProfile } from './profileCache';
+import { useHomeTabStore } from '../store/homeTabStore';
+import { useLeaveClubStore } from '../store/leaveClubStore';
+import { useOfficerStore } from '../store/officerStore';
+
+// ─── Centralized authenticated-session teardown ──────────────────────────────
+//
+// THE single cleanup path for every way an authenticated session can end:
+// normal logout, successful account deletion, and any forced invalidation.
+// Logout and deletion previously each did their own partial cleanup, which is
+// what left a half-torn-down "ghost" session behind (deleted account still
+// inside the app, sidebar rendering an Unknown User, stale session restored on
+// relaunch). There is now exactly one implementation, and both call it.
+//
+// ORDER IS LOAD-BEARING — do not reorder without reading this:
+//
+//   1. Session first. Clearing the Supabase session flips useAuthStore.session
+//      to null, which makes the root guard redirect to /welcome and UNMOUNT the
+//      whole authenticated tree. Doing this first is what prevents the
+//      "Unknown User" flash: no authenticated screen is ever alive while its
+//      data is missing. (Wiping caches first — the old deletion path — renders
+//      the still-mounted sidebar/profile with no data, which is the ghost.)
+//   2. Everything after runs against an unmounted tree, so it cannot flicker.
+//
+// The whole thing is bounded and local-only: no step waits on the network, so
+// logout stays instant even on a dead connection.
+
+const QUERY_CACHE_KEY = 'weglue-query-cache-v1';
+
+/** Keys holding per-account state that must never survive into the next session. */
+const AUTHED_STORAGE_KEYS = [
+  QUERY_CACHE_KEY,
+  '@weglue/pending_confirmation_email',
+  '@weglue/resend_cooldown_until',
+];
+
+/**
+ * Tears down every trace of the authenticated session on this device.
+ *
+ * Safe to call twice (logout double-tap, deletion retry): every step is
+ * idempotent and failures are swallowed — a cleanup error must never strand
+ * the user inside an account they asked to leave.
+ *
+ * @param userId  Owner of the per-user caches. Omit only if genuinely unknown.
+ */
+export async function tearDownAuthenticatedSession(
+  queryClient: QueryClient,
+  userId?: string,
+): Promise<void> {
+  // 1. Stop realtime first so no subscription callback can rehydrate a cache
+  //    we are about to wipe (a live message arriving mid-logout would
+  //    otherwise repopulate the query cache after clear()).
+  try {
+    await supabase.removeAllChannels();
+  } catch {
+    // Channels are local objects; failing to remove them cannot block logout.
+  }
+
+  // 2. Clear the local Supabase session. Local-only (no network round trip), so
+  //    this cannot hang on a bad connection — it is the step that flips the
+  //    auth guard and unmounts the authenticated tree.
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch {
+    // Even if GoTrue's local clear throws, the store reset below still logs out.
+  }
+
+  // 3. Reset the auth store explicitly. onAuthStateChange normally does this,
+  //    but it is an async listener — resetting here makes the logout
+  //    synchronous from the UI's point of view and closes the race where
+  //    navigation ran before the guard had observed the sign-out.
+  try {
+    const auth = useAuthStore.getState();
+    auth.setSession(null);
+    auth.setProfile(null);
+    auth.setOnboarded(false);
+  } catch {
+    // Store shape changed — non-fatal.
+  }
+
+  // 4. In-memory query cache: drop everything (all of it is account-scoped).
+  try {
+    queryClient.clear();
+  } catch {
+    /* non-fatal */
+  }
+
+  // 5. Persisted caches + per-account AsyncStorage keys (drafts, optimistic
+  //    sends, prompt state). Without this the *next* account on this device
+  //    rehydrates the previous user's data from disk.
+  try {
+    await AsyncStorage.multiRemove(AUTHED_STORAGE_KEYS);
+  } catch {
+    /* non-fatal */
+  }
+
+  if (userId) {
+    try {
+      await clearCachedProfile(userId);
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // 6. Reset user-scoped zustand stores so no club/officer/scroll state bleeds
+  //    into the next session. (zustand v4 has no getInitialState() — the
+  //    data fields are reset explicitly; actions are left in place.)
+  try {
+    useHomeTabStore.setState({
+      activeTab: 'events',
+      pendingScrollPostId: null,
+      pendingScrollEventId: null,
+    });
+    useLeaveClubStore.setState({ request: null });
+    useOfficerStore.getState().reset();
+  } catch {
+    /* non-fatal */
+  }
+
+  // 7. Best-effort global token revocation, deliberately NOT awaited. The local
+  //    session is already gone, so the user is logged out regardless; if this
+  //    request never lands the refresh token simply expires on its own. Awaiting
+  //    it here is what used to make logout feel slow.
+  void revokeRefreshTokenInBackground();
+}
+
+let pendingRevocationToken: string | null = null;
+
+/** Captures the access token *before* teardown so revocation can run after it. */
+export function rememberTokenForRevocation(accessToken: string | null | undefined): void {
+  pendingRevocationToken = accessToken ?? null;
+}
+
+async function revokeRefreshTokenInBackground(): Promise<void> {
+  const token = pendingRevocationToken;
+  pendingRevocationToken = null;
+  if (!token) return;
+
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL as string | undefined;
+  const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string | undefined;
+  if (!supabaseUrl || !anonKey) return;
+
+  try {
+    await fetch(`${supabaseUrl}/auth/v1/logout?scope=global`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, apikey: anonKey },
+    });
+  } catch {
+    // Token expires on its own — nothing to do.
+  }
+}

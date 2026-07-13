@@ -11,7 +11,11 @@ import {
   type ChangeUsernameResult,
   type UsernameAvailability,
 } from '../services/accountService';
-import { safeSignOut } from '../lib/support';
+import { supabase } from '../lib/supabase';
+import {
+  rememberTokenForRevocation,
+  tearDownAuthenticatedSession,
+} from '../lib/sessionCleanup';
 
 // Username availability — debounced 400ms to avoid hammering the DB
 export function useUsernameAvailability(
@@ -83,16 +87,27 @@ export function useDeleteAccount(userId: string | undefined) {
   const advanceToStep2    = useCallback(() => setConfirmStep(2), []);
 
   const mutation = useMutation<void, Error, void>({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!userId) throw new Error('Not authenticated');
       if (confirmStep !== 2) throw new Error('Deletion confirmation steps not completed');
-      return deleteOwnAccount(userId);
-    },
-    onSuccess: () => {
-      // Local-first sign-out (never hangs on a bad connection) + full cache
-      // wipe so nothing of the deleted account survives on this device.
-      queryClient.clear();
-      void safeSignOut();
+
+      // Capture the token up front: after the server deletes the account the
+      // session is void, and teardown needs something to revoke.
+      const { data } = await supabase.auth.getSession();
+      rememberTokenForRevocation(data.session?.access_token);
+
+      // Throws unless the account (data AND auth record) is really gone. On a
+      // throw we fall through to onError and change NOTHING locally — the
+      // account stays intact and usable, which is the whole point.
+      await deleteOwnAccount();
+
+      // Only now, with deletion server-confirmed, do we touch local state.
+      // AWAITED — the old code fired sign-out with `void` and navigated
+      // immediately, so the router raced the session clear: the guard still saw
+      // a session and bounced back into the app, and a relaunch mid-flight
+      // restored the dead session. Awaiting the single shared teardown closes
+      // that race, and it runs the same path as logout.
+      await tearDownAuthenticatedSession(queryClient, userId);
     },
   });
 

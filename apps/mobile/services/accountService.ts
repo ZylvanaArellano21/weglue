@@ -303,47 +303,20 @@ export async function changePassword(
 //   - Showing a double-confirmation dialog before invoking this
 //   - Signing out and routing to the welcome screen after this resolves
 //
-export async function deleteOwnAccount(userId: string): Promise<void> {
-  // Best-effort storage cleanup — a storage failure must never block the
-  // actual account deletion.
-  try {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('avatar_url, avatar_type')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (profile?.avatar_url && profile?.avatar_type !== 'text') {
-      const url = profile.avatar_url as string;
-      const avatarPath = url.split('/storage/v1/object/public/avatars/')[1];
-      if (avatarPath) {
-        await supabase.storage.from('avatars').remove([avatarPath]);
-      }
-    }
-
-    const { data: posts } = await supabase
-      .from('posts')
-      .select('image_url')
-      .eq('author_id', userId)
-      .not('image_url', 'is', null);
-
-    if (posts && posts.length > 0) {
-      const postPaths = (posts as any[])
-        .map((p) => {
-          const u = p.image_url as string;
-          const parts = u.split('/storage/v1/object/public/posts/');
-          return parts.length === 2 ? parts[1] : null;
-        })
-        .filter(Boolean) as string[];
-
-      if (postPaths.length > 0) {
-        await supabase.storage.from('posts').remove(postPaths);
-      }
-    }
-  } catch (e) {
-    console.warn('[deleteOwnAccount] storage cleanup failed (continuing)', e);
-  }
-
+export async function deleteOwnAccount(): Promise<void> {
+  // NOTHING destructive happens client-side before the server confirms.
+  //
+  // This function used to delete the user's avatar and post images from Storage
+  // FIRST, then call the Edge Function. When the server call then failed, the
+  // account still existed but its images were already gone — the profile
+  // rendered empty and the sidebar showed an Unknown User while the user was
+  // still signed in. That is the ghost account. Storage cleanup now happens
+  // server-side inside the Edge Function, with the service-role client, only
+  // after the data deletion has succeeded — and only ever as part of a
+  // deletion that actually goes through.
+  //
+  // Retrying after a partial failure is safe: every server-side step is
+  // idempotent.
   const { data, error } = await supabase.functions.invoke('delete-account', {
     method: 'POST',
     body: {},
@@ -353,7 +326,15 @@ export async function deleteOwnAccount(userId: string): Promise<void> {
     console.error('[deleteOwnAccount] edge function error:', error);
     throw error;
   }
-  if (!(data as { success?: boolean } | null)?.success) {
+
+  const result = data as
+    | { success?: boolean; dataDeleted?: boolean; authDeleted?: boolean }
+    | null;
+
+  // The account is only gone when the auth record is gone. A response that
+  // deleted the data but left auth.users behind is a FAILURE, not a success —
+  // treating it as success is what let a half-deleted account sign back in.
+  if (!result?.success || !result.authDeleted) {
     throw new Error('Account deletion failed');
   }
 }
