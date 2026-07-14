@@ -12,6 +12,39 @@ import { compressImageForUpload } from './imageUpload';
 export const CHAT_ATTACHMENTS_BUCKET = 'chat-attachments';
 export const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB document cap
 
+// ─── Supported document types ────────────────────────────────────────────────
+//
+// MUST stay in sync with the `chat-attachments` bucket's allowed_mime_types.
+// Storage enforces that whitelist server-side and rejects anything else, so a
+// file we let through here (the picker browses '*/*') fails the upload with an
+// opaque error — and Retry then fails forever, because retrying cannot change
+// the file's type. Checking at pick time turns that dead end into a clear
+// "this type isn't supported" message before anything is queued.
+const SUPPORTED_DOC_MIMES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+]);
+
+// Some providers (notably Android's Downloads/Drive) hand back
+// application/octet-stream for a perfectly good PDF or DOCX, so fall back to
+// the extension rather than rejecting a file the bucket would have accepted.
+const SUPPORTED_DOC_EXTS = new Set(['pdf', 'doc', 'docx', 'txt']);
+
+/** True when the bucket will accept this document. */
+export function isSupportedDocument(
+  mime: string | null | undefined,
+  name: string | null | undefined,
+): boolean {
+  if (mime && SUPPORTED_DOC_MIMES.has(mime.toLowerCase())) return true;
+  const ext = name?.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined;
+  return !!ext && SUPPORTED_DOC_EXTS.has(ext);
+}
+
+export const UNSUPPORTED_DOC_MESSAGE =
+  'That file type isn’t supported. You can send PDF, Word (.doc/.docx) and text (.txt) files.';
+
 /** Non-cryptographic v4-format UUID (client send tags + storage names). */
 export function clientUuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {

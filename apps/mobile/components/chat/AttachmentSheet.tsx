@@ -13,7 +13,11 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import type { AttachmentDraft } from '../../hooks/useConversation';
-import { MAX_FILE_BYTES } from '../../lib/chatAttachments';
+import {
+  MAX_FILE_BYTES,
+  isSupportedDocument,
+  UNSUPPORTED_DOC_MESSAGE,
+} from '../../lib/chatAttachments';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
 
 interface Props {
@@ -157,6 +161,13 @@ export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) 
 
     const a = result.assets[0];
 
+    // Reject types Storage would reject anyway. Without this the upload fails
+    // with an opaque error and Retry can never succeed, because retrying does
+    // not change the file's type.
+    if (!isSupportedDocument(a.mimeType, a.name)) {
+      onError(UNSUPPORTED_DOC_MESSAGE);
+      return;
+    }
     if (a.size != null && a.size > MAX_FILE_BYTES) {
       onError('This file is larger than 25 MB. Choose a smaller file and try again.');
       return;

@@ -192,7 +192,10 @@ export function useSendPipeline(opts: {
         const { id: convId, createdWithMessage } = await resolveConversation(msg);
 
         if (createdWithMessage) {
-          removePending(msg.clientTag);
+          // Deliberately NOT removePending here — see the note on the normal
+          // send path below. reconcile() drops the local copy the moment the
+          // server row is on screen, so the bubble never blinks out.
+          patch(msg.clientTag, { status: 'sending', progress: 1, conversationId: convId });
           finish(convId);
           opts.onFirstSend?.(convId);
           return;
@@ -232,7 +235,14 @@ export function useSendPipeline(opts: {
           clientTag: msg.clientTag,
         });
 
-        removePending(msg.clientTag);
+        // The send succeeded, but do NOT drop the local bubble yet: the server
+        // row is not on screen until the thread query refetches. Removing it
+        // here leaves a gap with nothing rendered — and on a brand-new DM/group
+        // that gap is the whole thread, so the screen flashed "No messages yet"
+        // between the optimistic bubble and the real message (caught on device).
+        // reconcile() removes this copy as soon as the server row with the same
+        // client_tag is visible, so the bubble is continuous.
+        patch(msg.clientTag, { status: 'sending', progress: 1, conversationId: convId });
         finish(convId);
         opts.onFirstSend?.(convId);
       } catch (e: any) {

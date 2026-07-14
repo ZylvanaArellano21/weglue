@@ -36,8 +36,17 @@ import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from '..
 // ─── Conversation screen ────────────────────────────────────────────────────
 // direct + custom group threads render here; official club chats redirect to
 // their channel thread. Draft modes (nothing saved until the first message):
-//   chatId = "new"        + draftUserId/draftName/draftAvatar  → draft DM
-//   chatId = "new-group"  + draftParticipantIds/draftNames/draftGroupName → draft group
+//   chatId = "new" + draftUserId/draftName/draftAvatar                 → draft DM
+//   chatId = "new" + draftParticipantIds/draftNames/draftGroupName     → draft group
+//
+// Both drafts use the SAME "new" segment and are told apart by their PARAMS,
+// never by a second magic segment. A previous attempt keyed the group draft on
+// chatId === "new-group", which can never match: app/chat/new-group.tsx is a
+// static route with exactly that path, and static routes shadow the dynamic
+// [chatId]. Navigating there just reopened the group PICKER (the selection form
+// silently reset), so the draft group thread was unreachable, the atomic
+// create_group_chat RPC was never wired up, and the first message failed with
+// "Conversation not ready" → "Didn't send." on every try.
 
 export default function ChatRoom() {
   const params = useLocalSearchParams<{
@@ -60,10 +69,14 @@ export default function ChatRoom() {
   const userId = user?.id ?? '';
   const queryClient = useQueryClient();
 
-  // Which draft the ROUTE is. These never change while mounted, so the header,
-  // avatar and conversation type stay rock-stable across the first send.
-  const isDraftDmRoute = chatId === 'new';
-  const isDraftGroupRoute = chatId === 'new-group';
+  // Which draft this is, decided by the PARAMS (see the note above — a
+  // "new-group" segment is unreachable). These never change while mounted, so
+  // the header, avatar and conversation type stay rock-stable across the first
+  // send.
+  const isNewDraft = chatId === 'new';
+  const hasGroupDraft = !!params.draftParticipantIds;
+  const isDraftDmRoute = isNewDraft && !hasGroupDraft;
+  const isDraftGroupRoute = isNewDraft && hasGroupDraft;
   const isDraftRoute = isDraftDmRoute || isDraftGroupRoute;
 
   // The id the first send materializes. Setting this HYDRATES THIS SAME SCREEN
