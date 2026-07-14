@@ -536,13 +536,19 @@ export default function ChatInfo() {
     const now = new Date();
     return items.map((poll) => {
       const ended = poll.end_at ? now > new Date(poll.end_at) : false;
+      // A poll with a future start hasn't opened yet — it is neither Active nor
+      // Closed. Without this it read "Active" here while the poll card in the
+      // thread correctly said "Poll not started".
+      const notStarted = !ended && !!poll.start_at && now < new Date(poll.start_at);
+      const status = ended ? 'Closed' : notStarted ? 'Scheduled' : 'Active';
+      const muted = ended || notStarted;
       const winner = poll.options.length > 0 ? poll.options.reduce((a, b) => (a.vote_count >= b.vote_count ? a : b)) : null;
       return (
         <View key={poll.id} style={styles.pollCard}>
           <View style={styles.pollHeader}>
             <Text style={styles.pollQuestion}>{poll.question}</Text>
-            <View style={[styles.pollStatus, ended ? styles.pollStatusEnded : styles.pollStatusActive]}>
-              <Text style={[styles.pollStatusText, ended ? { color: chatColors.textMuted } : { color: chatColors.teal }]}>{ended ? 'Closed' : 'Active'}</Text>
+            <View style={[styles.pollStatus, muted ? styles.pollStatusEnded : styles.pollStatusActive]}>
+              <Text style={[styles.pollStatusText, { color: muted ? chatColors.textMuted : chatColors.teal }]}>{status}</Text>
             </View>
           </View>
           <Text style={styles.pollMeta}>

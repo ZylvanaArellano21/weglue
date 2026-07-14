@@ -197,14 +197,21 @@ export function ConversationThread({
   // ── Long-press actions ──
   const [actionTarget, setActionTarget] = useState<ThreadMessage | null>(null);
 
+  const invalidateFor = useCallback(
+    (id: string | undefined) => {
+      queryClient.invalidateQueries({ queryKey: ['thread', id] });
+      queryClient.invalidateQueries({ queryKey: ['convMedia', id] });
+      queryClient.invalidateQueries({ queryKey: ['convFiles', id] });
+      queryClient.invalidateQueries({ queryKey: ['convEvents', id] });
+      queryClient.invalidateQueries({ queryKey: ['convPolls', id] });
+      queryClient.invalidateQueries({ queryKey: ['myChats'] });
+    },
+    [queryClient],
+  );
+
   const invalidate = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['thread', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['convMedia', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['convFiles', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['convEvents', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['convPolls', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['myChats'] });
-  }, [queryClient, conversationId]);
+    invalidateFor(conversationId);
+  }, [invalidateFor, conversationId]);
 
   const handleUnsend = useCallback(
     (messageId: string) => {
@@ -257,9 +264,16 @@ export function ConversationThread({
         endAt: payload.endAt ?? null,
         clientTag: newClientTag(),
       });
-      invalidate();
+      // A poll can be the FIRST thing sent into a draft group, exactly like a
+      // text message. ensureConversation() materialized it, so the screen has to
+      // be handed the real id — the text path does this via the send pipeline.
+      // Without it the screen stays on the draft, useThread stays disabled, and
+      // the poll is invisible until the app is relaunched even though it is
+      // already in the database.
+      if (convId !== conversationId) onFirstSend?.(convId);
+      invalidateFor(convId);
     },
-    [conversationId, channelId, ensureConversation, invalidate],
+    [conversationId, channelId, ensureConversation, onFirstSend, invalidateFor],
   );
 
   const renderRow = ({ item, index }: { item: Row; index: number }) => {

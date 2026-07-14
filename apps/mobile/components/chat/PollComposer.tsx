@@ -78,7 +78,19 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
   const [allowMultiple, setAllowMultiple] = useState(false);
   const [startAt, setStartAt] = useState<Date | null>(null);
   const [endAt, setEndAt] = useState<Date | null>(null);
-  const [picker, setPicker] = useState<null | { field: 'start' | 'end'; mode: 'date' | 'time' }>(null);
+  // `temp` is the picker's working value — the whole point of Bug 1. The old
+  // code committed straight from onChange, so a user who opened the picker,
+  // saw today's date sitting under the selection bar, and pressed Done WITHOUT
+  // spinning the wheel saved nothing: the spinner only emits onChange when the
+  // value actually changes. `temp` is seeded with exactly what the native picker
+  // is showing, so Done always has something real to commit, moved or not.
+  // `min` is captured at open time so the seed matches the picker's own clamping.
+  const [picker, setPicker] = useState<null | {
+    field: 'start' | 'end';
+    mode: 'date' | 'time';
+    temp: Date;
+    min: Date;
+  }>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -169,7 +181,47 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
   function openPicker(field: 'start' | 'end', mode: 'date' | 'time') {
     // Close the keyboard first, or the inline picker would come up behind it.
     Keyboard.dismiss();
-    setPicker({ field, mode });
+
+    const existing = field === 'start' ? startAt : endAt;
+    // Same bounds the picker itself enforces: start can't be in the past, and
+    // end can't precede start.
+    const min = field === 'end' ? (startAt ?? new Date()) : new Date();
+    // Seed with what the picker will actually display: the saved value if there
+    // is one, otherwise "now" pushed forward to the minimum (which is what the
+    // native picker clamps to). This is the value Done commits when the user
+    // never touches the wheel.
+    const seed = existing ?? (Date.now() < min.getTime() ? new Date(min) : new Date());
+
+    setPicker({ field, mode, temp: seed, min });
+  }
+
+  /** Folds a picker's working value into its field, touching only the component
+   *  that was being edited — picking a Start time never disturbs the Start date,
+   *  and never touches End at all (and vice versa). All dates stay local Date
+   *  objects; the conversion to UTC happens once, at submit. */
+  function commitPickerWith(p: NonNullable<typeof picker>) {
+    const current = p.field === 'start' ? startAt : endAt;
+    const next = new Date(current ?? p.temp);
+    if (p.mode === 'date') {
+      next.setFullYear(p.temp.getFullYear(), p.temp.getMonth(), p.temp.getDate());
+    } else {
+      next.setHours(p.temp.getHours(), p.temp.getMinutes(), 0, 0);
+    }
+
+    if (p.field === 'start') setStartAt(next);
+    else setEndAt(next);
+    setPicker(null);
+  }
+
+  /** iOS Done. Commits whatever the wheel is showing — including the seeded
+   *  default when the user never moved it, which is the Bug 1 fix. */
+  function commitPicker() {
+    if (picker) commitPickerWith(picker);
+  }
+
+  /** Cancel: drop the working value, leave the saved one (or empty) untouched. */
+  function cancelPicker() {
+    setPicker(null);
   }
 
   function fmtDate(d: Date | null): string {
@@ -183,19 +235,30 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
       : 'Time';
   }
 
-  function onPickerChange(_event: any, selected?: Date) {
+  function onPickerChange(event: any, selected?: Date) {
     const p = picker;
-    if (Platform.OS === 'android') setPicker(null);
-    if (!selected || !p) return;
-    const base = p.field === 'start' ? startAt : endAt;
-    const next = new Date(base ?? new Date());
-    if (p.mode === 'date') {
-      next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
-    } else {
-      next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+    if (!p) return;
+
+    if (Platform.OS === 'android') {
+      // Android's picker is a modal dialog that owns its own OK / Cancel and
+      // fires onChange exactly once: 'set' with the displayed value (so OK
+      // without moving the wheel already carries the default), 'dismissed' on
+      // cancel or back. Route those through the same commit/cancel paths so both
+      // platforms have identical semantics.
+      if (event?.type === 'set' && selected) {
+        setPicker({ ...p, temp: selected });
+        // setPicker is async, so commit from a locally-built picker rather than
+        // reading state we just queued.
+        commitPickerWith({ ...p, temp: selected });
+      } else {
+        cancelPicker();
+      }
+      return;
     }
-    if (p.field === 'start') setStartAt(next);
-    else setEndAt(next);
+
+    // iOS: the inline spinner streams changes as the wheel turns. Only the
+    // working value moves — nothing is saved until Done.
+    if (selected) setPicker({ ...p, temp: selected });
   }
 
   return (
@@ -403,24 +466,36 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
         {picker && (
           <View style={[styles.pickerWrap, { paddingBottom: insets.bottom }]}>
             {Platform.OS === 'ios' && (
+              // Android's dialog brings its own OK/Cancel; only iOS's inline
+              // spinner needs us to supply them.
               <View style={styles.iosPickerHeader}>
                 <TouchableOpacity
-                  onPress={() => setPicker(null)}
+                  onPress={cancelPicker}
                   hitSlop={12}
                   accessibilityRole="button"
-                  accessibilityLabel="Done choosing date and time"
+                  accessibilityLabel="Cancel, keep the previous value"
+                >
+                  <Text style={styles.iosPickerCancel}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={commitPicker}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done, save this date and time"
                 >
                   <Text style={styles.iosPickerDone}>Done</Text>
                 </TouchableOpacity>
               </View>
             )}
             <DateTimePicker
-              value={(picker.field === 'start' ? startAt : endAt) ?? new Date()}
+              // Driven by the working value, not the saved one, so the wheel
+              // reflects what Done is about to commit.
+              value={picker.temp}
               mode={picker.mode}
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
               // Never let the wheel land on a past instant: start ≥ now, end ≥
               // start (or now). Date mode only meaningfully bounds the day.
-              minimumDate={picker.field === 'end' ? startAt ?? new Date() : new Date()}
+              minimumDate={picker.min}
               onChange={onPickerChange}
             />
           </View>
@@ -638,9 +713,16 @@ const styles = StyleSheet.create({
   },
   iosPickerHeader: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 8,
+    minHeight: 44,
+  },
+  iosPickerCancel: {
+    fontFamily: chatFonts.medium,
+    fontSize: 14,
+    color: chatColors.textMuted,
   },
   iosPickerDone: {
     fontFamily: chatFonts.semiBold,

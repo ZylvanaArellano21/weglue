@@ -392,7 +392,11 @@ export default function ChatRoom() {
           <TouchableOpacity
             onPress={() => {
               if (isDraftDm && otherUserId) openProfile(otherUserId);
-              else if (!isDraft) router.push(`/chat/${chatId}/info` as any);
+              // realChatId, NOT chatId: a materialized draft keeps the route
+              // param "new" (the screen hydrates in place instead of navigating),
+              // so pushing chatId here opens Chat Info for a conversation that
+              // does not exist and it spins forever.
+              else if (!isDraft && realChatId) router.push(`/chat/${realChatId}/info` as any);
             }}
             disabled={isDraftGroup}
             style={styles.identityTap}
@@ -403,9 +407,9 @@ export default function ChatRoom() {
               {displayName}
             </Text>
           </TouchableOpacity>
-          {!isDraft && (
+          {!isDraft && realChatId && (
             <TouchableOpacity
-              onPress={() => router.push(`/chat/${chatId}/info` as any)}
+              onPress={() => router.push(`/chat/${realChatId}/info` as any)}
               hitSlop={8}
               accessibilityLabel="Chat information"
             >
