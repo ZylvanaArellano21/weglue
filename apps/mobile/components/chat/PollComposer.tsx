@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,10 @@ import {
   ActivityIndicator,
   StyleSheet,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
@@ -26,6 +27,19 @@ const inputShadow = {
   shadowRadius: 4,
   elevation: 4,
 } as const;
+
+/** UI-only cap. There is no max-options constraint in the database (checked:
+ *  poll_options / club_poll_options have none), so this is the single source of
+ *  truth for the limit and is intentionally preserved from the previous build. */
+const MAX_OPTIONS = 8;
+const MIN_OPTIONS = 2;
+
+/** iOS renders UISwitch noticeably larger than the design calls for (and larger
+ *  still on recent iOS). A mild scale brings it back in proportion with the rest
+ *  of the screen without swapping in a custom control; Android's switch is
+ *  already correctly proportioned, so it is left at native size. The row keeps a
+ *  44pt touch target regardless — the visual shrinks, the hit area does not. */
+const SWITCH_SCALE = Platform.OS === 'ios' ? 0.85 : 1;
 
 export interface PollComposerPayload {
   question: string;
@@ -44,11 +58,21 @@ interface Props {
 }
 
 /**
- * Full-screen keyboard-safe poll composer (replaces the old half-height
- * sheet whose fields the keyboard covered). Native date-time pickers replace
- * the old free-text MM/D/Y fields that produced unparseable timestamps.
+ * Full-screen poll composer.
+ *
+ * SAFE AREA — the header is padded from `useSafeAreaInsets()`, deliberately NOT
+ * from <SafeAreaView>. This screen lives inside a React Native <Modal>, which
+ * mounts into its own native view hierarchy; safe-area-context's <SafeAreaView>
+ * is a *native* view that measures its own parent, and inside a Modal it lays
+ * out at y=0 on the first frame before correcting itself (verified in-sim:
+ * headerY=0 then headerY=62 with contextInsets.top=62 the whole time). On some
+ * devices that correction is what the user actually ends up seeing — the ✕ and
+ * Send sitting on top of the clock and the battery. The insets *hook* reads
+ * React context, so it is right on the very first frame on every device.
  */
 export function PollComposer({ visible, onClose, onSubmit }: Props) {
+  const insets = useSafeAreaInsets();
+
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState(['', '']);
   const [allowMultiple, setAllowMultiple] = useState(false);
@@ -57,6 +81,12 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
   const [picker, setPicker] = useState<null | { field: 'start' | 'end'; mode: 'date' | 'time' }>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const scrollRef = useRef<ScrollView>(null);
+  const optionRefs = useRef<(TextInput | null)[]>([]);
+  // Swallows the second of two taps fired in the same instant, so a double-tap
+  // on "Add option" adds exactly one option.
+  const lastAddRef = useRef(0);
 
   function reset() {
     setQuestion('');
@@ -67,10 +97,19 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
     setError(null);
   }
 
+  const filledOptions = useMemo(
+    () => options.map((o) => o.trim()).filter(Boolean),
+    [options],
+  );
+
+  // Send is disabled until the poll is structurally valid. Date problems are not
+  // part of this (they are reported in the banner) so the user always has a way
+  // to find out *why* a date was rejected instead of facing a dead button.
+  const canSend = question.trim().length > 0 && filledOptions.length >= MIN_OPTIONS;
+
   function validate(): string | null {
     if (!question.trim()) return 'Add a question.';
-    const opts = options.map((o) => o.trim()).filter(Boolean);
-    if (opts.length < 2) return 'Add at least 2 options.';
+    if (filledOptions.length < MIN_OPTIONS) return `Add at least ${MIN_OPTIONS} options.`;
     // Blank start+end = poll starts now, never expires (matches helper text).
     // 60s grace so "now" isn't rejected as past.
     if (startAt && startAt.getTime() < Date.now() - 60_000) return "Start can't be in the past.";
@@ -80,7 +119,7 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
   }
 
   async function handleSend() {
-    if (submitting) return;
+    if (submitting) return; // no duplicate submissions
     const v = validate();
     if (v) {
       setError(v);
@@ -91,7 +130,7 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
     try {
       await onSubmit({
         question: question.trim(),
-        options: options.map((o) => o.trim()).filter(Boolean),
+        options: filledOptions, // blank extra options never reach the server
         allowMultiple,
         startAt: startAt?.toISOString(),
         endAt: endAt?.toISOString(),
@@ -104,6 +143,33 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  const addOption = useCallback(() => {
+    const now = Date.now();
+    if (now - lastAddRef.current < 350) return;
+    lastAddRef.current = now;
+
+    setOptions((prev) => {
+      if (prev.length >= MAX_OPTIONS) return prev;
+      const next = [...prev, ''];
+      // Focusing the new field is what reveals it: RN scrolls a focused input
+      // inside a ScrollView into view above the keyboard, so the new option can
+      // never be added off-screen or underneath the keyboard.
+      requestAnimationFrame(() => optionRefs.current[next.length - 1]?.focus());
+      return next;
+    });
+  }, []);
+
+  function removeOption(idx: number) {
+    setOptions((prev) => prev.filter((_, i) => i !== idx));
+    optionRefs.current.splice(idx, 1);
+  }
+
+  function openPicker(field: 'start' | 'end', mode: 'date' | 'time') {
+    // Close the keyboard first, or the inline picker would come up behind it.
+    Keyboard.dismiss();
+    setPicker({ field, mode });
   }
 
   function fmtDate(d: Date | null): string {
@@ -134,32 +200,61 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      {/* Plain View + hook insets (see the note on the component): correct on the
+          first frame, on every notch / Dynamic Island / Android status bar. */}
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} hitSlop={8} accessibilityLabel="Close poll composer">
+          <TouchableOpacity
+            onPress={onClose}
+            hitSlop={12}
+            style={styles.headerSide}
+            accessibilityRole="button"
+            accessibilityLabel="Close poll"
+          >
             <Ionicons name="close" size={24} color={chatColors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Poll</Text>
-          <TouchableOpacity
-            style={[styles.sendBtn, submitting && styles.sendBtnDisabled]}
-            onPress={handleSend}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color={chatColors.cream} />
-            ) : (
-              <Text style={styles.sendLabel}>Send</Text>
-            )}
-          </TouchableOpacity>
+
+          {/* Absolutely centered so the title stays optically centred no matter
+              how wide Send gets (localisation, loading spinner). */}
+          <View style={styles.headerTitleWrap} pointerEvents="none">
+            <Text style={styles.headerTitle}>Poll</Text>
+          </View>
+
+          <View style={[styles.headerSide, styles.headerSideRight]}>
+            <TouchableOpacity
+              style={[styles.sendBtn, (!canSend || submitting) && styles.sendBtnDisabled]}
+              onPress={handleSend}
+              disabled={!canSend || submitting}
+              accessibilityRole="button"
+              accessibilityLabel="Send poll"
+              accessibilityState={{ disabled: !canSend || submitting, busy: submitting }}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color={chatColors.cream} />
+              ) : (
+                <Text style={styles.sendLabel}>Send</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // 'padding' on iOS shrinks the scroll viewport by the keyboard height;
+          // 'height' is the Android equivalent that works inside a Modal, where
+          // windowSoftInputMode=adjustResize does not reach.
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <ScrollView
-            contentContainerStyle={styles.content}
+            ref={scrollRef}
+            style={styles.flex}
+            contentContainerStyle={[
+              styles.content,
+              // Clears the iOS home indicator / Android navigation bar.
+              { paddingBottom: insets.bottom + 24 },
+            ]}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
             showsVerticalScrollIndicator={false}
           >
             {error && (
@@ -178,28 +273,37 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
               maxLength={200}
               placeholder="What do you want to ask?"
               placeholderTextColor={chatColors.textMuted}
+              accessibilityLabel="Poll question"
             />
 
             <Text style={styles.label}>Poll options</Text>
             {options.map((opt, idx) => (
               <View key={idx} style={styles.optionRow}>
                 <TextInput
+                  ref={(r) => {
+                    optionRefs.current[idx] = r;
+                  }}
                   style={styles.optionInput}
                   value={opt}
                   placeholder={`Option ${idx + 1}`}
                   placeholderTextColor={chatColors.textMuted}
                   onChangeText={(t) => {
-                    const next = [...options];
-                    next[idx] = t;
-                    setOptions(next);
+                    setOptions((prev) => {
+                      const next = [...prev];
+                      next[idx] = t;
+                      return next;
+                    });
                   }}
                   maxLength={100}
+                  returnKeyType="next"
+                  accessibilityLabel={`Poll option ${idx + 1}`}
                 />
-                {options.length > 2 && (
+                {options.length > MIN_OPTIONS && (
                   <TouchableOpacity
-                    onPress={() => setOptions(options.filter((_, i) => i !== idx))}
-                    hitSlop={8}
+                    onPress={() => removeOption(idx)}
+                    hitSlop={12}
                     style={styles.removeOption}
+                    accessibilityRole="button"
                     accessibilityLabel={`Remove option ${idx + 1}`}
                   >
                     <Ionicons name="close-circle" size={20} color={chatColors.textMuted} />
@@ -207,8 +311,14 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
                 )}
               </View>
             ))}
-            {options.length < 8 && (
-              <TouchableOpacity style={styles.addOptionRow} onPress={() => setOptions([...options, ''])}>
+
+            {options.length < MAX_OPTIONS && (
+              <TouchableOpacity
+                style={styles.addOptionRow}
+                onPress={addOption}
+                accessibilityRole="button"
+                accessibilityLabel="Add option"
+              >
                 <Ionicons name="add" size={16} color={chatColors.teal} />
                 <Text style={styles.addOptionText}>Add option</Text>
               </TouchableOpacity>
@@ -216,38 +326,66 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
 
             <View style={styles.toggleRow}>
               <Text style={styles.label}>Multiple options</Text>
-              <Switch
-                value={allowMultiple}
-                onValueChange={setAllowMultiple}
-                trackColor={{ true: chatColors.teal, false: chatColors.border }}
-                thumbColor={chatColors.white}
-              />
+              <View style={styles.switchWrap}>
+                <Switch
+                  value={allowMultiple}
+                  onValueChange={setAllowMultiple}
+                  trackColor={{ true: chatColors.teal, false: chatColors.border }}
+                  thumbColor={chatColors.white}
+                  ios_backgroundColor={chatColors.border}
+                  style={{ transform: [{ scale: SWITCH_SCALE }] }}
+                  accessibilityRole="switch"
+                  accessibilityLabel="Allow selecting multiple options"
+                  accessibilityState={{ checked: allowMultiple }}
+                />
+              </View>
             </View>
 
             <Text style={styles.label}>Duration</Text>
             {(['start', 'end'] as const).map((field) => {
               const value = field === 'start' ? startAt : endAt;
+              const name = field === 'start' ? 'Start' : 'End';
               return (
                 <View key={field} style={styles.durationRow}>
-                  <Text style={styles.durationLabel}>{field === 'start' ? 'Start' : 'End'}</Text>
+                  <Text style={styles.durationLabel}>{name}</Text>
                   <View style={styles.dateTimeGroup}>
                     <TouchableOpacity
                       style={styles.dateChip}
-                      onPress={() => setPicker({ field, mode: 'date' })}
+                      onPress={() => openPicker(field, 'date')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${name} date${value ? `, ${fmtDate(value)}` : ', not set'}`}
                     >
-                      <Text style={[styles.chipText, !value && styles.chipPlaceholder]}>{fmtDate(value)}</Text>
+                      <Text
+                        style={[styles.chipText, !value && styles.chipPlaceholder]}
+                        numberOfLines={1}
+                      >
+                        {fmtDate(value)}
+                      </Text>
                     </TouchableOpacity>
+                    <View style={styles.chipDivider} />
                     <TouchableOpacity
                       style={styles.timeChip}
-                      onPress={() => setPicker({ field, mode: 'time' })}
+                      onPress={() => openPicker(field, 'time')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${name} time${value ? `, ${fmtTime(value)}` : ', not set'}`}
                     >
-                      <Text style={[styles.chipText, !value && styles.chipPlaceholder]}>{fmtTime(value)}</Text>
+                      <Text
+                        style={[styles.chipText, !value && styles.chipPlaceholder]}
+                        numberOfLines={1}
+                      >
+                        {fmtTime(value)}
+                      </Text>
                     </TouchableOpacity>
+                  </View>
+                  {/* Reserves its slot whether or not a value is set, so the
+                      chips never shift sideways when one is chosen or cleared. */}
+                  <View style={styles.clearSlot}>
                     {value && (
                       <TouchableOpacity
                         onPress={() => (field === 'start' ? setStartAt(null) : setEndAt(null))}
-                        hitSlop={8}
-                        style={styles.clearChip}
+                        hitSlop={12}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Clear ${name.toLowerCase()}`}
                       >
                         <Ionicons name="close-circle" size={18} color={chatColors.textMuted} />
                       </TouchableOpacity>
@@ -263,10 +401,15 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
         </KeyboardAvoidingView>
 
         {picker && (
-          <View style={Platform.OS === 'ios' ? styles.iosPickerWrap : undefined}>
+          <View style={[styles.pickerWrap, { paddingBottom: insets.bottom }]}>
             {Platform.OS === 'ios' && (
               <View style={styles.iosPickerHeader}>
-                <TouchableOpacity onPress={() => setPicker(null)}>
+                <TouchableOpacity
+                  onPress={() => setPicker(null)}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done choosing date and time"
+                >
                   <Text style={styles.iosPickerDone}>Done</Text>
                 </TouchableOpacity>
               </View>
@@ -282,7 +425,7 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
             />
           </View>
         )}
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -290,39 +433,55 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: chatColors.pollSheet },
   flex: { flex: 1 },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: chatColors.borderSearch,
   },
+  // Equal-width sides keep the absolutely-centred title honest, and the 44pt
+  // minimum keeps ✕ / Send comfortably tappable even though the icon is compact.
+  headerSide: {
+    minWidth: 72,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  headerSideRight: { alignItems: 'flex-end' },
+  headerTitleWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: {
     ...chatTypography.chatTitle,
-    fontSize: 20,
+    fontSize: 18,
   },
   sendBtn: {
     backgroundColor: chatColors.teal,
     borderRadius: 40,
     paddingHorizontal: 16,
-    paddingVertical: 6,
-    minWidth: 63,
+    paddingVertical: 7,
+    minWidth: 64,
     alignItems: 'center',
+    justifyContent: 'center',
     ...chatShadow,
   },
-  sendBtnDisabled: { opacity: 0.6 },
+  sendBtnDisabled: { opacity: 0.45 },
   sendLabel: {
     fontFamily: chatFonts.semiBold,
     fontSize: 12,
     color: chatColors.cream,
     letterSpacing: 0.38,
   },
+
   content: {
-    padding: 16,
-    paddingBottom: 48,
-    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    gap: 8,
   },
   errorBanner: {
     flexDirection: 'row',
@@ -343,16 +502,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: chatColors.text,
     letterSpacing: 0.38,
-    marginTop: 4,
+    marginTop: 2,
   },
+
+  // minHeight + padding (never a fixed height): the field is compact at rest,
+  // still a comfortable touch target, and grows instead of clipping when the
+  // text wraps or the user has larger accessibility text.
   questionInput: {
     backgroundColor: chatColors.pollSheet,
-    borderRadius: 40,
-    minHeight: 60,
+    borderRadius: 24,
+    minHeight: 48,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
     fontFamily: chatFonts.regular,
     fontSize: 15,
+    lineHeight: 20,
     color: chatColors.text,
     ...inputShadow,
   },
@@ -363,10 +527,10 @@ const styles = StyleSheet.create({
   optionInput: {
     flex: 1,
     backgroundColor: chatColors.pollSheet,
-    borderRadius: 40,
-    minHeight: 56,
+    borderRadius: 24,
+    minHeight: 44,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 10,
     fontFamily: chatFonts.regular,
     fontSize: 15,
     color: chatColors.text,
@@ -379,7 +543,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingVertical: 8,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+    minHeight: 36,
   },
   addOptionText: {
     fontFamily: chatFonts.semiBold,
@@ -387,52 +553,67 @@ const styles = StyleSheet.create({
     color: chatColors.teal,
     letterSpacing: 0.38,
   },
+
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 8,
+    marginTop: 4,
+    minHeight: 44,
   },
+  switchWrap: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+
   durationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
+    marginTop: 2,
+    minHeight: 44,
   },
   durationLabel: {
     fontFamily: chatFonts.semiBold,
     fontSize: 15,
     color: chatColors.text,
-    width: 48,
+    flexGrow: 1,
+    flexShrink: 1,
   },
+  // The joined Date|Time pill. flexShrink lets it compress on narrow devices
+  // instead of pushing the row off-screen.
   dateTimeGroup: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderRadius: 40,
+    backgroundColor: chatColors.pollSheet,
+    flexShrink: 1,
+    ...chatShadow,
   },
   dateChip: {
-    backgroundColor: chatColors.pollSheet,
-    borderTopLeftRadius: 40,
-    borderBottomLeftRadius: 40,
-    height: 34,
-    minWidth: 90,
+    minHeight: 36,
+    minWidth: 84,
+    flexShrink: 1,
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    ...chatShadow,
   },
   timeChip: {
-    backgroundColor: chatColors.pollSheet,
-    borderTopRightRadius: 40,
-    borderBottomRightRadius: 40,
-    height: 34,
-    minWidth: 82,
+    minHeight: 36,
+    minWidth: 76,
+    flexShrink: 1,
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    ...chatShadow,
   },
-  clearChip: {
-    marginLeft: 8,
+  chipDivider: {
+    width: 1,
+    alignSelf: 'stretch',
+    marginVertical: 6,
+    backgroundColor: chatColors.border,
+  },
+  clearSlot: {
+    width: 26,
+    alignItems: 'flex-end',
   },
   chipText: {
     fontFamily: chatFonts.medium,
@@ -440,7 +621,6 @@ const styles = StyleSheet.create({
     color: chatColors.text,
   },
   chipPlaceholder: {
-    fontStyle: 'italic',
     color: chatColors.textMuted,
   },
   durationHint: {
@@ -448,8 +628,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: chatColors.textMuted,
     fontStyle: 'italic',
+    marginTop: 2,
   },
-  iosPickerWrap: {
+
+  pickerWrap: {
     backgroundColor: chatColors.bg,
     borderTopWidth: 1,
     borderTopColor: chatColors.border,
