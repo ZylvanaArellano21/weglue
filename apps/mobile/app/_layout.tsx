@@ -25,6 +25,7 @@ import { supabase } from "../lib/supabase";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
 import { useInviteDeepLink } from "../hooks/useInviteDeepLink";
 import { LeaveClubHost } from "../components/club/LeaveClubHost";
+import { SidebarHost } from "../components/sidebar/SidebarHost";
 import { timedQuery } from "../lib/timedQuery";
 import {
   clearCachedProfile,
@@ -238,15 +239,17 @@ export default function RootLayout() {
           re-reconcile its children on every state change — which turned the
           sign-out <Redirect> into an infinite update loop (the logout freeze). */}
       <Stack screenOptions={{ headerShown: false }}>
-        {/* Restorable overlay layers — real routes so a screen pushed from them
-            (a profile, a chat) sits ABOVE them and Back reveals them intact,
-            with the tab bar covered. transparentModal keeps the screen beneath
-            visible through the dim backdrop. Names match real files, so the
-            navigator does not re-reconcile (the historical logout-freeze). */}
-        <Stack.Screen
-          name="sidebar"
-          options={{ presentation: 'transparentModal', animation: 'fade', gestureEnabled: true }}
-        />
+        {/* Intentional sheets — genuinely presented OVER the current screen and
+            never used as a navigation container for further destinations.
+            Names match real files, so the navigator does not re-reconcile (the
+            historical logout-freeze).
+
+            The sidebar is deliberately NOT here any more. It used to be a
+            transparentModal route, which made every destination opened from it a
+            child of that modal — the partial sheets, the rounded Welcome after
+            logout/deletion, the strip of the previous screen. It is now a pure
+            overlay (SidebarHost below), so its destinations are ordinary
+            full-screen pushes on this opaque stack. */}
         <Stack.Screen
           name="comments/[postId]"
           options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', gestureEnabled: true }}
@@ -256,6 +259,9 @@ export default function RootLayout() {
           options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', gestureEnabled: true }}
         />
       </Stack>
+      {/* Sidebar overlay: layered ABOVE the navigator (tab bar included) but a
+          sibling of it, so nothing opened from it is ever nested inside it. */}
+      <SidebarHost />
       {/* The single app-wide leave-club confirmation host: exactly one modal
           can exist at a time, so the sole-officer note can never stack on a
           leave confirmation (screens raise requests via requestLeaveClub). */}

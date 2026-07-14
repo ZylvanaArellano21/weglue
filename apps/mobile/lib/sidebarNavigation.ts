@@ -1,4 +1,5 @@
 import type { Router } from 'expo-router';
+import { useSidebarStore } from '../store/sidebarStore';
 
 // ─── Sidebar Item Types ───────────────────────────────────────────────────────
 
@@ -28,68 +29,84 @@ export interface SidebarActionHandlers {
   onLogout: () => void;
 }
 
+// ─── The one way an internal sidebar destination is opened ────────────────────
+//
+// Closes the overlay and pushes onto the normal opaque root stack, so the
+// destination owns the whole window (no transparent-modal container wrapping
+// it), while `openDestination` arms the return so Back reopens the drawer over
+// the same underlying screen. Every internal destination goes through here —
+// there are no per-screen Back handlers.
+//
+export function openSidebarDestination(
+  router: Router,
+  fromPathname: string,
+  href: Parameters<Router['push']>[0],
+): void {
+  useSidebarStore.getState().openDestination(fromPathname);
+  router.push(href);
+}
+
 // ─── Build sidebar items with navigation callbacks ────────────────────────────
-//
-// Call this inside the /sidebar route. Each item PUSHES its destination above
-// the sidebar route (no close-first) so Back returns to the still-open sidebar,
-// per the required Home → Sidebar → Destination → Back → Sidebar journey.
-//
+
 export function buildSidebarItems(
   router: Router,
+  fromPathname: string,
   handlers: SidebarActionHandlers,
 ): SidebarItem[] {
-  function navigate(path: string) {
-    router.push(path as any);
-  }
+  const go = (href: Parameters<Router['push']>[0]) => () =>
+    openSidebarDestination(router, fromPathname, href);
 
   return [
     {
       key: 'profile',
       label: 'Your Profile',
       icon: 'person-outline',
-      onPress: () => navigate('/profile/own'),
+      onPress: go('/profile/own'),
     },
     {
       key: 'savedEvents',
       label: 'Saved Events',
       icon: 'bookmark-outline',
-      onPress: () => navigate('/saved-events'),
+      onPress: go('/saved-events'),
     },
     {
       key: 'interests',
       label: 'Interests',
       icon: 'heart-outline',
-      onPress: () => {
-        // Existing edit flow: interests survey → activities survey
-        router.push({
-          pathname: '/profile/edit-interests',
-          params: { continueTo: 'activities' },
-        } as any);
-      },
+      // Existing edit flow: interests survey → activities survey → results.
+      // Back before Save returns here (the drawer), like any other destination;
+      // completing Save and tapping "See my matches" clears the pending return
+      // so Home Events is the final stop.
+      onPress: go({
+        pathname: '/profile/edit-interests',
+        params: { continueTo: 'activities' },
+      } as any),
     },
     {
       key: 'accountCenter',
       label: 'Account Center',
       icon: 'settings-outline',
-      onPress: () => navigate('/account-center'),
+      onPress: go('/account-center'),
     },
     {
       key: 'privacyCenter',
       label: 'Privacy Center',
       icon: 'shield-outline',
-      onPress: () => navigate('/privacy-center'),
+      onPress: go('/privacy-center'),
     },
     {
       key: 'help',
       label: 'Help',
       icon: 'help-circle-outline',
+      // External-app exception: launches the device mail composer, never an
+      // internal screen, so it neither closes the drawer nor pushes a route.
       onPress: handlers.onHelp,
     },
     {
       key: 'terms',
       label: 'Terms & Conditions',
       icon: 'document-text-outline',
-      onPress: () => navigate('/home/terms'),
+      onPress: go('/home/terms'),
     },
     {
       key: 'logout',

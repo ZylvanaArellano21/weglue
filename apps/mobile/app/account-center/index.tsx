@@ -21,6 +21,7 @@ import {
   useUsernameAvailability,
 } from '../../hooks/useAccountCenter';
 import { useOwnProfile } from '../../hooks/useOwnProfile';
+import { resetToWelcome } from '../../lib/sessionCleanup';
 import { SUPPORT_EMAIL } from '../../lib/support';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { ProfileConfirmationModal } from '../../components/profile/ProfileConfirmationModal';
@@ -159,12 +160,17 @@ export default function AccountCenterScreen() {
 
   const handleFinalDelete = async () => {
     try {
+      // Resolves only once the server has confirmed the deletion; the shared
+      // teardown (session, caches, sidebar state) has already run inside it.
       await executeDeletion();
-      // Data + auth record are gone and the local session is cleared —
-      // land on the welcome screen with a clean slate.
-      router.replace('/welcome');
+      // Land on Welcome as a full-screen root screen. Account Center is a normal
+      // opaque push now that the sidebar is an overlay rather than a
+      // transparent-modal container, so there is no sheet left around this —
+      // dismissAll+replace leaves Welcome as the only screen in the stack.
+      resetToWelcome(router);
     } catch {
-      // deletionError surfaced below
+      // Deletion failed: the account and session are untouched and the user
+      // stays here on the full-screen Account Center. deletionError renders below.
     }
   };
 

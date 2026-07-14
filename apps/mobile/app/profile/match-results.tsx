@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useHomeTabStore } from '../../store/homeTabStore';
+import { useSidebarStore } from '../../store/sidebarStore';
 
 /**
  * Celebratory results screen shown after an authenticated user saves their
@@ -46,6 +47,12 @@ export default function MatchResultsScreen() {
     // (the regenerate mutation seeded it), so the count and the club order here
     // and there are the same batch.
     setActiveTab('events');
+    // This is a completed flow moving the user FORWARD, not a Back out of a
+    // sidebar destination. Interests may have been launched from the sidebar,
+    // which armed "reopen the drawer when we return to Home" — drop that, or the
+    // sidebar would slide open on top of the matches the user just asked to see.
+    // (Backing out of the survey BEFORE saving still restores the sidebar.)
+    useSidebarStore.getState().clearReturn();
     router.dismissAll();
     router.replace('/(tabs)');
   }

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useOfficerStore, refreshOfficerStatus } from '../../store/officerStore';
 import { useHomeTabStore } from '../../store/homeTabStore';
+import { useSidebarStore } from '../../store/sidebarStore';
 import { useDismissPicturePrompt } from '../../hooks/usePicturePrompt';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
@@ -25,6 +26,7 @@ export default function HomeScreen() {
   const { session, profile } = useAuthStore();
   const { isOfficer } = useOfficerStore();
   const { activeTab, setActiveTab } = useHomeTabStore();
+  const openSidebar = useSidebarStore((s) => s.open);
   const dismissPicturePrompt = useDismissPicturePrompt();
   const router = useRouter();
 
@@ -76,8 +78,10 @@ export default function HomeScreen() {
     router.push('/home/new-event');
   };
 
+  // The sidebar is an overlay over this screen, not a route we navigate to —
+  // Home stays mounted underneath with its tab, feed and scroll position intact.
   const handleAvatarPress = () => {
-    router.push('/sidebar');
+    openSidebar();
   };
 
   // Shown only for genuinely new accounts that still have no custom picture.
@@ -91,7 +95,7 @@ export default function HomeScreen() {
     // Tapping counts as interaction: hide it permanently, then open the side
     // menu (deliberately NOT the photo picker).
     void dismissPicturePrompt();
-    router.push('/sidebar');
+    openSidebar();
   };
 
   const handleDismissPicturePrompt = () => {

@@ -1,13 +1,10 @@
 /**
- * Sidebar — root-level transparent-modal route (was a RN <Modal> overlay).
+ * SidebarOverlay — the drawer itself.
  *
- * As a real route it becomes a layer in the navigation history: tapping a
- * sidebar item pushes its destination ABOVE this route, so Back reveals the
- * still-open sidebar, and closing the sidebar (backdrop tap / system Back)
- * pops back to Home — exactly the required journey:
- *   Home → Sidebar → Destination → Back → Sidebar → close → Home.
- * The old version dismissed the drawer before navigating, which is why Back
- * could never restore it.
+ * Rendered by SidebarHost as an absolutely-positioned layer ABOVE the whole
+ * navigator (tab bar included) while `useSidebarStore.isOpen` is true. It is
+ * deliberately NOT a route: nothing opened from it is nested inside it, so every
+ * destination lands full-screen on the normal opaque stack. See store/sidebarStore.ts.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -16,31 +13,35 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   Animated,
-  Dimensions,
+  BackHandler,
+  Platform,
   StyleSheet,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
-import { buildSidebarItems, type SidebarItemKey } from '../lib/sidebarNavigation';
-import { openSupportEmail, SUPPORT_EMAIL } from '../lib/support';
-import { supabase } from '../lib/supabase';
+import {
+  buildSidebarItems,
+  openSidebarDestination,
+  type SidebarItemKey,
+} from '../../lib/sidebarNavigation';
+import { openSupportEmail, SUPPORT_EMAIL } from '../../lib/support';
+import { supabase } from '../../lib/supabase';
 import {
   rememberTokenForRevocation,
   tearDownAuthenticatedSession,
-} from '../lib/sessionCleanup';
-import { useOwnProfile } from '../hooks/useOwnProfile';
-import { useToast } from '../components/Toast';
-import { ConfirmModal } from '../components/ConfirmModal';
-import { Avatar } from '../components/shared/Avatar';
-import { profileColors, profileFonts, profileShadow } from '../components/profile/profileTheme';
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.75, 320);
+} from '../../lib/sessionCleanup';
+import { useSidebarStore } from '../../store/sidebarStore';
+import { useOwnProfile } from '../../hooks/useOwnProfile';
+import { useToast } from '../Toast';
+import { ConfirmModal } from '../ConfirmModal';
+import { Avatar } from '../shared/Avatar';
+import { profileColors, profileFonts, profileShadow } from '../profile/profileTheme';
 
 const LABEL_OVERRIDES: Partial<Record<SidebarItemKey, string>> = {
   terms: 'Terms & Conditions',
@@ -54,9 +55,17 @@ const MENU_KEYS: SidebarItemKey[] = [
 ];
 const FOOTER_KEYS: SidebarItemKey[] = ['help', 'terms', 'logout'];
 
-export default function SidebarScreen() {
+export function SidebarOverlay() {
   const router = useRouter();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
+
+  // Width follows the live window, not a module-level Dimensions snapshot, so it
+  // is correct on Android tablets/foldables and after a rotation — there is no
+  // hardcoded device width anywhere.
+  const { width: windowWidth } = useWindowDimensions();
+  const drawerWidth = Math.min(windowWidth * 0.75, 320);
+
   const { session } = useAuthStore();
   const userId = session?.user.id;
 
@@ -64,18 +73,46 @@ export default function SidebarScreen() {
   const { show, ToastComponent } = useToast();
   const queryClient = useQueryClient();
 
+  const closeSidebar = useSidebarStore((s) => s.close);
+
   const [helpFallbackVisible, setHelpFallbackVisible] = useState(false);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
-  // Dismiss = pop this route (reveals whatever was underneath — normally Home).
-  const close = () => router.back();
+  // Android system Back closes the drawer (it is an overlay, so there is no
+  // route to pop). Returning true stops the event from also popping the
+  // underlying screen. Only registered while the drawer is mounted/open.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (signingOut) return true;
+      if (helpFallbackVisible) {
+        setHelpFallbackVisible(false);
+        return true;
+      }
+      if (logoutConfirmVisible) {
+        setLogoutConfirmVisible(false);
+        return true;
+      }
+      closeSidebar();
+      return true;
+    });
+    return () => sub.remove();
+  }, [closeSidebar, signingOut, helpFallbackVisible, logoutConfirmVisible]);
 
   const handleHelp = () => {
+    // External-app exception: hands off to the device mail composer. The drawer
+    // stays open underneath on purpose — when the user finishes or cancels in
+    // Mail/Gmail/Outlook and returns to We Glue, they come back to exactly the
+    // context they left (same tab, same screen, sidebar still open). No route is
+    // pushed, so there is nothing to restore and no duplicate sidebar.
     void openSupportEmail().then((opened) => {
+      // Only surfaces when the mail action genuinely cannot be opened (no mail
+      // app configured); otherwise the OS handles app choice silently.
       if (!opened) setHelpFallbackVisible(true);
     });
   };
+
   const handleLogoutRequest = () => setLogoutConfirmVisible(true);
 
   const handleLogoutConfirm = async () => {
@@ -87,16 +124,15 @@ export default function SidebarScreen() {
     const { data } = await supabase.auth.getSession();
     rememberTokenForRevocation(data.session?.access_token);
 
-    // Close the sidebar first so the user never sits staring at it while
-    // cleanup runs, then tear the session down through the ONE shared path
-    // (identical to account deletion). Clearing the session unmounts the whole
-    // authenticated tree and the root guard lands on /welcome — which also
-    // means there is no authenticated route left behind for iOS swipe-back or
-    // Android Back to return to.
     setLogoutConfirmVisible(false);
-    close();
 
     try {
+      // The ONE shared teardown (identical to account deletion). It resets the
+      // sidebar store — closing this overlay — and clears the session, which
+      // makes the tabs guard replace the authenticated tree with /welcome.
+      // Welcome is a plain root screen now that no transparent modal is
+      // presented, so it fills the window: no rounded corners, no sheet, no
+      // dimmed backdrop, and no authenticated route left to swipe or Back into.
       await tearDownAuthenticatedSession(queryClient, userId);
     } finally {
       setSigningOut(false);
@@ -113,16 +149,14 @@ export default function SidebarScreen() {
     }
   };
 
-  // Items push their destination ABOVE this route (no close-first), so Back
-  // returns here with the sidebar still open.
-  const allItems = buildSidebarItems(router, {
+  const allItems = buildSidebarItems(router, pathname, {
     onHelp: handleHelp,
     onLogout: handleLogoutRequest,
   });
   const menuItems = allItems.filter((i) => MENU_KEYS.includes(i.key));
   const footerItems = allItems.filter((i) => FOOTER_KEYS.includes(i.key));
 
-  const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const slideAnim = useRef(new Animated.Value(-drawerWidth)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -132,11 +166,11 @@ export default function SidebarScreen() {
     ]).start();
   }, [slideAnim, fadeAnim]);
 
-  const openProfile = () => router.push('/profile/own');
+  const openProfile = () => openSidebarDestination(router, pathname, '/profile/own');
 
   return (
-    <View style={styles.root}>
-      <TouchableWithoutFeedback onPress={close}>
+    <View style={styles.root} pointerEvents="box-none">
+      <TouchableWithoutFeedback onPress={closeSidebar}>
         <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]} />
       </TouchableWithoutFeedback>
 
@@ -144,7 +178,7 @@ export default function SidebarScreen() {
         style={[
           styles.drawer,
           {
-            width: DRAWER_WIDTH,
+            width: drawerWidth,
             paddingTop: insets.top + 20,
             paddingBottom: insets.bottom + 16,
             transform: [{ translateX: slideAnim }],
@@ -226,7 +260,9 @@ function SidebarRow({ item }: { item: ReturnType<typeof buildSidebarItems>[numbe
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, flexDirection: 'row' },
+  // Fills the window it is layered into (the root container), covering the tab
+  // bar. It is a sibling of the navigator, never a parent of it.
+  root: { ...StyleSheet.absoluteFillObject, flexDirection: 'row' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: profileColors.sidebarOverlay },
   drawer: {
     position: 'absolute',

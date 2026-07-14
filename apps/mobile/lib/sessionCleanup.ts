@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Router } from 'expo-router';
 import type { QueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
 import { supabase } from './supabase';
@@ -6,6 +7,7 @@ import { clearCachedProfile } from './profileCache';
 import { useHomeTabStore } from '../store/homeTabStore';
 import { useLeaveClubStore } from '../store/leaveClubStore';
 import { useOfficerStore } from '../store/officerStore';
+import { useSidebarStore } from '../store/sidebarStore';
 
 // ─── Centralized authenticated-session teardown ──────────────────────────────
 //
@@ -109,6 +111,11 @@ export async function tearDownAuthenticatedSession(
   // 6. Reset user-scoped zustand stores so no club/officer/scroll state bleeds
   //    into the next session. (zustand v4 has no getInitialState() — the
   //    data fields are reset explicitly; actions are left in place.)
+  //
+  //    The sidebar is included on purpose: it is an overlay driven by state, so
+  //    without this reset an open drawer (or a pending "reopen me on Back")
+  //    would survive the teardown and could reappear over Welcome, or over the
+  //    next account that signs in on this device.
   try {
     useHomeTabStore.setState({
       activeTab: 'events',
@@ -117,6 +124,7 @@ export async function tearDownAuthenticatedSession(
     });
     useLeaveClubStore.setState({ request: null });
     useOfficerStore.getState().reset();
+    useSidebarStore.getState().reset();
   } catch {
     /* non-fatal */
   }
@@ -126,6 +134,27 @@ export async function tearDownAuthenticatedSession(
   //    request never lands the refresh token simply expires on its own. Awaiting
   //    it here is what used to make logout feel slow.
   void revokeRefreshTokenInBackground();
+}
+
+/**
+ * Lands the user on a genuinely full-screen Welcome after the session has been
+ * torn down. Call it from a screen that was PUSHED over the authenticated tree
+ * (Account Center after a confirmed deletion); a plain logout from the sidebar
+ * overlay needs nothing, because the tabs guard already replaces the tree.
+ *
+ * `dismissAll()` first, then `replace()`. Dismissing pops the pushed screen off
+ * so the stack is left holding exactly one entry — Welcome — which is what makes
+ * Welcome a normal full-screen root screen with no Back path, no iOS swipe-back
+ * path and no Android Back path into anything authenticated. This is correct
+ * whether or not the tabs guard's own redirect has committed yet.
+ */
+export function resetToWelcome(router: Router): void {
+  try {
+    if (router.canDismiss()) router.dismissAll();
+  } catch {
+    // Nothing to dismiss (already the only screen) — the replace below is enough.
+  }
+  router.replace('/welcome');
 }
 
 let pendingRevocationToken: string | null = null;
