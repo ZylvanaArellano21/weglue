@@ -279,12 +279,25 @@ BEGIN
     v_cnt = 1 AND v_cnt2 = 0, 'a=' || v_cnt || ' b=' || v_cnt2);
 
   -- ════ 9. event update + cancel ══════════════════════════════
+  -- Dedicated fixture: created by A, B is Going (a creator's own RSVP never
+  -- notifies the creator — verified as 9d below).
+  INSERT INTO events (club_id, created_by, title, event_date, start_time, end_time, visibility)
+  VALUES (
+    v_club, v_ua, 'Test 046 Editable',
+    ((now() + interval '3 days') AT TIME ZONE 'America/Chicago')::date,
+    '18:00'::time, '19:00'::time, 'members'
+  ) RETURNING id INTO v_event;
+  INSERT INTO event_rsvps (event_id, user_id, status) VALUES (v_event, v_ub, 'going');
+
   UPDATE events SET location = 'New location' WHERE id = v_event;
   UPDATE events SET location = 'Even newer location' WHERE id = v_event;
   SELECT count(*), max(group_count) INTO v_cnt, v_cnt2 FROM notifications
   WHERE type = 'event_updated' AND entity_id = v_event AND user_id = v_ub;
   INSERT INTO t_results VALUES ('9a repeated edits merge into one update',
     v_cnt = 1 AND v_cnt2 = 2, 'rows=' || v_cnt || ' count=' || COALESCE(v_cnt2, -1));
+  SELECT count(*) INTO v_cnt FROM notifications
+  WHERE type = 'event_updated' AND entity_id = v_event AND user_id = v_ua;
+  INSERT INTO t_results VALUES ('9d creator never notified of own edit', v_cnt = 0, '');
 
   DELETE FROM events WHERE id = v_event;
   SELECT count(*) INTO v_cnt FROM notifications
@@ -311,6 +324,12 @@ BEGIN
   INSERT INTO t_results VALUES ('10c work table drained', v_cnt = 0, '');
 
   -- ════ 11. unread summary ════════════════════════════════════
+  -- now() is frozen inside this transaction, so joined_at equals every
+  -- message's created_at; backdate the join (in reality joins always precede
+  -- other people's messages) so the strict > comparison is meaningful.
+  UPDATE conversation_participants SET joined_at = now() - interval '1 hour'
+  WHERE user_id = v_ub;
+
   SELECT get_unread_summary_for(v_ub) INTO v_json;
   INSERT INTO t_results VALUES ('11a summary shape + counts',
     (v_json ->> 'unread_notifications')::int > 0 AND (v_json ->> 'unread_threads')::int >= 1,

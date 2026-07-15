@@ -129,7 +129,10 @@ INSERT INTO notification_types
   ('chat_invite_joined','clubs', true,  true,  true,  0,    false, 'Someone joined via your chat invite'),
   ('club_inactive',    'clubs',  true,  true,  false, 0,    false, 'Club inactivity warning (system)'),
   -- events
-  ('event_updated',            'events', true, true, true, 1440, true,  'Event time/location changed (edits merge)'),
+  -- group_dedupe_actor stays FALSE: every edit must REFRESH the one unread
+  -- row (message + recency) even when the same officer edits repeatedly;
+  -- the min-gap throttle still caps pushes at one per window.
+  ('event_updated',            'events', true, true, true, 1440, false, 'Event time/location changed (edits merge)'),
   ('event_canceled',           'events', true, true, true, 0,    false, 'Event canceled'),
   ('event_reminder_tomorrow',  'events', true, true, true, 0,    false, 'Event is tomorrow (Going)'),
   ('event_reminder_hour',      'events', true, true, true, 0,    false, 'Event in one hour (Going)'),
