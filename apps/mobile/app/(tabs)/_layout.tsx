@@ -106,12 +106,13 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="messages"
         options={{
+          // Badge stays INSIDE the wrapper bounds (Android clips overhang).
           tabBarIcon: ({ color, focused }) => (
-            <View style={{ width: 34, height: 30, alignItems: "center", justifyContent: "center" }}>
+            <View style={{ width: 38, height: 32, alignItems: "center", justifyContent: "center" }}>
               <Ionicons name={focused ? "chatbubble" : "chatbubble-outline"} size={27} color={color} />
               <CountBadge
                 count={unreadThreads}
-                style={{ position: "absolute", top: -3, right: -4 }}
+                style={{ position: "absolute", top: 0, right: 0 }}
               />
             </View>
           ),

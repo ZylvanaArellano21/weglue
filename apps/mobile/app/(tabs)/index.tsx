@@ -205,9 +205,11 @@ export default function HomeScreen() {
                 }}
               >
                 <Ionicons name="person-add-outline" size={20} color="#0FA6A6" />
+                {/* Positioned INSIDE the button bounds: Android clips children
+                    that overhang their parent. */}
                 <CountBadge
                   count={unreadNotifications}
-                  style={{ position: 'absolute', top: -5, right: -5 }}
+                  style={{ position: 'absolute', top: -1, right: -1 }}
                 />
               </TouchableOpacity>
             </View>
