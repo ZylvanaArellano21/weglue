@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -59,14 +58,11 @@ export default function NotificationsScreen() {
 
   // Live inserts are handled by the app-wide subscription in (tabs)/_layout.
 
-  // Mark everything read when LEAVING the screen, so the unread highlight
-  // stays visible for the whole visit (marking on mount wiped it instantly).
-  const markReadRef = useRef(markRead);
-  markReadRef.current = markRead;
-  useEffect(() => {
-    if (!userId) return;
-    return () => markReadRef.current();
-  }, [userId]);
+  // Read state changes ONLY on explicit user action: opening a row marks that
+  // row, the header's "Mark all as read" marks everything. Merely visiting,
+  // scrolling, backgrounding or leaving this screen never touches read state —
+  // the old mark-all-on-unmount cleanup silently wiped every unread
+  // notification on Back/tab-switch and is intentionally gone.
 
   // Where a tapped row goes: the server's structured route (validated against
   // the allowlist) when present, then the legacy type/entity fallback for old

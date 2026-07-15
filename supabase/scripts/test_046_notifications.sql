@@ -48,6 +48,7 @@ DECLARE
   v_bool BOOLEAN;
   v_json JSONB;
   v_notif notifications%ROWTYPE;
+  v_notif_id UUID;
 BEGIN
   -- ── fixtures: synthetic users (auth trigger may or may not create the
   --    profile row depending on metadata; both paths are handled) ─────────
@@ -350,6 +351,55 @@ BEGIN
   WHERE user_id = v_ub AND read = true LIMIT 1;
   INSERT INTO t_results VALUES ('11c read-all zeroes badge + stamps read_at',
     (v_json ->> 'unread_notifications')::int = 0 AND v_bool, v_json::text);
+
+  -- ════ 13. read semantics (fix/notification-read-semantics) ══
+  -- Read state changes ONLY via explicit single-row open or explicit
+  -- mark-all; nothing else. 11c left B with zero unread.
+
+  -- New activity AFTER a mark-all arrives unread (mark-all never affects
+  -- future rows).
+  INSERT INTO posts (author_id, post_type, image_url, caption)
+  VALUES (v_ub, 'picture', 'https://example.com/t2.jpg', 'second')
+  RETURNING id INTO v_post;
+  INSERT INTO post_likes (post_id, user_id) VALUES (v_post, v_ua);
+  INSERT INTO post_comments (post_id, user_id, content) VALUES (v_post, v_uc, 'nice one');
+  SELECT (get_unread_summary_for(v_ub) ->> 'unread_notifications')::int INTO v_cnt;
+  INSERT INTO t_results VALUES ('13a new activity after mark-all is unread',
+    v_cnt = 2, 'unread=' || v_cnt);
+
+  -- Opening ONE row (single-id update — the only client open path) marks
+  -- exactly that row; the other stays unread and the badge drops by one.
+  SELECT id INTO v_notif_id FROM notifications
+  WHERE user_id = v_ub AND read = false AND type = 'like' LIMIT 1;
+  UPDATE notifications SET read = true WHERE id = v_notif_id AND read = false;
+  SELECT (get_unread_summary_for(v_ub) ->> 'unread_notifications')::int INTO v_cnt;
+  SELECT count(*) INTO v_cnt2 FROM notifications
+  WHERE user_id = v_ub AND read = false AND type = 'comment';
+  INSERT INTO t_results VALUES ('13b open-one marks exactly one',
+    v_cnt = 1 AND v_cnt2 = 1, 'unread=' || v_cnt);
+
+  -- Marking notifications read never touches message-thread unread state.
+  -- (Backdate the 11b channel read: now() is frozen in this transaction, so
+  -- the new message would otherwise share the read timestamp exactly.)
+  INSERT INTO messages (conversation_id, channel_id, sender_id, content)
+  VALUES (v_conv, v_main_channel, v_ua, 'independent thread message');
+  UPDATE channel_reads SET last_read_at = now() - interval '1 minute'
+  WHERE channel_id = v_main_channel AND user_id = v_ub;
+  UPDATE notifications SET read = true WHERE user_id = v_ub AND read = false;
+  SELECT get_unread_summary_for(v_ub) INTO v_json;
+  INSERT INTO t_results VALUES ('13c mark-all leaves message threads alone',
+    (v_json ->> 'unread_notifications')::int = 0
+    AND (v_json ->> 'unread_threads')::int = 1, v_json::text);
+
+  -- And reading the thread never touches notification records.
+  INSERT INTO post_likes (post_id, user_id) VALUES (v_post, v_uc);
+  INSERT INTO channel_reads (channel_id, user_id, last_read_at)
+  VALUES (v_main_channel, v_ub, now())
+  ON CONFLICT (channel_id, user_id) DO UPDATE SET last_read_at = now();
+  SELECT get_unread_summary_for(v_ub) INTO v_json;
+  INSERT INTO t_results VALUES ('13d thread read leaves notifications alone',
+    (v_json ->> 'unread_notifications')::int = 1
+    AND (v_json ->> 'unread_threads')::int = 0, v_json::text);
 
   -- ════ 12. cron jobs ═════════════════════════════════════════
   SELECT count(*) INTO v_cnt FROM cron.job
