@@ -291,10 +291,12 @@ export default function ChatInfo() {
   // ── Channel picture (officer) ──
   async function onChannelPicturePress() {
     if (!isOfficer || !channelId) return;
-    // Android: shared We Glue flow; iOS keeps its existing picker path.
+    // Android: shared We Glue flow. Tapping the avatar → 'choose' (Take Photo /
+    // Photo Library), then camera or picker + confirm preview. iOS keeps its
+    // existing library-only path. Square 1:1 avatar preserved.
     let localUri: string;
     if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'library', aspect: [1, 1], allowsEditing: true, quality: 0.85 });
+      const picked = await pickMedia({ source: 'choose', aspect: [1, 1], allowsEditing: true, quality: 0.85 });
       if (!picked) return;
       localUri = picked.uri;
     } else {
@@ -411,9 +413,12 @@ export default function ChatInfo() {
       onIdentityPress();
       return;
     }
+    // Android: shared We Glue flow. Tapping the avatar → 'choose' (Take Photo /
+    // Photo Library), then camera or picker + confirm preview. iOS keeps its
+    // existing library-only path. Square 1:1 avatar preserved.
     let localUri: string;
     if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'library', aspect: [1, 1], allowsEditing: true, quality: 0.85 });
+      const picked = await pickMedia({ source: 'choose', aspect: [1, 1], allowsEditing: true, quality: 0.85 });
       if (!picked) return;
       localUri = picked.uri;
     } else {

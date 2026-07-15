@@ -571,11 +571,12 @@ export default function EditClubScreen() {
     const aspect: [number, number] = type === 'banner' ? [16, 9] : [1, 1];
     let localUri: string;
 
-    // Android: shared We Glue flow (custom camera + confirm preview). iOS keeps
-    // its existing expo-image-picker path. Banner 16:9 and avatar 1:1 ratios
-    // are preserved on both platforms.
+    // Android: shared We Glue flow. The screen has a single "change image" tap
+    // with no source buttons, so 'choose' shows Take Photo / Photo Library
+    // first, then the custom camera or OS picker + confirm preview. iOS keeps
+    // its existing library-only path. Banner 16:9 / avatar 1:1 ratios preserved.
     if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'library', aspect, allowsEditing: true, quality: 0.85 });
+      const picked = await pickMedia({ source: 'choose', aspect, allowsEditing: true, quality: 0.85 });
       if (!picked) return;
       localUri = picked.uri;
     } else {

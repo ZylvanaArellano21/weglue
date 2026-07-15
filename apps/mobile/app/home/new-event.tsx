@@ -172,10 +172,11 @@ export default function NewEventScreen() {
   };
 
   const handlePickImage = async () => {
-    // Android: shared We Glue flow (custom camera + confirm preview). iOS keeps
-    // its existing expo-image-picker path. Event image keeps its 4:5 ratio.
+    // Android: shared We Glue flow. Single "add image" tap → 'choose' shows
+    // Take Photo / Photo Library first, then camera or picker + confirm
+    // preview. iOS keeps its existing library-only path. Event 4:5 preserved.
     if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'library', aspect: [4, 5], allowsEditing: true, quality: 0.8 });
+      const picked = await pickMedia({ source: 'choose', aspect: [4, 5], allowsEditing: true, quality: 0.8 });
       if (picked) await uploadSelectedEventImage(picked.uri);
       return;
     }

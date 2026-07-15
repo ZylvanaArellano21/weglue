@@ -8,10 +8,13 @@ import type { PickMediaRequest, PickedMedia } from '../../lib/media/types';
 import { AndroidCameraScreen } from './AndroidCameraScreen';
 import { AndroidPreviewScreen } from './AndroidPreviewScreen';
 import { CameraPermissionScreen } from './CameraPermissionScreen';
+import { PhotoSourceSheet } from './PhotoSourceSheet';
 import { mediaColors } from './mediaTheme';
 
 type Stage =
   | { kind: 'closed' }
+  // Take Photo / Photo Library chooser, for source:'choose' requests.
+  | { kind: 'choose' }
   | { kind: 'permission'; variant: 'explain' | 'blocked' }
   | { kind: 'camera' }
   | { kind: 'preview'; picked: PickedMedia; mode: 'camera' | 'library' };
@@ -115,12 +118,30 @@ export function MediaPickerHost() {
     activeId.current = request.id;
     settledFor.current = null;
 
-    if (request.options.source === 'camera') {
+    if (request.options.source === 'choose') {
+      // Screens with a single "change image" tap and no source buttons of their
+      // own: ask camera-vs-library first. Back / backdrop here cancels cleanly.
+      setStage({ kind: 'choose' });
+    } else if (request.options.source === 'camera') {
       void ensureCameraPermission(request.id);
     } else {
       void openLibrary(request.id, request.options, () => finish(null));
     }
   }, [request, ensureCameraPermission, openLibrary, finish]);
+
+  // Chooser selections. Library reuses the same options (ratio/crop preserved);
+  // cancelling the picker from here returns to the chooser, not out of the flow.
+  const chooseCamera = useCallback(() => {
+    const id = activeId.current;
+    if (id != null) void ensureCameraPermission(id);
+  }, [ensureCameraPermission]);
+
+  const chooseLibrary = useCallback(() => {
+    const id = activeId.current;
+    const options = useMediaPickerStore.getState().request?.options;
+    if (id == null || !options) return;
+    void openLibrary(id, options, () => setStage({ kind: 'choose' }));
+  }, [openLibrary]);
 
   const handleUse = useCallback(async () => {
     if (stage.kind !== 'preview') return;
@@ -159,8 +180,8 @@ export function MediaPickerHost() {
       setStage({ kind: 'camera' });
       return;
     }
-    // Live camera, gallery preview and the permission screens all cancel back
-    // to the calling feature, leaving its image untouched.
+    // Chooser, live camera, gallery preview and the permission screens all
+    // cancel back to the calling feature, leaving its image untouched.
     finish(null);
   }, [stage, finish]);
 
@@ -195,12 +216,26 @@ export function MediaPickerHost() {
       // pre-inset and the controls would be padded twice.
       statusBarTranslucent
       navigationBarTranslucent
-      transparent={false}
+      // Transparent so the chooser reads as a bottom sheet over the dimmed app.
+      // The camera / preview / permission stages each paint their own opaque
+      // full-screen background, so they still look identical.
+      transparent
     >
-      <View style={styles.root}>
+      <View style={stage.kind === 'choose' ? styles.transparentRoot : styles.root}>
         {/* The camera is black; the app's normal dark status-bar text would be
-            invisible on it. */}
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+            invisible on it. The chooser sits over the app, so it keeps the
+            app's own status-bar styling. */}
+        {stage.kind !== 'choose' ? (
+          <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        ) : null}
+
+        {stage.kind === 'choose' ? (
+          <PhotoSourceSheet
+            onCamera={chooseCamera}
+            onLibrary={chooseLibrary}
+            onCancel={() => finish(null)}
+          />
+        ) : null}
 
         {stage.kind === 'camera' ? (
           <AndroidCameraScreen
@@ -243,4 +278,6 @@ export function MediaPickerHost() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: mediaColors.dark },
+  // Chooser stage: let the dimmed app show through the transparent modal.
+  transparentRoot: { flex: 1, backgroundColor: 'transparent' },
 });

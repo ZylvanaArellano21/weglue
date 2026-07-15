@@ -13,8 +13,17 @@
 
 export type MediaSource = 'camera' | 'library';
 
+/**
+ * What a caller asks for:
+ *   'camera'  → straight to the We Glue camera (screen has its own Camera button)
+ *   'library' → straight to the OS photo picker (screen has its own Library button)
+ *   'choose'  → show the Take Photo / Photo Library sheet first (screen had a
+ *               single "change image" tap and no source buttons of its own)
+ */
+export type MediaRequestSource = MediaSource | 'choose';
+
 export interface PickMediaRequest {
-  source: MediaSource;
+  source: MediaRequestSource;
   /**
    * Feature crop ratio as [width, height] — avatars [1,1], club banner [16,9],
    * event image [4,5]. Omit for free-form (posts, chat).
