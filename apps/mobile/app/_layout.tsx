@@ -26,6 +26,7 @@ import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
 import { useInviteDeepLink } from "../hooks/useInviteDeepLink";
 import { LeaveClubHost } from "../components/club/LeaveClubHost";
 import { SidebarHost } from "../components/sidebar/SidebarHost";
+import { MediaPickerHost } from "../components/media/MediaPickerHost";
 import { timedQuery } from "../lib/timedQuery";
 import {
   clearCachedProfile,
@@ -266,6 +267,11 @@ export default function RootLayout() {
           can exist at a time, so the sole-officer note can never stack on a
           leave confirmation (screens raise requests via requestLeaveClub). */}
       <LeaveClubHost />
+      {/* The single app-wide Android camera / photo-preview host. One camera
+          implementation for every image entry point; renders nothing on iOS,
+          which keeps its existing expo-image-picker flow (screens raise
+          requests via pickMedia). */}
+      <MediaPickerHost />
     </PersistQueryClientProvider>
   );
 }

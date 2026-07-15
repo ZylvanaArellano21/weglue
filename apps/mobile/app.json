@@ -170,6 +170,14 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "We Glue uses your camera to take photos for your profile, posts, events, clubs, and chats.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "We Glue needs access to your photo library to save photos and videos from your chats.",

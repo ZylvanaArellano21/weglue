@@ -25,6 +25,7 @@ import { useToast } from '../../../components/Toast';
 import { Avatar } from '../../../components/shared/Avatar';
 import { AddOfficerSheet } from '../../../components/club/AddOfficerSheet';
 import * as ImagePicker from 'expo-image-picker';
+import { pickMedia, useWeGlueMediaFlow } from '../../../lib/media/pickMedia';
 import {
   updateClubProfile,
   updateClubGoals,
@@ -567,24 +568,36 @@ export default function EditClubScreen() {
   }
 
   async function pickImage(type: 'banner' | 'avatar') {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(
-        'Photos access needed',
-        'Please enable photo library access in Settings to update club images.',
-      );
-      return;
+    const aspect: [number, number] = type === 'banner' ? [16, 9] : [1, 1];
+    let localUri: string;
+
+    // Android: shared We Glue flow (custom camera + confirm preview). iOS keeps
+    // its existing expo-image-picker path. Banner 16:9 and avatar 1:1 ratios
+    // are preserved on both platforms.
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'library', aspect, allowsEditing: true, quality: 0.85 });
+      if (!picked) return;
+      localUri = picked.uri;
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Photos access needed',
+          'Please enable photo library access in Settings to update club images.',
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect,
+        quality: 0.85,
+      });
+
+      if (result.canceled || !result.assets[0]) return;
+      localUri = result.assets[0].uri;
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: type === 'banner' ? [16, 9] : [1, 1],
-      quality: 0.85,
-    });
-
-    if (result.canceled || !result.assets[0]) return;
-    const localUri = result.assets[0].uri;
 
     if (type === 'banner') {
       setUploadingBanner(true);

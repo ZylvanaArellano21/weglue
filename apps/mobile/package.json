@@ -29,6 +29,7 @@
     "@tanstack/react-query-persist-client": "^5.101.2",
     "@weglue/shared": "workspace:*",
     "expo": "~54.0.35",
+    "expo-camera": "~17.0.10",
     "expo-clipboard": "^8.0.8",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.21",

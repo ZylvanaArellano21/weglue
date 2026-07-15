@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
 import type { AttachmentDraft } from '../../hooks/useConversation';
 import {
   MAX_FILE_BYTES,
@@ -89,6 +90,21 @@ export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) 
   );
 
   async function pickCamera() {
+    // Android: shared We Glue camera + confirm preview. Use Photo hands the
+    // confirmed image straight to the existing optimistic-send pipeline via
+    // onPicked, so nothing sends merely because the shutter was tapped.
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'camera', quality: 0.85 });
+      if (!picked) return;
+      onPicked({
+        localUri: picked.uri,
+        kind: 'image',
+        name: picked.fileName,
+        size: picked.fileSize,
+        mime: picked.mimeType,
+      });
+      return;
+    }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
       Alert.alert(
@@ -110,6 +126,21 @@ export function AttachmentSheet({ visible, onClose, onPicked, onError }: Props) 
   }
 
   async function pickLibrary() {
+    // Android: official system photo picker (allows video) + a We Glue confirm
+    // preview for images. Video keeps its existing path (no preview) so video
+    // sending is unchanged.
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'library', quality: 0.85, allowVideo: true });
+      if (!picked) return;
+      onPicked({
+        localUri: picked.uri,
+        kind: picked.kind,
+        name: picked.fileName,
+        size: picked.fileSize,
+        mime: picked.mimeType,
+      });
+      return;
+    }
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert(

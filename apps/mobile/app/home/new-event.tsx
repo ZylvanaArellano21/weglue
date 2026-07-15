@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
 import { createEvent, updateEvent, getEventForEdit } from '../../services/eventService';
@@ -154,7 +155,30 @@ export default function NewEventScreen() {
     c.name.toLowerCase().includes(clubSearch.toLowerCase()),
   );
 
+  // Selection is durably uploaded before it counts as chosen, so a cancel
+  // mid-flow never leaves a dangling local URI in the form state.
+  const uploadSelectedEventImage = async (uri: string) => {
+    setImageUri(uri);
+    setUploading(true);
+    try {
+      const uploaded = await uploadEventImage(userId!, uri);
+      setImageUrl(uploaded);
+    } catch {
+      show('Failed to upload image. Try again.', 'error');
+      setImageUri(null);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handlePickImage = async () => {
+    // Android: shared We Glue flow (custom camera + confirm preview). iOS keeps
+    // its existing expo-image-picker path. Event image keeps its 4:5 ratio.
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'library', aspect: [4, 5], allowsEditing: true, quality: 0.8 });
+      if (picked) await uploadSelectedEventImage(picked.uri);
+      return;
+    }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       show('Photo library access is required to add an event image.', 'error');
@@ -167,18 +191,7 @@ export default function NewEventScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      const uri = result.assets[0].uri;
-      setImageUri(uri);
-      setUploading(true);
-      try {
-        const uploaded = await uploadEventImage(userId!, uri);
-        setImageUrl(uploaded);
-      } catch {
-        show('Failed to upload image. Try again.', 'error');
-        setImageUri(null);
-      } finally {
-        setUploading(false);
-      }
+      await uploadSelectedEventImage(result.assets[0].uri);
     }
   };
 

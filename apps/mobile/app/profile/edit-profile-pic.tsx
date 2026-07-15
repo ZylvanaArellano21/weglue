@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
 import { useAuthStore } from '@weglue/shared';
 import { useOwnProfile, useUpdateProfileAvatar } from '../../hooks/useOwnProfile';
 import { uploadImageToBucket } from '../../lib/imageUpload';
@@ -51,7 +52,24 @@ export default function EditProfilePicScreen() {
     !!previewUri || !!previewPreset || (showTextInput && !!textInput.trim());
   const hasPendingChange = hasUnsavedSelection && !saved;
 
+  // Android routes through the shared We Glue flow (custom camera + confirm
+  // preview); iOS keeps its existing expo-image-picker path unchanged.
+  const applyPickedAvatar = (uri: string, source: 'photo' | 'camera') => {
+    setPreviewUri(uri);
+    setPendingUriType(source);
+    setPreviewPreset(null);
+    setTextInput('');
+    setShowTextInput(false);
+    setSaved(false);
+  };
+
   const onPickFromLibrary = async () => {
+    if (useWeGlueMediaFlow) {
+      setPhotoDenied(false);
+      const picked = await pickMedia({ source: 'library', aspect: [1, 1], allowsEditing: true, quality: 0.8 });
+      if (picked) applyPickedAvatar(picked.uri, 'photo');
+      return;
+    }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status === 'denied') {
       setPhotoDenied(true);
@@ -78,6 +96,12 @@ export default function EditProfilePicScreen() {
   };
 
   const onPickFromCamera = async () => {
+    if (useWeGlueMediaFlow) {
+      setCameraDenied(false);
+      const picked = await pickMedia({ source: 'camera', aspect: [1, 1], quality: 0.8 });
+      if (picked) applyPickedAvatar(picked.uri, 'camera');
+      return;
+    }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status === 'denied') {
       setCameraDenied(true);

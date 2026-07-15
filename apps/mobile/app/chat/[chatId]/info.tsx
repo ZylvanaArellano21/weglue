@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
+import { pickMedia, useWeGlueMediaFlow } from '../../../lib/media/pickMedia';
 import { useChatDetails } from '../../../hooks/useChats';
 import { Avatar } from '../../../components/shared/Avatar';
 import { ConfirmationModal } from '../../../components/chat/ConfirmationModal';
@@ -290,12 +291,21 @@ export default function ChatInfo() {
   // ── Channel picture (officer) ──
   async function onChannelPicturePress() {
     if (!isOfficer || !channelId) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.85, allowsEditing: true, aspect: [1, 1] });
-    if (result.canceled || !result.assets[0]) return;
+    // Android: shared We Glue flow; iOS keeps its existing picker path.
+    let localUri: string;
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'library', aspect: [1, 1], allowsEditing: true, quality: 0.85 });
+      if (!picked) return;
+      localUri = picked.uri;
+    } else {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.85, allowsEditing: true, aspect: [1, 1] });
+      if (result.canceled || !result.assets[0]) return;
+      localUri = result.assets[0].uri;
+    }
     try {
-      const url = await uploadImageToBucket('avatars', `${userId}/channel-${channelId}.jpg`, result.assets[0].uri, 512);
+      const url = await uploadImageToBucket('avatars', `${userId}/channel-${channelId}.jpg`, localUri, 512);
       await setChannelAvatar(channelId, url);
       setChannelMeta((m) => (m ? { ...m, avatar_url: url } : m));
       invalidateAll();
@@ -401,12 +411,20 @@ export default function ChatInfo() {
       onIdentityPress();
       return;
     }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.85, allowsEditing: true, aspect: [1, 1] });
-    if (result.canceled || !result.assets[0]) return;
+    let localUri: string;
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'library', aspect: [1, 1], allowsEditing: true, quality: 0.85 });
+      if (!picked) return;
+      localUri = picked.uri;
+    } else {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.85, allowsEditing: true, aspect: [1, 1] });
+      if (result.canceled || !result.assets[0]) return;
+      localUri = result.assets[0].uri;
+    }
     try {
-      const url = await uploadImageToBucket('avatars', `${userId}/group-${chatId}.jpg`, result.assets[0].uri, 512);
+      const url = await uploadImageToBucket('avatars', `${userId}/group-${chatId}.jpg`, localUri, 512);
       await updateGroupMeta(chatId, { avatar_url: url });
       invalidateAll();
     } catch {

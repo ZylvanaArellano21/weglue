@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
 import { useAuthStore } from '@weglue/shared';
 import { createPost } from '../../services/postService';
 import { getAllClubs, UserClub } from '../../services/clubService';
@@ -45,7 +46,14 @@ export default function NewPostScreen() {
     c.name.toLowerCase().includes(clubSearch.toLowerCase()),
   );
 
+  // Android routes through the shared We Glue flow; iOS keeps its existing
+  // expo-image-picker path. Posts keep their free-form (uncropped) image.
   const handlePickFromLibrary = async () => {
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'library', quality: 0.8 });
+      if (picked) setImageUri(picked.uri);
+      return;
+    }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       show('We Glue needs access to your photo library to share photos in posts.', 'error');
@@ -62,6 +70,11 @@ export default function NewPostScreen() {
   };
 
   const handlePickFromCamera = async () => {
+    if (useWeGlueMediaFlow) {
+      const picked = await pickMedia({ source: 'camera', quality: 0.8 });
+      if (picked) setImageUri(picked.uri);
+      return;
+    }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
       show('We Glue needs access to your camera to take photos for posts.', 'error');
