@@ -15,29 +15,20 @@ export type ActorFollowState = 'not_following' | 'pending' | 'following';
 
 export interface AppNotification {
   id: string;
-  type:
-    | 'follow_request'
-    | 'follow_accepted'
-    | 'new_follower'
-    | 'like'
-    | 'comment'
-    | 'event_rsvp'
-    | 'new_event'
-    | 'new_message'
-    | 'gluemate'
-    | 'club_inactive'
-    | 'club_chat_added'
-    | 'officer_chat_added'
-    | 'officer_role'
-    | 'officer_removed'
-    | 'club_joined'
-    | 'member_joined';
+  /** Open set: the server-side notification_types registry (migration 046)
+   * is authoritative; unknown values render with the generic fallback. */
+  type: string;
   sender: NotificationSender | null;
   reference_id: string | null;
   entity_type: 'event' | 'club' | 'message' | 'post' | null;
   /** Pre-rendered copy from the DB trigger (club/chat notifications) —
    * shown verbatim when present. */
   message: string | null;
+  /** Structured destination from the server (validated client-side before
+   * navigating — see lib/notifications/routes.ts). */
+  route: Record<string, unknown> | null;
+  /** Grouped rows ("Camila and 4 others liked your post"): total actions. */
+  group_count: number;
   actor_follow_state: ActorFollowState;
   is_read: boolean;
   created_at: string;
@@ -52,7 +43,7 @@ export async function getNotifications(userId: string): Promise<NotificationSect
   const { data, error } = await supabase
     .from('notifications')
     .select(`
-      id, type, entity_id, entity_type, read, created_at, message,
+      id, type, entity_id, entity_type, read, created_at, message, route, group_count,
       profiles!notifications_actor_id_fkey(id, username, avatar_url)
     `)
     .eq('user_id', userId)
@@ -107,6 +98,8 @@ export async function getNotifications(userId: string): Promise<NotificationSect
       reference_id: n.entity_id ?? null,
       entity_type: n.entity_type ?? null,
       message: n.message ?? null,
+      route: n.route ?? null,
+      group_count: n.group_count ?? 1,
       actor_follow_state: n.profiles
         ? followStateMap.get(n.profiles.id) ?? 'not_following'
         : 'not_following',
@@ -154,5 +147,14 @@ export async function markNotificationsRead(userId: string): Promise<void> {
     .from('notifications')
     .update({ read: true })
     .eq('user_id', userId)
+    .eq('read', false);
+}
+
+/** Mark ONE notification read (on open) — realtime UPDATE syncs other devices. */
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  await supabase
+    .from('notifications')
+    .update({ read: true })
+    .eq('id', notificationId)
     .eq('read', false);
 }

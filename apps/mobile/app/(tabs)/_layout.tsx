@@ -5,6 +5,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
 import { useRealtimeNotifications } from "../../hooks/useNotifications";
 import { useClubRealtimeSync } from "../../hooks/useClubRealtimeSync";
+import { useUnreadSummaryValue } from "../../hooks/useUnreadSummary";
+import { CountBadge } from "../../components/shared/CountBadge";
 
 export default function TabsLayout() {
   const { session, isLoading, profile } = useAuthStore();
@@ -19,6 +21,11 @@ export default function TabsLayout() {
   // add/remove, club renames and channel changes propagate live to every
   // screen and device without a manual refresh.
   useClubRealtimeSync(session?.user.id);
+
+  // Messages tab badge: unread THREADS (a conversation/channel with 20 unread
+  // messages counts once). Kept live by PushNotificationsHost's subscription.
+  const { data: unreadSummary } = useUnreadSummaryValue(session?.user.id);
+  const unreadThreads = unreadSummary?.unread_threads ?? 0;
 
   if (isLoading) {
     return (
@@ -100,7 +107,13 @@ export default function TabsLayout() {
         name="messages"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "chatbubble" : "chatbubble-outline"} size={27} color={color} />
+            <View style={{ width: 34, height: 30, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name={focused ? "chatbubble" : "chatbubble-outline"} size={27} color={color} />
+              <CountBadge
+                count={unreadThreads}
+                style={{ position: "absolute", top: -3, right: -4 }}
+              />
+            </View>
           ),
         }}
       />

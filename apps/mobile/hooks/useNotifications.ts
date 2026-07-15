@@ -112,6 +112,8 @@ export function useMarkNotificationsRead(userId: string | undefined) {
     mutationFn: () => markNotificationsRead(userId!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+      // Entry badge + app icon badge react immediately.
+      queryClient.invalidateQueries({ queryKey: ['unreadSummary', userId] });
     },
   });
 }

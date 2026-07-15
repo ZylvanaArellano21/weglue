@@ -19,6 +19,8 @@ import { useDismissPicturePrompt } from '../../hooks/usePicturePrompt';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
 import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
+import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
+import { CountBadge } from '../../components/shared/CountBadge';
 
 type ActiveTab = 'posts' | 'events';
 
@@ -35,6 +37,11 @@ export default function HomeScreen() {
 
   const userId = session?.user.id;
   const firstName = profile?.full_name?.split(' ')[0] ?? profile?.username ?? '';
+
+  // Unread count for the existing notifications entry (kept live app-wide by
+  // PushNotificationsHost; this is a cache read, no extra subscription).
+  const { data: unreadSummary } = useUnreadSummaryValue(userId);
+  const unreadNotifications = unreadSummary?.unread_notifications ?? 0;
 
   // Keep officer status fresh: on mount AND every time Home regains focus, so
   // gaining/losing an officer role flips the plus-menu Event option and the
@@ -198,6 +205,10 @@ export default function HomeScreen() {
                 }}
               >
                 <Ionicons name="person-add-outline" size={20} color="#0FA6A6" />
+                <CountBadge
+                  count={unreadNotifications}
+                  style={{ position: 'absolute', top: -5, right: -5 }}
+                />
               </TouchableOpacity>
             </View>
           </View>

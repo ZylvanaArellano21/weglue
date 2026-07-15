@@ -37,6 +37,7 @@ import {
 import { resolveAttachmentUrl } from '../../lib/chatAttachments';
 import { displayNameOrFallback } from '../../lib/displayName';
 import { markConversationRead } from '../../services/chatService';
+import { setActiveThread, clearActiveThread } from '../../lib/notifications/activeThread';
 import { chatColors, chatFonts } from './chatTheme';
 
 // ─── Shared conversation thread ──────────────────────────────────────────────
@@ -119,6 +120,14 @@ export function ConversationThread({
       void markConversationRead(conversationId);
     }
   }, [conversationId, serverMessages.length]);
+
+  // While THIS thread is on screen, its pushes never banner (the foreground
+  // handler checks this); leaving the screen re-enables them.
+  useEffect(() => {
+    if (!conversationId) return;
+    setActiveThread(conversationId, channelId ?? null);
+    return () => clearActiveThread(conversationId);
+  }, [conversationId, channelId]);
 
   // Merged render list: server messages then local pending (chronological).
   type Row =

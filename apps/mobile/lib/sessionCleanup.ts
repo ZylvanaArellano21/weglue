@@ -1,9 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import type { Router } from 'expo-router';
 import type { QueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
 import { supabase } from './supabase';
 import { clearCachedProfile } from './profileCache';
+import { deactivateCurrentPushToken } from './notifications/registerPush';
 import { useHomeTabStore } from '../store/homeTabStore';
 import { useLeaveClubStore } from '../store/leaveClubStore';
 import { useOfficerStore } from '../store/officerStore';
@@ -53,6 +55,19 @@ export async function tearDownAuthenticatedSession(
   queryClient: QueryClient,
   userId?: string,
 ): Promise<void> {
+  // 0. Push token OFF for this device+account, while the session can still
+  //    authenticate the RPC. Time-boxed so a dead connection can't delay the
+  //    local logout below (the receipts loop cleans up if this loses).
+  try {
+    await Promise.race([
+      deactivateCurrentPushToken(),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch {
+    // Best-effort only.
+  }
+  // The icon badge belongs to the account that just left.
+  void Notifications.setBadgeCountAsync(0).catch(() => {});
   // 1. Stop realtime first so no subscription callback can rehydrate a cache
   //    we are about to wipe (a live message arriving mid-logout would
   //    otherwise repopulate the query cache after clear()).

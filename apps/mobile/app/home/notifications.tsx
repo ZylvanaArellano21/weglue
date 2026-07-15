@@ -21,15 +21,22 @@ import { Avatar } from '../../components/shared/Avatar';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { timeAgo } from '../../components/home/PostCard';
-import type { AppNotification } from '../../services/notificationService';
+import { markNotificationRead, type AppNotification } from '../../services/notificationService';
+import { validateNotificationRoute } from '../../lib/notifications/routes';
+import { EnableNotificationsCard } from '../../components/notifications/EnableNotificationsCard';
 
-function notificationDescription(type: AppNotification['type']): string {
-  switch (type) {
+function notificationDescription(item: AppNotification): string {
+  // Grouped social rows: "and 4 others liked your photo".
+  const others = Math.max((item.group_count ?? 1) - 1, 0);
+  const grouped = (verb: string) =>
+    others > 0 ? `and ${others} other${others === 1 ? '' : 's'} ${verb}` : verb;
+
+  switch (item.type) {
     case 'follow_request':  return 'requested to follow you';
     case 'follow_accepted': return 'accepted your follow request';
     case 'new_follower':    return 'started following you';
-    case 'like':            return 'liked your photo';
-    case 'comment':         return 'commented on your photo';
+    case 'like':            return grouped('liked your photo');
+    case 'comment':         return grouped('commented on your photo');
     case 'event_rsvp':      return 'is going to an event you posted';
     case 'new_event':       return 'posted a new event';
     case 'new_message':     return 'sent you a message';
@@ -61,15 +68,28 @@ export default function NotificationsScreen() {
     return () => markReadRef.current();
   }, [userId]);
 
-  // Where a tapped row goes: post for likes/comments, event detail for
-  // events, otherwise the actor's profile. Always push — back returns here
-  // at the same list position.
+  // Where a tapped row goes: the server's structured route (validated against
+  // the allowlist) when present, then the legacy type/entity fallback for old
+  // rows. Always push — back returns here at the same list position. The row
+  // is marked read only once a destination actually begins opening.
   const openNotification = (item: AppNotification) => {
+    const markOpened = () => {
+      if (!item.is_read) void markNotificationRead(item.id);
+    };
+
+    const validated = validateNotificationRoute(item.route);
+    if (validated) {
+      markOpened();
+      router.push({ pathname: validated.pathname as never, params: validated.params as never });
+      return;
+    }
     if ((item.type === 'like' || item.type === 'comment') && item.reference_id) {
+      markOpened();
       router.push({ pathname: '/post/[postId]', params: { postId: item.reference_id } });
       return;
     }
     if (item.type === 'new_event' && item.reference_id) {
+      markOpened();
       router.push({ pathname: '/home/event-detail', params: { eventId: item.reference_id } });
       return;
     }
@@ -83,10 +103,12 @@ export default function NotificationsScreen() {
         item.type === 'member_joined') &&
       item.reference_id
     ) {
+      markOpened();
       router.push({ pathname: '/club/[clubId]', params: { clubId: item.reference_id } });
       return;
     }
     if (item.sender?.id) {
+      markOpened();
       router.push({ pathname: '/profile/[userId]', params: { userId: item.sender.id } });
     }
   };
@@ -137,7 +159,7 @@ export default function NotificationsScreen() {
                 {item.sender?.username ?? 'Someone'}
               </Text>
               {' '}
-              {notificationDescription(item.type)}
+              {notificationDescription(item)}
             </Text>
           )}
           <Text
@@ -277,7 +299,31 @@ export default function NotificationsScreen() {
         >
           {profile?.username ?? 'Notifications'}
         </Text>
+        {flatItems.some((i) => i.type === 'notification' && !i.notification.is_read) && (
+          <TouchableOpacity
+            onPress={() => markRead()}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Mark all notifications as read"
+          >
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: '600',
+                color: '#0FA6A6',
+                fontFamily: 'Inter_600SemiBold',
+              }}
+            >
+              Mark all as read
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
+
+      {/* Store-compliant permission entry point: only shown while push is
+          not yet granted; the OS prompt fires only from its button. */}
+      <EnableNotificationsCard />
 
       {isLoading ? (
         <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 16 }}>

@@ -27,6 +27,7 @@ import { useInviteDeepLink } from "../hooks/useInviteDeepLink";
 import { LeaveClubHost } from "../components/club/LeaveClubHost";
 import { SidebarHost } from "../components/sidebar/SidebarHost";
 import { MediaPickerHost } from "../components/media/MediaPickerHost";
+import { PushNotificationsHost } from "../components/notifications/PushNotificationsHost";
 import { timedQuery } from "../lib/timedQuery";
 import {
   clearCachedProfile,
@@ -272,6 +273,9 @@ export default function RootLayout() {
           which keeps its existing expo-image-picker flow (screens raise
           requests via pickMedia). */}
       <MediaPickerHost />
+      {/* App-wide push + unread-badge wiring. Must live inside the query
+          provider; renders nothing. */}
+      <PushNotificationsHost />
     </PersistQueryClientProvider>
   );
 }
