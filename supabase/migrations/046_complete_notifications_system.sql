@@ -992,15 +992,16 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_conv      conversations%ROWTYPE;
-  v_sender    TEXT;
-  v_channel   TEXT;
-  v_club      TEXT;
-  v_preview   TEXT;
-  v_title     TEXT;
-  v_body      TEXT;
-  v_type      TEXT;
-  v_recipient RECORD;
+  v_conv       conversations%ROWTYPE;
+  v_sender     TEXT;
+  v_channel    TEXT;
+  v_is_channel BOOLEAN := false;
+  v_club       TEXT;
+  v_preview    TEXT;
+  v_title      TEXT;
+  v_body       TEXT;
+  v_type       TEXT;
+  v_recipient  RECORD;
 BEGIN
   BEGIN
     IF NEW.deleted_at IS NOT NULL THEN RETURN NEW; END IF;
@@ -1035,9 +1036,12 @@ BEGIN
       v_type := 'club_chat_message';
       SELECT name INTO v_club FROM clubs WHERE id = v_conv.club_id;
       IF NEW.channel_id IS NOT NULL THEN
-        -- Main chats carry no channel prefix; hashtag channels always do
-        -- (kind from 041, never name matching).
-        SELECT CASE WHEN ch.kind = 'channel' THEN ch.name END INTO v_channel
+        -- Main chats carry no channel prefix and route as the plain chat
+        -- screen; hashtag channels carry both (kind from 041, never name
+        -- matching).
+        SELECT CASE WHEN ch.kind = 'channel' THEN ch.name END,
+               ch.kind = 'channel'
+          INTO v_channel, v_is_channel
         FROM conversation_channels ch WHERE ch.id = NEW.channel_id;
       END IF;
       v_title := COALESCE(v_club, 'Club chat') ||
@@ -1071,9 +1075,10 @@ BEGIN
         jsonb_strip_nulls(jsonb_build_object(
           'screen', 'chat',
           'chatId', NEW.conversation_id,
-          'channelId', NEW.channel_id
+          'channelId', CASE WHEN v_is_channel THEN NEW.channel_id END
         )),
-        'msg:' || NEW.conversation_id || ':' || COALESCE(NEW.channel_id::text, 'main'),
+        'msg:' || NEW.conversation_id || ':' ||
+          CASE WHEN v_is_channel THEN NEW.channel_id::text ELSE 'main' END,
         'msg:' || NEW.id || ':' || v_recipient.user_id,
         0
       );
