@@ -51,6 +51,7 @@ const MENU_KEYS: SidebarItemKey[] = [
   'savedEvents',
   'interests',
   'accountCenter',
+  'notifications',
   'privacyCenter',
 ];
 const FOOTER_KEYS: SidebarItemKey[] = ['help', 'terms', 'logout'];

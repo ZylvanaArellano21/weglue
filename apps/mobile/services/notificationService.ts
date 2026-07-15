@@ -158,3 +158,51 @@ export async function markNotificationRead(notificationId: string): Promise<void
     .eq('id', notificationId)
     .eq('read', false);
 }
+
+// ─── Notification preferences (synced across devices; enforced server-side
+//     in enqueue_push — flipping a toggle here changes real push delivery) ───
+
+export interface NotificationPreferences {
+  push_enabled: boolean;
+  push_messages: boolean;
+  push_social: boolean;
+  push_clubs: boolean;
+  push_events: boolean;
+  push_social_proof: boolean;
+}
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  push_enabled: true,
+  push_messages: true,
+  push_social: true,
+  push_clubs: true,
+  push_events: true,
+  push_social_proof: false,
+};
+
+export async function getNotificationPreferences(
+  userId: string,
+): Promise<NotificationPreferences> {
+  const { data, error } = await supabase
+    .from('notification_preferences')
+    .select('push_enabled, push_messages, push_social, push_clubs, push_events, push_social_proof')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  // Missing row = server defaults (user_wants_push mirrors these exactly).
+  return data ?? DEFAULT_NOTIFICATION_PREFERENCES;
+}
+
+export async function updateNotificationPreference(
+  userId: string,
+  current: NotificationPreferences,
+  patch: Partial<NotificationPreferences>,
+): Promise<void> {
+  const { error } = await supabase
+    .from('notification_preferences')
+    .upsert(
+      { user_id: userId, ...current, ...patch, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    );
+  if (error) throw error;
+}

@@ -8,6 +8,7 @@ export type SidebarItemKey =
   | 'savedEvents'
   | 'interests'
   | 'accountCenter'
+  | 'notifications'
   | 'privacyCenter'
   | 'help'
   | 'terms'
@@ -87,6 +88,12 @@ export function buildSidebarItems(
       label: 'Account Center',
       icon: 'settings-outline',
       onPress: go('/account-center'),
+    },
+    {
+      key: 'notifications',
+      label: 'Notifications',
+      icon: 'notifications-outline',
+      onPress: go('/account-center/notifications'),
     },
     {
       key: 'privacyCenter',
