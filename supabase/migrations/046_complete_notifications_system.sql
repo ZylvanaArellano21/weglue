@@ -1281,7 +1281,9 @@ REVOKE ALL ON FUNCTION process_event_reminders() FROM PUBLIC, anon, authenticate
 --     Thread rules mirror chatService/channelService exactly; one thread with
 --     any number of unread messages counts once, muted threads still count.
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION get_unread_summary()
+-- Internal variant (service_role only): the push worker stamps each push
+-- with the recipient's current iOS icon-badge number.
+CREATE OR REPLACE FUNCTION get_unread_summary_for(p_user UUID)
 RETURNS JSONB
 LANGUAGE plpgsql
 STABLE
@@ -1289,7 +1291,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_uid            UUID := auth.uid();
+  v_uid            UUID := p_user;
   v_notifications  INT;
   v_dm_threads     INT;
   v_club_threads   INT;
@@ -1366,6 +1368,19 @@ BEGIN
     'unread_threads', COALESCE(v_dm_threads, 0) + COALESCE(v_club_threads, 0)
   );
 END;
+$$;
+REVOKE ALL ON FUNCTION get_unread_summary_for(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_unread_summary_for(UUID) TO service_role;
+
+-- Client-facing wrapper: always the caller's own counts.
+CREATE OR REPLACE FUNCTION get_unread_summary()
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT get_unread_summary_for(auth.uid());
 $$;
 REVOKE ALL ON FUNCTION get_unread_summary() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION get_unread_summary() TO authenticated;
