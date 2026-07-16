@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "991870986566",
+    "project_id": "weglue",
+    "storage_bucket": "weglue.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:991870986566:android:c7e7f1bb701e5c74e65d47",
+        "android_client_info": {
+          "package_name": "com.weglue.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyByo21qy8DQ1puS0nKQ6Mp84FxZmsWdO2U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
