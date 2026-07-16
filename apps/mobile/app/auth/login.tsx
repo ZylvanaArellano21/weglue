@@ -23,6 +23,7 @@ import {
   sendVerificationEmail,
   setPendingSignupEmail,
 } from "../../lib/authFlow";
+import { signInWithMicrosoft } from "../../lib/microsoftAuth";
 
 type LoginError =
   | null
@@ -37,9 +38,10 @@ type LoginError =
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { prefillEmail, verified } = useLocalSearchParams<{
+  const { prefillEmail, verified, oauthError } = useLocalSearchParams<{
     prefillEmail?: string;
     verified?: string;
+    oauthError?: string;
   }>();
   const { show, ToastComponent } = useToast();
   const {
@@ -58,6 +60,8 @@ export default function LoginScreen() {
   const [showVerifiedBanner] = useState(verified === "1");
   const [verifying, setVerifying] = useState(false);
   const verifyingRef = useRef(false);
+  const [msLoading, setMsLoading] = useState(false);
+  const [msError, setMsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -65,9 +69,47 @@ export default function LoginScreen() {
     return () => sub.remove();
   }, []);
 
+  // A Microsoft sign-in that resolved through the cold-start deep-link path
+  // (app killed during OAuth) lands here with its friendly message.
+  useEffect(() => {
+    if (typeof oauthError === "string" && oauthError.length > 0) {
+      setMsError(oauthError);
+    }
+  }, [oauthError]);
+
   function clearAllErrors() {
     setFieldErrors({});
     setLoginError(null);
+    setMsError(null);
+  }
+
+  /**
+   * "Continue with Microsoft" — existing users land in their account; a
+   * Microsoft identity that never completed We Glue onboarding is routed
+   * through Interests → Activities by the root guard (onboarding_completed
+   * is false until complete_oauth_onboarding runs). Cancelling the browser
+   * sheet just returns to this screen unchanged.
+   */
+  async function handleMicrosoftLogin() {
+    if (msLoading || loading) return;
+    clearAllErrors();
+    setMsLoading(true);
+    try {
+      const result = await signInWithMicrosoft();
+      if (result.status === "busy" || result.status === "cancelled") return;
+      if (result.status === "error") {
+        setMsError(result.message);
+        return;
+      }
+      // Session established. Wipe any stale signup-in-progress state exactly
+      // like a password login, then let the root guard route (Home, or the
+      // onboarding steps for a brand-new Microsoft account).
+      resetOnboarding();
+      await clearPendingSignup();
+      router.replace("/");
+    } finally {
+      setMsLoading(false);
+    }
   }
 
   /**
@@ -342,17 +384,26 @@ export default function LoginScreen() {
 
             <TouchableOpacity
               style={styles.secondaryBtn}
-              onPress={() => show("Coming soon!", "info")}
+              onPress={handleMicrosoftLogin}
+              disabled={msLoading}
               activeOpacity={0.85}
             >
-              <View style={styles.msLogo}>
-                <View style={[styles.msSquare, { backgroundColor: "#F25022" }]} />
-                <View style={[styles.msSquare, { backgroundColor: "#7FBA00" }]} />
-                <View style={[styles.msSquare, { backgroundColor: "#00A4EF" }]} />
-                <View style={[styles.msSquare, { backgroundColor: "#FFB900" }]} />
-              </View>
-              <Text style={styles.secondaryBtnText}>Continue with Microsoft</Text>
+              {msLoading ? (
+                <ActivityIndicator color="#000" />
+              ) : (
+                <>
+                  <View style={styles.msLogo}>
+                    <View style={[styles.msSquare, { backgroundColor: "#F25022" }]} />
+                    <View style={[styles.msSquare, { backgroundColor: "#7FBA00" }]} />
+                    <View style={[styles.msSquare, { backgroundColor: "#00A4EF" }]} />
+                    <View style={[styles.msSquare, { backgroundColor: "#FFB900" }]} />
+                  </View>
+                  <Text style={styles.secondaryBtnText}>Continue with Microsoft</Text>
+                </>
+              )}
             </TouchableOpacity>
+
+            {!!msError && <Text style={styles.generalError}>{msError}</Text>}
 
             <TouchableOpacity
               onPress={startNewAccount}

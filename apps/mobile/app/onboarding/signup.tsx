@@ -13,7 +13,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
-import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
+import {
+  useAuthStore,
+  useOnboardingStore,
+  validateEducationEmail,
+  type Profile,
+} from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 import {
   CONFIRM_EMAIL_REDIRECT,
@@ -22,6 +27,17 @@ import {
   replacePendingSignup,
   setPendingSignupEmail,
 } from "../../lib/authFlow";
+import {
+  completeOAuthOnboarding,
+  signInWithMicrosoft,
+} from "../../lib/microsoftAuth";
+import { writeCachedProfile } from "../../lib/profileCache";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  rememberTokenForRevocation,
+  resetToWelcome,
+  tearDownAuthenticatedSession,
+} from "../../lib/sessionCleanup";
 
 export default function OnboardingSignupScreen() {
   const router = useRouter();
@@ -32,10 +48,13 @@ export default function OnboardingSignupScreen() {
     setPendingUsername,
     setPendingEmail,
     setPendingPassword,
+    reset: resetOnboarding,
     pendingUsername,
     pendingEmail,
   } = useOnboardingStore();
+  const { session, profile, setProfile, setOnboarded } = useAuthStore();
   const { show, ToastComponent } = useToast();
+  const queryClient = useQueryClient();
 
   // Restore username/email from store so back navigation preserves the form
   const [username, setUsername] = useState(pendingUsername);
@@ -46,7 +65,117 @@ export default function OnboardingSignupScreen() {
   // "Try to log in." link instead of a plain string.
   const [emailExistsVerified, setEmailExistsVerified] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [msLoading, setMsLoading] = useState(false);
   const [emailFeedback, setEmailFeedback] = useState<{ valid: boolean; reason?: string } | null>(null);
+
+  // Microsoft-completion mode: the user is ALREADY authenticated (OAuth
+  // succeeded) but never finished We Glue onboarding — only the explicit
+  // username choice is still missing. Email and password have no role here.
+  // While the Microsoft flow itself is running we keep the normal form
+  // rendered so the screen doesn't flash between layouts mid-handoff.
+  const microsoftCompleteMode =
+    !!session && profile?.onboarding_completed === false && !msLoading;
+
+  /**
+   * Server-authoritative finish for a Microsoft account: persists the pending
+   * Interests/Activities and the explicit username, generates the initial
+   * recommendation batch, and flips onboarding_completed — exactly once, no
+   * matter how often it is retried.
+   */
+  async function finishMicrosoftOnboarding(cleanUsername: string): Promise<void> {
+    const result = await completeOAuthOnboarding(
+      cleanUsername,
+      selectedInterests,
+      selectedActivities,
+    );
+
+    switch (result.status) {
+      case "completed":
+      case "already_completed": {
+        if (result.profile) {
+          const fresh = result.profile as unknown as Profile;
+          setProfile(fresh);
+          const onboarded = result.status === "completed" ? true : undefined;
+          if (onboarded) setOnboarded(true);
+          void writeCachedProfile(fresh.id, {
+            profile: fresh,
+            isOnboarded: onboarded ?? true,
+          });
+        }
+        resetOnboarding();
+        router.replace("/");
+        return;
+      }
+      case "username_taken":
+        setErrors((prev) => ({ ...prev, username: "This username is already taken." }));
+        return;
+      case "username_invalid":
+        setErrors((prev) => ({ ...prev, username: "Please choose a valid username." }));
+        return;
+      case "not_eligible":
+        show(
+          "This Microsoft account isn't connected to an eligible school email (.edu or equivalent).",
+          "error",
+        );
+        return;
+      case "email_unverified":
+        show("We couldn't verify a school email on that Microsoft account.", "error");
+        return;
+      default:
+        show("Account setup could not be completed. Please try again.", "error");
+    }
+  }
+
+  /**
+   * "Continue with Microsoft" from Account Creation. The username is an
+   * explicit We Glue choice, so it must be filled in before OAuth starts —
+   * it is never derived from the Microsoft email or profile.
+   */
+  async function handleMicrosoftSignup() {
+    if (msLoading || loading) return;
+
+    const cleanUsername = username.trim().replace(/^@/, "");
+    if (!cleanUsername) {
+      setErrors((prev) => ({
+        ...prev,
+        username: "Choose a username first — you'll use it with your Microsoft account.",
+      }));
+      return;
+    }
+
+    setMsLoading(true);
+    try {
+      if (!useAuthStore.getState().session) {
+        const result = await signInWithMicrosoft();
+        if (result.status === "busy" || result.status === "cancelled") return;
+        if (result.status === "error") {
+          show(result.message, "error");
+          return;
+        }
+      }
+      await finishMicrosoftOnboarding(cleanUsername);
+    } finally {
+      setMsLoading(false);
+    }
+  }
+
+  /**
+   * "Not you?" in Microsoft-completion mode: the authenticated identity is the
+   * wrong one, so leave via the ONE shared session teardown — same as a normal
+   * logout — and land on full-screen Welcome, free to pick another account.
+   */
+  async function handleMicrosoftSwitchAccount() {
+    if (msLoading) return;
+    setMsLoading(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      rememberTokenForRevocation(data.session?.access_token);
+      await tearDownAuthenticatedSession(queryClient, session?.user.id);
+      resetToWelcome(router);
+    } finally {
+      setMsLoading(false);
+    }
+  }
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
@@ -241,6 +370,48 @@ export default function OnboardingSignupScreen() {
             />
             {!!errors.username && <Text style={styles.errorText}>{errors.username}</Text>}
 
+            {microsoftCompleteMode ? (
+              <>
+                {/* Microsoft account is already authenticated — only the
+                    explicit username choice above is missing. */}
+                <Text style={styles.msSignedInText}>
+                  You&apos;re signed in with Microsoft as{" "}
+                  <Text style={{ fontWeight: "700" }}>{session?.user.email}</Text>.
+                  Choose your username to finish.
+                </Text>
+
+                {/* Only username errors matter here — email/password errors
+                    from before the OAuth hop have no field to point at. */}
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    { marginTop: 24 },
+                    (msLoading || !!errors.username) && styles.primaryBtnDisabled,
+                  ]}
+                  onPress={handleMicrosoftSignup}
+                  disabled={msLoading || !!errors.username}
+                  activeOpacity={0.85}
+                >
+                  {msLoading ? (
+                    <ActivityIndicator color="#FEFCF0" />
+                  ) : (
+                    <Text style={styles.primaryBtnText}>Finish</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleMicrosoftSwitchAccount}
+                  style={{ alignSelf: "center", marginTop: 16 }}
+                  disabled={msLoading}
+                >
+                  <Text style={styles.footerText}>
+                    Not you?{" "}
+                    <Text style={styles.tealLink}>Use a different account</Text>
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+            <>
             {/* School Email */}
             <Text style={[styles.label, { marginTop: 16 }]}>School Email</Text>
             <View style={{ position: "relative" }}>
@@ -308,19 +479,27 @@ export default function OnboardingSignupScreen() {
               </Text>
             </View>
 
-            {/* Microsoft SSO (coming soon) */}
+            {/* Microsoft SSO — uses the survey answers and username above,
+                skipping the password + Confirm Email steps entirely. */}
             <TouchableOpacity
               style={[styles.secondaryBtn, { marginTop: 24 }]}
-              onPress={() => show("Coming soon!", "info")}
+              onPress={handleMicrosoftSignup}
+              disabled={msLoading || loading}
               activeOpacity={0.85}
             >
-              <View style={styles.msLogo}>
-                <View style={[styles.msSquare, { backgroundColor: "#F25022" }]} />
-                <View style={[styles.msSquare, { backgroundColor: "#7FBA00" }]} />
-                <View style={[styles.msSquare, { backgroundColor: "#00A4EF" }]} />
-                <View style={[styles.msSquare, { backgroundColor: "#FFB900" }]} />
-              </View>
-              <Text style={styles.secondaryBtnText}>Continue with Microsoft</Text>
+              {msLoading ? (
+                <ActivityIndicator color="#000" />
+              ) : (
+                <>
+                  <View style={styles.msLogo}>
+                    <View style={[styles.msSquare, { backgroundColor: "#F25022" }]} />
+                    <View style={[styles.msSquare, { backgroundColor: "#7FBA00" }]} />
+                    <View style={[styles.msSquare, { backgroundColor: "#00A4EF" }]} />
+                    <View style={[styles.msSquare, { backgroundColor: "#FFB900" }]} />
+                  </View>
+                  <Text style={styles.secondaryBtnText}>Continue with Microsoft</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             {/* Next button */}
@@ -328,10 +507,10 @@ export default function OnboardingSignupScreen() {
               style={[
                 styles.primaryBtn,
                 { marginTop: 16 },
-                (loading || (emailFeedback !== null && !emailFeedback.valid) || Object.keys(errors).length > 0) && styles.primaryBtnDisabled,
+                (loading || msLoading || (emailFeedback !== null && !emailFeedback.valid) || Object.keys(errors).length > 0) && styles.primaryBtnDisabled,
               ]}
               onPress={handleNext}
-              disabled={loading || (emailFeedback !== null && !emailFeedback.valid) || Object.keys(errors).length > 0}
+              disabled={loading || msLoading || (emailFeedback !== null && !emailFeedback.valid) || Object.keys(errors).length > 0}
               activeOpacity={0.85}
             >
               {loading ? (
@@ -351,6 +530,8 @@ export default function OnboardingSignupScreen() {
                 <Text style={styles.tealLink}>Log in</Text>
               </Text>
             </TouchableOpacity>
+            </>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -443,6 +624,12 @@ const styles = StyleSheet.create({
   msLogo: { flexDirection: "row", flexWrap: "wrap", width: 18, height: 18, gap: 1.5, marginRight: 2 },
   msSquare: { width: 7.5, height: 7.5 },
   secondaryBtnText: { fontSize: 16, fontWeight: "600", color: "#000" },
+  msSignedInText: {
+    fontSize: 13,
+    color: "#5F5D5D",
+    marginTop: 16,
+    lineHeight: 19,
+  },
   hintRow: { flexDirection: "row", gap: 12, marginTop: 6, marginLeft: 4, flexWrap: "wrap" },
   hintItem: { fontSize: 11, fontWeight: "500" },
   hintGray: { color: "#9CA3AF" },

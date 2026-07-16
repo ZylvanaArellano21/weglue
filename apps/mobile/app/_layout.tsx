@@ -195,11 +195,23 @@ export default function RootLayout() {
       );
       const onboarded = (interestsResult.data?.length ?? 0) > 0;
       if (profileResult.data) {
-        setProfile(profileResult.data);
-        void writeCachedProfile(userId, {
-          profile: profileResult.data,
-          isOnboarded: onboarded,
-        });
+        // Onboarding completion is monotonic (only complete_oauth_onboarding
+        // flips it, and only to true). A fetch that started BEFORE the
+        // Microsoft onboarding RPC finished can resolve AFTER it — never let
+        // that stale snapshot un-complete the profile and bounce the user
+        // back into the onboarding flow.
+        const current = useAuthStore.getState().profile;
+        const staleOnboardingSnapshot =
+          current?.id === profileResult.data.id &&
+          current?.onboarding_completed === true &&
+          profileResult.data.onboarding_completed === false;
+        if (!staleOnboardingSnapshot) {
+          setProfile(profileResult.data);
+          void writeCachedProfile(userId, {
+            profile: profileResult.data,
+            isOnboarded: onboarded,
+          });
+        }
       } else if (profileResult.error?.code === "PGRST116") {
         // Profile row missing (e.g. the signup trigger hit a username
         // collision) — repair it server-side instead of stranding the user.

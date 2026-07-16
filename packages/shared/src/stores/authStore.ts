@@ -10,9 +10,10 @@ export interface Profile {
   bio: string | null;
   is_seed: boolean;
   /**
-   * Legacy flag from the old mandatory onboarding. Nothing gates on it any
-   * more — migration 042 set it true for every account — but the column is
-   * still selected, so it stays on the type.
+   * True for every password account (042 backfilled the legacy gate away).
+   * False ONLY for an OAuth (Microsoft) account that has not yet completed
+   * Interests → Activities → username — the root guard routes those into the
+   * onboarding flow until complete_oauth_onboarding flips this to true.
    */
   onboarding_completed?: boolean;
   /** Canonical campus (single-campus launch mode assigns this server-side). */

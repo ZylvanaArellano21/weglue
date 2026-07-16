@@ -14,7 +14,7 @@ import { getPendingSignupEmail } from "../lib/authFlow";
 import { getPendingInvite } from "../lib/pendingInvite";
 
 export default function WelcomeScreen() {
-  const { session, isLoading } = useAuthStore();
+  const { session, isLoading, profile } = useAuthStore();
   const router = useRouter();
   // null = still checking AsyncStorage; "" = no pending signup
   const [pendingSignupEmail, setPendingSignupEmail] = useState<string | null>(null);
@@ -48,11 +48,22 @@ export default function WelcomeScreen() {
       return;
     }
 
+    // A Microsoft (OAuth) account that never completed We Glue onboarding may
+    // not enter Home: OAuth succeeding is not the same as having an account.
+    // onboarding_completed is false ONLY for those accounts (042 backfilled it
+    // true for everything else; password signups always set it true), and
+    // complete_oauth_onboarding is the only thing that flips it — so this can
+    // never trap an existing user.
+    if (profile && profile.onboarding_completed === false) {
+      router.replace("/onboarding/interests");
+      return;
+    }
+
     // A verified user ALWAYS goes straight to Home. There is no mandatory
     // onboarding left: no profile picture is required, no club catalog, no
     // club selection, no "Done" step. Accounts stranded mid-way through the
-    // old flow (no avatar / onboarding_completed = false) therefore land on
-    // Home like everyone else — migration 042 also backfilled that flag.
+    // old flow therefore land on Home like everyone else — migration 042 also
+    // backfilled that flag.
     // A deferred chat invite is consumed exactly here so the invited chat is
     // the first destination shown — then normal app entry.
     getPendingInvite().then((token) => {
@@ -62,7 +73,7 @@ export default function WelcomeScreen() {
         router.replace("/(tabs)");
       }
     });
-  }, [isLoading, session, pendingSignupEmail]);
+  }, [isLoading, session, profile, pendingSignupEmail]);
 
   if (isLoading || pendingSignupEmail === null) {
     return (

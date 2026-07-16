@@ -40,9 +40,14 @@ export default function InterestsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Back arrow */}
+      {/* Back arrow. The Microsoft-onboarding resume path lands here via
+          replace() with an empty stack — back() would throw, so fall back to
+          Welcome (whose guard safely re-routes an authenticated user). */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/welcome"))}
+          style={styles.backBtn}
+        >
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
       </View>
