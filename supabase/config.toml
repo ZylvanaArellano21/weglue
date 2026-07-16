@@ -168,6 +168,9 @@ additional_redirect_urls = [
   "weglue://auth/confirmed",
   "weglue://auth/confirm-email",
   "weglue://onboarding/profile-pic",
+  # Microsoft OAuth return (mobile). GoTrue redirects here with ?code=…
+  # after the Azure callback; the app exchanges it via PKCE.
+  "weglue://auth/callback",
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
@@ -367,6 +370,24 @@ redirect_uri = ""
 # or any other third-party OIDC providers.
 url = ""
 # If enabled, the nonce check will be skipped. Required for local sign in with Google auth.
+skip_nonce_check = false
+
+# Microsoft ("Continue with Microsoft") — school/work accounts. Flip enabled
+# to true once the Azure app registration exists and its credentials are set
+# in production (docs/microsoft-auth-setup.md has the exact steps). The app's
+# buttons live on the Login and Account Creation screens; the mobile redirect
+# is weglue://auth/callback (allow-listed above).
+[auth.external.azure]
+enabled = false
+client_id = ""
+# DO NOT commit your OAuth provider secret to git. Use environment variable substitution instead:
+secret = "env(SUPABASE_AUTH_EXTERNAL_AZURE_SECRET)"
+redirect_uri = ""
+# "organizations" tenant: school/work Microsoft accounts only — personal
+# outlook.com/hotmail.com accounts cannot even start the flow, matching the
+# .edu-only eligibility the before_user_created hook enforces server-side.
+# (GoTrue appends /oauth2/v2.0/authorize etc.; default is …/common.)
+url = "https://login.microsoftonline.com/organizations"
 skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
 email_optional = false
