@@ -13,9 +13,12 @@ export async function POST(request: NextRequest) {
   }
 
   const email = (body.email ?? "").trim().toLowerCase();
-  if (!email) {
-    return NextResponse.json({ error: "Email is required." }, { status: 400 });
+  if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
   }
+
+  const reason =
+    typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : null;
 
   const supabase = createAdminClient();
 
@@ -24,7 +27,7 @@ export async function POST(request: NextRequest) {
     .from("deletion_requests")
     .insert({
       email,
-      reason: body.reason ?? null,
+      reason: reason || null,
     });
 
   if (insertError) {
