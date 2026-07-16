@@ -22,10 +22,13 @@ CREATE TEMP TABLE t_results (test text, ok boolean, detail text) ON COMMIT DROP;
 
 DO $$
 DECLARE
-  -- fixtures (live ids; transaction rolls back)
-  v_clay      UUID := '925e7a84-eb0b-4c98-9460-65ee4667c611'; -- Clay Club (officer: lola21)
+  -- fixtures (live club/member ids; transaction rolls back). The officer is
+  -- created fresh inside the transaction — the original live officer account
+  -- was deleted from production, so the suite seeds its own role layout below
+  -- instead of assuming live data.
+  v_clay      UUID := '925e7a84-eb0b-4c98-9460-65ee4667c611'; -- Clay Club
   v_stock     UUID := 'e87b15ef-f7d7-444b-990d-6708ea0bef7d'; -- Stock Market Club
-  v_lola      UUID := 'c1797f66-df96-45dd-bd73-0b0353fb8be9'; -- officer of clay+stock
+  v_lola      UUID := gen_random_uuid();                      -- officer of clay+stock (seeded)
   v_marcus    UUID := '00000001-0000-4000-a000-000000000001'; -- member of stock
   v_diego     UUID := '00000004-0000-4000-a000-000000000004'; -- member of clay+stock
   v_post      UUID;
@@ -37,7 +40,35 @@ DECLARE
   v_txt       TEXT;
   v_res       TEXT;
 BEGIN
-  -- ── impersonate lola21 (authenticated) ─────────────────────
+  -- ── seed the role layout the assertions assume (rolls back) ──
+  -- v_lola: officer of clay + stock, and the SOLE officer of clay (test 4c).
+  -- diego: member of clay + stock. marcus: member of stock, NOT clay.
+  INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password,
+    email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+    created_at, updated_at
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000000', v_lola, 'authenticated',
+    'authenticated', 'officer_038_test@lonestar.edu', '', NOW(),
+    '{"provider":"email","providers":["email"]}',
+    '{"username":"officer_038_test"}',
+    NOW(), NOW()
+  );
+  DELETE FROM club_officers WHERE club_id = v_clay;
+  UPDATE club_members SET role = 'member' WHERE club_id = v_clay AND role = 'officer';
+  INSERT INTO club_members (club_id, user_id, role) VALUES
+    (v_clay, v_lola, 'officer'), (v_stock, v_lola, 'officer')
+  ON CONFLICT (club_id, user_id) DO UPDATE SET role = 'officer';
+  INSERT INTO club_officers (club_id, user_id, display_name, role_title, display_order)
+  VALUES (v_clay,  v_lola, 'officer_038_test', 'President', 0),
+         (v_stock, v_lola, 'officer_038_test', 'President', 0)
+  ON CONFLICT DO NOTHING;
+  INSERT INTO club_members (club_id, user_id, role) VALUES
+    (v_clay, v_diego, 'member'), (v_stock, v_diego, 'member'), (v_stock, v_marcus, 'member')
+  ON CONFLICT (club_id, user_id) DO NOTHING;
+  DELETE FROM club_members WHERE club_id = v_clay AND user_id = v_marcus;
+
+  -- ── impersonate the officer (authenticated) ─────────────────
   -- auth.uid() reads request.jwt.claims; the executing role stays postgres
   -- (SECURITY DEFINER RPCs bypass RLS regardless).
   PERFORM set_config('request.jwt.claims',
