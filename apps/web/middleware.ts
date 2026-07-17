@@ -1,32 +1,25 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "./lib/supabase/middleware";
 
-// Routes that are completely public — no session needed
-const PUBLIC_ROUTES = new Set([
-  "/",
+// Auth-flow pages a signed-in, fully-onboarded user has no business visiting —
+// they bounce to the dashboard instead.
+const AUTH_FLOW_ROUTES = [
   "/get-started",
   "/onboarding/interests",
   "/onboarding/activities",
   "/onboarding/signup",
-  "/login",
-  "/privacy-policy",
-  "/terms-of-service",
-  "/terms",
-  "/delete-account",
-  "/auth/callback",
-]);
-
-// Onboarding routes that require a valid (possibly unverified) session
-const SESSION_REQUIRED_ROUTES = [
   "/onboarding/verify-email",
-  "/onboarding/avatar",
-  "/onboarding/explore-clubs",
+  "/login",
+  "/forgot-password",
 ];
+
+// Routes that require a signed-in session.
+const PROTECTED_PREFIXES = ["/dashboard", "/home", "/onboarding/explore-clubs"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Always allow Next.js internals and static assets through
+  // Always allow Next.js internals, API routes, and static assets through
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/") ||
@@ -43,108 +36,67 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isPublic = PUBLIC_ROUTES.has(pathname);
-  const needsSession = SESSION_REQUIRED_ROUTES.some((r) =>
-    pathname.startsWith(r)
+  const isProtected = PROTECTED_PREFIXES.some((r) => pathname.startsWith(r));
+  const isAuthFlow = AUTH_FLOW_ROUTES.some(
+    (r) => pathname === r || pathname.startsWith(`${r}/`)
   );
-  const isDashboard =
-    pathname.startsWith("/dashboard") || pathname.startsWith("/home");
 
   // ── Unauthenticated users ──────────────────────────────────────────────────
 
   if (!user) {
-    // Allow public routes through
-    if (isPublic) return response;
-
-    // Protected session routes → send to login
-    if (needsSession || isDashboard) {
+    if (isProtected) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
-
+    // The whole auth flow (surveys, signup, confirm-email, login, forgot
+    // password, email-link landing pages) is public by design: signups have
+    // no session until the email is verified.
     return response;
   }
 
   // ── Authenticated users ────────────────────────────────────────────────────
 
+  // /auth/* handles its own session states (recovery links must render their
+  // form even though the recovery session is technically "authenticated").
+  if (pathname.startsWith("/auth/")) return response;
+
   const isEmailVerified = !!user.email_confirmed_at;
 
-  // User confirmed their email but landed on verify-email (e.g. refreshed page)
-  if (pathname === "/onboarding/verify-email" && isEmailVerified) {
-    // Fetch profile to know next step
+  if (!isEmailVerified) {
+    // A session without a verified email may only sit on the confirm screen.
+    if (isProtected) {
+      return NextResponse.redirect(
+        new URL("/onboarding/verify-email", request.url)
+      );
+    }
+    return response;
+  }
+
+  // Verified session. A Microsoft account that never finished We Glue
+  // onboarding must complete it (username + survey) before entering the app.
+  if (isProtected || isAuthFlow) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("onboarding_complete, avatar_url")
+      .select("onboarding_completed")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (profile?.onboarding_complete) {
+    const onboardingPending = profile?.onboarding_completed === false;
+
+    if (onboardingPending) {
+      if (
+        pathname.startsWith("/onboarding/signup") ||
+        pathname.startsWith("/onboarding/interests") ||
+        pathname.startsWith("/onboarding/activities")
+      ) {
+        return response; // let them finish
+      }
+      return NextResponse.redirect(new URL("/onboarding/signup", request.url));
+    }
+
+    // Fully onboarded — auth-flow pages bounce to the dashboard.
+    if (isAuthFlow) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
-    if (profile?.avatar_url) {
-      return NextResponse.redirect(
-        new URL("/onboarding/explore-clubs", request.url)
-      );
-    }
-    return NextResponse.redirect(
-      new URL("/onboarding/avatar", request.url)
-    );
-  }
-
-  // Unverified user trying to access post-verification onboarding steps
-  if (
-    !isEmailVerified &&
-    (pathname.startsWith("/onboarding/avatar") ||
-      pathname.startsWith("/onboarding/explore-clubs") ||
-      isDashboard)
-  ) {
-    return NextResponse.redirect(
-      new URL("/onboarding/verify-email", request.url)
-    );
-  }
-
-  // Verified + authenticated user on dashboard
-  if (isDashboard && isEmailVerified) {
-    return response; // pass through — they belong here
-  }
-
-  // Verified user hitting public/auth pages → redirect to the correct
-  // onboarding step or the dashboard
-  if (
-    isEmailVerified &&
-    (isPublic || pathname.startsWith("/login"))
-  ) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("onboarding_complete, avatar_url")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (!profile || !profile.avatar_url) {
-      // Still needs to set up avatar
-      if (
-        pathname.startsWith("/onboarding/avatar") ||
-        pathname.startsWith("/onboarding/interests") ||
-        pathname.startsWith("/onboarding/activities") ||
-        pathname.startsWith("/onboarding/signup")
-      ) {
-        return response; // allow these survey steps
-      }
-      return NextResponse.redirect(
-        new URL("/onboarding/avatar", request.url)
-      );
-    }
-
-    if (!profile.onboarding_complete) {
-      if (pathname.startsWith("/onboarding/explore-clubs")) {
-        return response;
-      }
-      return NextResponse.redirect(
-        new URL("/onboarding/explore-clubs", request.url)
-      );
-    }
-
-    // Fully onboarded — redirect to dashboard
-    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return response;

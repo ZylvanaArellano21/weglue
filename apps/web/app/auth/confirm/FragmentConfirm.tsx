@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { WebContinue } from "../../../components/auth/WebContinue";
 
 export default function FragmentConfirm(): JSX.Element | null {
   const [hasTokens, setHasTokens] = useState(false);
@@ -56,6 +57,9 @@ export default function FragmentConfirm(): JSX.Element | null {
           <span className="text-[#0FA6A6] font-semibold">&ldquo;Next&rdquo;</span>{" "}
           button.
         </p>
+
+        {/* Only appears when this browser started a WEB signup. */}
+        <WebContinue />
       </div>
     </main>
   );

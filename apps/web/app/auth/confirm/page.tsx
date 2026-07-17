@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import Image from "next/image";
 import FragmentConfirm from "./FragmentConfirm";
+import { WebContinue } from "../../../components/auth/WebContinue";
 
 interface PageProps {
   searchParams: { token_hash?: string; type?: string; code?: string };
@@ -99,6 +100,9 @@ export default async function AuthConfirmPage({ searchParams }: PageProps): Prom
                 <span className="text-[#0FA6A6] font-semibold">&ldquo;Next&rdquo;</span>{" "}
                 button.
               </p>
+
+              {/* Only appears when this browser started a WEB signup. */}
+              <WebContinue />
             </>
           ) : (
             <>

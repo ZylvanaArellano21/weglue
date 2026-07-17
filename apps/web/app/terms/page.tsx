@@ -4,6 +4,7 @@ import {
   TERMS_AND_CONDITIONS_SECTIONS,
   TERMS_AND_CONDITIONS_TITLE,
 } from "@weglue/shared";
+import { BackButton } from "../../components/auth/BackButton";
 
 export const metadata = {
   title: "Terms & Conditions — We Glue",
@@ -16,6 +17,9 @@ export default function TermsPage(): JSX.Element {
   return (
     <main className="min-h-screen bg-[#FEFCF0] px-4 py-12">
       <div className="max-w-2xl mx-auto">
+        <div className="mb-6">
+          <BackButton />
+        </div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           {TERMS_AND_CONDITIONS_TITLE}
         </h1>

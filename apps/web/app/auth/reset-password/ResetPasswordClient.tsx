@@ -2,17 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { getSupabaseBrowser } from "../../../lib/supabase-browser";
+import {
+  checkPassword,
+  passwordError,
+  resetPasswordRedirect,
+} from "../../../lib/authFlow";
 
 type View = "loading" | "form" | "success" | "expired";
-
-function getPasswordStrength(pw: string): { level: 0 | 1 | 2 | 3; label: string; color: string } {
-  if (pw.length === 0) return { level: 0, label: "", color: "" };
-  const hasSpecial = /[0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw);
-  if (pw.length >= 10 && hasSpecial) return { level: 3, label: "Strong", color: "#16A34A" };
-  if (pw.length >= 6) return { level: 2, label: "Medium", color: "#F59E0B" };
-  return { level: 1, label: "Weak", color: "#F02719" };
-}
 
 const LogoBlock = () => (
   <div className="flex flex-col items-center mb-8">
@@ -48,7 +46,7 @@ export default function ResetPasswordClient(): JSX.Element | null {
     setResendResult(null);
     const supabase = getSupabaseBrowser();
     const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-      redirectTo: "https://weglue.app/auth/reset-password",
+      redirectTo: resetPasswordRedirect(),
     });
     setResendLoading(false);
     setResendResult(error ? "error" : "sent");
@@ -104,8 +102,10 @@ export default function ResetPasswordClient(): JSX.Element | null {
       setErrorMessage("Please fill in both fields.");
       return;
     }
-    if (password.length < 8) {
-      setErrorMessage("Password must be at least 8 characters.");
+    // Same password rules as account creation (mobile parity).
+    const pwError = passwordError(password);
+    if (pwError) {
+      setErrorMessage(pwError);
       return;
     }
     if (password !== confirmPassword) {
@@ -116,13 +116,18 @@ export default function ResetPasswordClient(): JSX.Element | null {
     setLoading(true);
     const supabase = getSupabaseBrowser();
     const { error } = await supabase.auth.updateUser({ password });
-    setLoading(false);
 
     if (error) {
+      setLoading(false);
       setErrorMessage(error.message || "Something went wrong. Please try again.");
       return;
     }
 
+    // The recovery session has done its one job — end it so the user signs in
+    // freshly with the new password and is never left half-authenticated on
+    // this recovery route.
+    await supabase.auth.signOut();
+    setLoading(false);
     setView("success");
   }
 
@@ -186,13 +191,23 @@ export default function ResetPasswordClient(): JSX.Element | null {
 
           <div className="mt-4 max-w-[300px] mx-auto">
             <p className="text-sm leading-relaxed" style={{ color: "#4B5563" }}>
-              Your password has been updated.
+              Your password has been updated. Log in with your new password.
             </p>
-            <p className="text-sm leading-relaxed mt-2" style={{ color: "#4B5563" }}>
-              Head back to the We Glue app and log in with your new password.
-            </p>
-            <p className="text-xs mt-3" style={{ color: "#9CA3AF" }}>
-              You can close this tab.
+
+            <Link
+              href="/login"
+              className="inline-flex items-center justify-center h-[48px] px-10 mt-5 rounded-full font-semibold text-base text-white"
+              style={{
+                backgroundColor: "#0FA6A6",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+              }}
+            >
+              Go to Log In
+            </Link>
+
+            <p className="text-xs mt-4" style={{ color: "#9CA3AF" }}>
+              Using the We Glue app? Head back to the app and log in there — you
+              can close this tab.
             </p>
           </div>
         </div>
@@ -303,7 +318,9 @@ export default function ResetPasswordClient(): JSX.Element | null {
   }
 
   // view === "form"
-  const strength = getPasswordStrength(password);
+  const pw = checkPassword(password);
+  const hintColor = (ok: boolean) =>
+    password.length === 0 ? "#9CA3AF" : ok ? "#0FA6A6" : "#F02719";
 
   return (
     <main
@@ -364,26 +381,18 @@ export default function ResetPasswordClient(): JSX.Element | null {
               </button>
             </div>
 
-            {/* Password strength bar */}
-            {password.length > 0 && (
-              <div className="flex items-center gap-2 mt-2">
-                <div className="flex gap-1 flex-1">
-                  {[1, 2, 3].map((seg) => (
-                    <div
-                      key={seg}
-                      className="h-1.5 flex-1 rounded-full transition-colors"
-                      style={{
-                        backgroundColor:
-                          strength.level >= seg ? strength.color : "#E5E7EB",
-                      }}
-                    />
-                  ))}
-                </div>
-                <span className="text-xs font-medium" style={{ color: strength.color }}>
-                  {strength.label}
-                </span>
-              </div>
-            )}
+            {/* Same requirement hints as account creation (mobile parity) */}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+              <span className="text-xs font-medium" style={{ color: hintColor(pw.minLength) }}>
+                Min. 8 characters
+              </span>
+              <span className="text-xs font-medium" style={{ color: hintColor(pw.hasCapital) }}>
+                1 capital letter
+              </span>
+              <span className="text-xs font-medium" style={{ color: hintColor(pw.hasNumber) }}>
+                1 number
+              </span>
+            </div>
           </div>
 
           {/* Confirm password */}

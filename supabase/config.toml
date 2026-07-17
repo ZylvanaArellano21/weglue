@@ -163,8 +163,15 @@ site_url = "https://weglue.app"
 additional_redirect_urls = [
   "https://127.0.0.1:3000",
   "http://localhost:3000",
+  # Local web-app development (email links + OAuth return).
+  "http://localhost:3000/auth/callback",
+  "http://localhost:3000/auth/confirm",
+  "http://localhost:3000/auth/reset-password",
   "https://weglue.app/auth/confirm",
   "https://weglue.app/auth/reset-password",
+  # Microsoft OAuth return (web). GoTrue redirects here with ?code=…;
+  # the Next.js route exchanges it via PKCE.
+  "https://weglue.app/auth/callback",
   "weglue://auth/confirmed",
   "weglue://auth/confirm-email",
   "weglue://onboarding/profile-pic",

@@ -1,165 +1,214 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+import {
+  RESEND_COOLDOWN_SECONDS,
+  getPendingSignupEmail,
+  getResendCooldownRemaining,
+  sendVerificationEmail,
+  setPendingSignupEmail,
+} from "../../../lib/authFlow";
 
-const RESEND_COOLDOWN_SECONDS = 60;
+const SUCCESS_MESSAGE_DURATION_MS = 8000;
+const RESEND_SUCCESS_MESSAGE =
+  "Verification email sent. Check your inbox — and your spam/junk folder.";
 
-function LegalFooter() {
-  return (
-    <p className="text-center text-[10px] text-[#5F5D5D] mt-6">
-      <Link href="/privacy-policy" className="hover:text-[#0FA6A6] underline">
-        Privacy Policy
-      </Link>
-      {" · "}
-      <Link href="/terms-of-service" className="hover:text-[#0FA6A6] underline">
-        Terms of Service
-      </Link>
-    </p>
-  );
-}
-
-function VerifyEmailContent() {
+function VerifyEmailContent(): JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const emailFromParams = searchParams.get("email") ?? null;
+  const emailParam = searchParams.get("email");
+  const expiredParam = searchParams.get("expired");
 
-  const [email, setEmail] = useState<string | null>(emailFromParams);
-  const [countdown, setCountdown] = useState(0);
+  const [email, setEmail] = useState("");
   const [resending, setResending] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [resendStatus, setResendStatus] = useState<"success" | "error" | null>(null);
+  const [resendErrorMessage, setResendErrorMessage] = useState("");
+  const [expiredNotice, setExpiredNotice] = useState(expiredParam === "1");
 
-  // Try to get the email from the active session (if email confirmation is disabled)
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendingRef = useRef(false);
+
+  // Resolve which email this screen is for: URL param first, then the
+  // persisted pending-signup marker (refresh-safe).
   useEffect(() => {
-    if (email) return;
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user?.email) setEmail(user.email);
-    });
-  }, [email]);
+    const paramEmail = emailParam?.trim().toLowerCase();
+    if (paramEmail) {
+      setEmail(paramEmail);
+      setPendingSignupEmail(paramEmail);
+      return;
+    }
+    const stored = getPendingSignupEmail();
+    if (stored) setEmail(stored);
+  }, [emailParam]);
 
-  // Poll for email confirmation and auto-redirect when verified.
-  // Works in the same browser: after the user clicks the email link in another
-  // tab, the callback sets session cookies — which this tab picks up on next poll.
-  useEffect(() => {
-    const supabase = createClient();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (
-          (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") &&
-          session?.user?.email_confirmed_at
-        ) {
-          router.push("/onboarding/avatar");
+  const startCooldown = useCallback((seconds: number) => {
+    setCooldown(seconds);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          cooldownRef.current = null;
+          return 0;
         }
-      }
-    );
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
 
+  // Adopt any cooldown already running — "Verify Now" on Login just sent an
+  // email and navigated here, or the page was refreshed mid-countdown. The
+  // countdown continues; it never restarts at a fresh 60.
+  useEffect(() => {
+    if (!email) return;
+    const remaining = getResendCooldownRemaining(email);
+    if (remaining > 0) {
+      startCooldown(remaining);
+      setResendStatus("success");
+    }
+  }, [email, startCooldown]);
+
+  useEffect(
+    () => () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+    },
+    []
+  );
+
+  // Same-browser flow: clicking the email link opens /auth/confirm which sets
+  // session cookies. Poll for the verified session and move the user along
+  // automatically, exactly as the screenshot copy promises.
+  useEffect(() => {
+    const supabase = createClient();
     const interval = setInterval(async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (user?.email_confirmed_at) {
         clearInterval(interval);
-        router.push("/onboarding/avatar");
+        router.push("/dashboard");
+        router.refresh();
       }
     }, 3000);
-
-    return () => {
-      authListener.subscription.unsubscribe();
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, [router]);
 
-  // Countdown timer for resend cooldown
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
-
-  const handleResend = useCallback(async () => {
-    if (countdown > 0 || !email) return;
+  async function handleResend() {
+    if (sendingRef.current || resending || cooldown > 0 || !email) return;
+    sendingRef.current = true;
     setResending(true);
-    setResendSuccess(false);
+    setResendStatus(null);
+    setExpiredNotice(false);
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = null;
+    }
+
     try {
-      const supabase = createClient();
-      await supabase.auth.resend({ type: "signup", email });
-      setResendSuccess(true);
-      setCountdown(RESEND_COOLDOWN_SECONDS);
-    } catch {
-      // fail silently — no need to alarm user
+      const result = await sendVerificationEmail(email);
+
+      if (result.ok) {
+        startCooldown(RESEND_COOLDOWN_SECONDS);
+        setResendStatus("success");
+        feedbackTimeoutRef.current = setTimeout(() => {
+          setResendStatus(null);
+          feedbackTimeoutRef.current = null;
+        }, SUCCESS_MESSAGE_DURATION_MS);
+        return;
+      }
+
+      if ("cooldown" in result) {
+        startCooldown(result.cooldown);
+        return;
+      }
+
+      setResendErrorMessage(result.message);
+      setResendStatus("error");
     } finally {
+      sendingRef.current = false;
       setResending(false);
     }
-  }, [countdown, email]);
+  }
+
+  const resendLabel =
+    cooldown > 0 ? `Resend again in ${cooldown}s` : "Resend Email";
+  const resendDisabled = !email || resending || cooldown > 0;
 
   return (
-    <main className="min-h-screen bg-[#FEFCF0] flex flex-col items-center justify-center px-6 text-center">
-      <Image
-        src="/logo.png"
-        alt="We Glue"
-        width={64}
-        height={64}
-        className="mb-6"
-      />
+    <main className="min-h-screen bg-[#FEFCF0] flex flex-col items-center px-6 pt-[8vh]">
+      <Image src="/logo.png" alt="We Glue" width={110} height={100} priority />
 
-      <div className="w-16 h-16 bg-[#E0F7F7] rounded-full flex items-center justify-center mb-5 text-3xl">
-        ✉️
-      </div>
+      <h1 className="text-[30px] font-bold text-black mt-8">Confirm your email</h1>
 
-      <h1
-        className="text-2xl font-bold text-black mb-2"
-        style={{ fontFamily: "var(--font-zain)" }}
-      >
-        Check your email
-      </h1>
-
-      <p className="text-sm text-[#5F5D5D] max-w-xs leading-relaxed mb-2">
-        We sent a verification link to
-      </p>
-      {email && (
-        <p className="text-sm font-semibold text-black mb-4 break-all">{email}</p>
-      )}
-      <p className="text-sm text-[#5F5D5D] max-w-xs leading-relaxed mb-8">
-        Click the link in that email to confirm your account. This page
-        redirects automatically once you&apos;re verified.
-      </p>
-
-      {/* Resend button */}
-      <button
-        type="button"
-        onClick={handleResend}
-        disabled={countdown > 0 || resending || !email}
-        className="h-[48px] px-8 bg-[#0FA6A6] text-white font-semibold text-sm rounded-[40px] shadow hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center gap-2 mb-3"
-      >
-        {resending && (
-          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-        )}
-        {countdown > 0
-          ? `Resend in ${countdown}s`
-          : resending
-          ? "Sending…"
-          : "Resend email"}
-      </button>
-
-      {resendSuccess && (
-        <p className="text-xs text-[#0FA6A6] mb-3">
-          Email resent! Check your inbox.
+      <div className="w-full max-w-[406px] bg-[#FFFEF7] shadow-[0px_18px_60px_rgba(0,0,0,0.3)] mt-10 px-8 py-14 text-center">
+        <p className="text-[17px] font-semibold text-[#5F5D5D]">
+          We sent a verification link to
         </p>
-      )}
+        <p className="text-[17px] font-bold text-[#0FA6A6] mt-1 break-all">
+          {email || "your school email"}
+        </p>
 
-      <Link
-        href="/onboarding/signup"
-        className="text-sm text-[#5F5D5D] hover:text-[#0FA6A6] transition-colors"
-      >
-        ← Go back
-      </Link>
+        <p className="text-[14px] text-[#5F5D5D] leading-relaxed mt-9">
+          Tap the link in the email to verify your account. Once verified, you
+          will be taken to the next step automatically.
+        </p>
 
-      <LegalFooter />
+        {expiredNotice && (
+          <p aria-live="polite" className="text-[13px] text-[#F02719] mt-4">
+            That confirmation link expired. Tap Resend Email to get a new one.
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={handleResend}
+          disabled={resendDisabled}
+          className="w-[80%] h-[46px] mx-auto mt-9 rounded-full bg-[#0FA6A6] text-[#FEFCF0] text-[17px] font-bold shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:bg-[#CCCCCC] disabled:shadow-none flex items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+        >
+          {resending ? (
+            <span
+              aria-hidden
+              className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+            />
+          ) : (
+            <span aria-live="polite">{resendLabel}</span>
+          )}
+        </button>
+
+        <p aria-live="polite" className="min-h-[20px] mt-4">
+          {resendStatus === "success" && (
+            <span className="text-[13px] text-[#0FA6A6] font-medium">
+              {RESEND_SUCCESS_MESSAGE}
+            </span>
+          )}
+          {resendStatus === "error" && (
+            <span className="text-[13px] text-[#F02719] font-medium">
+              {resendErrorMessage}
+            </span>
+          )}
+        </p>
+
+        <p className="text-[15px] font-bold text-black mt-8">
+          Already verified it?{" "}
+          <Link
+            href={
+              email
+                ? `/login?prefillEmail=${encodeURIComponent(email)}`
+                : "/login"
+            }
+            className="text-[#0FA6A6] hover:underline"
+          >
+            Log In
+          </Link>
+        </p>
+      </div>
     </main>
   );
 }

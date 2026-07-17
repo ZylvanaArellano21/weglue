@@ -1,11 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useOnboardingStore } from "@weglue/shared";
+import {
+  SurveyChip,
+  SurveyProgress,
+  SurveyTopBar,
+} from "../../../components/auth/SurveyChrome";
+import {
+  readOnboardingState,
+  writeOnboardingState,
+} from "../../../lib/onboardingState";
 import { createClient } from "../../../lib/supabase/client";
 
+// Same list and spelling as the mobile survey (the DB CHECK constraints on
+// user_activities accept exactly these values).
 const ACTIVITIES = [
   "Projects",
   "Volunteering",
@@ -19,45 +28,57 @@ const ACTIVITIES = [
   "Campus Tours",
 ] as const;
 
-function LegalFooter() {
-  return (
-    <p className="text-center text-[10px] text-[#5F5D5D] mt-6">
-      <Link href="/privacy-policy" className="hover:text-[#0FA6A6] underline">
-        Privacy Policy
-      </Link>
-      {" · "}
-      <Link href="/terms-of-service" className="hover:text-[#0FA6A6] underline">
-        Terms of Service
-      </Link>
-    </p>
-  );
-}
-
 export default function ActivitiesPage(): JSX.Element | null {
   const router = useRouter();
-  const { selectedActivities, toggleActivity, selectedInterests, setMatchCount } =
-    useOnboardingStore();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setSelected(readOnboardingState().selectedActivities);
+    setHydrated(true);
+  }, []);
+
+  function toggle(activity: string) {
+    setError(null);
+    setSelected((current) => {
+      const next = current.includes(activity)
+        ? current.filter((a) => a !== activity)
+        : [...current, activity];
+      writeOnboardingState({ selectedActivities: next });
+      return next;
+    });
+  }
 
   async function handleFindMatches() {
-    setLoading(true);
-    try {
-      if (selectedInterests.length > 0) {
-        const supabase = createClient();
-        const { data } = await supabase
-          .from("club_interests")
-          .select("club_id")
-          .in("interest", selectedInterests);
+    if (loading) return;
+    if (selected.length === 0) {
+      setError("Select at least one activity to find your matches.");
+      return;
+    }
 
-        const unique = new Set(
-          (data ?? []).map((r: { club_id: string }) => r.club_id)
-        );
-        setMatchCount(unique.size);
-      } else {
-        setMatchCount(0);
-      }
+    setLoading(true);
+    const { selectedInterests } = readOnboardingState();
+    try {
+      // Same server-side ranking that will persist the recommendation batch at
+      // signup, so the number shown is the number of clubs the account gets.
+      // The server never returns 0 or 1 while the campus has at least two
+      // eligible clubs — it tops the batch up with the best-ranked clubs.
+      const supabase = createClient();
+      const { data, error: rpcError } = await supabase.rpc(
+        "preview_club_match_count",
+        { p_interests: selectedInterests }
+      );
+      if (rpcError) throw rpcError;
+      writeOnboardingState({
+        selectedActivities: selected,
+        matchCount: typeof data === "number" ? data : 0,
+      });
     } catch {
-      setMatchCount(0);
+      // Never strand the user on a network blip — the real batch is built
+      // server-side at signup regardless of what we managed to preview here.
+      writeOnboardingState({ selectedActivities: selected, matchCount: 0 });
     } finally {
       setLoading(false);
       router.push("/onboarding/signup");
@@ -65,79 +86,52 @@ export default function ActivitiesPage(): JSX.Element | null {
   }
 
   return (
-    <main className="min-h-screen bg-[#FEFCF0] flex items-start justify-center px-4 py-8">
-      <div className="w-full max-w-lg">
-        {/* Top bar */}
-        <div className="flex items-center justify-between mb-5">
-          <Link
-            href="/onboarding/interests"
-            className="text-sm font-medium text-[#5F5D5D] hover:text-black transition-colors"
-          >
-            Cancel
-          </Link>
-          <span className="text-sm font-semibold text-black">Survey</span>
-          <Link
-            href="/login"
-            className="bg-[#0FA6A6] text-white text-sm font-semibold px-4 py-1.5 rounded-full hover:bg-[#0d9494] transition-colors"
-          >
-            Log In
-          </Link>
-        </div>
+    <main className="min-h-screen bg-[#FEFCF0] flex justify-center px-6 py-8">
+      <div className="w-full max-w-[820px]">
+        <SurveyTopBar />
+        <SurveyProgress filled={2} step="Step 2 of 2" />
 
-        {/* Progress bar — both halves teal */}
-        <div className="mb-2">
-          <div className="h-1.5 bg-[#0FA6A6] rounded-full" />
-          <p className="text-xs font-medium text-[#5F5D5D] mt-1.5">Step 2 of 2</p>
-        </div>
-
-        {/* Heading */}
-        <h1
-          className="text-[26px] font-bold text-[#0FA6A6] leading-tight mb-1 mt-4"
-          style={{ fontFamily: "var(--font-zain)" }}
-        >
+        <h1 className="text-[27px] font-bold text-[#0FA6A6] leading-tight mt-9 mb-3">
           What do you enjoy doing?
         </h1>
-        <p className="text-sm text-[#0FA6A6] mb-6 leading-relaxed">
+        <p className="text-[19px] text-[#0FA6A6] mb-9 leading-relaxed">
           Pick all the activities you love. This helps us personalize your feed.
         </p>
 
-        {/* Activity pills */}
-        <div className="flex flex-wrap gap-2.5 mb-10">
-          {ACTIVITIES.map((item) => {
-            const selected = selectedActivities.includes(item);
-            return (
-              <button
-                key={item}
-                type="button"
-                onClick={() => toggleActivity(item)}
-                className={`px-[18px] py-2.5 rounded-[40px] border text-sm font-medium transition-colors ${
-                  selected
-                    ? "bg-[#0FA6A6] border-[#0FA6A6] text-white"
-                    : "bg-white border-black/20 text-black hover:border-[#0FA6A6] hover:text-[#0FA6A6]"
-                }`}
-              >
-                {item}
-              </button>
-            );
-          })}
+        <div
+          role="group"
+          aria-label="Activities"
+          className="flex flex-wrap gap-x-[22px] gap-y-[26px] mb-10 max-w-[790px]"
+        >
+          {ACTIVITIES.map((item) => (
+            <SurveyChip
+              key={item}
+              label={item}
+              selected={hydrated && selected.includes(item)}
+              onToggle={() => toggle(item)}
+            />
+          ))}
         </div>
 
-        {/* Find my matches */}
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-5 pb-8 mt-24">
+          <p aria-live="polite" className="text-[15px] font-semibold text-[#F02719]">
+            {error}
+          </p>
           <button
             type="button"
             onClick={handleFindMatches}
             disabled={loading}
-            className="h-[52px] px-10 bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-base rounded-[40px] shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center gap-2"
+            className="h-[56px] px-10 bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-[19px] rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center gap-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
           >
             {loading && (
-              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span
+                aria-hidden
+                className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
+              />
             )}
             Find my matches
           </button>
         </div>
-
-        <LegalFooter />
       </div>
     </main>
   );

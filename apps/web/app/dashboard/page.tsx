@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { createClient } from "../../lib/supabase/server";
+import { ClubMatchesSection } from "../../components/home/ClubMatchesSection";
 
 export const metadata = { title: "Dashboard" };
 
@@ -77,6 +78,10 @@ export default async function DashboardPage(): Promise<JSX.Element> {
         <p className="text-sm text-[#5F5D5D] mb-8">
           Your campus community is here. More features coming soon.
         </p>
+
+        {/* The persistent club-match batch promised during signup — same
+            server-side batch the mobile Home tab shows. */}
+        <ClubMatchesSection userId={user.id} />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md mx-auto">
           <Link
