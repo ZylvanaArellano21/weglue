@@ -122,8 +122,17 @@ export async function middleware(request: NextRequest) {
       .eq("id", user.id)
       .maybeSingle();
 
+    // `onboarding_completed` is the authoritative completion flag. Once it is
+    // true the user belongs on Home — even if they never set a custom avatar
+    // (that's the exact state the Home "Personalize your picture!" prompt
+    // handles). Checking avatar_url first used to bounce onboarded users back
+    // into /onboarding/avatar, so it must NOT gate ahead of this.
+    if (profile?.onboarding_completed) {
+      return NextResponse.redirect(new URL("/home", request.url));
+    }
+
+    // Not finished yet — route through the remaining onboarding steps.
     if (!profile || !profile.avatar_url) {
-      // Still needs to set up avatar
       if (
         pathname.startsWith("/onboarding/avatar") ||
         pathname.startsWith("/onboarding/interests") ||
@@ -137,17 +146,12 @@ export async function middleware(request: NextRequest) {
       );
     }
 
-    if (!profile.onboarding_completed) {
-      if (pathname.startsWith("/onboarding/explore-clubs")) {
-        return response;
-      }
-      return NextResponse.redirect(
-        new URL("/onboarding/explore-clubs", request.url)
-      );
+    if (pathname.startsWith("/onboarding/explore-clubs")) {
+      return response;
     }
-
-    // Fully onboarded — send them straight to Home.
-    return NextResponse.redirect(new URL("/home", request.url));
+    return NextResponse.redirect(
+      new URL("/onboarding/explore-clubs", request.url)
+    );
   }
 
   return response;
