@@ -70,15 +70,18 @@ export async function middleware(request: NextRequest) {
 
   // User confirmed their email but landed on verify-email (e.g. refreshed page)
   if (pathname === "/onboarding/verify-email" && isEmailVerified) {
-    // Fetch profile to know next step
+    // Fetch profile to know next step. `onboarding_completed` (migration 027)
+    // is the single source of truth written by mobile + all onboarding RPCs;
+    // the legacy `onboarding_complete` (migration 003) is NOT kept in sync and
+    // must never gate routing, or a freshly verified user is mis-routed.
     const { data: profile } = await supabase
       .from("profiles")
-      .select("onboarding_complete, avatar_url")
+      .select("onboarding_completed, avatar_url")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (profile?.onboarding_complete) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+    if (profile?.onboarding_completed) {
+      return NextResponse.redirect(new URL("/home", request.url));
     }
     if (profile?.avatar_url) {
       return NextResponse.redirect(
@@ -115,7 +118,7 @@ export async function middleware(request: NextRequest) {
   ) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("onboarding_complete, avatar_url")
+      .select("onboarding_completed, avatar_url")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -134,7 +137,7 @@ export async function middleware(request: NextRequest) {
       );
     }
 
-    if (!profile.onboarding_complete) {
+    if (!profile.onboarding_completed) {
       if (pathname.startsWith("/onboarding/explore-clubs")) {
         return response;
       }
@@ -143,8 +146,8 @@ export async function middleware(request: NextRequest) {
       );
     }
 
-    // Fully onboarded — redirect to dashboard
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    // Fully onboarded — send them straight to Home.
+    return NextResponse.redirect(new URL("/home", request.url));
   }
 
   return response;
