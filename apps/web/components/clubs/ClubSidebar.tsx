@@ -39,7 +39,7 @@ export function ClubSidebar({
           aria-label="Search your clubs and the catalog"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          className="h-9 w-full rounded-full border bg-white pl-9 pr-9 text-sm outline-none focus:ring-2"
+          className="no-native-clear h-9 w-full rounded-full border bg-white pl-9 pr-9 text-sm outline-none focus:ring-2"
           style={{ borderColor: "rgba(0,0,0,0.12)" }}
         />
         {query && (

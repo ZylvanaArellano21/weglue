@@ -14,4 +14,11 @@
     background-color: #FEFCF0;
     color: #111827;
   }
+
+  /* Hide the browser-native clear (✕) on search inputs that render their own
+     custom clear button, so the two don't stack (Club-tab sidebar search). */
+  .no-native-clear::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
 }
