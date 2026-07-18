@@ -9,15 +9,20 @@ import { HomeFeed } from "./HomeFeed";
 import { RightColumn } from "./RightColumn";
 import { EventDetailModal } from "./EventDetailModal";
 import { SavedEventsModal } from "./SavedEventsModal";
+import { NotificationsModal } from "./NotificationsModal";
+import { GluematesModal } from "./GluematesModal";
+import { PostModal } from "./PostModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
+import { useRealtimeNotifications, type NotificationTarget } from "../../lib/hooks/useNotifications";
+import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 
-// Root of the authenticated web Home experience. Mounts the single live
-// unread-summary subscription and lays out the three desktop columns. The
-// event-detail overlay is URL-driven (?event=) so it opens from the feed,
-// Upcoming Events or the calendar, deep-links when opened directly, and Back /
-// close restores the exact prior Home state (tab + scroll).
+// Root of the authenticated web Home experience. Mounts the live unread-summary
+// + notifications subscriptions and lays out the three desktop columns. Every
+// overlay (event, post, saved, notifications, gluemates) is URL-driven so
+// browser Back closes it and restores the exact prior Home state (tab + scroll).
 export function HomeClient({ userId }: { userId: string }): JSX.Element {
-  useUnreadSummary(userId); // owns the realtime badge subscription
+  useUnreadSummary(userId); // realtime badge subscription
+  useRealtimeNotifications(userId); // live notification inserts
 
   return (
     <ToastProvider>
@@ -35,8 +40,13 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const { data: profile } = useOwnProfile(userId);
+
   const eventId = params.get("event");
+  const postId = params.get("post");
   const savedOpen = params.get("saved") === "1";
+  const notifOpen = params.get("notifications") === "1";
+  const gluematesOpen = params.get("gluemates") === "1";
 
   const buildUrl = useCallback(
     (mutate: (sp: URLSearchParams) => void) => {
@@ -48,21 +58,33 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
     [params, pathname]
   );
 
-  // Push (adds a history entry) so browser Back closes the overlay and returns
-  // to the same feed/tab/scroll; keeps the current ?tab so the tab is preserved.
-  const openEvent = useCallback(
-    (id: string) => router.push(buildUrl((sp) => sp.set("event", id)), { scroll: false }),
+  const set = useCallback(
+    (key: string, val: string) => router.push(buildUrl((sp) => sp.set(key, val)), { scroll: false }),
     [router, buildUrl]
   );
-  const closeEvent = useCallback(
-    () => router.push(buildUrl((sp) => sp.delete("event")), { scroll: false }),
+  const clear = useCallback(
+    (key: string) => router.push(buildUrl((sp) => sp.delete(key)), { scroll: false }),
     [router, buildUrl]
   );
-  const closeSaved = useCallback(
-    () => router.push(buildUrl((sp) => sp.delete("saved")), { scroll: false }),
-    [router, buildUrl]
-  );
+
+  const openEvent = useCallback((id: string) => set("event", id), [set]);
+  const openPost = useCallback((id: string) => set("post", id), [set]);
   const openClub = useCallback((clubId: string) => router.push(`/club/${clubId}`), [router]);
+
+  // Notification deep-links → the right web destination.
+  const openTarget = useCallback(
+    (target: NotificationTarget) => {
+      switch (target.kind) {
+        case "event": return openEvent(target.id);
+        case "post": return openPost(target.id);
+        case "user": return router.push(`/u/${target.id}`);
+        case "club": return router.push(`/club/${target.id}`);
+        case "chat": return router.push(`/messages`);
+        case "notifications": return; // already here
+      }
+    },
+    [openEvent, openPost, router]
+  );
 
   return (
     <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
@@ -70,28 +92,50 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
         <div className="hidden lg:block">
           <ProfileSidebar userId={userId} />
         </div>
-
         <div>
           <HomeFeed userId={userId} onOpenEvent={openEvent} />
         </div>
-
         <div className="hidden xl:block">
           <RightColumn userId={userId} onOpenEvent={openEvent} />
         </div>
       </div>
 
-      {/* Saved overlay hides while an event overlay is on top, so Back from the
-          event returns to Saved rather than double-dimming the screen. */}
-      {savedOpen && !eventId && (
-        <SavedEventsModal userId={userId} onClose={closeSaved} onOpenEvent={openEvent} />
+      {/* Base overlays hide while an event/post overlay is on top so Back from
+          the inner overlay returns to them rather than double-dimming. */}
+      {savedOpen && !eventId && !postId && (
+        <SavedEventsModal userId={userId} onClose={() => clear("saved")} onOpenEvent={openEvent} />
+      )}
+      {notifOpen && !eventId && !postId && (
+        <NotificationsModal
+          userId={userId}
+          username={profile?.username}
+          onClose={() => clear("notifications")}
+          onOpenTarget={openTarget}
+        />
+      )}
+      {gluematesOpen && !eventId && !postId && (
+        <GluematesModal
+          userId={userId}
+          onClose={() => clear("gluemates")}
+          onOpenUser={(id) => router.push(`/u/${id}`)}
+        />
       )}
 
+      {postId && (
+        <PostModal
+          key={`post-${postId}`}
+          postId={postId}
+          userId={userId}
+          onClose={() => clear("post")}
+          onOpenAuthor={(id) => router.push(`/u/${id}`)}
+        />
+      )}
       {eventId && (
         <EventDetailModal
-          key={eventId}
+          key={`event-${eventId}`}
           eventId={eventId}
           userId={userId}
-          onClose={closeEvent}
+          onClose={() => clear("event")}
           onOpenClub={openClub}
         />
       )}

@@ -95,7 +95,7 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
 
       {/* Notifications */}
       <MenuCard>
-        <MenuRow href="/notifications" label="Notifications" badge={notifications} bold />
+        <MenuRow href="/home?notifications=1" label="Notifications" badge={notifications} bold />
       </MenuCard>
 
       {/* Saved Events + Interests */}
@@ -107,7 +107,7 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
       {/* Gluemates */}
       <MenuCard>
         <Link
-          href="/gluemates"
+          href="/home?gluemates=1"
           className="flex items-center justify-between px-4 py-3 text-[15px] font-bold text-gray-900"
         >
           <span>Gluemates</span>

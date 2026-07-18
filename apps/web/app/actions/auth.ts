@@ -252,10 +252,16 @@ export async function loginAction(payload: LoginPayload): Promise<LoginResult> {
     return { success: true, redirectTo: "/onboarding/verify-email" };
   }
 
-  // Fetch profile to determine onboarding step
+  // Fetch profile to determine onboarding step. `onboarding_completed`
+  // (migration 027) is the authoritative flag written by mobile + all
+  // onboarding RPCs; the legacy `onboarding_complete` (migration 003) is not
+  // kept in sync and must never gate routing. It is also checked BEFORE
+  // avatar_url so a completed user with no custom picture lands on Home (the
+  // exact state the Home "Personalize your picture!" prompt handles) rather
+  // than being sent back into onboarding.
   const { data: profile } = await supabase
     .from("profiles")
-    .select("onboarding_complete, avatar_url")
+    .select("onboarding_completed, avatar_url")
     .eq("id", data.user.id)
     .single();
 
@@ -263,8 +269,8 @@ export async function loginAction(payload: LoginPayload): Promise<LoginResult> {
     return { success: true, redirectTo: "/onboarding/avatar" };
   }
 
-  if (profile.onboarding_complete) {
-    return { success: true, redirectTo: "/dashboard" };
+  if (profile.onboarding_completed) {
+    return { success: true, redirectTo: "/home" };
   }
 
   // Determine next incomplete onboarding step

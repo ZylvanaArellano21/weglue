@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 
 // Web port of apps/mobile/services/postService.ts::getHomePostsFeed +
@@ -168,6 +168,66 @@ export function useHomePostsFeed(userId: string | undefined) {
     initialPageParam: 0,
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
+  });
+}
+
+// Single post — powers the post overlay opened from like/comment notifications
+// and the profile posts grid.
+async function getPostById(postId: string, userId: string): Promise<FeedPost | null> {
+  const supabase = getSupabaseBrowser();
+  const { data: p, error } = await supabase
+    .from("posts")
+    .select(
+      `id, image_url, caption, created_at, author_id, club_id,
+       profiles!inner(id, username, avatar_url), clubs(id, name)`
+    )
+    .eq("id", postId)
+    .maybeSingle();
+  if (error || !p) return null;
+  const post = p as any;
+
+  const [{ data: likesRows }, { data: commentsRows }, { data: extraTagRows }] = await Promise.all([
+    supabase.from("post_likes").select("user_id").eq("post_id", postId),
+    supabase.from("post_comments").select("id").eq("post_id", postId),
+    supabase.from("post_club_tags").select("post_id, club_id, clubs(id, name)").eq("post_id", postId),
+  ]);
+
+  const extra = new Map<string, { id: string; name: string }[]>();
+  for (const row of (extraTagRows as any[]) ?? []) {
+    if (!row.clubs) continue;
+    const list = extra.get(row.post_id) ?? [];
+    list.push({ id: row.clubs.id, name: row.clubs.name });
+    extra.set(row.post_id, list);
+  }
+  const likes = (likesRows ?? []) as any[];
+
+  return {
+    id: post.id,
+    image_url: post.image_url,
+    caption: post.caption,
+    created_at: post.created_at,
+    author: {
+      id: post.profiles.id,
+      username: post.profiles.username,
+      avatar_url: post.profiles.avatar_url,
+      is_following: false,
+      is_requested: false,
+      follows_me: false,
+      profile_is_private: false,
+    },
+    tagged_clubs: mergeTaggedClubs(post.club_id, post.clubs, extra.get(post.id) ?? []),
+    likes_count: likes.length,
+    comments_count: ((commentsRows ?? []) as any[]).length,
+    user_has_liked: likes.some((l) => l.user_id === userId),
+  };
+}
+
+export function usePostDetail(postId: string | undefined, userId: string | undefined) {
+  return useQuery({
+    queryKey: ["postDetail", postId, userId],
+    queryFn: () => getPostById(postId!, userId!),
+    enabled: !!postId && !!userId,
+    staleTime: 60 * 1000,
   });
 }
 

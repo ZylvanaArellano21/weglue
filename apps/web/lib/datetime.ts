@@ -87,6 +87,20 @@ export function isEventPast(
 
 // ─── Display formatters (match EventCard on mobile) ──────────────────────────
 
+/** YYYY-MM-DD + n days → YYYY-MM-DD (UTC-noon anchored, timezone-safe). */
+export function addDaysToDateString(dateStr: string, days: number): string {
+  const base = new Date(dateStr + "T12:00:00Z");
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().split("T")[0]!;
+}
+
+/** Whole-day difference between two YYYY-MM-DD strings (b - a). */
+export function dayDiff(a: string, b: string): number {
+  const aMs = new Date(a + "T12:00:00Z").getTime();
+  const bMs = new Date(b + "T12:00:00Z").getTime();
+  return Math.round((bMs - aMs) / 86_400_000);
+}
+
 /** "18 May 2025" */
 export function formatEventDate(dateStr: string): string {
   const date = new Date(dateStr + "T00:00:00");
@@ -105,6 +119,22 @@ export function formatEventTime(timeStr: string): string {
   const ampm = h >= 12 ? "pm" : "am";
   const hour = h % 12 || 12;
   return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+/** Compact relative time: "now", "5m", "3h", "2d", "4w", else a date. */
+export function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (secs < 60) return "now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 /** "Building F, Room 219" with free-text location fallback (mirrors mobile). */
