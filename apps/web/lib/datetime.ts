@@ -85,6 +85,27 @@ export function isEventPast(
   return endTime < nowTimeInAppTz();
 }
 
+/**
+ * Split events into upcoming vs past by real end datetime (mirrors mobile's
+ * lib/eventDisplay.splitPastAndUpcoming): upcoming ascending, past descending.
+ */
+export function splitPastAndUpcoming<
+  T extends { event_date: string; start_time: string; end_time: string | null }
+>(events: T[]): { upcoming: T[]; past: T[] } {
+  const upcoming: T[] = [];
+  const past: T[] = [];
+  for (const e of events) {
+    (isEventPast(e.event_date, e.end_time) ? past : upcoming).push(e);
+  }
+  upcoming.sort(
+    (a, b) => a.event_date.localeCompare(b.event_date) || a.start_time.localeCompare(b.start_time)
+  );
+  past.sort(
+    (a, b) => b.event_date.localeCompare(a.event_date) || b.start_time.localeCompare(a.start_time)
+  );
+  return { upcoming, past };
+}
+
 // ─── Display formatters (match EventCard on mobile) ──────────────────────────
 
 /** YYYY-MM-DD + n days → YYYY-MM-DD (UTC-noon anchored, timezone-safe). */

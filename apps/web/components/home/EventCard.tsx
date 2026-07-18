@@ -23,6 +23,8 @@ interface EventCardProps {
   onJoinClub: (clubId: string) => void;
   onOpenEvent: (eventId: string) => void;
   onOpenClub: (clubId: string) => void;
+  /** Past events show no active RSVP action (Club Profile Past Events, §15). */
+  isPast?: boolean;
 }
 
 // Desktop adaptation of apps/mobile/components/home/EventCard.tsx — same data,
@@ -34,6 +36,7 @@ export function EventCard({
   onJoinClub,
   onOpenEvent,
   onOpenClub,
+  isPast = false,
 }: EventCardProps): JSX.Element {
   const [imageError, setImageError] = useState(false);
   const location = formatEventLocation(event.building, event.room, event.location);
@@ -162,18 +165,24 @@ export function EventCard({
             <span className="text-xs text-black">{event.attendee_count} going</span>
           </button>
           <div className="flex-1" />
-          <button
-            type="button"
-            onClick={() => onRsvp(event.id)}
-            className="rounded-full px-5 py-1.5 text-xs font-semibold transition-colors"
-            style={
-              rsvp === "cant"
-                ? { background: "rgba(240,39,25,0.1)", color: "#F02719", border: "1.5px solid #F02719" }
-                : { background: "#0FA6A6", color: "#fff" }
-            }
-          >
-            {rsvp === "going" ? "Going ✓" : rsvp === "cant" ? "Can't" : "RSVP"}
-          </button>
+          {isPast ? (
+            <span className="rounded-full px-4 py-1.5 text-xs font-semibold" style={{ background: "#F3F4F6", color: "#6B7280" }}>
+              Ended
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onRsvp(event.id)}
+              className="rounded-full px-5 py-1.5 text-xs font-semibold transition-colors"
+              style={
+                rsvp === "cant"
+                  ? { background: "rgba(240,39,25,0.1)", color: "#F02719", border: "1.5px solid #F02719" }
+                  : { background: "#0FA6A6", color: "#fff" }
+              }
+            >
+              {rsvp === "going" ? "Going ✓" : rsvp === "cant" ? "Can't" : "RSVP"}
+            </button>
+          )}
         </div>
       </div>
     </article>

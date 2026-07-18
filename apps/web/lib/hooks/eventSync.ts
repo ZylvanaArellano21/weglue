@@ -20,6 +20,9 @@ export function invalidateEventState(
   ]) {
     void queryClient.invalidateQueries({ queryKey: key });
   }
-  // Event-detail overlays are keyed by eventId; invalidate them all.
+  // Event-detail overlays are keyed by eventId; invalidate them all. Likewise
+  // the club-scoped feeds + club calendar markers (Club Profile Home/Calendar).
   void queryClient.invalidateQueries({ queryKey: ["eventDetail"] });
+  void queryClient.invalidateQueries({ queryKey: ["clubEventsFeed"] });
+  void queryClient.invalidateQueries({ queryKey: ["clubCalendarEvents"] });
 }

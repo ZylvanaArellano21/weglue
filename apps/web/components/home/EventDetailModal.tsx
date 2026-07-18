@@ -31,11 +31,17 @@ export function EventDetailModal({
   userId,
   onClose,
   onOpenClub,
+  onPrev,
+  onNext,
+  indicator,
 }: {
   eventId: string;
   userId: string;
   onClose: () => void;
   onOpenClub: (clubId: string) => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+  indicator?: string;
 }): JSX.Element {
   const show = useToast();
   const { data: event, isLoading } = useEventDetail(eventId, userId);
@@ -72,7 +78,14 @@ export function EventDetailModal({
   };
 
   return (
-    <Modal onClose={onClose} labelledBy="event-detail-title" maxWidth={560}>
+    <Modal
+      onClose={onClose}
+      labelledBy="event-detail-title"
+      maxWidth={560}
+      onPrev={onPrev}
+      onNext={onNext}
+      indicator={indicator}
+    >
       {isLoading ? (
         <div className="space-y-3 p-6">
           <div className="h-9 w-2/3 animate-pulse rounded bg-black/5" />
