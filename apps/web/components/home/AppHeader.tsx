@@ -3,16 +3,26 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../shared/Avatar";
 import { CountBadge } from "../shared/CountBadge";
 import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon } from "../shared/icons";
 import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 
-// Fixed top navigation (matches the web Home screenshots): logo, search, then
-// Home / Clubs / Messages icons + the user's avatar. Badges use the SAME shared
-// counts as mobile — Home = unread notifications, Messages = unread threads.
-// Mobile has no club-activity badge, so the Clubs icon shows none.
+// Fixed top navigation (matches the web Home + Club screenshots): logo, the
+// global search, then Home / Clubs / Messages icons + the user's avatar. Badges
+// use the SAME shared counts as mobile — Home = unread notifications,
+// Messages = unread threads. Mobile has no club-activity badge, so the Clubs
+// icon shows none.
+//
+// GLOBAL SEARCH BEHAVIOR (spec §3):
+//  • On Home the search is ALWAYS expanded (a full field, even empty/unfocused).
+//  • On every other destination it collapses to the small circular search
+//    button; clicking it expands the field; it stays open while focused or
+//    non-empty; it re-collapses when blurred empty; and navigating away from
+//    Home resets it to the collapsed circle. This is the GLOBAL search, not the
+//    Club-tab's own filter input.
 export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const pathname = usePathname();
   const { data: summary } = useUnreadSummaryValue(userId);
@@ -21,6 +31,23 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const isHome = pathname === "/home" || pathname === "/dashboard";
   const notifications = summary?.unread_notifications ?? 0;
   const threads = summary?.unread_threads ?? 0;
+  const isClubs = pathname === "/clubs" || pathname.startsWith("/club/");
+
+  // Off-Home expand/collapse state for the global search.
+  const [expanded, setExpanded] = useState(false);
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Navigating to any non-Home destination returns the search to its collapsed
+  // circular state (spec §3). Home always renders it expanded regardless.
+  useEffect(() => {
+    if (!isHome) {
+      setExpanded(false);
+      setValue("");
+    }
+  }, [pathname, isHome]);
+
+  const showInput = isHome || expanded;
 
   return (
     <header
@@ -32,25 +59,54 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           <Image src="/logo.png" alt="We Glue" width={40} height={40} priority />
         </Link>
 
-        <div className="relative min-w-0 flex-1 max-w-xl">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-            <SearchIcon size={18} />
-          </span>
-          <input
-            type="search"
-            aria-label="Search"
-            placeholder="Search"
-            className="h-10 w-full rounded-full border bg-white pl-10 pr-4 text-sm outline-none focus:ring-2"
-            style={{ borderColor: "rgba(0,0,0,0.1)" }}
-          />
+        {/* The search region is ALWAYS flex-1 so the nav icons keep a fixed
+            right-aligned position whether the field is expanded or collapsed —
+            expanding/collapsing must never make the icons jump (spec §3). */}
+        <div className="flex min-w-0 flex-1 items-center">
+          {showInput ? (
+            <div className="relative w-full max-w-xl">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                <SearchIcon size={18} />
+              </span>
+              <input
+                ref={inputRef}
+                type="search"
+                aria-label="Search"
+                placeholder="Search"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={() => {
+                  // Off-Home: collapse back to the circle only when left empty.
+                  if (!isHome && value.trim() === "") setExpanded(false);
+                }}
+                className="h-10 w-full rounded-full border bg-white pl-10 pr-4 text-sm outline-none focus:ring-2"
+                style={{ borderColor: "rgba(0,0,0,0.1)" }}
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              aria-label="Open search"
+              aria-expanded={false}
+              onClick={() => {
+                setExpanded(true);
+                // Focus once the input has rendered.
+                requestAnimationFrame(() => inputRef.current?.focus());
+              }}
+              className="flex h-10 w-10 items-center justify-center rounded-full border bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2"
+              style={{ borderColor: "rgba(0,0,0,0.1)" }}
+            >
+              <SearchIcon size={18} />
+            </button>
+          )}
         </div>
 
         <nav className="flex shrink-0 items-center gap-4 sm:gap-5" aria-label="Primary">
           <NavIcon href="/home" label="Home" active={isHome} badge={notifications} badgeLabel="unread notifications">
             <HomeIcon size={26} filled={isHome} />
           </NavIcon>
-          <NavIcon href="/clubs" label="Clubs">
-            <PeopleIcon size={27} />
+          <NavIcon href="/clubs" label="Clubs" active={isClubs}>
+            <PeopleIcon size={27} filled={isClubs} />
           </NavIcon>
           <NavIcon href="/messages" label="Messages" badge={threads} badgeLabel="unread conversations">
             <ChatIcon size={26} />

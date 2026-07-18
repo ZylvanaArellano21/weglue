@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
 import { ToastProvider, useToast } from "../shared/Toast";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
@@ -39,7 +39,14 @@ type Step = "interests" | "activities" | "congrats";
 
 function Body({ userId }: { userId: string }): JSX.Element {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const show = useToast();
+
+  // Context-aware return (spec §10): launched from the Club tab → back to Clubs,
+  // scrolled to the freshly refreshed Suggested for you. Launched from Home /
+  // the Home sidebar → the established Home → Events behavior.
+  const fromClubs = searchParams.get("from") === "clubs";
+  const seeMatchesHref = fromClubs ? "/clubs?matches=1" : "/home";
   const { data: profile } = useOwnProfile(userId);
   const rerun = useInterestsRerun(userId);
 
@@ -94,7 +101,7 @@ function Body({ userId }: { userId: string }): JSX.Element {
           </p>
           <button
             type="button"
-            onClick={() => router.push("/home")}
+            onClick={() => router.push(seeMatchesHref)}
             className="mt-10 w-full rounded-full py-3 text-[15px] font-semibold text-white"
             style={{ background: "#0FA6A6" }}
           >
