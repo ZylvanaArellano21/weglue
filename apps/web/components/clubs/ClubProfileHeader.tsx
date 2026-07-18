@@ -1,7 +1,7 @@
 "use client";
 
 import { Avatar } from "../shared/Avatar";
-import { ChatIcon } from "../shared/icons";
+import { ChatBubbleOutlineIcon, StarOutlineIcon } from "../shared/icons";
 import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
 
 export type ClubTab = "home" | "calendar" | "officers" | "media";
@@ -70,37 +70,26 @@ export function ClubProfileHeader({
           </div>
         </div>
 
-        {/* Counts + chat actions row (right-aligned above the name) */}
-        <div className="flex min-h-[56px] items-start justify-end gap-8 pt-1">
+        {/* Counts + chat actions cluster (right-aligned, top of the content
+            area). The chat pills use the SAME outlined-teal style + icons as the
+            mobile Club Profile actions; they're grouped and equal-width so the
+            pair reads as one intentional control, clear of the banner Edit
+            button, the avatar, the description and the tabs. Officer Chat is
+            officer-only; Group Chat follows the same membership rule as mobile
+            (any member, which includes officers). */}
+        <div className="flex min-h-[56px] flex-wrap items-start justify-end gap-x-8 gap-y-3 pt-1">
           <div className="flex items-center gap-8">
             <Stat value={club.member_count} label="Members" />
             <Stat value={club.gluemates_count} label="Gluemates" />
           </div>
-          <div className="flex flex-col items-start gap-2">
-            {club.is_officer && (
-              <button
-                type="button"
-                onClick={onOfficerChat}
-                className="flex items-center gap-1.5 text-[15px] font-semibold text-teal hover:underline"
-              >
-                <span className="relative">
-                  <ChatIcon size={20} />
-                  <span className="absolute -right-1 -top-1 text-[10px]" aria-hidden>⭐</span>
-                </span>
-                Officer Chat
-              </button>
-            )}
-            {club.is_member && (
-              <button
-                type="button"
-                onClick={onGroupChat}
-                className="flex items-center gap-1.5 text-[15px] font-semibold text-teal hover:underline"
-              >
-                <ChatIcon size={20} />
-                Group Chat
-              </button>
-            )}
-          </div>
+          {(club.is_officer || club.is_member) && (
+            <div className="flex w-[150px] flex-col items-stretch gap-2">
+              {club.is_officer && (
+                <ChatPill label="Officer Chat" onClick={onOfficerChat} officer />
+              )}
+              {club.is_member && <ChatPill label="Group Chat" onClick={onGroupChat} />}
+            </div>
+          )}
         </div>
 
         {/* Name + description + Join/Joined */}
@@ -155,6 +144,40 @@ export function ClubProfileHeader({
         </nav>
       </div>
     </section>
+  );
+}
+
+// Mobile-parity chat action: an outlined-teal pill (1.5px border, transparent
+// fill, teal semibold label) with the mobile chat-bubble icon; Officer Chat
+// overlays the mobile star to denote officer scope. The click handler is passed
+// in so it can later be pointed at the real web Messages routes without touching
+// this layout.
+function ChatPill({
+  label,
+  onClick,
+  officer = false,
+}: {
+  label: string;
+  onClick: () => void;
+  officer?: boolean;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center justify-center gap-2 rounded-full border-[1.5px] bg-transparent px-4 py-2 text-[15px] font-semibold text-teal transition hover:bg-teal/5"
+      style={{ borderColor: "#0FA6A6" }}
+    >
+      <span className="relative inline-flex" aria-hidden>
+        <ChatBubbleOutlineIcon size={17} strokeWidth={1.9} />
+        {officer && (
+          <span className="absolute -right-1.5 -top-1.5 rounded-full bg-white">
+            <StarOutlineIcon size={11} strokeWidth={2} filled />
+          </span>
+        )}
+      </span>
+      {label}
+    </button>
   );
 }
 

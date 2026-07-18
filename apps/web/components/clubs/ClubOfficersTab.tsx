@@ -43,10 +43,10 @@ export function ClubOfficersTab({
               <button
                 type="button"
                 onClick={() => onMessage(officer.user_id!)}
-                className="rounded-full border px-5 py-1.5 text-[14px] font-semibold text-gray-800 transition hover:bg-black/[0.03]"
-                style={{ borderColor: "rgba(0,0,0,0.2)" }}
+                className="rounded-full border-[1.5px] bg-transparent px-5 py-1.5 text-[14px] font-semibold text-teal transition hover:bg-teal/5"
+                style={{ borderColor: "#0FA6A6" }}
               >
-                message
+                Message
               </button>
             )}
           </div>

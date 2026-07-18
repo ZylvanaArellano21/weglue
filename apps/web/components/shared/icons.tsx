@@ -122,3 +122,24 @@ export function CommentIcon(p: IconProps): JSX.Element {
     </svg>
   );
 }
+
+// Ionicons `chatbubble-outline` equivalent — the SAME rounded outline bubble the
+// mobile Club Profile uses for its Group Chat / Officer Chat actions, so the web
+// chat actions read as the same We Glue control, not a new desktop button.
+export function ChatBubbleOutlineIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M20 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 20.5l1.9-4.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" />
+    </svg>
+  );
+}
+
+// Ionicons `star-outline` equivalent — mobile marks the officer/admin chat with a
+// star; the web Officer Chat pill overlays this on the chat bubble.
+export function StarOutlineIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)} fill={p.filled ? "currentColor" : "none"}>
+      <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z" />
+    </svg>
+  );
+}
