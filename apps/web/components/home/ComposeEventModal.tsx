@@ -25,17 +25,20 @@ export function ComposeEventModal({
   userId,
   onClose,
   onCreated,
+  presetClubId,
 }: {
   userId: string;
   onClose: () => void;
   onCreated: () => void;
+  /** Locks the host club (e.g. creating from a Club Profile). */
+  presetClubId?: string;
 }): JSX.Element {
   const show = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const { data: officerClubs } = useOfficerClubs(userId);
   const create = useCreateEvent(userId);
 
-  const [clubId, setClubId] = useState("");
+  const [clubId, setClubId] = useState(presetClubId ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -111,7 +114,13 @@ export function ComposeEventModal({
         </h2>
 
         <label className="mb-1 block text-sm font-semibold text-gray-700">Hosting as</label>
-        <select value={clubId} onChange={(e) => setClubId(e.target.value)} className={`${inputCls} mb-4`} style={inputStyle}>
+        <select
+          value={clubId}
+          onChange={(e) => setClubId(e.target.value)}
+          disabled={!!presetClubId}
+          className={`${inputCls} mb-4 disabled:opacity-70`}
+          style={inputStyle}
+        >
           <option value="">Select a club…</option>
           {(officerClubs ?? []).map((c) => (
             <option key={c.id} value={c.id}>
@@ -119,7 +128,7 @@ export function ComposeEventModal({
             </option>
           ))}
         </select>
-        {(officerClubs ?? []).length === 0 && (
+        {!presetClubId && (officerClubs ?? []).length === 0 && (
           <p className="mb-4 -mt-2 text-xs text-gray-400">You must be a club officer to create an event.</p>
         )}
 

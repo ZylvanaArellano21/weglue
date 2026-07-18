@@ -30,6 +30,9 @@ export interface EventDetail {
   user_rsvp_status: "going" | "cant" | null;
   is_saved: boolean;
   user_has_joined_club: boolean;
+  /** Viewer may edit/delete this event: an officer of its club, or its creator.
+      Defence-in-depth only — the events RLS enforces the same rule server-side. */
+  can_manage: boolean;
 }
 
 async function getEventDetail(eventId: string, userId: string): Promise<EventDetail | null> {
@@ -38,7 +41,7 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
     supabase
       .from("events")
       .select(
-        `id, club_id, title, emoji, description, cover_image_url,
+        `id, club_id, created_by, title, emoji, description, cover_image_url,
          event_date, start_time, end_time, location, building, room, visibility,
          clubs!inner(id, name, avatar_url)`
       )
@@ -57,8 +60,11 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
       .select("user_id, profiles!inner(id, username, avatar_url)")
       .eq("event_id", eventId)
       .eq("status", "going"),
-    supabase.from("club_members").select("id").eq("club_id", e.club_id).eq("user_id", userId).maybeSingle(),
+    supabase.from("club_members").select("role").eq("club_id", e.club_id).eq("user_id", userId).maybeSingle(),
   ]);
+
+  const viewerRole = (memberCheck as { role?: string } | null)?.role ?? null;
+  const canManage = e.created_by === userId || viewerRole === "officer";
 
   const previews: AttendeePreview[] = ((goingRsvps ?? []) as any[])
     .slice(0, 4)
@@ -84,6 +90,7 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
     user_rsvp_status: ((rsvpRow as any)?.status as "going" | "cant" | null) ?? null,
     is_saved: !!savedRow,
     user_has_joined_club: !!memberCheck,
+    can_manage: canManage,
   };
 }
 
@@ -150,6 +157,22 @@ export function useSaveEventMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (eventId: string) => toggleSaveEvent(userId!, eventId),
+    onSuccess: () => invalidateEventState(queryClient, userId),
+  });
+}
+
+// Officer/creator deletes an event. A plain delete guarded by the events RLS
+// (only the creator or a club officer may delete); AFTER DELETE cascades clear
+// RSVPs/saves. invalidateEventState refreshes Home, the club Home/Calendar
+// feeds, Saved Events, and any open overlay together — mobile sees it too.
+export function useDeleteEvent(userId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (eventId: string) => {
+      const supabase = getSupabaseBrowser();
+      const { error } = await supabase.from("events").delete().eq("id", eventId);
+      if (error) throw error;
+    },
     onSuccess: () => invalidateEventState(queryClient, userId),
   });
 }

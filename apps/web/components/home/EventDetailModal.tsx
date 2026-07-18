@@ -5,10 +5,12 @@ import { Avatar } from "../shared/Avatar";
 import { AvatarStack } from "../shared/AvatarStack";
 import { CalendarIcon, LocationIcon, BookmarkIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
+import { useState } from "react";
 import {
   useEventDetail,
   useRsvpMutation,
   useSaveEventMutation,
+  useDeleteEvent,
 } from "../../lib/hooks/useEventDetail";
 import { useJoinClubMutation } from "../../lib/hooks/useClubMembership";
 import { formatEventTime, formatEventLocation, isEventPast } from "../../lib/datetime";
@@ -34,6 +36,8 @@ export function EventDetailModal({
   onPrev,
   onNext,
   indicator,
+  onEdit,
+  onDeleted,
 }: {
   eventId: string;
   userId: string;
@@ -42,12 +46,17 @@ export function EventDetailModal({
   onPrev?: () => void;
   onNext?: () => void;
   indicator?: string;
+  /** Officer/creator affordances (Club Profile). Absent on Home. */
+  onEdit?: (eventId: string) => void;
+  onDeleted?: () => void;
 }): JSX.Element {
   const show = useToast();
   const { data: event, isLoading } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: rsvping } = useRsvpMutation(userId);
   const { mutate: toggleSave, isPending: saving } = useSaveEventMutation(userId);
   const { mutate: joinClub, isPending: joining } = useJoinClubMutation(userId);
+  const { mutate: deleteEvent, isPending: deleting } = useDeleteEvent(userId);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const doRsvp = (status: "going" | "cant") =>
     rsvp(
@@ -246,6 +255,54 @@ export function EventDetailModal({
                   {event.user_rsvp_status === "cant" ? "Can't ✓" : "Can't"}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Officer/creator management (spec §17/§20) */}
+          {(event.can_manage && (onEdit || onDeleted)) && (
+            <div className="mt-5 flex items-center gap-3 border-t pt-4" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
+              {onEdit && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(event.id)}
+                  className="rounded-full border-[1.5px] px-5 py-2 text-sm font-semibold text-teal transition hover:bg-teal/5"
+                  style={{ borderColor: "#0FA6A6" }}
+                >
+                  Edit event
+                </button>
+              )}
+              {onDeleted &&
+                (confirmingDelete ? (
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        deleteEvent(event.id, {
+                          onSuccess: () => {
+                            show("Event deleted");
+                            onDeleted();
+                          },
+                          onError: () => show("Could not delete event. Try again.", "error"),
+                        })
+                      }
+                      disabled={deleting}
+                      className="rounded-full bg-[#F02719] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {deleting ? "Deleting…" : "Confirm delete"}
+                    </button>
+                    <button type="button" onClick={() => setConfirmingDelete(false)} className="text-sm font-semibold text-gray-500 hover:underline">
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(true)}
+                    className="rounded-full border-[1.5px] border-[#F02719]/40 px-5 py-2 text-sm font-semibold text-[#F02719] transition hover:bg-[#F02719]/5"
+                  >
+                    Delete event
+                  </button>
+                ))}
             </div>
           )}
         </div>

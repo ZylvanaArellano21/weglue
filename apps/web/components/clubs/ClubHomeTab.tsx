@@ -18,6 +18,8 @@ export function ClubHomeTab({
   onJoinClub,
   onOpenEvent,
   onOpenClub,
+  onCreateEvent,
+  onCreatePost,
 }: {
   club: ClubProfileData;
   upcoming: HomeFeedEvent[];
@@ -27,6 +29,10 @@ export function ClubHomeTab({
   onJoinClub: (clubId: string) => void;
   onOpenEvent: (eventId: string) => void;
   onOpenClub: (clubId: string) => void;
+  /** Officer-only event creation. */
+  onCreateEvent?: () => void;
+  /** Member (incl. officer) post creation. */
+  onCreatePost?: () => void;
 }): JSX.Element {
   return (
     <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[190px_minmax(0,1fr)]">
@@ -44,6 +50,29 @@ export function ClubHomeTab({
 
       {/* Events */}
       <div>
+        {(onCreateEvent || onCreatePost) && (
+          <div className="mb-4 flex justify-end gap-2">
+            {onCreatePost && (
+              <button
+                type="button"
+                onClick={onCreatePost}
+                className="rounded-full border-[1.5px] px-4 py-1.5 text-sm font-semibold text-teal transition hover:bg-teal/5"
+                style={{ borderColor: "#0FA6A6" }}
+              >
+                + Post
+              </button>
+            )}
+            {onCreateEvent && (
+              <button
+                type="button"
+                onClick={onCreateEvent}
+                className="rounded-full bg-teal px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90"
+              >
+                + Create event
+              </button>
+            )}
+          </div>
+        )}
         <h2 className="mb-3 text-xl font-bold text-gray-900">Upcoming Events</h2>
         {upcoming.length > 0 ? (
           <div className="space-y-5">

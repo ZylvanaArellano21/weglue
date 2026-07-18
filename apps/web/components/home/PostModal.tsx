@@ -13,11 +13,14 @@ export function PostModal({
   userId,
   onClose,
   onOpenAuthor,
+  officerActions,
 }: {
   postId: string;
   userId: string;
   onClose: () => void;
   onOpenAuthor: (userId: string) => void;
+  /** Optional officer moderation controls (Club Media overlay). */
+  officerActions?: React.ReactNode;
 }): JSX.Element {
   const { data: post, isLoading } = usePostDetail(postId, userId);
   const { mutate: like } = useLikePost();
@@ -78,6 +81,11 @@ export function PostModal({
               <p className="mt-2 text-sm text-gray-800">
                 <span className="font-semibold">{post.author.username}</span> {post.caption}
               </p>
+            )}
+            {officerActions && (
+              <div className="mt-3 flex items-center justify-end gap-2 border-t pt-3" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
+                {officerActions}
+              </div>
             )}
           </div>
         </div>

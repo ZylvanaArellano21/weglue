@@ -12,10 +12,13 @@ export function ComposePostModal({
   userId,
   onClose,
   onCreated,
+  presetClubId,
 }: {
   userId: string;
   onClose: () => void;
   onCreated: () => void;
+  /** Pre-tags a club (e.g. posting from that Club Profile). */
+  presetClubId?: string;
 }): JSX.Element {
   const show = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -25,7 +28,7 @@ export function ComposePostModal({
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(presetClubId ? [presetClubId] : []);
   const [clubQuery, setClubQuery] = useState("");
 
   const onFile = (f: File | undefined) => {
