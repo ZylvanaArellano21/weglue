@@ -93,9 +93,9 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL("/onboarding/signup", request.url));
     }
 
-    // Fully onboarded — auth-flow pages bounce to the dashboard.
+    // Fully onboarded — auth-flow pages bounce to the Home experience.
     if (isAuthFlow) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+      return NextResponse.redirect(new URL("/home", request.url));
     }
   }
 
