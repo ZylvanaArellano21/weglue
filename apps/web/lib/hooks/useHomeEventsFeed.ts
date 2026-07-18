@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { todayInAppTz, isEventPast } from "../datetime";
+import { invalidateEventState } from "./eventSync";
 
 // Web port of apps/mobile/services/eventService.ts (getHomeEventsFeed,
 // rsvpToEvent, toggleSaveEvent) + apps/mobile/hooks/useHomeEventsFeed.ts.
@@ -273,12 +274,7 @@ export function useRsvpToEvent() {
       eventId: string;
       status: "going" | "cant";
     }) => rsvpToEvent(userId, eventId, status),
-    onSuccess: (_data, { userId }) => {
-      void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
-      void queryClient.invalidateQueries({ queryKey: ["ownThisWeekEvents", userId] });
-      void queryClient.invalidateQueries({ queryKey: ["calendarEvents", userId] });
-      void queryClient.invalidateQueries({ queryKey: ["savedEvents", userId] });
-    },
+    onSuccess: (_data, { userId }) => invalidateEventState(queryClient, userId),
   });
 }
 
@@ -306,9 +302,6 @@ export function useToggleSaveEvent() {
   return useMutation({
     mutationFn: ({ userId, eventId }: { userId: string; eventId: string }) =>
       toggleSaveEvent(userId, eventId),
-    onSuccess: (_saved, { userId }) => {
-      void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
-      void queryClient.invalidateQueries({ queryKey: ["savedEvents", userId] });
-    },
+    onSuccess: (_saved, { userId }) => invalidateEventState(queryClient, userId),
   });
 }

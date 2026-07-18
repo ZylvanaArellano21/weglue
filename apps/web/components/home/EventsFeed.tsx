@@ -18,7 +18,13 @@ import { EmptyState } from "./EmptyState";
 // Desktop container mirroring apps/mobile/components/home/EventsFeed.tsx:
 // recommendation strip first (below the Posts/Events selector), then the
 // "Your Clubs" and "Recommended for You" event sections in the same order.
-export function EventsFeed({ userId }: { userId: string }): JSX.Element {
+export function EventsFeed({
+  userId,
+  onOpenEvent,
+}: {
+  userId: string;
+  onOpenEvent: (eventId: string) => void;
+}): JSX.Element {
   const router = useRouter();
   const show = useToast();
 
@@ -36,9 +42,9 @@ export function EventsFeed({ userId }: { userId: string }): JSX.Element {
   );
 
   const openClub = (clubId: string) => router.push(`/club/${clubId}`);
-  // Event detail is a URL-driven overlay (built in Phase 2); pushing the query
-  // param keeps browser Back working and restores Home state on close.
-  const openEvent = (eventId: string) => router.push(`/home?event=${eventId}`);
+  // Event detail is the shared URL-driven overlay (see HomeClient); opening it
+  // preserves the current tab so browser Back restores the exact Home state.
+  const openEvent = onOpenEvent;
 
   const handleRsvp = (eventId: string) =>
     rsvp(

@@ -100,7 +100,7 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
 
       {/* Saved Events + Interests */}
       <MenuCard>
-        <MenuRow href="/saved-events" label="Saved Events" icon={<BookmarkIcon size={18} />} />
+        <MenuRow href="/home?saved=1" label="Saved Events" icon={<BookmarkIcon size={18} />} />
         <MenuRow href="/interests" label="Interests" icon={<HeartIcon size={18} />} />
       </MenuCard>
 

@@ -11,7 +11,13 @@ type Tab = "posts" | "events";
 // Center column: Share a Glue, the Posts | Events selector, and the active
 // feed. Home opens on Events (spec §1). Tab state lives in the URL (?tab=) so
 // browser Back restores the exact prior tab.
-export function HomeFeed({ userId }: { userId: string }): JSX.Element {
+export function HomeFeed({
+  userId,
+  onOpenEvent,
+}: {
+  userId: string;
+  onOpenEvent: (eventId: string) => void;
+}): JSX.Element {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -68,7 +74,11 @@ export function HomeFeed({ userId }: { userId: string }): JSX.Element {
       </div>
 
       <div className="pt-4">
-        {tab === "events" ? <EventsFeed userId={userId} /> : <PostsFeed userId={userId} />}
+        {tab === "events" ? (
+          <EventsFeed userId={userId} onOpenEvent={onOpenEvent} />
+        ) : (
+          <PostsFeed userId={userId} />
+        )}
       </div>
     </div>
   );
