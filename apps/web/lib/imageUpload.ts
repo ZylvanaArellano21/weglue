@@ -7,7 +7,7 @@ import { getSupabaseBrowser } from "./supabase-browser";
 // Storage bucket + path convention mobile uses, and cache-busts the fixed-path
 // URL so the new avatar shows immediately everywhere (React Query keys by URL).
 
-async function resizeToJpeg(file: File, maxDimension: number): Promise<Blob> {
+export async function resizeToJpeg(file: File, maxDimension: number): Promise<Blob> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -53,4 +53,24 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
   if (error) throw error;
   const { data } = supabase.storage.from("avatars").getPublicUrl(path);
   return `${data.publicUrl}?v=${Date.now()}`;
+}
+
+/**
+ * Uploads a resized JPEG to `bucket` at `path` (no upsert — unique paths) and
+ * returns its public URL. Used for post + event images (both the `posts`
+ * bucket, matching mobile's createPost / uploadEventImage).
+ */
+export async function uploadToBucket(
+  bucket: string,
+  path: string,
+  file: File,
+  maxDimension = 1280
+): Promise<string> {
+  const supabase = getSupabaseBrowser();
+  const blob = await resizeToJpeg(file, maxDimension);
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .upload(path, blob, { contentType: "image/jpeg", upsert: false });
+  if (error || !data) throw error ?? new Error("Upload failed");
+  return supabase.storage.from(bucket).getPublicUrl(data.path).data.publicUrl;
 }

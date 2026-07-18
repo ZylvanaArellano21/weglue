@@ -12,6 +12,8 @@ import { SavedEventsModal } from "./SavedEventsModal";
 import { NotificationsModal } from "./NotificationsModal";
 import { GluematesModal } from "./GluematesModal";
 import { PostModal } from "./PostModal";
+import { ComposePostModal } from "./ComposePostModal";
+import { ComposeEventModal } from "./ComposeEventModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications, type NotificationTarget } from "../../lib/hooks/useNotifications";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
@@ -47,6 +49,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const savedOpen = params.get("saved") === "1";
   const notifOpen = params.get("notifications") === "1";
   const gluematesOpen = params.get("gluemates") === "1";
+  const compose = params.get("compose"); // "post" | "event"
 
   const buildUrl = useCallback(
     (mutate: (sp: URLSearchParams) => void) => {
@@ -70,6 +73,21 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const openEvent = useCallback((id: string) => set("event", id), [set]);
   const openPost = useCallback((id: string) => set("post", id), [set]);
   const openClub = useCallback((clubId: string) => router.push(`/club/${clubId}`), [router]);
+
+  // After creating a post/event: switch to the matching tab and close compose,
+  // so the user lands on the feed where their new item appears.
+  const afterCreate = useCallback(
+    (tab: "posts" | "events") =>
+      router.push(
+        buildUrl((sp) => {
+          sp.delete("compose");
+          if (tab === "posts") sp.set("tab", "posts");
+          else sp.delete("tab");
+        }),
+        { scroll: false }
+      ),
+    [router, buildUrl]
+  );
 
   // Notification deep-links → the right web destination.
   const openTarget = useCallback(
@@ -119,6 +137,13 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
           onClose={() => clear("gluemates")}
           onOpenUser={(id) => router.push(`/u/${id}`)}
         />
+      )}
+
+      {compose === "post" && (
+        <ComposePostModal userId={userId} onClose={() => clear("compose")} onCreated={() => afterCreate("posts")} />
+      )}
+      {compose === "event" && (
+        <ComposeEventModal userId={userId} onClose={() => clear("compose")} onCreated={() => afterCreate("events")} />
       )}
 
       {postId && (

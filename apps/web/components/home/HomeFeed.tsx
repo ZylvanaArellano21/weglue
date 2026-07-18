@@ -4,7 +4,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ShareAGlue } from "./ShareAGlue";
 import { EventsFeed } from "./EventsFeed";
 import { PostsFeed } from "./PostsFeed";
-import { useToast } from "../shared/Toast";
 
 type Tab = "posts" | "events";
 
@@ -21,7 +20,6 @@ export function HomeFeed({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const show = useToast();
 
   const tab: Tab = params.get("tab") === "posts" ? "posts" : "events";
 
@@ -34,12 +32,9 @@ export function HomeFeed({
   };
 
   const handleShare = (kind: "post" | "event") => {
-    // Full create flows arrive in a later phase; keep the menu functional now.
-    show(
-      kind === "post"
-        ? "Creating a post is coming soon on web."
-        : "Creating an event is coming soon on web."
-    );
+    const sp = new URLSearchParams(params.toString());
+    sp.set("compose", kind);
+    router.push(`${pathname}?${sp.toString()}`, { scroll: false });
   };
 
   return (
