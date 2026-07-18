@@ -13,6 +13,8 @@ import { ClubHomeTab } from "./ClubHomeTab";
 import { ClubCalendarTab } from "./ClubCalendarTab";
 import { ClubOfficersTab } from "./ClubOfficersTab";
 import { ClubMediaTab } from "./ClubMediaTab";
+import { EditClubModal } from "./EditClubModal";
+import { ManageClubModal } from "./ManageClubModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications } from "../../lib/hooks/useNotifications";
 import { useClubProfile, useToggleClubMembership, OnlyOfficerError } from "../../lib/hooks/useClubProfile";
@@ -60,6 +62,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const activeTab: ClubTab = (TABS as string[]).includes(tabParam ?? "") ? (tabParam as ClubTab) : "home";
 
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const [editing, setEditing] = useState(false);
+  const [managing, setManaging] = useState(false);
 
   const upcoming = feed?.upcoming ?? [];
   const past = feed?.past ?? [];
@@ -149,7 +153,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onSelectTab={setTab}
             onToggleMembership={handleToggleMembership}
             membershipPending={membership.isPending}
-            onEdit={() => show("Club editing is coming to web soon.")}
+            onEdit={() => setEditing(true)}
             onOfficerChat={chatUnavailable}
             onGroupChat={chatUnavailable}
           />
@@ -176,6 +180,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             <ClubOfficersTab
               officers={club.officers}
               currentUserId={userId}
+              canManage={club.is_officer}
+              onManage={() => setManaging(true)}
               onOpenProfile={(id) => router.push(`/u/${id}`)}
               onMessage={chatUnavailable}
             />
@@ -221,6 +227,13 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           onClose={() => setOverlay(null)}
           onOpenAuthor={(id) => router.push(`/u/${id}`)}
         />
+      )}
+
+      {editing && club.is_officer && (
+        <EditClubModal club={club} userId={userId} onClose={() => setEditing(false)} />
+      )}
+      {managing && club.is_officer && (
+        <ManageClubModal clubId={clubId} userId={userId} onClose={() => setManaging(false)} />
       )}
 
       {overlay?.kind === "image" && (

@@ -9,21 +9,36 @@ import type { ClubOfficer } from "../../lib/clubs/clubProfileService";
 export function ClubOfficersTab({
   officers,
   currentUserId,
+  canManage,
+  onManage,
   onOpenProfile,
   onMessage,
 }: {
   officers: ClubOfficer[];
   currentUserId: string;
+  canManage: boolean;
+  onManage: () => void;
   onOpenProfile: (userId: string) => void;
   onMessage: (userId: string) => void;
 }): JSX.Element {
-  if (officers.length === 0) {
-    return <p className="mt-8 text-center text-sm text-gray-500">No officers listed yet.</p>;
-  }
-
   return (
-    <div className="mt-6 grid grid-cols-1 gap-x-10 gap-y-6 sm:grid-cols-2">
-      {officers.map((officer) => {
+    <div className="mt-6">
+      {canManage && (
+        <div className="mb-5 flex justify-end">
+          <button
+            type="button"
+            onClick={onManage}
+            className="rounded-full bg-teal px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+          >
+            Manage members
+          </button>
+        </div>
+      )}
+      {officers.length === 0 ? (
+        <p className="mt-4 text-center text-sm text-gray-500">No officers listed yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-x-10 gap-y-6 sm:grid-cols-2">
+          {officers.map((officer) => {
         const isSelf = !!officer.user_id && officer.user_id === currentUserId;
         return (
           <div key={officer.id} className="flex items-center gap-4">
@@ -50,8 +65,10 @@ export function ClubOfficersTab({
               </button>
             )}
           </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
