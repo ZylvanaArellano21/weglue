@@ -254,6 +254,8 @@ export function useLikePost() {
     },
     onSettled: (_data, _err, { userId }) => {
       void queryClient.invalidateQueries({ queryKey: ["homePostsFeed", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["postDetail"] });
+      void queryClient.invalidateQueries({ queryKey: ["ownPosts", userId] });
     },
   });
 }

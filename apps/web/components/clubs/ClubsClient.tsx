@@ -8,6 +8,7 @@ import { ClubCatalog } from "./ClubCatalog";
 import { useMyClubs, useDiscoveryClubs, useJoinClubFromCatalog } from "../../lib/hooks/useClubTab";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications } from "../../lib/hooks/useNotifications";
+import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
 import type { SidebarClub, CatalogClub } from "../../lib/clubs/clubService";
 
 // Root of the web Club tab. One shared search query filters the Officer/Member
@@ -17,6 +18,7 @@ import type { SidebarClub, CatalogClub } from "../../lib/clubs/clubService";
 export function ClubsClient({ userId, scrollToSuggested }: { userId: string; scrollToSuggested?: boolean }): JSX.Element {
   useUnreadSummary(userId); // live header badges
   useRealtimeNotifications(userId);
+  useMyClubsRealtime(userId); // cross-device join/leave reconcile
 
   const { data: mine } = useMyClubs(userId);
   const { data: catalog } = useDiscoveryClubs(userId);

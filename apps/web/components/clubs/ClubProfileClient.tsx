@@ -6,10 +6,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ToastProvider, useToast } from "../shared/Toast";
 import { AppHeader } from "../home/AppHeader";
 import { EventDetailModal } from "../home/EventDetailModal";
-import { PostModal } from "../home/PostModal";
 import { ComposeEventModal } from "../home/ComposeEventModal";
 import { ComposePostModal } from "../home/ComposePostModal";
-import { Modal } from "../shared/Modal";
+import { ClubMediaOverlay } from "./ClubMediaOverlay";
 import { ClubProfileHeader, type ClubTab } from "./ClubProfileHeader";
 import { ClubRightColumn } from "./ClubRightColumn";
 import { ClubHomeTab } from "./ClubHomeTab";
@@ -20,12 +19,12 @@ import { EditClubModal } from "./EditClubModal";
 import { ManageClubModal } from "./ManageClubModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications } from "../../lib/hooks/useNotifications";
+import { useClubRealtime } from "../../lib/hooks/useClubRealtime";
 import { useClubProfile, useToggleClubMembership, OnlyOfficerError, clubProfileKey } from "../../lib/hooks/useClubProfile";
 import { useClubEventsFeed, clubEventsFeedKey } from "../../lib/hooks/useClubEventsFeed";
 import { useManageClubPhoto } from "../../lib/hooks/useClubManagement";
 import { useRsvpToEvent, useToggleSaveEvent } from "../../lib/hooks/useHomeEventsFeed";
 import type { HomeFeedEvent } from "../../lib/hooks/useHomeEventsFeed";
-import type { ClubPhoto } from "../../lib/clubs/clubProfileService";
 
 const TABS: ClubTab[] = ["home", "calendar", "officers", "media"];
 
@@ -35,13 +34,13 @@ const TABS: ClubTab[] = ["home", "calendar", "officers", "media"];
 // officers get moderation actions.
 type Overlay =
   | { kind: "event"; list: HomeFeedEvent[]; index: number }
-  | { kind: "post"; photo: ClubPhoto }
-  | { kind: "image"; photo: ClubPhoto }
+  | { kind: "media"; index: number }
   | null;
 
 export function ClubProfileClient({ clubId, userId }: { clubId: string; userId: string }): JSX.Element {
   useUnreadSummary(userId);
   useRealtimeNotifications(userId);
+  useClubRealtime(clubId, userId);
 
   return (
     <ToastProvider>
@@ -73,6 +72,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const [editing, setEditing] = useState(false);
   const [managing, setManaging] = useState(false);
   const [compose, setCompose] = useState<"event" | "post" | null>(null);
+  const [editEventId, setEditEventId] = useState<string | null>(null);
 
   const invalidateClubContent = () => {
     void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
@@ -128,11 +128,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   };
 
   const openPhoto = (index: number) => {
-    if (!club) return;
-    const photo = club.photos[index];
-    if (!photo) return;
-    if (photo.source === "tagged_post" && photo.post_id) setOverlay({ kind: "post", photo });
-    else setOverlay({ kind: "image", photo });
+    if (!club || !club.photos[index]) return;
+    setOverlay({ kind: "media", index });
   };
 
   const chatUnavailable = () => show("Messaging is available in the We Glue mobile app.");
@@ -234,39 +231,48 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           onNext={overlay.list.length > 1 ? () => setOverlay({ ...overlay, index: (overlay.index + 1) % overlay.list.length }) : undefined}
           indicator={overlay.list.length > 1 ? `${overlay.index + 1} of ${overlay.list.length}` : undefined}
           onDeleted={() => setOverlay(null)}
+          onEdit={(id) => {
+            setOverlay(null);
+            setEditEventId(id);
+          }}
         />
       )}
 
-      {overlay?.kind === "post" && overlay.photo.post_id && (
-        <PostModal
-          key={`post-${overlay.photo.post_id}`}
-          postId={overlay.photo.post_id}
+      {overlay?.kind === "media" && (
+        <ClubMediaOverlay
+          photos={club.photos}
+          initialIndex={overlay.index}
           userId={userId}
+          clubId={clubId}
+          isOfficer={club.is_officer}
           onClose={() => setOverlay(null)}
           onOpenAuthor={(id) => router.push(`/u/${id}`)}
-          officerActions={
-            club.is_officer ? (
-              <PhotoModeration
-                onHide={() =>
-                  photoManage.hide.mutate(overlay.photo.id, {
-                    onSuccess: () => {
-                      show("Photo hidden from this club");
-                      setOverlay(null);
-                    },
-                    onError: () => show("Could not hide photo.", "error"),
-                  })
-                }
-                onRemove={() =>
-                  photoManage.removePost.mutate(overlay.photo.post_id!, {
-                    onSuccess: () => {
-                      show("Post removed from this club");
-                      setOverlay(null);
-                    },
-                    onError: () => show("Could not remove post.", "error"),
-                  })
-                }
-              />
-            ) : undefined
+          onHide={(photoId) =>
+            photoManage.hide.mutate(photoId, {
+              onSuccess: () => {
+                show("Photo hidden from this club");
+                setOverlay(null);
+              },
+              onError: () => show("Could not hide photo.", "error"),
+            })
+          }
+          onRemovePost={(postId) =>
+            photoManage.removePost.mutate(postId, {
+              onSuccess: () => {
+                show("Post removed from this club");
+                setOverlay(null);
+              },
+              onError: () => show("Could not remove post.", "error"),
+            })
+          }
+          onDeleteUpload={(photoId) =>
+            photoManage.deleteUpload.mutate(photoId, {
+              onSuccess: () => {
+                show("Photo deleted");
+                setOverlay(null);
+              },
+              onError: () => show("Could not delete photo.", "error"),
+            })
           }
         />
       )}
@@ -276,32 +282,6 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
       )}
       {managing && club.is_officer && (
         <ManageClubModal clubId={clubId} userId={userId} onClose={() => setManaging(false)} />
-      )}
-
-      {overlay?.kind === "image" && (
-        <Modal onClose={() => setOverlay(null)} maxWidth={720}>
-          <div className="p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={overlay.photo.url} alt={overlay.photo.caption ?? ""} className="max-h-[75vh] w-full rounded-xl object-contain" />
-            {overlay.photo.caption && <p className="px-1 pt-3 text-[15px] text-gray-800">{overlay.photo.caption}</p>}
-            {club.is_officer && (
-              <div className="mt-2 flex justify-end border-t px-1 pt-3" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
-                <ConfirmButton
-                  label="Delete photo"
-                  onConfirm={() =>
-                    photoManage.deleteUpload.mutate(overlay.photo.id, {
-                      onSuccess: () => {
-                        show("Photo deleted");
-                        setOverlay(null);
-                      },
-                      onError: () => show("Could not delete photo.", "error"),
-                    })
-                  }
-                />
-              </div>
-            )}
-          </div>
-        </Modal>
       )}
 
       {compose === "event" && club.is_officer && (
@@ -326,61 +306,18 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           }}
         />
       )}
-    </main>
-  );
-}
-
-// Officer moderation for a tagged-post photo, shown inside the media overlay:
-// Hide (this club only) or Remove-from-club (strips only the club tag; the post
-// itself is untouched). Each requires a second click to confirm.
-function PhotoModeration({ onHide, onRemove }: { onHide: () => void; onRemove: () => void }): JSX.Element {
-  return (
-    <div className="flex items-center gap-2">
-      <ConfirmButton label="Hide" onConfirm={onHide} tone="neutral" />
-      <ConfirmButton label="Remove from club" onConfirm={onRemove} />
-    </div>
-  );
-}
-
-function ConfirmButton({
-  label,
-  onConfirm,
-  tone = "danger",
-}: {
-  label: string;
-  onConfirm: () => void;
-  tone?: "danger" | "neutral";
-}): JSX.Element {
-  const [confirming, setConfirming] = useState(false);
-  const danger = tone === "danger";
-  if (confirming) {
-    return (
-      <span className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setConfirming(false);
-            onConfirm();
+      {editEventId && (
+        <ComposeEventModal
+          key={`edit-${editEventId}`}
+          userId={userId}
+          editEventId={editEventId}
+          onClose={() => setEditEventId(null)}
+          onCreated={() => {
+            setEditEventId(null);
+            invalidateClubContent();
           }}
-          className="rounded-full px-3 py-1.5 text-xs font-semibold text-white"
-          style={{ background: danger ? "#F02719" : "#0FA6A6" }}
-        >
-          Confirm
-        </button>
-        <button type="button" onClick={() => setConfirming(false)} className="text-xs font-semibold text-gray-500 hover:underline">
-          Cancel
-        </button>
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={() => setConfirming(true)}
-      className="rounded-full border-[1.5px] px-3 py-1.5 text-xs font-semibold transition"
-      style={danger ? { borderColor: "rgba(240,39,25,0.4)", color: "#F02719" } : { borderColor: "rgba(0,0,0,0.2)", color: "#374151" }}
-    >
-      {label}
-    </button>
+        />
+      )}
+    </main>
   );
 }

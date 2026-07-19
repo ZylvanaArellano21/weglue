@@ -119,3 +119,120 @@ export function useCreateEvent(userId: string | undefined) {
     onSuccess: () => invalidateEventState(queryClient, userId),
   });
 }
+
+// ─── Edit existing event (officers only) ─────────────────────────────────────
+// Web port of eventService.getEventForEdit + updateEvent. A partial UPDATE that
+// touches only the officer's changed fields, so it never resets untouched data
+// and never disturbs existing RSVPs/saves. The events UPDATE trigger
+// (trg_event_updated_notify, migration 046) fires the same event_updated
+// notifications to going RSVPs on date/time/location changes — identical to
+// mobile. Officer authorization is re-checked here AND by the events RLS.
+
+export interface EventForEdit {
+  id: string;
+  club_id: string;
+  club_name: string;
+  title: string;
+  emoji: string | null;
+  description: string | null;
+  cover_image_url: string | null;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  building: string | null;
+  room: string | null;
+  visibility: Visibility;
+  specific_user_ids: string[];
+  specific_members: { id: string; username: string; full_name: string; avatar_url: string | null }[];
+}
+
+export function useEventForEdit(eventId: string | undefined) {
+  return useQuery({
+    queryKey: ["eventForEdit", eventId],
+    queryFn: async (): Promise<EventForEdit | null> => {
+      const supabase = getSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("events")
+        .select(
+          `id, club_id, title, emoji, description, cover_image_url, event_date,
+           start_time, end_time, building, room, visibility, specific_user_ids,
+           clubs!inner(name)`
+        )
+        .eq("id", eventId!)
+        .maybeSingle();
+      if (error || !data) return null;
+      const e = data as any;
+      const ids: string[] = e.specific_user_ids ?? [];
+      let specific_members: EventForEdit["specific_members"] = [];
+      if (ids.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, username, full_name, avatar_url")
+          .in("id", ids);
+        specific_members = (profs ?? []) as any[];
+      }
+      return {
+        id: e.id,
+        club_id: e.club_id,
+        club_name: e.clubs?.name ?? "",
+        title: e.title,
+        emoji: e.emoji,
+        description: e.description,
+        cover_image_url: e.cover_image_url,
+        event_date: e.event_date,
+        start_time: e.start_time,
+        end_time: e.end_time,
+        building: e.building,
+        room: e.room,
+        visibility: (e.visibility ?? "everyone") as Visibility,
+        specific_user_ids: ids,
+        specific_members,
+      };
+    },
+    enabled: !!eventId,
+    staleTime: 0,
+  });
+}
+
+export interface UpdateEventInput {
+  title?: string;
+  description?: string | null;
+  cover_image_url?: string | null;
+  event_date?: string;
+  start_time?: string; // HH:MM(:SS)
+  end_time?: string;
+  building?: string | null;
+  room?: string | null;
+  visibility?: Visibility;
+  specific_user_ids?: string[] | null;
+}
+
+async function updateEvent(userId: string, eventId: string, updates: UpdateEventInput): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { data: eventRow } = await supabase.from("events").select("club_id").eq("id", eventId).maybeSingle();
+  if (!eventRow) throw new Error("Event not found");
+
+  const { data: officer } = await supabase
+    .from("club_members")
+    .select("id")
+    .eq("club_id", (eventRow as any).club_id)
+    .eq("user_id", userId)
+    .eq("role", "officer")
+    .maybeSingle();
+  if (!officer) throw new Error("Only club officers can edit events");
+
+  const { error } = await supabase.from("events").update(updates).eq("id", eventId);
+  if (error) throw error;
+}
+
+export function useUpdateEvent(userId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ eventId, updates }: { eventId: string; updates: UpdateEventInput }) =>
+      updateEvent(userId!, eventId, updates),
+    onSuccess: () => {
+      invalidateEventState(queryClient, userId);
+      void queryClient.invalidateQueries({ queryKey: ["eventForEdit"] });
+    },
+  });
+}

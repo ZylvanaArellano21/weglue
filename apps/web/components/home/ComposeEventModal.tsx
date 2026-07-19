@@ -1,14 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
 import { ImageIcon, CloseIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
+import { uploadToBucket } from "../../lib/imageUpload";
 import {
   useOfficerClubs,
   useMemberSearch,
   useCreateEvent,
+  useEventForEdit,
+  useUpdateEvent,
   type Visibility,
 } from "../../lib/hooks/useCreateEvent";
 
@@ -26,21 +29,28 @@ export function ComposeEventModal({
   onClose,
   onCreated,
   presetClubId,
+  editEventId,
 }: {
   userId: string;
   onClose: () => void;
   onCreated: () => void;
   /** Locks the host club (e.g. creating from a Club Profile). */
   presetClubId?: string;
+  /** When set, the modal edits this existing event instead of creating one. */
+  editEventId?: string;
 }): JSX.Element {
   const show = useToast();
+  const isEdit = !!editEventId;
   const fileRef = useRef<HTMLInputElement>(null);
   const { data: officerClubs } = useOfficerClubs(userId);
   const create = useCreateEvent(userId);
+  const update = useUpdateEvent(userId);
+  const { data: editing } = useEventForEdit(editEventId);
 
   const [clubId, setClubId] = useState(presetClubId ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [existingCover, setExistingCover] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [about, setAbout] = useState("");
   const [date, setDate] = useState("");
@@ -51,8 +61,27 @@ export function ComposeEventModal({
   const [visibility, setVisibility] = useState<Visibility>("everyone");
   const [memberQuery, setMemberQuery] = useState("");
   const [members, setMembers] = useState<{ id: string; username: string; full_name: string; avatar_url: string | null }[]>([]);
+  const [seeded, setSeeded] = useState(false);
 
   const { data: results } = useMemberSearch(userId, memberQuery);
+
+  // Prefill once from the existing event (edit mode); never clobber officer edits
+  // on a refetch, and never reset fields the officer hasn't touched.
+  useEffect(() => {
+    if (!isEdit || seeded || !editing) return;
+    setClubId(editing.club_id);
+    setTitle(editing.title);
+    setAbout(editing.description ?? "");
+    setDate(editing.event_date);
+    setStart(editing.start_time.slice(0, 5));
+    setEnd(editing.end_time.slice(0, 5));
+    setBuilding(editing.building ?? "");
+    setRoom(editing.room ?? "");
+    setVisibility(editing.visibility);
+    setMembers(editing.specific_members);
+    setExistingCover(editing.cover_image_url);
+    setSeeded(true);
+  }, [isEdit, seeded, editing]);
 
   const onFile = (f: File | undefined) => {
     if (!f) return;
@@ -64,9 +93,10 @@ export function ComposeEventModal({
     setPreview(URL.createObjectURL(f));
   };
 
+  // In edit mode the cover already exists, so a new file isn't required.
   const valid =
     !!clubId &&
-    !!file &&
+    (isEdit ? !!existingCover || !!file : !!file) &&
     title.trim() &&
     about.trim() &&
     date &&
@@ -76,8 +106,48 @@ export function ComposeEventModal({
     room.trim() &&
     (visibility !== "specific" || members.length > 0);
 
-  const submit = () => {
-    if (!valid || !file) return;
+  const pending = create.isPending || update.isPending;
+
+  const submit = async () => {
+    if (!valid) return;
+    const specific = visibility === "specific" ? members.map((m) => m.id) : [];
+
+    if (isEdit && editEventId) {
+      try {
+        // Only upload a new cover if the officer picked one; otherwise keep it.
+        const coverUrl = file ? await uploadToBucket("posts", `${userId}/events/${Date.now()}.jpg`, file) : undefined;
+        update.mutate(
+          {
+            eventId: editEventId,
+            updates: {
+              title: title.trim(),
+              description: about.trim(),
+              event_date: date,
+              start_time: `${start}:00`,
+              end_time: `${end}:00`,
+              building: building.trim() || null,
+              room: room.trim() || null,
+              visibility,
+              specific_user_ids: visibility === "specific" && specific.length ? specific : null,
+              ...(coverUrl ? { cover_image_url: coverUrl } : {}),
+            },
+          },
+          {
+            onSuccess: () => {
+              show("Event updated ✓");
+              onCreated();
+            },
+            onError: (e: any) =>
+              show(e?.message === "Only club officers can edit events" ? "Only club officers can edit events." : "Could not update event.", "error"),
+          }
+        );
+      } catch {
+        show("Could not upload the new cover image.", "error");
+      }
+      return;
+    }
+
+    if (!file) return;
     create.mutate(
       {
         file,
@@ -90,7 +160,7 @@ export function ComposeEventModal({
         building: building.trim(),
         room: room.trim(),
         visibility,
-        specific_user_ids: members.map((m) => m.id),
+        specific_user_ids: specific,
       },
       {
         onSuccess: () => {
@@ -110,7 +180,7 @@ export function ComposeEventModal({
     <Modal onClose={onClose} labelledBy="compose-event-title" maxWidth={560}>
       <div className="max-h-[80vh] overflow-y-auto p-5 sm:p-6">
         <h2 id="compose-event-title" className="mb-4 text-center text-lg font-bold text-gray-900">
-          New Glue
+          {isEdit ? "Edit event" : "New Glue"}
         </h2>
 
         <label className="mb-1 block text-sm font-semibold text-gray-700">Hosting as</label>
@@ -132,21 +202,31 @@ export function ComposeEventModal({
           <p className="mb-4 -mt-2 text-xs text-gray-400">You must be a club officer to create an event.</p>
         )}
 
-        {preview ? (
+        {preview || (isEdit && existingCover) ? (
           <div className="relative mb-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview} alt="preview" className="w-full rounded-xl object-cover" style={{ maxHeight: 240 }} />
-            <button
-              type="button"
-              onClick={() => {
-                setFile(null);
-                setPreview(null);
-              }}
-              aria-label="Remove image"
-              className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white"
-            >
-              <CloseIcon size={16} />
-            </button>
+            <img src={(preview ?? existingCover) as string} alt="preview" className="w-full rounded-xl object-cover" style={{ maxHeight: 240 }} />
+            {preview ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setFile(null);
+                  setPreview(null);
+                }}
+                aria-label="Remove image"
+                className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white"
+              >
+                <CloseIcon size={16} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="absolute bottom-2 right-2 rounded-full bg-black/55 px-3 py-1 text-xs font-semibold text-white"
+              >
+                Change image
+              </button>
+            )}
           </div>
         ) : (
           <button
@@ -256,11 +336,11 @@ export function ComposeEventModal({
         <button
           type="button"
           onClick={submit}
-          disabled={!valid || create.isPending}
+          disabled={!valid || pending}
           className="w-full rounded-full py-3 text-[15px] font-semibold text-white disabled:opacity-50"
           style={{ background: "#0FA6A6" }}
         >
-          {create.isPending ? "Posting…" : "Post event"}
+          {pending ? (isEdit ? "Saving…" : "Posting…") : isEdit ? "Save changes" : "Post event"}
         </button>
       </div>
     </Modal>
