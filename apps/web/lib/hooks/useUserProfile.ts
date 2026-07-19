@@ -174,7 +174,16 @@ export function useUserWeeklyEvents(targetUserId: string | undefined, enabled: b
 }
 
 function invalidateFollow(qc: ReturnType<typeof useQueryClient>, viewerId: string | undefined) {
-  for (const key of [["userProfile"], ["ownProfile", viewerId], ["ownGluemates", viewerId], ["notifications", viewerId]])
+  // Follow state is embedded in post author data too (media overlay + feeds),
+  // so those must refetch or a Follow button won't flip to Following.
+  for (const key of [
+    ["userProfile"],
+    ["ownProfile", viewerId],
+    ["ownGluemates", viewerId],
+    ["notifications", viewerId],
+    ["postDetail"],
+    ["homePostsFeed"],
+  ])
     void qc.invalidateQueries({ queryKey: key });
 }
 

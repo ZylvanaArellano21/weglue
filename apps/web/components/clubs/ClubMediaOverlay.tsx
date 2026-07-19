@@ -214,8 +214,8 @@ function PostPanel({
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Poster + Follow + menu */}
-      <div className="flex items-start gap-2.5 p-4 pr-2">
+      {/* Poster + Follow (right padding clears the Modal's close X) */}
+      <div className="flex items-start gap-2.5 p-4 pr-12">
         <button type="button" onClick={() => onOpenAuthor(post.author.id)} className="flex min-w-0 items-center gap-2.5 text-left">
           <Avatar uri={post.author.avatar_url} size={40} name={post.author.username} />
           <span className="min-w-0">
@@ -239,31 +239,10 @@ function PostPanel({
             {isFollowing ? "Following" : "Follow"}
           </button>
         )}
-        <div className="relative">
-          <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" className="rounded-full p-1.5 text-gray-500 hover:bg-black/5">
-            <DotsGlyph />
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 z-10 mt-1 w-48 overflow-hidden rounded-xl border bg-white py-1 shadow-lg" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
-              {isAuthor && (
-                <MenuItem
-                  label="Edit caption"
-                  onClick={() => {
-                    setCaptionDraft(post.caption ?? "");
-                    setEditing(true);
-                    setMenuOpen(false);
-                  }}
-                />
-              )}
-              <MenuItem label="Report post" onClick={doReport} danger />
-              {isOfficer && <MenuItem label="Hide from this club" onClick={() => { setMenuOpen(false); onHide(); }} />}
-              {isOfficer && <MenuItem label="Remove from club" onClick={() => { setMenuOpen(false); onRemovePost(); }} danger />}
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions (like / comment / share) + a ⋯ menu (report + officer moderation
+          + author caption edit) at the right — kept out of the Modal X's corner. */}
       <div className="flex items-center gap-5 px-4">
         <button
           type="button"
@@ -283,6 +262,29 @@ function PostPanel({
         <button type="button" onClick={doShare} aria-label="Share" className="text-teal">
           <ShareGlyph />
         </button>
+        <div className="flex-1" />
+        <div className="relative">
+          <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" className="rounded-full p-1.5 text-gray-500 hover:bg-black/5">
+            <DotsGlyph />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full z-10 mt-1 w-48 overflow-hidden rounded-xl border bg-white py-1 shadow-lg" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
+              {isAuthor && (
+                <MenuItem
+                  label="Edit caption"
+                  onClick={() => {
+                    setCaptionDraft(post.caption ?? "");
+                    setEditing(true);
+                    setMenuOpen(false);
+                  }}
+                />
+              )}
+              <MenuItem label="Report post" onClick={doReport} danger />
+              {isOfficer && <MenuItem label="Hide from this club" onClick={() => { setMenuOpen(false); onHide(); }} />}
+              {isOfficer && <MenuItem label="Remove from club" onClick={() => { setMenuOpen(false); onRemovePost(); }} danger />}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Caption + comments (scroll) */}

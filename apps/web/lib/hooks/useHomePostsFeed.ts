@@ -186,11 +186,29 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
   if (error || !p) return null;
   const post = p as any;
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: extraTagRows }] = await Promise.all([
-    supabase.from("post_likes").select("user_id").eq("post_id", postId),
-    supabase.from("post_comments").select("id").eq("post_id", postId),
-    supabase.from("post_club_tags").select("post_id, club_id, clubs(id, name)").eq("post_id", postId),
-  ]);
+  const isSelf = post.author_id === userId;
+  const [{ data: likesRows }, { data: commentsRows }, { data: extraTagRows }, { data: myFollow }, { data: theirFollow }] =
+    await Promise.all([
+      supabase.from("post_likes").select("user_id").eq("post_id", postId),
+      supabase.from("post_comments").select("id").eq("post_id", postId),
+      supabase.from("post_club_tags").select("post_id, club_id, clubs(id, name)").eq("post_id", postId),
+      // Real follow relationship viewer → author (so the media overlay's Follow
+      // button reflects actual state instead of always showing "Follow").
+      isSelf
+        ? Promise.resolve({ data: null })
+        : supabase.from("follows").select("status").eq("follower_id", userId).eq("following_id", post.author_id).maybeSingle(),
+      isSelf
+        ? Promise.resolve({ data: null })
+        : supabase
+            .from("follows")
+            .select("id")
+            .eq("follower_id", post.author_id)
+            .eq("following_id", userId)
+            .eq("status", "accepted")
+            .maybeSingle(),
+    ]);
+
+  const myFollowStatus = (myFollow as { status?: string } | null)?.status ?? null;
 
   const extra = new Map<string, { id: string; name: string }[]>();
   for (const row of (extraTagRows as any[]) ?? []) {
@@ -210,9 +228,9 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
       id: post.profiles.id,
       username: post.profiles.username,
       avatar_url: post.profiles.avatar_url,
-      is_following: false,
-      is_requested: false,
-      follows_me: false,
+      is_following: myFollowStatus === "accepted",
+      is_requested: myFollowStatus === "pending",
+      follows_me: !!theirFollow,
       profile_is_private: false,
     },
     tagged_clubs: mergeTaggedClubs(post.club_id, post.clubs, extra.get(post.id) ?? []),
