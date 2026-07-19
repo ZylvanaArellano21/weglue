@@ -13,6 +13,7 @@ import {
   useDeleteEvent,
 } from "../../lib/hooks/useEventDetail";
 import { useJoinClubMutation } from "../../lib/hooks/useClubMembership";
+import { useEventRsvpRealtime } from "../../lib/hooks/useClubRealtime";
 import { formatEventTime, formatEventLocation, isEventPast } from "../../lib/datetime";
 
 function formatLongDate(dateStr: string): string {
@@ -51,6 +52,7 @@ export function EventDetailModal({
   onDeleted?: () => void;
 }): JSX.Element {
   const show = useToast();
+  useEventRsvpRealtime(eventId, userId); // live attendee count/avatars from other users
   const { data: event, isLoading } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: rsvping } = useRsvpMutation(userId);
   const { mutate: toggleSave, isPending: saving } = useSaveEventMutation(userId);

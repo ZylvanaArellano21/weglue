@@ -54,6 +54,49 @@ export function useClubRealtime(clubId: string | undefined, userId: string | und
   }, [clubId, userId, queryClient]);
 }
 
+// Event-overlay realtime: another user's RSVP change to the OPEN event updates
+// its attendee count + avatars live. Scoped to a single event_id (not a
+// firehose); RLS on event_rsvps still governs which rows are delivered. Fires
+// once event_rsvps is in the supabase_realtime publication (migration 050).
+export function useEventRsvpRealtime(eventId: string | undefined, userId: string | undefined): void {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!eventId || !userId) return;
+    const inv = () => {
+      void queryClient.invalidateQueries({ queryKey: ["eventDetail", eventId] });
+      void queryClient.invalidateQueries({ queryKey: ["clubEventsFeed"] });
+      void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["clubCalendarEvents"] });
+    };
+    const channel = createSafeChannel(`event-rsvps:${eventId}`, [
+      { event: "*", schema: "public", table: "event_rsvps", filter: `event_id=eq.${eventId}`, callback: inv },
+    ]);
+    return () => removeSafeChannel(channel);
+  }, [eventId, userId, queryClient]);
+}
+
+// Media-overlay realtime: another user's like/unlike or new/deleted comment on
+// the OPEN post updates its counts + comment list live. Scoped to a single
+// post_id (one bounded channel per open item); RLS on post_likes/post_comments
+// (both "authenticated can read") governs delivery. Fires once those tables are
+// in the supabase_realtime publication (migration 050).
+export function usePostInteractionsRealtime(postId: string | undefined, userId: string | undefined): void {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!postId || !userId) return;
+    const inv = () => {
+      void queryClient.invalidateQueries({ queryKey: ["postDetail"] });
+      void queryClient.invalidateQueries({ queryKey: ["postComments", postId] });
+      void queryClient.invalidateQueries({ queryKey: ["homePostsFeed"] });
+    };
+    const channel = createSafeChannel(`post-interactions:${postId}`, [
+      { event: "*", schema: "public", table: "post_likes", filter: `post_id=eq.${postId}`, callback: inv },
+      { event: "*", schema: "public", table: "post_comments", filter: `post_id=eq.${postId}`, callback: inv },
+    ]);
+    return () => removeSafeChannel(channel);
+  }, [postId, userId, queryClient]);
+}
+
 // Club-tab realtime: the signed-in user's own membership rows (this-device or
 // another device / another session join·leave·promotion) reconcile the sidebar
 // and catalog. Scoped to user_id = me, so no other user's data is observed.

@@ -8,6 +8,7 @@ import { useToast } from "../shared/Toast";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
 import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
 import { usePostComments, useAddComment, useUpdatePostCaption } from "../../lib/hooks/usePostActions";
+import { usePostInteractionsRealtime } from "../../lib/hooks/useClubRealtime";
 import { useReport, REPORT_RECEIVED_MESSAGE } from "../../lib/hooks/useReport";
 import type { ClubPhoto } from "../../lib/clubs/clubProfileService";
 
@@ -165,6 +166,7 @@ function PostPanel({
   onRemovePost: () => void;
 }): JSX.Element {
   const show = useToast();
+  usePostInteractionsRealtime(postId, userId); // live likes/comments from other users
   const { data: post } = usePostDetail(postId, userId);
   const { mutate: like } = useLikePost();
   const follow = useFollow(userId);
