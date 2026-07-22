@@ -24,37 +24,42 @@
 --
 -- AUTHORIZATION: receiving is gated by RLS on realtime.messages. Each policy is
 -- restricted to BROADCAST messages (extension = 'broadcast') AND a visibility
--- check. Because the realtime.messages policy context cannot read `public`
--- tables via an inline sub-select, the visibility check lives in a SECURITY
--- DEFINER function that has table access yet still honours auth.uid(). The event
--- check is the VERBATIM equivalent of the events SELECT RLS (migration 029):
--- everyone / creator / club officer / member-of-club-for-members / named-for-
--- specific. The post check mirrors the posts SELECT RLS (migration 001,
--- USING true) — the post simply exists. A CASE guards the ::uuid cast so a
--- malformed topic is denied cleanly (never a cast error). No INSERT policy is
--- added, so clients are receive-only; only the SECURITY DEFINER triggers send.
+-- check. The two visibility helpers are SECURITY INVOKER, so their EXISTS runs
+-- UNDER THE CALLER'S RLS: an `event:<id>` topic is authorized iff the caller can
+-- SELECT that event under the events "visibility-aware read" policy (029), and a
+-- `post:<id>` topic iff the caller can SELECT that post under the posts RLS
+-- (001). This can never drift from — and is never weaker than — an ordinary
+-- app query, and it follows automatically if those RLS policies ever change. A
+-- strict UUID pattern + CASE guards the ::uuid cast, so any malformed topic is
+-- denied with a clean `false` (never a cast error). No INSERT policy is added,
+-- so clients are receive-only; only the SECURITY DEFINER triggers send.
 --
--- HARDENING: helper + trigger functions live in a non-exposed `private` schema
--- (never reachable through PostgREST). Every function is SECURITY DEFINER with
--- SET search_path = '' and fully-qualified references, no dynamic SQL, and no
--- executable input. EXECUTE is revoked from PUBLIC; only the two authorization
--- helpers are granted to `authenticated` (needed for policy evaluation); the
--- trigger functions are granted to no client role (triggers fire regardless).
+-- HARDENING: helper + trigger functions live in the non-exposed `private`
+-- schema (not in PostgREST's exposed schemas). Every function SETs
+-- search_path = '' and fully schema-qualifies its references, uses no dynamic
+-- SQL, and takes no executable input. PUBLIC/anon get no access; `authenticated`
+-- gets only schema USAGE + EXECUTE on the two authorization helpers; the trigger
+-- functions are executable by no client role (triggers fire regardless).
 --
 -- Fully ADDITIVE: no supabase_realtime publication change, no change to any
--- application-table column / RLS policy / existing trigger / existing function,
--- and migration 049 is left untouched.
+-- application-table column / RLS policy / existing trigger / existing function.
+-- Uses plain CREATE (not CREATE OR REPLACE / DROP-then-CREATE) so it fails
+-- visibly rather than silently overwriting an unexpected same-name object.
+-- Migration 049 is left untouched.
 -- ============================================================
 
--- Non-exposed schema for the interaction-realtime internals.
+-- Shared, non-exposed schema. IF NOT EXISTS because `private` is generic and may
+-- pre-exist; PUBLIC never gets access (revoked explicitly below), and the
+-- rollback never drops the schema (another feature may own objects in it).
 CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC;
 
--- ── Broadcast trigger functions ─────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION private.broadcast_event_rsvp_change()
+-- ── Broadcast trigger functions (SECURITY DEFINER: send bypasses messages RLS) ─
+CREATE FUNCTION private.broadcast_event_rsvp_change()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   PERFORM realtime.send(
-    jsonb_build_object('table', 'event_rsvps', 'op', TG_OP),
+    pg_catalog.jsonb_build_object('table', 'event_rsvps', 'op', TG_OP),
     'interaction',
     'event:' || coalesce(NEW.event_id, OLD.event_id)::text,
     true
@@ -65,11 +70,11 @@ EXCEPTION WHEN OTHERS THEN
   RETURN NULL;
 END; $$;
 
-CREATE OR REPLACE FUNCTION private.broadcast_post_like_change()
+CREATE FUNCTION private.broadcast_post_like_change()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   PERFORM realtime.send(
-    jsonb_build_object('table', 'post_likes', 'op', TG_OP),
+    pg_catalog.jsonb_build_object('table', 'post_likes', 'op', TG_OP),
     'interaction',
     'post:' || coalesce(NEW.post_id, OLD.post_id)::text,
     true
@@ -80,11 +85,11 @@ EXCEPTION WHEN OTHERS THEN
   RETURN NULL;
 END; $$;
 
-CREATE OR REPLACE FUNCTION private.broadcast_post_comment_change()
+CREATE FUNCTION private.broadcast_post_comment_change()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   PERFORM realtime.send(
-    jsonb_build_object('table', 'post_comments', 'op', TG_OP),
+    pg_catalog.jsonb_build_object('table', 'post_comments', 'op', TG_OP),
     'interaction',
     'post:' || coalesce(NEW.post_id, OLD.post_id)::text,
     true
@@ -95,39 +100,23 @@ EXCEPTION WHEN OTHERS THEN
   RETURN NULL;
 END; $$;
 
--- ── Visibility check functions (mirror the app's SELECT RLS exactly) ─────────
--- event:<id> → identical to the events "visibility-aware read" policy (029).
--- CASE guards the ::uuid cast: for a non-matching (malformed) topic the EXISTS
--- (and its cast) is never evaluated, so the result is a clean `false`.
-CREATE OR REPLACE FUNCTION private.can_receive_event_interaction(p_topic text)
-RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = '' STABLE AS $$
+-- ── Visibility helpers (SECURITY INVOKER: EXISTS runs under the caller's RLS) ──
+-- Strict UUID pattern (8-4-4-4-12 hex) validates hyphen placement before the
+-- CASE-guarded ::uuid cast, so a malformed topic can never reach the cast.
+CREATE FUNCTION private.can_receive_event_interaction(p_topic text)
+RETURNS boolean LANGUAGE sql SECURITY INVOKER SET search_path = '' STABLE AS $$
   SELECT CASE
-    WHEN p_topic ~ '^event:[0-9a-fA-F-]{36}$' THEN EXISTS (
-      SELECT 1 FROM public.events e
-      WHERE e.id = substring(p_topic from 7)::uuid
-        AND (
-          e.visibility = 'everyone'
-          OR e.created_by = auth.uid()
-          OR public.is_club_officer(e.club_id)
-          OR (e.visibility = 'members'
-              AND EXISTS (SELECT 1 FROM public.club_members cm
-                          WHERE cm.club_id = e.club_id AND cm.user_id = auth.uid()))
-          OR (e.visibility = 'specific'
-              AND e.specific_user_ids IS NOT NULL
-              AND auth.uid() = ANY (e.specific_user_ids))
-        )
-    )
+    WHEN p_topic ~ '^event:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      THEN EXISTS (SELECT 1 FROM public.events e WHERE e.id = pg_catalog.substr(p_topic, 7)::uuid)
     ELSE false
   END;
 $$;
 
--- post:<id> → mirrors the posts "anyone authenticated can read" policy (001):
--- authorized iff the post still exists (a deleted post yields no rows → denied).
-CREATE OR REPLACE FUNCTION private.can_receive_post_interaction(p_topic text)
-RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = '' STABLE AS $$
+CREATE FUNCTION private.can_receive_post_interaction(p_topic text)
+RETURNS boolean LANGUAGE sql SECURITY INVOKER SET search_path = '' STABLE AS $$
   SELECT CASE
-    WHEN p_topic ~ '^post:[0-9a-fA-F-]{36}$'
-      THEN EXISTS (SELECT 1 FROM public.posts p WHERE p.id = substring(p_topic from 6)::uuid)
+    WHEN p_topic ~ '^post:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      THEN EXISTS (SELECT 1 FROM public.posts p WHERE p.id = pg_catalog.substr(p_topic, 6)::uuid)
     ELSE false
   END;
 $$;
@@ -139,24 +128,21 @@ REVOKE ALL ON FUNCTION private.broadcast_post_comment_change()      FROM PUBLIC;
 REVOKE ALL ON FUNCTION private.can_receive_event_interaction(text)  FROM PUBLIC;
 REVOKE ALL ON FUNCTION private.can_receive_post_interaction(text)   FROM PUBLIC;
 
--- The RLS policies (evaluated as `authenticated`) must be able to call the two
--- authorization helpers, and only those.
+-- The realtime.messages policies (evaluated as `authenticated`) must be able to
+-- call the two authorization helpers, and only those.
 GRANT USAGE ON SCHEMA private TO authenticated;
 GRANT EXECUTE ON FUNCTION private.can_receive_event_interaction(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION private.can_receive_post_interaction(text)  TO authenticated;
 
 -- ── Triggers (INSERT / UPDATE / DELETE) ─────────────────────────────────────
-DROP TRIGGER IF EXISTS trg_broadcast_event_rsvp ON public.event_rsvps;
 CREATE TRIGGER trg_broadcast_event_rsvp
   AFTER INSERT OR UPDATE OR DELETE ON public.event_rsvps
   FOR EACH ROW EXECUTE FUNCTION private.broadcast_event_rsvp_change();
 
-DROP TRIGGER IF EXISTS trg_broadcast_post_like ON public.post_likes;
 CREATE TRIGGER trg_broadcast_post_like
   AFTER INSERT OR UPDATE OR DELETE ON public.post_likes
   FOR EACH ROW EXECUTE FUNCTION private.broadcast_post_like_change();
 
-DROP TRIGGER IF EXISTS trg_broadcast_post_comment ON public.post_comments;
 CREATE TRIGGER trg_broadcast_post_comment
   AFTER INSERT OR UPDATE OR DELETE ON public.post_comments
   FOR EACH ROW EXECUTE FUNCTION private.broadcast_post_comment_change();
@@ -166,7 +152,6 @@ CREATE TRIGGER trg_broadcast_post_comment
 -- These two SELECT policies are the ONLY way to receive on our topics, they
 -- authorize BROADCAST messages only (not Presence or any other extension), and
 -- no INSERT policy is added (clients cannot send).
-DROP POLICY IF EXISTS "weglue_receive_event_interaction" ON realtime.messages;
 CREATE POLICY "weglue_receive_event_interaction"
   ON realtime.messages FOR SELECT TO authenticated
   USING (
@@ -174,7 +159,6 @@ CREATE POLICY "weglue_receive_event_interaction"
     AND private.can_receive_event_interaction(realtime.topic())
   );
 
-DROP POLICY IF EXISTS "weglue_receive_post_interaction" ON realtime.messages;
 CREATE POLICY "weglue_receive_post_interaction"
   ON realtime.messages FOR SELECT TO authenticated
   USING (
@@ -182,7 +166,8 @@ CREATE POLICY "weglue_receive_post_interaction"
     AND private.can_receive_post_interaction(realtime.topic())
   );
 
--- ── Reversal / rollback (removes ONLY objects created by this migration) ─────
+-- ── Reversal / rollback — removes ONLY objects created by this migration ─────
+-- (Never drops the shared `private` schema.)
 -- DROP POLICY IF EXISTS "weglue_receive_event_interaction" ON realtime.messages;
 -- DROP POLICY IF EXISTS "weglue_receive_post_interaction"  ON realtime.messages;
 -- DROP TRIGGER IF EXISTS trg_broadcast_event_rsvp   ON public.event_rsvps;
@@ -193,4 +178,3 @@ CREATE POLICY "weglue_receive_post_interaction"
 -- DROP FUNCTION IF EXISTS private.broadcast_event_rsvp_change();
 -- DROP FUNCTION IF EXISTS private.broadcast_post_like_change();
 -- DROP FUNCTION IF EXISTS private.broadcast_post_comment_change();
--- DROP SCHEMA IF EXISTS private;  -- only if nothing else was added to it
