@@ -59,3 +59,58 @@ export function removeSafeChannel(channel: RealtimeChannel | null): void {
     console.warn("[realtime] removeChannel failed", e);
   }
 }
+
+// Subscribe to a PRIVATE Broadcast channel whose name IS the authorization topic
+// (e.g. `event:<id>` / `post:<id>`). The topic gates receipt via the
+// realtime.messages RLS policies in migration 050, so a user only gets pings for
+// items they can see. The payload is an invalidation-only signal — the caller
+// refetches through the app's normal RLS-governed queries.
+//
+// Private channels require the realtime socket to carry the user's JWT, which is
+// set EXPLICITLY here (relying on the browser client's auto-wiring proved
+// unreliable). Because that read is async, this returns a cleanup function
+// rather than the channel; a subscription still in flight when the caller
+// unmounts is cancelled, and any channel already opened is removed. The callback
+// and subscribe are wrapped so a realtime hiccup — or an authorization denial —
+// degrades to a console warning while the UI keeps working via refetch. One
+// channel per topic; the caller invokes the returned cleanup on unmount / id
+// change.
+export function subscribeBroadcast(
+  topic: string,
+  event: string,
+  onMessage: () => void
+): () => void {
+  let channel: RealtimeChannel | null = null;
+  let cancelled = false;
+
+  void (async () => {
+    try {
+      const supabase = getSupabaseBrowser();
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) await supabase.realtime.setAuth(token);
+      if (cancelled) return;
+      channel = supabase
+        .channel(topic, { config: { private: true } })
+        .on("broadcast", { event }, () => {
+          try {
+            onMessage();
+          } catch (e) {
+            console.warn(`[realtime] ${topic} broadcast callback error`, e);
+          }
+        })
+        .subscribe((status: string, err?: Error) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn(`[realtime] ${topic} ${status}`, err?.message ?? "");
+          }
+        });
+    } catch (e) {
+      console.warn(`[realtime] failed to subscribe broadcast ${topic}`, e);
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+    removeSafeChannel(channel);
+  };
+}

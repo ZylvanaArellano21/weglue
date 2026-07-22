@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createSafeChannel, removeSafeChannel } from "../realtime";
+import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../realtime";
 import { clubProfileKey } from "./useClubProfile";
 import { clubEventsFeedKey } from "./useClubEventsFeed";
 import { myClubsKey, discoveryClubsKey } from "./useClubTab";
@@ -54,46 +54,41 @@ export function useClubRealtime(clubId: string | undefined, userId: string | und
   }, [clubId, userId, queryClient]);
 }
 
-// Event-overlay realtime: another user's RSVP change to the OPEN event updates
-// its attendee count + avatars live. Scoped to a single event_id (not a
-// firehose); RLS on event_rsvps still governs which rows are delivered. Fires
-// once event_rsvps is in the supabase_realtime publication (migration 050).
+// Event-overlay realtime: another user's RSVP change (INSERT / UPDATE / DELETE)
+// to the OPEN event updates its attendee count + avatars live. Delivered via a
+// PRIVATE Broadcast topic `event:<id>` (migration 050) — deletion-safe (the
+// trigger reads OLD.event_id, unlike filtered postgres_changes which can't see
+// event_id on a DELETE) and visibility-gated (a user only receives if they can
+// see the event). The ping carries no row data; we refetch through RLS-governed
+// queries. One channel per open event; cleaned up on unmount / event change.
 export function useEventRsvpRealtime(eventId: string | undefined, userId: string | undefined): void {
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!eventId || !userId) return;
-    const inv = () => {
+    return subscribeBroadcast(`event:${eventId}`, "interaction", () => {
       void queryClient.invalidateQueries({ queryKey: ["eventDetail", eventId] });
       void queryClient.invalidateQueries({ queryKey: ["clubEventsFeed"] });
       void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
       void queryClient.invalidateQueries({ queryKey: ["clubCalendarEvents"] });
-    };
-    const channel = createSafeChannel(`event-rsvps:${eventId}`, [
-      { event: "*", schema: "public", table: "event_rsvps", filter: `event_id=eq.${eventId}`, callback: inv },
-    ]);
-    return () => removeSafeChannel(channel);
+    });
   }, [eventId, userId, queryClient]);
 }
 
 // Media-overlay realtime: another user's like/unlike or new/deleted comment on
-// the OPEN post updates its counts + comment list live. Scoped to a single
-// post_id (one bounded channel per open item); RLS on post_likes/post_comments
-// (both "authenticated can read") governs delivery. Fires once those tables are
-// in the supabase_realtime publication (migration 050).
+// the OPEN post updates its counts + comment list live. Delivered via a PRIVATE
+// Broadcast topic `post:<id>` (migration 050) — deletion-safe (the trigger reads
+// OLD.post_id, which a filtered postgres_changes DELETE cannot) and
+// visibility-gated. One bounded channel per open post; cleaned up on unmount /
+// post change.
 export function usePostInteractionsRealtime(postId: string | undefined, userId: string | undefined): void {
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!postId || !userId) return;
-    const inv = () => {
+    return subscribeBroadcast(`post:${postId}`, "interaction", () => {
       void queryClient.invalidateQueries({ queryKey: ["postDetail"] });
       void queryClient.invalidateQueries({ queryKey: ["postComments", postId] });
       void queryClient.invalidateQueries({ queryKey: ["homePostsFeed"] });
-    };
-    const channel = createSafeChannel(`post-interactions:${postId}`, [
-      { event: "*", schema: "public", table: "post_likes", filter: `post_id=eq.${postId}`, callback: inv },
-      { event: "*", schema: "public", table: "post_comments", filter: `post_id=eq.${postId}`, callback: inv },
-    ]);
-    return () => removeSafeChannel(channel);
+    });
   }, [postId, userId, queryClient]);
 }
 
