@@ -55,3 +55,48 @@ At the end of every task, after the triple-check passes:
 - If native changes: run `eas build --profile production --platform all --auto-submit`
 - Report the exact command run and its output
 - A task is NOT complete until both iOS and Android are live. No exceptions.
+
+---
+
+# Engineering documentation & navigation
+
+The 9 requirements above are the session rules. **Architecture, schema, and
+process truth lives in [`docs/`](docs/README.md)** — keep it focused; this file
+stays a rules + navigation index, not an architecture dump.
+
+Read `docs/README.md` first. Load-bearing facts to hold before touching backend:
+
+- **`packages/database/src/types.ts` is STALE** — derive the schema from
+  `supabase/migrations/*.sql`, not the generated types. See
+  [`docs/database/schema-map.md`](docs/database/schema-map.md).
+- **Canonical writes only** — write `university_id` (not the `university` text
+  mirror); never treat a cached count as truth. See
+  [`docs/database/canonical-sources-of-truth.md`](docs/database/canonical-sources-of-truth.md).
+- **Officer permission = `club_members.role = 'officer'`** (via `is_club_officer`).
+  `club_officers` is a display-only roster and grants nothing. Route role changes
+  through the officer RPCs. See
+  [`docs/database/roles-and-officer-authorization.md`](docs/database/roles-and-officer-authorization.md).
+- **No platform-admin / restrictions / audit / edit-history / blocks tables
+  exist** — they are greenfield for the Admin Dashboard.
+- **Deleted-content privacy is non-negotiable — and NOT yet enforced.** Message
+  soft-delete doesn't null `content` and the SELECT RLS has no `deleted_at`
+  filter, so deleted content is currently retrievable by participants. The only
+  *protected* snapshot is `reports.content_snapshot` (reported messages), on
+  `reports`, not `messages`. See
+  [`docs/product/deletion-and-edit-history.md`](docs/product/deletion-and-edit-history.md).
+- **One migration task at a time; reconcile 042–044 before authoring 051+** (the
+  `fix/supabase-migration-history-042-044` branch is misnamed — no reconciliation
+  in it). No service-role key in client code, ever. No undocumented Supabase
+  Studio changes.
+- **Admin Dashboard = backend + web only.** If all changes stay additive/
+  compatible it needs **no EAS build** (but prove it). Plan:
+  [`docs/product/admin-dashboard.md`](docs/product/admin-dashboard.md).
+
+Codex (backend/security) is guided by [`AGENTS.md`](AGENTS.md) and onboards via
+[`docs/operations/codex-onboarding-checklist.md`](docs/operations/codex-onboarding-checklist.md).
+Collaboration rules (one editing owner per task, review, migration lock, approval
+gates): [`docs/operations/agent-collaboration-protocol.md`](docs/operations/agent-collaboration-protocol.md).
+
+> Note: this file's own numbering says "9 requirements" in the header but
+> requirement 7's confirmation line reads "all 7 requirements" — that legacy
+> wording is intentionally left as-is; confirm completion per requirement 7.
