@@ -421,6 +421,91 @@ INSERT INTO test_results VALUES ('M3 refused edge delete leaves message intact',
   (SELECT deleted_at IS NULL FROM messages WHERE id='aaaa1111-0000-4000-8000-00000000000a'));
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- TEST N — no client hard-delete: authenticated/anon lack DELETE on messages.
+-- ════════════════════════════════════════════════════════════════════════════
+INSERT INTO test_results VALUES ('N1 authenticated cannot DELETE messages (grant revoked)',
+  NOT has_table_privilege('authenticated','public.messages','DELETE'));
+INSERT INTO test_results VALUES ('N2 anon cannot DELETE messages',
+  NOT has_table_privilege('anon','public.messages','DELETE'));
+INSERT INTO test_results VALUES ('N3 no DELETE RLS policy exists on messages',
+  (SELECT count(*)=0 FROM pg_policies WHERE tablename='messages' AND cmd='DELETE'));
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TEST O — custom-group (type='group') authorization matrix.
+--   c2 is a custom group created by u1; participants u1, u2.
+-- ════════════════════════════════════════════════════════════════════════════
+\set m_grp_u2a 'aaaa1111-0000-4000-8000-00000000000b'
+\set m_grp_u1  'aaaa1111-0000-4000-8000-00000000000c'
+\set m_grp_u2b 'aaaa1111-0000-4000-8000-00000000000d'
+INSERT INTO messages (id, conversation_id, sender_id, message_type, content) VALUES
+  (:'m_grp_u2a', :'c2', :'u2', 'text', 'u2 in group a'),
+  (:'m_grp_u1',  :'c2', :'u1', 'text', 'u1 in group'),
+  (:'m_grp_u2b', :'c2', :'u2', 'text', 'u2 in group b');
+
+-- O1: group creator (u1) may delete ANY message in the group (u2's message).
+SET LOCAL "request.jwt.claims" = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+SELECT unsend_message(:'m_grp_u2a');
+INSERT INTO test_results VALUES ('O1 custom-group creator deletes any member message',
+  (SELECT deleted_at IS NOT NULL AND content IS NULL FROM messages WHERE id=:'m_grp_u2a'));
+
+-- O2: ordinary participant (u2) may NOT delete another user's message.
+SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
+DO $$
+DECLARE v_raised text := NULL;
+BEGIN
+  BEGIN PERFORM unsend_message('aaaa1111-0000-4000-8000-00000000000c');
+  EXCEPTION WHEN OTHERS THEN v_raised := SQLERRM; END;
+  INSERT INTO test_results VALUES ('O2 ordinary group participant cannot delete another''s message',
+    v_raised = 'not_found_or_not_authorized');
+END $$;
+INSERT INTO test_results VALUES ('O2b that message is untouched',
+  (SELECT deleted_at IS NULL FROM messages WHERE id=:'m_grp_u1'));
+
+-- O3: ordinary participant (u2) MAY delete their own message.
+SELECT unsend_message(:'m_grp_u2b');
+INSERT INTO test_results VALUES ('O3 group participant deletes own message',
+  (SELECT deleted_at IS NOT NULL FROM messages WHERE id=:'m_grp_u2b'));
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TEST P — official club chat (type='club_group') authorization matrix.
+--   c3: u1 = officer, u2 = ordinary member.
+-- ════════════════════════════════════════════════════════════════════════════
+\set m_c3_u1 'aaaa1111-0000-4000-8000-00000000000e'
+\set m_c3_u2 'aaaa1111-0000-4000-8000-00000000000f'
+INSERT INTO messages (id, conversation_id, sender_id, message_type, content) VALUES
+  (:'m_c3_u1', :'c3', :'u1', 'text', 'officer message'),
+  (:'m_c3_u2', :'c3', :'u2', 'text', 'member own message');
+
+-- P1: ordinary official-chat participant (u2, non-officer) may NOT delete
+-- another user's (the officer's) message.
+SET LOCAL "request.jwt.claims" = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
+DO $$
+DECLARE v_raised text := NULL;
+BEGIN
+  BEGIN PERFORM unsend_message('aaaa1111-0000-4000-8000-00000000000e');
+  EXCEPTION WHEN OTHERS THEN v_raised := SQLERRM; END;
+  INSERT INTO test_results VALUES ('P1 non-officer member cannot delete another''s official-chat message',
+    v_raised = 'not_found_or_not_authorized');
+END $$;
+INSERT INTO test_results VALUES ('P1b officer message untouched',
+  (SELECT deleted_at IS NULL FROM messages WHERE id=:'m_c3_u1'));
+
+-- P2: ordinary member (u2) MAY delete their own official-chat message.
+SELECT unsend_message(:'m_c3_u2');
+INSERT INTO test_results VALUES ('P2 member deletes own official-chat message',
+  (SELECT deleted_at IS NOT NULL FROM messages WHERE id=:'m_c3_u2'));
+
+-- P3: club officer (u1) MAY delete the member's message (moderation) — via the
+-- legacy path for a no-attachment message (edge path covered by M1).
+\set m_c3_u2b 'aaaa1111-0000-4000-8000-000000000010'
+INSERT INTO messages (id, conversation_id, sender_id, message_type, content)
+VALUES (:'m_c3_u2b', :'c3', :'u2', 'text', 'member message for officer delete');
+SET LOCAL "request.jwt.claims" = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+SELECT unsend_message(:'m_c3_u2b');
+INSERT INTO test_results VALUES ('P3 officer deletes member message (moderation, legacy path)',
+  (SELECT deleted_at IS NOT NULL FROM messages WHERE id=:'m_c3_u2b'));
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- RESULTS
 -- ════════════════════════════════════════════════════════════════════════════
 \echo ''
