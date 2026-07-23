@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { secureDeleteMessage } from './messageDeletion';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -381,11 +382,15 @@ export async function sendMessage(
   if (error) throw error;
 }
 
+/**
+ * Delete a club-channel message for everyone. Routes through the single secure
+ * deletion entry point (delete-message Edge Function) — the SAME path used by
+ * thread/DM/group deletion. Previously this hard-deleted the row directly,
+ * which bypassed authorization, founder history, canonical redaction, managed-
+ * attachment retention/removal, poll protection, push cleanup, Realtime safety,
+ * and reconciliation. Never hard-deletes; the server re-verifies that the caller
+ * is the sender or a club officer.
+ */
 export async function deleteMessage(messageId: string): Promise<void> {
-  const { error } = await supabase
-    .from('messages')
-    .delete()
-    .eq('id', messageId);
-
-  if (error) throw error;
+  await secureDeleteMessage(messageId);
 }

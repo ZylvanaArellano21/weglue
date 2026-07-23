@@ -363,6 +363,15 @@ CREATE POLICY "messages: non-member club preview"
     )
   );
 
+-- Hard guarantee: NO client may hard-delete a message. There is no DELETE RLS
+-- policy on messages (so a client DELETE already affects 0 rows), but the base
+-- DELETE grant existed — revoke it so any client-side hard-delete fails loudly
+-- instead of silently no-op'ing. All deletion goes through the secure path
+-- (unsend_message RPC / delete-message Edge Function) which soft-deletes +
+-- redacts + retains. FK cascades and SECURITY DEFINER account-deletion are
+-- unaffected (they do not run as anon/authenticated).
+REVOKE DELETE ON messages FROM anon, authenticated;
+
 -- ============================================================================
 -- SECTION 9 — Poll privacy (§9)
 -- ============================================================================

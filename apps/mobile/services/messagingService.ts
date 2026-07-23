@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { clientUuid } from '../lib/chatAttachments';
+import { secureDeleteMessage } from './messageDeletion';
 
 // ─── Unified messaging service (all four conversation types) ────────────────
 // direct · group (custom) · club_group · officer_chat
@@ -189,10 +190,14 @@ export function newClientTag(): string {
 
 // ─── Message actions ─────────────────────────────────────────────────────────
 
-/** Unsend for everyone (server-authorized: sender / official-chat officer / group admin). */
+/**
+ * Unsend for everyone (server-authorized: sender / official-chat officer /
+ * group admin). Routes through the single secure deletion entry point
+ * (delete-message Edge Function) so managed attachments are retained+removed
+ * and canonical content is redacted — never a client-side hard delete.
+ */
 export async function unsendMessage(messageId: string): Promise<void> {
-  const { error } = await supabase.rpc('unsend_message', { p_message_id: messageId });
-  if (error) throw error;
+  await secureDeleteMessage(messageId);
 }
 
 /** Delete for me only. */
