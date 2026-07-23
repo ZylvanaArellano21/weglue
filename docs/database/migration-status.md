@@ -39,29 +39,29 @@ change the schema. No undocumented Supabase Studio edits (CLAUDE.md §5).
 | 048 | security_hardening_search_path | `SET search_path` hardening |
 | 049 | realtime_club_content | Realtime for club content |
 | 050 | realtime_interactions | deletion-safe private-Broadcast RSVP/like/comment realtime |
+| 051 | deleted_message_privacy | **NOT DEPLOYED — awaiting Codex review + founder approval.** Deleted-message privacy foundation (v9): `message_deletion_attempts`, `message_attachment_map`, `deleted_message_history`, `data_health_diagnostics`, `report_evidence`; message/poll SELECT RLS require `deleted_at IS NULL`; secure `unsend_message` (B2) + deletion/worker/restore/purge RPCs; push provenance + scrub; `deleted-message-retention` bucket. Validated locally (62/62 tests). Branch `backend/deleted-message-privacy`. |
 
-## The 042–044 reconciliation note (⚠️ read before writing 051+)
+## The 042–044 reconciliation note — ✅ RECONCILED (2026-07-23)
 
-The project brief (§36) and project memory flag a **known migration-history
-inconsistency around 042–044**. Two things are now established:
+**Verdict: RECONCILED.** Statement-level comparison of prod's *stored applied
+SQL* against the committed local files closed the long-standing uncertainty.
 
-- ⚠️ **The branch `fix/supabase-migration-history-042-044` is misnamed.** Its
-  commits are Android-camera / poll / sidebar-bug work (tip: "Android: add Take
-  Photo / Photo Library choice"), and `git diff main...that-branch` = **0 files**
-  (main already contains them). It contains **no** 042–044 reconciliation — that
-  work still has to be produced from scratch.
-- **Prod reflects the *effect* of 042–044** (verified read-only: `universities`,
-  `app_config`, `profiles.university_id`, `sync_university_name`, and 044's
-  `delete_own_account_atomic` all exist). What is **not** yet verified is
-  whether prod's *stored applied SQL* byte/statement-matches the committed files.
+Evidence (all read-only; zero prod writes; no `migration repair`):
+- Pulled the full applied history from `supabase_migrations.schema_migrations`
+  via the Management API (`POST /database/query`, project ref
+  `yoozrnosmqtaiksgcixc`): all **50** versions 001→050 applied; every
+  version+name matches local filenames (whole-range `diff` = empty — no gaps,
+  extras, or name drift).
+- Pulled the stored `statements[]` for 042/043/044, normalized both sides
+  (stripped comments + whitespace + separators), and diffed:
+  **042/043/044 are byte-identical (normalized) to the committed files.**
+- Local provenance: 042/043 from commit `e4f9acb1`, 044 from `53a88cfd`; working
+  tree == HEAD. Local SHA-256: 042 `0b6dad5b…`, 043 `f633dc02…`, 044 `f9d81c35…`.
+- ⚠️ The branch `fix/supabase-migration-history-042-044` remains misnamed —
+  `git diff main...that-branch` = **0 files**; it holds no reconciliation work.
 
-**Before creating any new migration (051+):**
-1. Confirm applied versions + statement hashes with `supabase migration list`
-   (founder-run link — see credentials commands in the reconciliation report).
-2. Statement-compare prod's applied 042/043/044 against the local files.
-3. If names match but bodies differ, show the exact `supabase migration repair`
-   action, impact, and rollback **before** running it (do not run unprompted).
-4. Only then author 051+.
+**Next valid migration number = 051** (now authored — see below).
+No `supabase migration repair` is warranted (no mismatch exists).
 
 ## How to verify prod vs. files
 - Pull the applied migration list from prod (`supabase migration list` against the
