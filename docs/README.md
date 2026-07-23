@@ -25,7 +25,7 @@ not asserted.
 - [`reports-and-moderation.md`](product/reports-and-moderation.md) — the single `reports` table, the report→email flow, gaps.
 - [`conversations-channels-messages.md`](product/conversations-channels-messages.md) — the conversation → channel → message hierarchy and message payload types.
 - [`deletion-and-edit-history.md`](product/deletion-and-edit-history.md) — current soft-delete / snapshot / hide behavior and what edit-history exists.
-- [`deleted-message-privacy.md`](product/deleted-message-privacy.md) — **authoritative v8 design** for secure deleted-message privacy (preflight-vs-active-saga failure taxonomy, authorization + Category-C create no attempt, Storage-4xx split, `data_health_diagnostics`, lease-based reconciliation, exact legacy idempotency-key rule, push provenance DDL, report evidence, OTA evidence). Design only, not implemented.
+- [`deleted-message-privacy.md`](product/deleted-message-privacy.md) — **authoritative v9 design** for secure deleted-message privacy (preflight-vs-active-saga taxonomy, fully-private `data_health_diagnostics` + `safe_metadata` allowlist, positive server-side original-object absence proof, lease-based reconciliation, legacy idempotency-key rule, push provenance DDL, report evidence, OTA evidence). Design only, not implemented.
 - [`admin-dashboard.md`](product/admin-dashboard.md) — **the proposed Admin Dashboard**: IA, routes, actions, admin-auth design, canonical reports/restrictions/audit design, phased plan, rollback.
 
 ### operations/

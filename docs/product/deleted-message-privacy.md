@@ -1,8 +1,8 @@
-# Deleted-Message Privacy — Authoritative Design (v8)
+# Deleted-Message Privacy — Authoritative Design (v9)
 
 > **Status: DESIGN ONLY. Not implemented.** No migration, no production/data
 > change, no mobile change, no OTA publish, no native build, no Supabase deploy.
-> Single authoritative artifact for Codex review; supersedes v1–v6. **No migration
+> Single authoritative artifact for Codex review; supersedes v1–v8. **No migration
 > 051, implementation, Edge Function, Supabase policy, production-data backfill,
 > OTA, or deployment until 042–044 are statement/hash reconciled (§16).**
 >
@@ -190,7 +190,7 @@ message_attachment_map ( id uuid pk, attempt_id uuid, message_id uuid,
   mapping_error text )
 ```
 **A. Managed and mapped** (`chat-attachments/{conv}/{uuid}.ext`, confidence high):
-retention copy → verify (size+checksum) → original delete → verify gone → finalize.
+retention copy → verify (size+checksum) → original delete → **verify absent (§8f)** → finalize.
 
 **B. External / device-local** (`file://`, third-party, non-We-Glue host — prod: 2
 `file://`): redact canonical URL + metadata; **do not claim deletion of the
@@ -215,13 +215,49 @@ failure taxonomy (§8).
 **Category-C diagnostic (design-only; NOT a generic diagnostics platform):**
 ```
 data_health_diagnostics ( id uuid pk, diagnostic_type text,   -- e.g. 'unmappable_attachment'
-  related_entity_type text, related_entity_id uuid, severity text,
-  safe_metadata jsonb, status text,                            -- 'open'|'resolved'
+  related_entity_type text, related_entity_id uuid,           -- internal-only, see below
+  severity text,
+  -- prefer TYPED columns for important facts:
+  diagnostic_code text, provider_category text, mapping_confidence_category text,
+  validation_result_category text, error_classification text, remediation_state text,
+  correlation_id uuid,                                         -- attempt-free; no message/path
+  safe_metadata jsonb,                                         -- server-built from an allowlist only
+  status text,                                                 -- 'open'|'resolved'
   created_at timestamptz, resolved_at timestamptz )
 ```
-It lives **outside** `message_deletion_attempts` and is **never** claimable by the
-deletion worker. `safe_metadata` must **not** expose message content, retained
-content, attachment secrets, signed URLs, or service-role information.
+
+**Access policy (Change #2) — fully private operational table.** Until platform-
+admin authorization + audited admin-read RPCs exist: **no ordinary authenticated
+SELECT; no browser / mobile / web-client access; no reporter / reported-user /
+participant / officer access; no Realtime publication; service-role backend only;
+no service-role key in any client.** RLS = deny-all to `authenticated`. Future
+founder/admin reads use platform-admin authorization + a **reason-required RPC** +
+an **audit record** + **minimal returned fields**. **The deletion worker must never
+claim diagnostic rows** (they are not in `message_deletion_attempts`; §8c).
+
+**`related_entity_id` protection (Change #3).** It may be stored **internally only
+because this table is deny-by-default and backend-only**. It must **never** be
+returned to ordinary clients or exposed via ordinary API queries, Realtime, browser
+RPCs, user-facing error responses, notifications, or logs accessible to ordinary
+users. A future admin diagnostic view showing the entity relationship must be
+founder/admin-authorized and audited. (Test §13: an ordinary user cannot infer
+whether a specific message exists by querying diagnostics or observing error
+differences — error responses are identical regardless of message existence.)
+
+**`safe_metadata` allowlist (Change #4).** Do not rely only on prohibited-field
+wording. Prefer **typed columns** (above) for important facts; if JSON is retained
+it is **server-constructed from an allowlist only** — **never** accept arbitrary
+client-supplied metadata.
+- **Permitted (categorized, non-sensitive):** diagnostic code · provider category ·
+  mapping-confidence category · validation-result category · non-sensitive error
+  classification · remediation state · timestamps · an attempt-free correlation ID
+  that exposes no message or Storage path.
+- **Prohibited (never stored):** message content · poll question/options/votes/
+  totals/voter identities · report evidence · attachment URL · external URL ·
+  original object path · retained object path · bucket/path combinations · signed
+  URLs · authentication tokens · API keys · service-role data · secrets of any kind
+  · raw request headers · raw provider responses · raw exception text (may contain
+  paths/tokens/content/secrets) · private filenames that could disclose content.
 
 Privacy redaction ≠ physical deletion of an object outside We Glue's control.
 
@@ -261,7 +297,7 @@ fields live on `message_deletion_attempts` (§5).
 ### 8a. `delete-message` Edge Function
 JWT verify → authorize (§3) → require+enforce unique idempotency key → claim/locate
 the active attempt → first PG txn (§4) → `pending` → (A) retention copy + verify
-(size+checksum) → `retained` → delete original + verify gone → `original_removed`
+(size+checksum) → `retained` → delete original + verify absent (§8f) → `original_removed`
 → finalize → `redacted` → `completed`. Minimal status; never retained paths/
 snapshots. Duplicate invocation → idempotent no-op. **Return success only when We
 Glue no longer serves the original.** Not atomic across Storage+PostgreSQL.
@@ -337,13 +373,39 @@ those are **preflight** (§4a) and create no attempt.
 - **B. Post-attempt `4xx`** (original object becomes unavailable after retention/
   redaction work began; retained object disappears during an active saga; permanent
   provider rejection after canonical redaction committed): behavior depends on
-  whether the privacy guarantee can be **proven** —
-  - if the original is **verified absent** and canonical data is **redacted**, the
-    worker may continue toward safe finalization (privacy already satisfied);
+  whether **original-object absence is positively proven (§8f)** —
+  - if the original is **verified absent (§8f)** and canonical data is
+    **redacted**, the worker may continue toward safe finalization (privacy already
+    satisfied);
   - if object state **cannot be proven**, enter **manual reconciliation**
     (dead-letter per §8d);
-  - do **not** automatically retry permanent failures forever; **never re-expose
-    canonical content automatically**.
+  - the worker must **not guess from HTTP status alone** without interpreting the
+    provider operation and authentication context; do **not** automatically retry
+    permanent failures forever; **never re-expose canonical content automatically**.
+
+### 8f. Original-object absence proof (Change #5/#6) — the deletion-success standard
+A managed (Category A) deletion may only complete when the exact original object's
+absence is **positively established server-side**. The worker MUST:
+1. Read the **immutable attachment mapping** (§6: storage provider, original bucket,
+   original object path, expected object identity, checksum/size where available) —
+   **not** the redacted message row.
+2. Query the **exact** provider/bucket/object path via a **trusted server-side
+   Storage API**.
+3. Confirm the **exact mapped object no longer exists**.
+4. Confirm new signed-URL generation is **denied** for the old path.
+5. Record: verification **method**, **timestamp**, **result**, and provider-response
+   **classification** (typed, non-sensitive — no raw provider body).
+6. Advance to successful completion **only** when absence is positively established
+   under this documented method.
+
+**Not sufficient proof by themselves** (each → ambiguous): a client-visible 404 · an
+expired signed URL · a permission-denied response · a network timeout · an ambiguous
+provider error · inability to generate a signed URL · a missing URL on the redacted
+message row.
+
+**If ambiguous:** do not report deletion success; do not classify the object as
+absent; **transient** failures → retryable reconciliation; **permanent or
+repeatedly ambiguous** failures → manual reconciliation (§8d).
 
 ---
 
@@ -434,6 +496,28 @@ DEFINER hardening · custom-group authorization (each actor).
 failure **enters manual reconciliation** where safety cannot be proven (else safe
 finalization if original verified absent + redacted); permanent failures are not
 retried forever; canonical content is never re-exposed automatically.
+
+**Diagnostics privacy (Change #3/#7):**
+- ordinary authenticated users **cannot query** `data_health_diagnostics`;
+- diagnostics are **not in Realtime**;
+- `related_entity_id` **cannot be used to infer message existence** (identical
+  error responses whether or not the message exists);
+- future admin reads **require authorization, reason, and audit**.
+
+**Diagnostic metadata allowlist (Change #4/#7):** arbitrary client metadata cannot
+be inserted; a `safe_metadata` containing any of these is **rejected** — attachment
+URL · object path · retained path · signed URL · secrets/tokens · poll content ·
+report evidence.
+
+**Original-object absence proof (Change #5/#6/#7):**
+- absence is checked through the **immutable provider/bucket/path mapping** (not the
+  redacted row);
+- a client-facing **404 alone cannot finalize** deletion;
+- a **permission-denied** response cannot be interpreted as object absence;
+- a **timeout** cannot be interpreted as object absence;
+- **verified server-side absence records method/time/result**;
+- **ambiguous** absence enters reconciliation;
+- **successful completion requires verified original removal**.
 
 **Legacy idempotency (Change #4):** duplicate legacy call (idempotent, one attempt)
 · concurrent legacy calls (no duplicate `attempt_no`) · restore-then-delete-again
