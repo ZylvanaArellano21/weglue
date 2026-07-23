@@ -17,6 +17,10 @@ Dashboard.
 | **Posts / comments / events / clubs / conversations / channels** | **Not confirmed** — likely hard delete (with FK cascades wired in 023/033/038/039) | **none** (hard delete = no retention) |
 | **Accounts** | Hard delete via `delete_own_account_atomic()` cascading through `auth.users` (044) | none |
 
+> 📐 **The full remediation design lives in
+> [`deleted-message-privacy.md`](deleted-message-privacy.md) (authoritative v4).**
+> The note below states the current (broken) reality.
+
 > ⚠️ **Deleted-message privacy is NOT yet enforced.** The `messages` SELECT RLS
 > is `USING(is_conversation_participant(conversation_id))` (001:808) with **no
 > `deleted_at` filter**, and `unsend_message` doesn't null `content`. Verified in
