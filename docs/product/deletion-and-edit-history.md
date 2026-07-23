@@ -41,8 +41,10 @@ Dashboard.
 
 ## Enforcement obligations for the dashboard work
 
-1. **Verify** that ordinary-client RLS/queries filter `deleted_at IS NOT NULL`
-   (and `hidden` states) for messages **everywhere** — including Realtime
+1. **Verify** that ordinary-client RLS/queries **require `deleted_at IS NULL`**
+   (i.e. **exclude** deleted rows; deleted rows remain accessible only through
+   future founder/admin history mechanisms, never ordinary product queries) —
+   and hide `hidden` states — for messages **everywhere**, including Realtime
    payloads (049/050) and any storage URL for a deleted attachment. A deleted
    message must not leak its `attachment_url`. This is an audit, not an
    assumption.

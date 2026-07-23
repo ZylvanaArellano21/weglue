@@ -28,7 +28,7 @@ change the schema. No undocumented Supabase Studio edits (CLAUDE.md §5).
 | 036 | club_officers_unique | uniqueness on officer roster |
 | 037 | club_photos_officer_visibility | `club_photos.is_visible` |
 | 038–039 | club sync/tag removal/joins/reports / photo removal never deletes posts | `remove_club_officer`, cascade fixes |
-| 040 | messaging_overhaul | shared ConversationThread model; message **soft-delete + snapshots**, `message_hides`, `chat_invitations` |
+| 040 | messaging_overhaul | shared ConversationThread model; message **soft-delete + report snapshots** (snapshot cols on `reports`, not `messages`), `message_hides`, `chat_invitations` |
 | 041 | club_conversation_hub | `channel_posters/mutes/reads`, post permissions |
 | 042 | single_campus_and_club_recommendations | **`universities`, `app_config`, `university_id`**, `sync_university_name()` |
 | 043 | fix_duplicate_signup_trigger_and_survey_uniqueness | signup/survey fixes |
