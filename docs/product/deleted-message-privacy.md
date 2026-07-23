@@ -1,4 +1,4 @@
-# Deleted-Message Privacy — Authoritative Design (v7)
+# Deleted-Message Privacy — Authoritative Design (v8)
 
 > **Status: DESIGN ONLY. Not implemented.** No migration, no production/data
 > change, no mobile change, no OTA publish, no native build, no Supabase deploy.
@@ -78,31 +78,56 @@ transfers admin (040:442–452). Do not change unless the founder explicitly dir
 
 ---
 
-## 4. Initial PostgreSQL transaction (atomic; no partial state)
-One transaction, all-or-nothing, both entry points:
-1. `SELECT … FOR UPDATE` lock the `messages` row.
-2. Verify authorization (§3).
-3. Compute `attempt_no = 1 + coalesce(max,0)` **inside the lock**; insert
-   `message_deletion_attempts` (`idempotency_key`, `entry_point`,
-   `attachment_category` §6), `state='pending'`.
-4. Snapshot to founder history: `content`; attachment mapping (§6); poll
-   question/options/votes/voters/totals; shared refs.
-5. Redact canonical content-bearing fields (null all §2 content cols); protect/
-   unlink poll (§9).
-6. `deleted_at=now()`, `deleted_by=auth.uid()`.
-7. Category B/none → `state='completed'`. Category A → `state='pending'` (→ §8).
-   Category C (unmappable) → **roll back everything and raise a real error** (§6C)
-   — no deletion recorded.
+## 4. Preflight, then the initial PostgreSQL transaction
+**Preflight failures create NO deletion attempt** (§4a). The first transaction
+(§4b) runs only after preflight passes.
 
-Any failure rolls back the whole transaction — **never a history-only or
-redaction-only remnant**. Realtime UPDATE carries the redacted row. DB fail-closed
-at commit.
+### 4a. Preflight (before any attempt exists — Change #2/#3/#4/#5)
+Under a short lock / read, establish that the deletion can proceed safely:
+- Verify **authorization** (§3).
+- **Classify + safely map the attachment** (§6): Category A (managed, mappable),
+  B (external/`file://`, nothing to move), or C (appears managed but unmappable).
+- Validate the request; confirm the source object exists where a managed mapping
+  requires it.
+
+**If authorization fails, the request is invalid, the source object is missing at
+preflight, mapping cannot be safely established, the provider is unsupported, or
+the attachment is Category C → return a real error and:**
+- create **no** `message_deletion_attempt`, **no** deletion history,
+- perform **no** canonical redaction, set **no** `deleted_at`,
+- perform **no** Storage mutation, **no** push cleanup,
+- create **no** dead-lettered attempt,
+- expose no content, path, or message-existence information beyond the minimum
+  authorized error response.
+
+Optional logging uses a **separate** security-audit or `data_health_diagnostics`
+path (§6C), never `message_deletion_attempts`.
+
+### 4b. First PostgreSQL transaction (only after preflight passes; atomic)
+One transaction, all-or-nothing, both entry points:
+1. `SELECT … FOR UPDATE` lock the `messages` row (re-confirm authorization + that
+   the attachment is still Category A managed / B / none — never C here).
+2. Compute `attempt_no = 1 + coalesce(max,0)` **inside the lock**; insert
+   `message_deletion_attempts` (`idempotency_key`, `entry_point`,
+   `attachment_category ∈ {managed, external, none}` §6), `state='pending'`.
+3. Snapshot to founder history: `content`; attachment mapping (§6); poll
+   question/options/votes/voters/totals; shared refs.
+4. Redact canonical content-bearing fields (null all §2 content cols); protect/
+   unlink poll (§9).
+5. `deleted_at=now()`, `deleted_by=auth.uid()`.
+6. Category B/none → `state='completed'`. Category A → `state='pending'` (→ §8).
+
+Any failure inside §4b rolls back the whole transaction — **never a history-only
+or redaction-only remnant**. Realtime UPDATE carries the redacted row. DB
+fail-closed at commit. (If preflight-class evidence — e.g. missing source object —
+is somehow discovered inside §4b before redaction, the transaction rolls back and
+raises: still no attempt, no redaction.)
 
 ## 5. Deletion attempt identity
 ```
 message_deletion_attempts ( id uuid pk, message_id uuid, attempt_no int,
   idempotency_key text, actor_id uuid, reason text, state text, entry_point text,
-  attachment_category text,           -- 'managed' | 'external' | 'unmappable' | 'none'
+  attachment_category text,           -- 'managed' | 'external' | 'none' (NEVER 'unmappable' — Category C creates no attempt, §4a/§6C)
   started_at, updated_at, completed_at, failed_at, failure_reason,
   -- lease + retry (§8)
   claimed_by text, claim_token uuid, claimed_at timestamptz, claim_expires_at timestamptz,
@@ -174,13 +199,29 @@ appropriate; add a **data-health diagnostic**; **prevent future `file://`
 records** (client validation + insert CHECK/trigger — separate task).
 `state='completed'`.
 
-**C. Appears managed but unmappable** (confidence none): **do not report success;
-do not guess the path; fail with a real error;** create/update a reconciliation
-diagnostic; require manual review; **make no privacy-destructive partial change**
-(first txn rolls back, content unchanged). **Quarantine is NOT part of v1** — a
-separate quarantine system requires a future reviewed design. v1 behavior = real
-error + no success claim + no path guess + no destructive change + a data-health/
-manual-review diagnostic where safely possible.
+**C. Appears managed but unmappable** (confidence none) — a **preflight** failure
+(§4a), detected **before any attempt exists**. V1 behavior:
+- return a **real error**; return **no** deletion success,
+- **create no deletion attempt** and **no deletion history**,
+- **leave the canonical message unchanged**; leave `deleted_at` unchanged,
+- perform **no** Storage mutation and **no** push cleanup,
+- create only a **separate safe data-health/manual-review diagnostic** (below).
+
+**Quarantine is NOT part of v1** — a separate quarantine system requires a future
+reviewed design. Category C is therefore **excluded** from deletion-attempt
+dead-letter conditions, reconciliation-worker automatic claims, and the post-attempt
+failure taxonomy (§8).
+
+**Category-C diagnostic (design-only; NOT a generic diagnostics platform):**
+```
+data_health_diagnostics ( id uuid pk, diagnostic_type text,   -- e.g. 'unmappable_attachment'
+  related_entity_type text, related_entity_id uuid, severity text,
+  safe_metadata jsonb, status text,                            -- 'open'|'resolved'
+  created_at timestamptz, resolved_at timestamptz )
+```
+It lives **outside** `message_deletion_attempts` and is **never** claimable by the
+deletion worker. `safe_metadata` must **not** expose message content, retained
+content, attachment secrets, signed URLs, or service-role information.
 
 Privacy redaction ≠ physical deletion of an object outside We Glue's control.
 
@@ -252,17 +293,31 @@ SKIP LOCKED LIMIT 1` → assign lease (`claim_token`, `claimed_by`, `claimed_at`
 **compare-and-set** transitions require matching `id` + `claim_token` + expected
 `state`; zero rows updated ⇒ stale worker aborts.
 
-### 8d. Retryable failure vs dead-letter (Change #2)
-- **Retryable failure:** transient error (network, timeout, 5xx, lease-lost). Set
-  `state='failed_requires_reconciliation'`, increment `retry_count`, set
-  `next_retry_at = now() + backoff(retry_count)` (exponential), record
-  `last_error`. Automatic workers may reclaim (predicate §8c).
-- **Transition to dead-letter** when **any**: `retry_count >= max_retry`
+**Scope (Change #7):** the predicate applies **only to rows in
+`message_deletion_attempts`**. Workers must **never** claim security-audit events,
+`data_health_diagnostics`, unauthorized requests, or Category-C diagnostics — none
+of which are deletion attempts — and never a **dead-lettered** attempt unless an
+audited manual retry has cleared `requires_manual_reconciliation`.
+
+### 8d. Retryable failure vs dead-letter — active-saga only (Change #2/#3/#4/#5/#6)
+This taxonomy applies **only after an authorized attempt exists and §4b
+committed**. It **never** includes: unauthorized requests, Category-C preflight
+failures, invalid input, or unsupported/preflight attachment-mapping failures —
+those are **preflight** (§4a) and create no attempt.
+- **Retryable failure** (active saga): temporary network error, Storage **5xx**,
+  request timeout, lease loss, recoverable worker crash, temporary verification
+  failure. Set `state='failed_requires_reconciliation'`, increment `retry_count`,
+  set `next_retry_at = now() + backoff(retry_count)`, record `last_error`.
+  Automatic workers may reclaim (predicate §8c).
+- **Transition to dead-letter/manual** when **any**: `retry_count >= max_retry`
   (default **8**); OR attempt age > `max_attempt_age` (default **24 h**); OR a
-  **non-retryable** error occurs (authorization failure, Category-C unmappable,
-  data-integrity violation, permanent storage 4xx such as a missing copy source).
-  Set `requires_manual_reconciliation=true`, `dead_lettered_at=now()`,
+  **non-retryable active-saga** error — repeated checksum mismatch, missing
+  retained copy after redaction, integrity-invariant failure, or a **permanent
+  post-attempt Storage failure** (§8e case B). Set
+  `requires_manual_reconciliation=true`, `dead_lettered_at=now()`,
   `dead_letter_reason`, `dead_lettered_by='worker'`; raise a **critical alert**.
+  Never automatically retry a permanent failure forever; never re-expose canonical
+  content automatically.
 - **Once dead-lettered:** automatic workers must not claim it; Cron must ignore it;
   only an **explicit audited manual retry** may clear `requires_manual_reconciliation`
   and schedule **one** controlled attempt (reset `next_retry_at`, keep history);
@@ -272,6 +327,23 @@ SKIP LOCKED LIMIT 1` → assign lease (`claim_token`, `claimed_by`, `claimed_at`
 - **Schedule:** Supabase Cron invokes the worker every 1–2 min (open question:
   external runner). No attempt remains indefinitely stuck without visibility/
   alerting.
+
+### 8e. Permanent Storage `4xx` classification (Change #5) — not automatically one category
+- **A. Preflight `4xx`** (source object missing before attempt creation; caller
+  lacks authorization; object mapping invalid before deletion begins): this is a
+  **preflight** case (§4a) → **no attempt, no redaction, no history, no mutation**;
+  return a real error; optional safe diagnostic. It is **not** a deletion-attempt
+  failure or dead-letter.
+- **B. Post-attempt `4xx`** (original object becomes unavailable after retention/
+  redaction work began; retained object disappears during an active saga; permanent
+  provider rejection after canonical redaction committed): behavior depends on
+  whether the privacy guarantee can be **proven** —
+  - if the original is **verified absent** and canonical data is **redacted**, the
+    worker may continue toward safe finalization (privacy already satisfied);
+  - if object state **cannot be proven**, enter **manual reconciliation**
+    (dead-letter per §8d);
+  - do **not** automatically retry permanent failures forever; **never re-expose
+    canonical content automatically**.
 
 ---
 
@@ -343,12 +415,25 @@ authenticated nonparticipant · service backend · future founder/admin.
 
 **Core:** every state (§7) · message SELECT · `getDirectMessages` ·
 `getChannelMessages` · `getNonMemberPreview` · text · attachment metadata ·
-external/`file://` · unmappable Category-C failure (real error, no data change) ·
-polls/options/votes · report evidence · Realtime (messages+poll_votes+web unread) ·
-search · media/files · prior signed URL before vs after original-delete · new-sign
-denial · copy/original-delete verification · retained-bucket denial · restoration ·
-permanent purge · rollback · SECURITY DEFINER hardening · custom-group authorization
-(each actor).
+external/`file://` · polls/options/votes · report evidence · Realtime
+(messages+poll_votes+web unread) · search · media/files · prior signed URL before
+vs after original-delete · new-sign denial · copy/original-delete verification ·
+retained-bucket denial · restoration · permanent purge · rollback · SECURITY
+DEFINER hardening · custom-group authorization (each actor).
+
+**Preflight — no attempt created (Change #3/#4/#5):**
+- **Unauthorized delete creates zero mutations** — no attempt, no history, no
+  dead-letter, no redaction, no `deleted_at`, no Storage change, no push change;
+  denied-action audit (if any) exposes no message existence/content/path.
+- **Category-C request creates no deletion attempt** and only an approved **safe
+  diagnostic**; the diagnostic contains **no** sensitive content or path.
+- **Preflight missing Storage object creates no attempt** (no redaction/mutation).
+- Automatic workers **never claim** `data_health_diagnostics` or audit events.
+
+**Post-attempt Storage failure (Change #5):** a permanent post-attempt Storage
+failure **enters manual reconciliation** where safety cannot be proven (else safe
+finalization if original verified absent + redacted); permanent failures are not
+retried forever; canonical content is never re-exposed automatically.
 
 **Legacy idempotency (Change #4):** duplicate legacy call (idempotent, one attempt)
 · concurrent legacy calls (no duplicate `attempt_no`) · restore-then-delete-again
