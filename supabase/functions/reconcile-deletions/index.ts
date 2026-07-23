@@ -19,14 +19,14 @@
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RECONCILE_SECRET.
 
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const ORIGINAL_BUCKET = "chat-attachments";
 const RETENTION_BUCKET = "deleted-message-retention";
-const OP_TIMEOUT_MS = 100_000;       // §8b: 90–120 s per Storage op.
-const RENEW_BELOW_MS = 2 * 60_000;   // renew lease when < 2 min remain.
-const MAX_ATTEMPTS_PER_RUN = 5;      // bounded work per invocation (Edge limits).
-const RUN_BUDGET_MS = 55_000;        // stay well under the Edge wall-clock limit.
+const OP_TIMEOUT_MS = 100_000; // §8b: 90–120 s per Storage op.
+const RENEW_BELOW_MS = 2 * 60_000; // renew lease when < 2 min remain.
+const MAX_ATTEMPTS_PER_RUN = 5; // bounded work per invocation (Edge limits).
+const RUN_BUDGET_MS = 55_000; // stay well under the Edge wall-clock limit.
 
 type MappingRow = {
   id: string;
@@ -57,7 +57,9 @@ Deno.serve(async (req) => {
   const secret = Deno.env.get("RECONCILE_SECRET");
   const auth = req.headers.get("Authorization") ?? "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  if (!secret || !bearer || bearer !== secret) return json({ error: "unauthorized" }, 401);
+  if (!secret || !bearer || bearer !== secret) {
+    return json({ error: "unauthorized" }, 401);
+  }
 
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -71,7 +73,9 @@ Deno.serve(async (req) => {
   for (let i = 0; i < MAX_ATTEMPTS_PER_RUN; i++) {
     if (Date.now() - started > RUN_BUDGET_MS) break;
 
-    const cr = await admin.rpc("claim_deletion_attempt", { p_worker: workerId });
+    const cr = await admin.rpc("claim_deletion_attempt", {
+      p_worker: workerId,
+    });
     if (cr.error) {
       console.error("claim failed:", cr.error.message);
       break;
@@ -86,7 +90,14 @@ Deno.serve(async (req) => {
     else retried++;
   }
 
-  return json({ ok: true, worker: workerId, claimed, completed, retried, dead_lettered: deadLettered });
+  return json({
+    ok: true,
+    worker: workerId,
+    claimed,
+    completed,
+    retried,
+    dead_lettered: deadLettered,
+  });
 });
 
 // Resume one claimed attempt from its current state. Category-external/none
@@ -102,8 +113,10 @@ async function resume(
   if (!map || !map.original_object_path) {
     // No managed mapping but claimed as managed: integrity failure -> manual.
     await admin.rpc("fail_deletion_attempt", {
-      p_attempt: attemptId, p_claim_token: token,
-      p_error: "missing_attachment_mapping", p_permanent: true,
+      p_attempt: attemptId,
+      p_claim_token: token,
+      p_error: "missing_attachment_mapping",
+      p_permanent: true,
     });
     return "dead_letter";
   }
@@ -116,15 +129,26 @@ async function resume(
     // --- pending -> retained: copy original to retention + verify.
     if (state === "pending") {
       const copied = await copyAndVerify(admin, attemptId, token, map);
-      if (copied === "retry") return await failRetry(admin, attemptId, token, "copy_failed");
+      if (copied === "retry") {
+        return await failRetry(admin, attemptId, token, "copy_failed");
+      }
       if (copied === "dead") return "dead_letter";
       state = "retained";
     }
 
     // --- retained -> original_removed: delete original + PROVE absence (§8f).
     if (state === "retained") {
-      const rm = await withTimeout(admin.storage.from(ORIGINAL_BUCKET).remove([srcPath]));
-      if (rm.error) return await failRetry(admin, attemptId, token, `remove_failed:${rm.error.message}`);
+      const rm = await withTimeout(
+        admin.storage.from(ORIGINAL_BUCKET).remove([srcPath]),
+      );
+      if (rm.error) {
+        return await failRetry(
+          admin,
+          attemptId,
+          token,
+          `remove_failed:${rm.error.message}`,
+        );
+      }
 
       const absence = await verifyOriginalAbsent(admin, srcPath);
       if (absence !== "absent") {
@@ -133,9 +157,14 @@ async function resume(
         return await failRetry(admin, attemptId, token, `absence_${absence}`);
       }
       const ok = await admin.rpc("mark_original_removed", {
-        p_attempt: attemptId, p_claim_token: token,
-        p_verification: { method: "storage_list", result: "absent",
-          checked_at: new Date().toISOString(), classification: "verified_absent" },
+        p_attempt: attemptId,
+        p_claim_token: token,
+        p_verification: {
+          method: "storage_list",
+          result: "absent",
+          checked_at: new Date().toISOString(),
+          classification: "verified_absent",
+        },
       });
       if (ok.error || ok.data !== true) return "retry"; // stale lease → defer.
       state = "original_removed";
@@ -144,7 +173,8 @@ async function resume(
     // --- original_removed -> completed.
     if (state === "original_removed") {
       const done = await admin.rpc("finalize_message_deletion", {
-        p_attempt: attemptId, p_claim_token: token,
+        p_attempt: attemptId,
+        p_claim_token: token,
       });
       if (done.error || done.data !== true) return "retry";
       return "completed";
@@ -154,7 +184,12 @@ async function resume(
     // its mapping state; treat as retry so the next claim re-drives it.
     return "retry";
   } catch (e) {
-    await failRetry(admin, attemptId, token, `exception:${String(e).slice(0, 200)}`);
+    await failRetry(
+      admin,
+      attemptId,
+      token,
+      `exception:${String(e).slice(0, 200)}`,
+    );
     return "retry";
   } finally {
     clearInterval(heartbeat);
@@ -168,10 +203,13 @@ async function copyAndVerify(
   map: MappingRow,
 ): Promise<"ok" | "retry" | "dead"> {
   const srcPath = map.original_object_path!;
-  const dl = await withTimeout(admin.storage.from(ORIGINAL_BUCKET).download(srcPath));
+  const dl = await withTimeout(
+    admin.storage.from(ORIGINAL_BUCKET).download(srcPath),
+  );
   if (dl.error || !dl.data) return "retry";
-  const bytes = new Uint8Array(await dl.data.arrayBuffer());
-  const checksum = await sha256Hex(bytes);
+  const buf = await dl.data.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const checksum = await sha256Hex(buf);
   const retainedPath = `${attemptId}/${srcPath}`;
 
   const up = await withTimeout(
@@ -182,20 +220,29 @@ async function copyAndVerify(
   );
   if (up.error) return "retry";
 
-  const verify = await withTimeout(admin.storage.from(RETENTION_BUCKET).download(retainedPath));
+  const verify = await withTimeout(
+    admin.storage.from(RETENTION_BUCKET).download(retainedPath),
+  );
   if (verify.error || !verify.data) return "retry";
-  const vb = new Uint8Array(await verify.data.arrayBuffer());
-  if (vb.byteLength !== bytes.byteLength || (await sha256Hex(vb)) !== checksum) {
+  const vbuf = await verify.data.arrayBuffer();
+  if (
+    vbuf.byteLength !== buf.byteLength || (await sha256Hex(vbuf)) !== checksum
+  ) {
     await admin.rpc("fail_deletion_attempt", {
-      p_attempt: attemptId, p_claim_token: token,
-      p_error: "retention_checksum_mismatch", p_permanent: true,
+      p_attempt: attemptId,
+      p_claim_token: token,
+      p_error: "retention_checksum_mismatch",
+      p_permanent: true,
     });
     return "dead";
   }
 
   const marked = await admin.rpc("mark_retention_copied", {
-    p_attempt: attemptId, p_claim_token: token,
-    p_retained_bucket: RETENTION_BUCKET, p_retained_path: retainedPath, p_checksum: checksum,
+    p_attempt: attemptId,
+    p_claim_token: token,
+    p_retained_bucket: RETENTION_BUCKET,
+    p_retained_path: retainedPath,
+    p_checksum: checksum,
   });
   if (marked.error || marked.data !== true) return "retry";
   return "ok";
@@ -210,10 +257,15 @@ async function verifyOriginalAbsent(
   const folder = slash >= 0 ? srcPath.slice(0, slash) : "";
   const name = slash >= 0 ? srcPath.slice(slash + 1) : srcPath;
   const listed = await withTimeout(
-    admin.storage.from(ORIGINAL_BUCKET).list(folder, { search: name, limit: 100 }),
+    admin.storage.from(ORIGINAL_BUCKET).list(folder, {
+      search: name,
+      limit: 100,
+    }),
   );
   if (listed.error) return "ambiguous";
-  return (listed.data ?? []).some((o) => o.name === name) ? "present" : "absent";
+  return (listed.data ?? []).some((o) => o.name === name)
+    ? "present"
+    : "absent";
 }
 
 async function failRetry(
@@ -223,18 +275,31 @@ async function failRetry(
   error: string,
 ): Promise<"retry" | "dead_letter"> {
   const res = await admin.rpc("fail_deletion_attempt", {
-    p_attempt: attemptId, p_claim_token: token, p_error: error, p_permanent: false,
+    p_attempt: attemptId,
+    p_claim_token: token,
+    p_error: error,
+    p_permanent: false,
   });
-  const dead = (res.data as { dead_lettered?: boolean } | null)?.dead_lettered === true;
-  if (dead) console.error(`CRITICAL: deletion attempt ${attemptId} dead-lettered: ${error}`);
+  const dead =
+    (res.data as { dead_lettered?: boolean } | null)?.dead_lettered === true;
+  if (dead) {
+    console.error(
+      `CRITICAL: deletion attempt ${attemptId} dead-lettered: ${error}`,
+    );
+  }
   return dead ? "dead_letter" : "retry";
 }
 
 // Heartbeat: renew the lease when < 2 min remain (§8b). Runs every 60 s.
-function startHeartbeat(admin: SupabaseClient, attemptId: string, token: string): number {
+function startHeartbeat(
+  admin: SupabaseClient,
+  attemptId: string,
+  token: string,
+): number {
   return setInterval(async () => {
     const ok = await admin.rpc("heartbeat_deletion_claim", {
-      p_attempt: attemptId, p_claim_token: token,
+      p_attempt: attemptId,
+      p_claim_token: token,
     });
     if (ok.error || ok.data !== true) {
       // Lease lost: stop heartbeating; CAS transitions will now reject us.
@@ -243,9 +308,11 @@ function startHeartbeat(admin: SupabaseClient, attemptId: string, token: string)
   }, 60_000) as unknown as number;
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+async function sha256Hex(buf: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest)).map((b) =>
+    b.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 function withTimeout<T>(p: PromiseLike<T>): Promise<T> {

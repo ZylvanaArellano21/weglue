@@ -29,14 +29,14 @@
 // Env (Supabase function secrets):
 //   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
 
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const ORIGINAL_BUCKET = "chat-attachments";
 const RETENTION_BUCKET = "deleted-message-retention";
 const OP_TIMEOUT_MS = 100_000; // §8b: 90–120 s per Storage operation.
 
 type BeginResult = {
-  status: string;            // 'started' | 'existing' | 'already_deleted'
+  status: string; // 'started' | 'existing' | 'already_deleted'
   message_id: string;
   attempt_id?: string;
   category?: "managed" | "external" | "none";
@@ -48,7 +48,9 @@ Deno.serve(async (req) => {
 
   // 1. Verify the caller's JWT.
   const authHeader = req.headers.get("Authorization") ?? "";
-  if (!authHeader.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
+  if (!authHeader.startsWith("Bearer ")) {
+    return json({ error: "unauthorized" }, 401);
+  }
 
   const anon = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -88,7 +90,9 @@ Deno.serve(async (req) => {
   });
   if (pf.error) {
     const m = pf.error.message;
-    if (m.includes("attachment_unmappable") || m.includes("source_object_missing")) {
+    if (
+      m.includes("attachment_unmappable") || m.includes("source_object_missing")
+    ) {
       const code = m.includes("source_object_missing")
         ? "source_object_missing"
         : "unmappable_attachment";
@@ -103,7 +107,9 @@ Deno.serve(async (req) => {
     return json(mapRpcError(m), errStatus(m));
   }
   const pfStatus = (pf.data as { status?: string })?.status;
-  if (pfStatus === "already_deleted") return json({ status: "already_deleted" }, 200);
+  if (pfStatus === "already_deleted") {
+    return json({ status: "already_deleted" }, 200);
+  }
 
   // 4. First PG transaction (redact + snapshot + set state).
   const bg = await admin.rpc("begin_message_deletion", {
@@ -113,18 +119,27 @@ Deno.serve(async (req) => {
     p_idempotency_key: idempotencyKey,
     p_reason: null,
   });
-  if (bg.error) return json(mapRpcError(bg.error.message), errStatus(bg.error.message));
+  if (bg.error) {
+    return json(mapRpcError(bg.error.message), errStatus(bg.error.message));
+  }
   const begin = bg.data as BeginResult;
 
   // External / none, or an already-terminal reuse: done — original never served.
-  if (begin.category !== "managed" || begin.state === "completed" ||
-      begin.status === "already_deleted") {
-    return json({ status: "completed", state: begin.state ?? "completed" }, 200);
+  if (
+    begin.category !== "managed" || begin.state === "completed" ||
+    begin.status === "already_deleted"
+  ) {
+    return json(
+      { status: "completed", state: begin.state ?? "completed" },
+      200,
+    );
   }
 
   // 5. Managed attachment: run the Storage saga. If any step is unsafe we leave
   //    the attempt for the reconcile worker rather than reporting false success.
-  if (!begin.attempt_id) return json({ status: "accepted", state: begin.state }, 202);
+  if (!begin.attempt_id) {
+    return json({ status: "accepted", state: begin.state }, 202);
+  }
   const outcome = await runStorageSaga(admin, begin.attempt_id);
   return json(outcome.body, outcome.status);
 });
@@ -149,7 +164,9 @@ async function runStorageSaga(
     mapping?: MappingRow | null;
   };
   // Another worker holds the lease (or it moved on): safe to defer.
-  if (!c.claimed || c.attempt_id !== attemptId || !c.claim_token || !c.mapping) {
+  if (
+    !c.claimed || c.attempt_id !== attemptId || !c.claim_token || !c.mapping
+  ) {
     return { body: { status: "accepted", state: "pending" }, status: 202 };
   }
   const token = c.claim_token;
@@ -158,18 +175,23 @@ async function runStorageSaga(
   try {
     // (a) Copy original -> retention, verify size + checksum.
     const srcPath = map.original_object_path!;
-    const dl = await withTimeout(admin.storage.from(ORIGINAL_BUCKET).download(srcPath));
+    const dl = await withTimeout(
+      admin.storage.from(ORIGINAL_BUCKET).download(srcPath),
+    );
     if (dl.error || !dl.data) {
       // Source already gone? Could be a legitimate absence — but not proven
       // safe here. Hand to reconciliation rather than guessing (§8e/§8f).
       await admin.rpc("fail_deletion_attempt", {
-        p_attempt: attemptId, p_claim_token: token,
-        p_error: `download_failed:${dl.error?.message ?? "empty"}`, p_permanent: false,
+        p_attempt: attemptId,
+        p_claim_token: token,
+        p_error: `download_failed:${dl.error?.message ?? "empty"}`,
+        p_permanent: false,
       });
       return { body: { status: "accepted", state: "pending" }, status: 202 };
     }
-    const bytes = new Uint8Array(await dl.data.arrayBuffer());
-    const checksum = await sha256Hex(bytes);
+    const buf = await dl.data.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    const checksum = await sha256Hex(buf);
     const retainedPath = `${attemptId}/${srcPath}`;
 
     const up = await withTimeout(
@@ -180,44 +202,62 @@ async function runStorageSaga(
     );
     if (up.error) {
       await admin.rpc("fail_deletion_attempt", {
-        p_attempt: attemptId, p_claim_token: token,
-        p_error: `retention_upload_failed:${up.error.message}`, p_permanent: false,
+        p_attempt: attemptId,
+        p_claim_token: token,
+        p_error: `retention_upload_failed:${up.error.message}`,
+        p_permanent: false,
       });
       return { body: { status: "accepted" }, status: 202 };
     }
     // Verify the retained copy exists and matches size (checksum recomputed).
-    const verify = await withTimeout(admin.storage.from(RETENTION_BUCKET).download(retainedPath));
+    const verify = await withTimeout(
+      admin.storage.from(RETENTION_BUCKET).download(retainedPath),
+    );
     if (verify.error || !verify.data) {
       await admin.rpc("fail_deletion_attempt", {
-        p_attempt: attemptId, p_claim_token: token,
-        p_error: "retention_verify_failed", p_permanent: false,
+        p_attempt: attemptId,
+        p_claim_token: token,
+        p_error: "retention_verify_failed",
+        p_permanent: false,
       });
       return { body: { status: "accepted" }, status: 202 };
     }
-    const verifyBytes = new Uint8Array(await verify.data.arrayBuffer());
-    if (verifyBytes.byteLength !== bytes.byteLength || (await sha256Hex(verifyBytes)) !== checksum) {
+    const verifyBuf = await verify.data.arrayBuffer();
+    if (
+      verifyBuf.byteLength !== buf.byteLength ||
+      (await sha256Hex(verifyBuf)) !== checksum
+    ) {
       // Repeated checksum mismatch is a non-retryable integrity failure (§8d).
       await admin.rpc("fail_deletion_attempt", {
-        p_attempt: attemptId, p_claim_token: token,
-        p_error: "retention_checksum_mismatch", p_permanent: true,
+        p_attempt: attemptId,
+        p_claim_token: token,
+        p_error: "retention_checksum_mismatch",
+        p_permanent: true,
       });
       return { body: { status: "manual_reconciliation" }, status: 202 };
     }
 
     const retained = await admin.rpc("mark_retention_copied", {
-      p_attempt: attemptId, p_claim_token: token,
-      p_retained_bucket: RETENTION_BUCKET, p_retained_path: retainedPath, p_checksum: checksum,
+      p_attempt: attemptId,
+      p_claim_token: token,
+      p_retained_bucket: RETENTION_BUCKET,
+      p_retained_path: retainedPath,
+      p_checksum: checksum,
     });
     if (retained.error || retained.data !== true) {
       return { body: { status: "accepted" }, status: 202 }; // stale lease → defer
     }
 
     // (b) Delete the original, then POSITIVELY verify absence server-side (§8f).
-    const rm = await withTimeout(admin.storage.from(ORIGINAL_BUCKET).remove([srcPath]));
+    const rm = await withTimeout(
+      admin.storage.from(ORIGINAL_BUCKET).remove([srcPath]),
+    );
     if (rm.error) {
       await admin.rpc("fail_deletion_attempt", {
-        p_attempt: attemptId, p_claim_token: token,
-        p_error: `original_remove_failed:${rm.error.message}`, p_permanent: false,
+        p_attempt: attemptId,
+        p_claim_token: token,
+        p_error: `original_remove_failed:${rm.error.message}`,
+        p_permanent: false,
       });
       return { body: { status: "accepted" }, status: 202 };
     }
@@ -226,15 +266,20 @@ async function runStorageSaga(
     if (absence.result !== "absent") {
       // Ambiguous → do NOT finalize; hand to reconciliation (§8f).
       await admin.rpc("fail_deletion_attempt", {
-        p_attempt: attemptId, p_claim_token: token,
+        p_attempt: attemptId,
+        p_claim_token: token,
         p_error: `absence_${absence.result}:${absence.detail}`,
         p_permanent: false,
       });
-      return { body: { status: "accepted", verification: absence.result }, status: 202 };
+      return {
+        body: { status: "accepted", verification: absence.result },
+        status: 202,
+      };
     }
 
     const removed = await admin.rpc("mark_original_removed", {
-      p_attempt: attemptId, p_claim_token: token,
+      p_attempt: attemptId,
+      p_claim_token: token,
       p_verification: {
         method: "storage_list",
         result: "absent",
@@ -248,7 +293,8 @@ async function runStorageSaga(
 
     // (c) Finalize.
     const done = await admin.rpc("finalize_message_deletion", {
-      p_attempt: attemptId, p_claim_token: token,
+      p_attempt: attemptId,
+      p_claim_token: token,
     });
     if (done.error || done.data !== true) {
       return { body: { status: "accepted" }, status: 202 };
@@ -258,8 +304,10 @@ async function runStorageSaga(
     // Unexpected crash mid-saga: mark retryable; the worker resumes. Never
     // re-expose canonical content (it is already redacted).
     await admin.rpc("fail_deletion_attempt", {
-      p_attempt: attemptId, p_claim_token: token,
-      p_error: `saga_exception:${String(e).slice(0, 200)}`, p_permanent: false,
+      p_attempt: attemptId,
+      p_claim_token: token,
+      p_error: `saga_exception:${String(e).slice(0, 200)}`,
+      p_permanent: false,
     });
     return { body: { status: "accepted" }, status: 202 };
   }
@@ -285,9 +333,17 @@ async function verifyOriginalAbsent(
   const name = slash >= 0 ? srcPath.slice(slash + 1) : srcPath;
 
   const listed = await withTimeout(
-    admin.storage.from(ORIGINAL_BUCKET).list(folder, { search: name, limit: 100 }),
+    admin.storage.from(ORIGINAL_BUCKET).list(folder, {
+      search: name,
+      limit: 100,
+    }),
   );
-  if (listed.error) return { result: "ambiguous", detail: `list_error:${listed.error.message}` };
+  if (listed.error) {
+    return {
+      result: "ambiguous",
+      detail: `list_error:${listed.error.message}`,
+    };
+  }
   const stillThere = (listed.data ?? []).some((o) => o.name === name);
   if (stillThere) return { result: "present", detail: "object_listed" };
 
@@ -298,13 +354,17 @@ async function verifyOriginalAbsent(
   // Service role can sign even a missing object in some versions; the list
   // check above is the authoritative signal, so a signable-but-unlisted object
   // is still treated as absent. A hard error only reinforces absence.
-  if (signed.error) return { result: "absent", detail: "unlisted_and_unsignable" };
+  if (signed.error) {
+    return { result: "absent", detail: "unlisted_and_unsignable" };
+  }
   return { result: "absent", detail: "unlisted" };
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+async function sha256Hex(buf: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest)).map((b) =>
+    b.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 function withTimeout<T>(p: PromiseLike<T>): Promise<T> {
@@ -318,19 +378,33 @@ function withTimeout<T>(p: PromiseLike<T>): Promise<T> {
 
 // Map internal RPC error codes to opaque, existence-preserving responses (§6).
 function mapRpcError(msg: string): Record<string, unknown> {
-  if (msg.includes("secure_deletion_required")) return { error: "secure_deletion_required" };
-  if (msg.includes("attachment_unmappable")) return { error: "attachment_unmappable" };
-  if (msg.includes("source_object_missing")) return { error: "source_object_missing" };
+  if (msg.includes("secure_deletion_required")) {
+    return { error: "secure_deletion_required" };
+  }
+  if (msg.includes("attachment_unmappable")) {
+    return { error: "attachment_unmappable" };
+  }
+  if (msg.includes("source_object_missing")) {
+    return { error: "source_object_missing" };
+  }
   if (msg.includes("not_authenticated")) return { error: "unauthorized" };
   // Both "missing" and "foreign" collapse to the same response (§6 Change #3).
-  if (msg.includes("not_found_or_not_authorized")) return { error: "not_found_or_not_authorized" };
+  if (msg.includes("not_found_or_not_authorized")) {
+    return { error: "not_found_or_not_authorized" };
+  }
   return { error: "deletion_failed" };
 }
 
 function errStatus(msg: string): number {
-  if (msg.includes("not_authenticated") || msg.includes("not_found_or_not_authorized")) return 403;
-  if (msg.includes("secure_deletion_required") || msg.includes("attachment_unmappable") ||
-      msg.includes("source_object_missing")) return 409;
+  if (
+    msg.includes("not_authenticated") ||
+    msg.includes("not_found_or_not_authorized")
+  ) return 403;
+  if (
+    msg.includes("secure_deletion_required") ||
+    msg.includes("attachment_unmappable") ||
+    msg.includes("source_object_missing")
+  ) return 409;
   return 500;
 }
 
