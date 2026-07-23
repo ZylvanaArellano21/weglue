@@ -1,468 +1,383 @@
-# Deleted-Message Privacy — Authoritative Design (v5)
+# Deleted-Message Privacy — Authoritative Design (v6)
 
 > **Status: DESIGN ONLY. Not implemented.** No migration, no production/data
 > change, no mobile change, no OTA publish, no native build, no Supabase deploy.
-> This is the single authoritative artifact for Codex review; it supersedes
-> v1–v4. **No migration 051 is prepared or numbered until 042–044 are
-> statement/hash reconciled (§19).**
+> Single authoritative artifact for Codex review; supersedes v1–v5. **No migration
+> 051, Edge Function, policy change, OTA, or data backfill until 042–044 are
+> statement/hash reconciled (§16).**
 >
 > Owner (implementer): Claude · Reviewer: Codex · Decision-maker: founder.
 
 ## 0. The non-negotiable rule
 After a user deletes a message, We Glue must never again *serve* the original —
-text, attachment, poll, or shared payload — to any ordinary user (sender,
-recipient, participant, officer, club member, non-member preview, reporter,
-reported user, or any normal Supabase/iOS/Android/web client) through queries,
+text, attachment, poll, shared payload — to any ordinary user through queries,
 Realtime, search, previews, signed URLs, related tables, notifications/pushes, or
-report records. Only the founder/super-admin may inspect retained originals via an
-audited, platform-admin-gated path that **does not exist yet** (retained data
-stays service-role-only until it does). Boundary stated, not hidden: We Glue
-cannot recall a file already **downloaded, screenshotted, or captured
-off-platform**, nor a **push already delivered** to a device.
+report records. Only the founder/super-admin may inspect retained originals via a
+future audited, platform-admin-gated path (retained data stays service-role-only
+until it exists). **Boundaries, stated honestly:** We Glue cannot recall content
+already downloaded, cached, screenshotted, or copied off-platform; cannot recall a
+push already delivered to a device; and cannot delete a file it does not host
+(external / `file://` device-local).
 
 ---
 
-## 1. (Change #1) Corrected current-client query facts — the design must NOT depend on clients filtering `deleted_at`
-A prior draft claimed "every mobile message-loading query filters `deleted_at`."
-**That was false.** Verified behavior:
+## 1. Corrected current-client query facts (design does NOT depend on client filtering)
+Verified — a prior draft's "every mobile query filters `deleted_at`" was false:
 
-| Surface | Function / location | Filters `deleted_at`? |
+| Surface | Function | Filters `deleted_at`? |
 |---|---|---|
-| Modern thread loader | `getThreadMessages` — `messagingService.ts:107` | **Yes** (`.is('deleted_at', null)`) |
-| Direct messages | `getDirectMessages` — `chatService.ts:401` | **NO** |
-| Non-member club preview | `getNonMemberPreview` — `chatService.ts:511` | **NO** |
-| Channel messages | `getChannelMessages` — `channelService.ts:312` | **NO** |
-| Conversation media | `getConversationMedia` — `messagingService.ts:452` | Yes |
-| Conversation files | `getConversationFiles` — `messagingService.ts:475` | Yes |
-| Shared events | `getConversationSharedEvents` — `messagingService.ts:519` | Yes |
-| Poll history (ids) | `getConversationPollIds` — `messagingService.ts:592` | Yes (`messages.deleted_at`) |
-| Search | `searchConversation` — `messagingService.ts:628/636/644/651/658` | Yes |
-| Web unread Realtime | `useUnreadSummary.ts:82` subscribes `INSERT ON public.messages`; count via `get_unread_summary` RPC | subscription is INSERT-only (delete UPDATE doesn't fire it); RPC must exclude deleted |
+| Modern thread | `getThreadMessages` (`messagingService.ts:107`) | Yes |
+| Direct messages | `getDirectMessages` (`chatService.ts:401`) | **NO** |
+| Non-member preview | `getNonMemberPreview` (`chatService.ts:511`) | **NO** |
+| Channel messages | `getChannelMessages` (`channelService.ts:312`) | **NO** |
+| Media / files / shared / poll-ids / search | `messagingService.ts` 452/475/519/592/628+ | Yes |
+| Web unread | `useUnreadSummary.ts:82` `INSERT ON public.messages` + `get_unread_summary` RPC | INSERT-only sub; RPC must exclude deleted |
 
-**Conclusion:** at least three loaders (`getDirectMessages`, `getNonMemberPreview`,
-`getChannelMessages`) return deleted rows today. Therefore **backend RLS +
-canonical redaction are mandatory and sufficient on their own**; the design does
-not rely on any client filtering `deleted_at`. The message SELECT RLS gains
-`deleted_at IS NULL` (new) and canonical redaction nulls content — so a redacted,
-hidden row is safe even for the non-filtering loaders and for direct PostgREST.
-
----
+**Backend RLS + canonical redaction are mandatory and sufficient on their own.**
+The message SELECT RLS gains `deleted_at IS NULL` (new); redaction nulls content.
 
 ## 2. Architecture overview
-Approach B — **deletion-scrubbing + server orchestration**:
-- `messages` stays canonical/current. Deletion mutates in place: snapshot out →
-  redact to tombstone-safe fields.
-- Originals go to **immutable, founder-only** retention (DB history + a
-  **dedicated founder-only storage bucket**, §6).
-- A **first PostgreSQL transaction** makes ordinary DB access fail-closed
-  atomically (§4). **Edge Function orchestration** performs the physical
-  attachment move Postgres can't (§8). The cross-service saga is **not** atomic.
-- Two entry points must both be secure: OTA **Edge Function** (`delete-message`)
-  and the **legacy `unsend_message` RPC** (§6).
+Approach B — deletion-scrubbing + server orchestration. `messages` stays
+canonical; deletion snapshots originals to **immutable founder-only retention** (DB
+history + a dedicated bucket `deleted-message-retention`, §14) then redacts the row
+to tombstone-safe fields. A **first PostgreSQL transaction** makes ordinary DB
+access fail-closed atomically (§4); **Edge Function orchestration** (§8) performs
+the physical attachment move Postgres cannot. The Storage+PostgreSQL saga is **not**
+atomic. Two entry points must both be secure: OTA **Edge Function**
+(`delete-message`) and the **legacy `unsend_message` RPC** (§6b).
 
-Verified current-state facts the design rests on (citations real):
-message SELECT RLS has no `deleted_at` filter (001:808); `unsend_message` (040:177)
-nulls nothing; snapshots are on `reports` (040:810), reporter-readable (033:66);
-`chat-attachments` private, participant-read policy with no deleted check
-(040:883); signed-URL TTL 1h (`chatAttachments.ts:167`); `messages` content
-columns = `content, attachment_url, attachment_name, attachment_mime,
-attachment_size, shared_event_id, shared_post_id`; `message_type` ∈
-`{text,image,video,poll,file,shared_event,shared_post}` (040:49); no reply column;
-`messages` & `poll_votes` in `supabase_realtime` (010:39/40); push body from
-`NEW.content` (046:1020–1026). Prod: 13 attachment messages — 11 standard storage
-paths, **2 nonstandard `file://` device URIs (unmanaged, not in storage)**.
+Grounding facts (citations real): message SELECT RLS lacks `deleted_at` filter
+(001:808); `unsend_message` (040:177) nulls nothing; snapshots on `reports`
+(040:810), reporter-readable (033:66); `chat-attachments` private, participant-read
+policy no deleted check (040:883); signed-URL TTL 1h (`chatAttachments.ts:167`);
+`messages` content cols = `content, attachment_url, attachment_name,
+attachment_mime, attachment_size, shared_event_id, shared_post_id`; `message_type`
+∈ `{text,image,video,poll,file,shared_event,shared_post}` (040:49); no reply column;
+`messages`+`poll_votes` in `supabase_realtime` (010:39/40); push body from
+`NEW.content` (046:1020). Prod: 13 attachment rows — 11 standard paths, 2 `file://`
+device URIs (unmanaged).
 
 ---
 
-## 3. (Change #2) Independent deletion attempts
-```
-message_deletion_attempts (
-  id               uuid primary key default gen_random_uuid(),
-  message_id       uuid not null references messages(id) on delete cascade,
-  attempt_no       int  not null,
-  idempotency_key  text not null,
-  actor_id         uuid references profiles(id),
-  reason           text,
-  state            text not null,            -- §7 state machine
-  entry_point      text not null,            -- 'edge_function' | 'legacy_rpc'
-  has_managed_attachment boolean not null default false,
-  started_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now(),
-  completed_at timestamptz, failed_at timestamptz, failure_reason text,
-  reconcile_after timestamptz, reconcile_tries int not null default 0, last_error text,
-  restored_at timestamptz, restored_by uuid references profiles(id),
-  restoration_reason text, restoration_result text
-)
-```
-Constraints: **`unique (message_id, attempt_no)`**; **`unique (idempotency_key)`**;
-**partial unique active attempt**:
-```
-create unique index uq_active_deletion_attempt on message_deletion_attempts(message_id)
-  where state in ('pending','retained','original_removed','redacted','failed_requires_reconciliation');
-```
-`attempt_no = 1 + coalesce(max(attempt_no),0)` **computed inside the locked
-transaction** (§4 step: after `SELECT … FOR UPDATE` on the message). Supports
-delete → restore → delete-again (new attempt). **Concurrency:** duplicate call
-(same `idempotency_key`) → the unique index makes it a no-op returning current
-state; competing distinct calls → the partial-unique-active index rejects the
-second, which then reads and returns the in-flight attempt.
+## 3. (Change #9) Current message-deletion & custom-group authorization (cited — preserve as-is)
+From `unsend_message` (040:156–180) and the group RPCs (040:144, 371–477). **The
+new secure paths MUST reuse exactly this authorization.**
 
-**Active states:** `pending, retained, original_removed, redacted,
-failed_requires_reconciliation`. **Terminal states:** `completed, restored,
-purged, aborted`.
+| Actor | Delete a message | Manage custom group | Source |
+|---|---|---|---|
+| Message **sender** | own message, any conversation type | — | `m.sender_id = auth.uid()` (040:172) |
+| **Conversation creator = custom-group admin** (`group` type) | **any** message in that group | add/remove participants, rename, delete group, transfer on leave | `type='group' AND created_by=auth.uid()` (040:175, 144, 381, 410, 452, 477) |
+| **Ordinary group participant** | own messages only | none | not creator |
+| **Club officer** (`club_group`/`officer_chat`) | **any** message in that chat | via officer RPCs | `is_club_officer(club_id)` (040:174) |
+| **Official-chat participant** (non-officer) | own messages only | none | falls through to sender-only |
+| **Future platform admin** | (greenfield) via audited admin path | — | not yet a concept |
+
+Custom groups have a **single administrator** = `conversations.created_by`
+(040:14/89); leaving transfers admin (040:442–452). Do not change this behavior
+unless the founder explicitly directs it.
 
 ---
 
-## 4. (Change #3) Initial PostgreSQL transaction (atomic; no partial state)
-One transaction — all-or-nothing — for both entry points:
+## 4. (Change #2 first-txn) Initial PostgreSQL transaction (atomic; no partial state)
+One transaction, all-or-nothing, both entry points:
 1. `SELECT … FOR UPDATE` lock the `messages` row.
-2. Verify authorization (sender / officer / custom-group admin — existing rules).
-3. Compute `attempt_no`; insert `message_deletion_attempts` (`idempotency_key`,
-   `entry_point`, `has_managed_attachment`), `state='pending'`.
-4. Snapshot to founder-only history: `content`; **attachment metadata + object
-   mapping (§5)**; poll question/options/votes/voters/totals; shared refs
-   (`shared_event_id`, `shared_post_id`).
-5. Redact every canonical content-bearing field: null `content`, `attachment_url`,
+2. Verify authorization (§3).
+3. Compute `attempt_no = 1 + coalesce(max,0)` (inside the lock); insert
+   `message_deletion_attempts` (`idempotency_key`, `entry_point`,
+   attachment category §7), `state='pending'`.
+4. Snapshot to founder history: `content`; **attachment mapping (§6)**; poll
+   question/options/votes/voters/totals; shared refs.
+5. Redact canonical content-bearing fields (null `content`, `attachment_url`,
    `attachment_name`, `attachment_mime`, `attachment_size`, `shared_event_id`,
-   `shared_post_id`; protect/unlink poll (§12).
+   `shared_post_id`); protect/unlink poll (§9).
 6. `deleted_at = now()`, `deleted_by = auth.uid()`.
-7. No-managed-attachment messages (text/poll/shared/`file://` unmanaged) →
-   `state='completed'`. Managed-attachment messages → stay `state='pending'` for
-   §8 storage orchestration.
+7. Category B (external/device-local) or no-attachment → `state='completed'`.
+   Category A (managed) → `state='pending'` for §8. Category C (unmappable) →
+   **roll back everything and raise error** (§7C) — no deletion recorded.
 
-**If any step fails, the whole transaction rolls back** — never a history-only or
-redaction-only remnant. The Realtime `UPDATE` this emits carries the
-already-redacted row → **no original content in the Realtime payload**. Ordinary
-DB access is fail-closed at commit (content null + message SELECT RLS
-`deleted_at IS NULL` + deleted-aware storage policy denying new signing).
+If any step fails, the whole transaction rolls back — **never a history-only or
+redaction-only remnant**. Realtime UPDATE carries the already-redacted row (no
+original content). DB access fail-closed at commit.
 
----
-
-## 5. (Change #5) Canonical attachment object mapping
-Do **not** assume `messages.attachment_url == storage.objects.name`. Snapshot an
-explicit immutable mapping per attempt:
+## 5. (Change #2) Deletion attempt identity & deterministic legacy idempotency
 ```
-message_attachment_map (
-  id uuid pk, attempt_id uuid references message_deletion_attempts(id),
-  message_id uuid, storage_provider text,        -- 'supabase' | 'external' | 'device_local'
-  bucket text, original_path text,               -- e.g. chat-attachments / {conv}/{uuid}.ext
-  retained_bucket text, retained_path text,       -- founder-only retention (§6)
-  is_external boolean not null default false, external_url text,
-  size bigint, mime text, checksum text,
-  copy_state  text,   -- 'n/a'|'pending'|'copied'|'verified'|'failed'
-  delete_state text,  -- 'n/a'|'pending'|'deleted'|'verified'|'failed'
-  copied_at timestamptz, deleted_at_storage timestamptz
-)
+message_deletion_attempts ( id uuid pk, message_id uuid, attempt_no int,
+  idempotency_key text, actor_id uuid, reason text, state text, entry_point text,
+  attachment_category text,           -- 'managed' | 'external' | 'unmappable' | 'none'
+  started_at, updated_at, completed_at, failed_at, failure_reason,
+  -- lease + retry (§8)
+  claimed_by text, claim_token uuid, claimed_at timestamptz, claim_expires_at timestamptz,
+  retry_count int default 0, next_retry_at timestamptz, last_error text, last_attempt_at timestamptz,
+  -- restoration (§10)
+  restored_at, restored_by, restoration_reason, restoration_result )
 ```
-**Backfill/classification of current records (prod-verified: 13 total):**
-- **11 standard** `chat-attachments/{conv}/{uuid}.ext` → `supabase`, managed;
-  normal copy+delete+verify path.
-- **2 `file:///var/mobile/…` device URIs** → `device_local`, **unmanaged**: no
-  We Glue storage object exists → **redact the `attachment_url` immediately; no
-  copy/delete possible**; mark `copy_state/delete_state='n/a'`, `is_external=true`.
-- **UUID-path-like records** that parse to a valid bucket/path → managed path.
-- **Records that cannot be mapped automatically** (unexpected shape, missing
-  object) → **fail closed → `failed_requires_reconciliation`** and manual review;
-  **never treated as successfully deleted.**
-External deletion control: for `device_local`/`external`, We Glue controls only
-the DB reference (redacted); it cannot move/delete an object outside its storage.
-Documented, not claimed otherwise.
+Constraints: `unique(message_id, attempt_no)`; `unique(idempotency_key)`; partial
+unique **active** index over `state in (pending,retained,original_removed,redacted,
+failed_requires_reconciliation)`.
+
+**Edge Function path:** requires a real client idempotency key; uniqueness enforced;
+a duplicate request returns the existing attempt.
+
+**Legacy `unsend_message` (no idempotency key) — deterministic server behavior:**
+1. `SELECT … FOR UPDATE` lock the message.
+2. If a **compatible active attempt** exists → reuse/resume it (return its state).
+3. If the message is **already securely deleted** (redacted + `deleted_at`) →
+   return **idempotent success** (no-op).
+4. If it was **restored** since → create the **next** attempt number.
+5. If a **competing active attempt by another actor** exists → return a controlled
+   **conflict** (or reuse per §3 authorization if the caller is equally
+   authorized).
+6. If the message has a **We-Glue-managed attachment** → throw the **B2
+   `secure_deletion_required`** error, modifying **nothing**: not `deleted_at`, not
+   content, not attachment metadata, not poll data, not push state.
+
+Documented: duplicate call (idempotent), network retry (idempotent),
+restore-then-delete (new attempt), concurrent-actor (conflict/reuse per authz).
 
 ---
 
-## 6. (Change #6) Dedicated founder-only retention bucket
-A **separate private bucket** (e.g. `deleted-retention`), **not** a prefix inside
-`chat-attachments`. Policies: no ordinary authenticated access; no participant/
-officer access; no public URLs; **no browser-side service-role**; no ordinary
-client signed-URL generation; access only via future audited founder/admin
-operations; deliberate restoration (§10) and purge paths.
+## 6. (Change #4/#5) Attachment classification, mapping, and fail-closed behavior
+**Do not use the redacted canonical message row to discover an object path later.**
+Storage policies and workers use the immutable **attempt/history mapping** only.
 
-## 6b. (Change #4) Legacy `unsend_message` compatibility — honest B2
-- **No We-Glue-managed-attachment messages** (text/poll/shared_event/shared_post,
-  and the `device_local`/external cases where there is nothing to move): the
-  legacy RPC executes the **complete §4 DB-only snapshot+redact flow** and returns
-  **success only after DB privacy completes**. Old-client UX: unchanged in effect.
-- **We-Glue-managed-attachment messages** (image/video/file in `chat-attachments`):
-  the legacy RPC **throws an actual RPC error** (e.g.
-  `raise exception 'secure_deletion_required' using errcode='P0001'`). It **does
-  not** return a success-shaped result and **does not** perform the old insecure
-  `deleted_at`-only behavior. The user must use the OTA-updated Edge Function
-  path. **Old-client behavior:** the delete surfaces an error toast and the
-  message remains visible (nothing changed) until the app receives the OTA. This
-  is honest: we do not fake success or leave the attachment served.
-- **External / pass-through (`file://`/non-managed) URLs:** identified explicitly
-  via the mapping (§5); We Glue **redacts the URL immediately** (DB-only path
-  above returns success) and does **not** claim to move/delete an object it does
-  not host; documents that no external deletion control exists.
-
----
-
-## 7. (Change #7) State matrix
-`aborted` is allowed **only before canonical redaction commits** (authz/pre-lock
-failure). Once redaction commits, an attempt ends only via `completed`,
-`failed_requires_reconciliation`→reconcile, `restored`, or `purged` — never normal
-abortion. **No failed state exposes content.**
-
-| Dimension | pending | retained | original_removed | redacted | completed | failed_reconc | restored | purged | aborted |
-|---|---|---|---|---|---|---|---|---|---|
-| Ordinary SELECT | Hidden | Hidden | Hidden | Hidden | Hidden | Hidden | Visible | Hidden(gone) | Normal |
-| Non-member preview | Hidden | Hidden | Hidden | Hidden | Hidden | Hidden | Visible | Hidden | Normal |
-| Web unread sub (INSERT-only) | unaffected¹ | ” | ” | ” | ” | ” | ” | ” | ” |
-| Realtime msg payload | Redacted | Redacted | Redacted | Redacted | Redacted | Redacted | Full | — | Normal |
-| Realtime poll-vote | Guarded | Guarded | Guarded | Guarded | Guarded | Guarded | Live | — | Normal |
-| New signed-URL | Denied | Denied | Denied(gone) | Denied | Denied | Denied | Allowed | Denied | Allowed |
-| Prev signed-URL | ≤1h | ≤1h | **404** | 404 | 404 | 404/≤1h | valid | 404 | valid |
-| Canonical text | null | null | null | null | null | null | restored | null | present |
-| Poll visibility | Hidden | Hidden | Hidden | Hidden | Hidden | Hidden | Visible | Hidden | Normal |
-| Report evidence | Founder | Founder | Founder | Founder | Founder | Founder | Founder | removed | Founder |
-| Notification visibility | scrubbed² | scrubbed | scrubbed | scrubbed | scrubbed | scrubbed | n/a | scrubbed | normal |
-| Retry | n/a(txn) | resume move | resume finalize | finalize | none | **retry+alert** | n/a | n/a | n/a |
-| Restoration eligible | no | no | no | **yes** | **yes** | after reconcile | (is) | **no** | n/a |
-| Purge eligible | no | no | no | yes | **yes** | after reconcile | via new attempt | (done) | n/a |
-
-¹ Web unread subscribes to `INSERT` only; a delete `UPDATE` never fires it;
-`get_unread_summary` must exclude deleted. ² Pending push rows scrubbed/cancelled
-(§13); delivered pushes cannot be recalled.
-
----
-
-## 8. (Change #8) Edge Function `delete-message` orchestration
-Steps (returns minimal status; never retained paths/snapshots):
-1. Verify JWT. 2. Authorize (sender/officer/custom-group admin). 3. Idempotency
-key `(message_id, actor_id, client_attempt_uuid)`; claim/locate the active
-attempt. 4. **First PG txn (§4)** → `pending` (DB fail-closed). 5. Storage
-retention **copy** to `deleted-retention`; **verify** via size + checksum where
-possible → `retained`. 6. **Delete** original object; **verify** old path no
-longer resolves → `original_removed`. 7. Finalize DB state → `redacted` →
-`completed`. 8. **Return success only when We Glue no longer serves the original to
-ordinary users** (through step 6 for managed attachments; immediately after §4 for
-non-managed).
-**Failure/edge behavior:** duplicate invocation → idempotency no-op returns state;
-network/Edge timeout or process crash → DB already fail-closed from step 4;
-reconciliation worker (§9) resumes from recorded state; copy-verify fail → retry,
-don't advance; original-delete fail → retry, object un-signable meanwhile;
-finalize fail → retry (idempotent). **The Storage+PostgreSQL saga is explicitly
-NOT one atomic transaction.**
-
----
-
-## 9. (Change #9) Durable reconciliation worker
-- **Mechanism:** a scheduled Edge Function invoked by Supabase Cron (pg_cron
-  `net.http_post`) — decision in open questions if a queue table + external runner
-  is preferred.
-- **Schedule:** e.g. every 1–2 min. **Job-claim query:** `SELECT … FROM
-  message_deletion_attempts WHERE state IN ('pending','retained','original_removed',
-  'failed_requires_reconciliation') AND reconcile_after <= now() ORDER BY
-  started_at FOR UPDATE SKIP LOCKED LIMIT N`. **Locking:** `FOR UPDATE SKIP
-  LOCKED` prevents double-processing.
-- **Eligible states:** the active set above. **Retry:** bounded
-  (`reconcile_tries`) with **exponential backoff** (`reconcile_after`).
-  **Max age:** after a threshold or max tries → **dead-letter**
-  (`failed_requires_reconciliation` sticky) + **critical alert**.
-- **Idempotent transitions:** each step checks current storage/DB state before
-  acting. **Alerts:** critical alert on dead-letter / stuck jobs. **Founder
-  dashboard visibility (§18):** state, age, tries, last error. **Manual:** retry /
-  restore / purge RPCs. **Audit:** every transition writes an audit row.
-  **Worker failure:** claimed-but-unfinished jobs are re-eligible after
-  `reconcile_after` (no permanent lock). **No attempt remains indefinitely stuck
-  without visibility/alerting.**
-
----
-
-## 10. (Change #7) Restoration — preserves history, all-or-nothing
-`admin_restore_message(attempt_id, reason)` (super-admin, audited):
-1. Read snapshot + mapping from history. 2. **Move retained file back** to the
-original path; verify. If it fails → **abort; message stays deleted** (no partial
-restore). 3. One PG txn: restore `content`/attachment cols/`shared_*`; re-insert
-poll+options+votes from snapshot; clear `deleted_at`/`deleted_by`; set attempt
-`state='restored'`, `restored_at/by`, `restoration_reason`, `restoration_result`.
-**Deletion attempts and `deleted_at` history are preserved** (never deleted). A
-restored message may be deleted again under a **new** attempt. All-or-nothing
-across text / attachment / poll / options / votes / shared refs / search /
-previews / Realtime.
-
----
-
-## 11. (Change #10 + #11) One-to-many report evidence + migration
-`reports` remains the canonical workflow table (reason/status/target only). One
-report → many private evidence rows:
 ```
-report_evidence ( id uuid pk, report_id uuid references reports(id) on delete cascade,
-  evidence_type text check (evidence_type in
-    ('message_snapshot','attachment','screenshot','poll','file','related_message','other')),
-  related_entity_type text, related_entity_id uuid,
-  content_snapshot text, storage_bucket text, storage_path text,
-  metadata jsonb, checksum text, created_at timestamptz not null default now() )
+message_attachment_map ( id uuid pk, attempt_id uuid, message_id uuid,
+  storage_provider text,        -- 'supabase' | 'external' | 'device_local'
+  original_bucket text, original_object_path text,
+  retained_bucket text, retained_object_path text,
+  external_url_type text,       -- null | 'http' | 'file' | 'other'
+  original_url text, size bigint, mime text, checksum text,
+  copy_status text, copy_verified_at timestamptz,
+  delete_status text, delete_verified_at timestamptz,
+  mapping_confidence text,      -- 'high' | 'low' | 'none'
+  mapping_error text )
 ```
-RLS: **reporter / reported-user / officer / participant / ordinary-authenticated
-unreadable** (deny-all to `authenticated`); founder/admin readable **only through a
-future audited RPC**; **immutable**; purgeable only via an audited irreversible
-operation.
-**Migration (prod-data → gated by §19 + explicit approval) — column-`REVOKE` is
-NOT the final architecture:** (1) create `report_evidence`; (2) **backfill** all
-existing `reports.{content_snapshot,attachment_snapshot,message_*}` →
-`report_evidence`; (3) **validate counts**; (4) **validate checksums / deterministic
-comparison**; (5) verify every source row has a destination; (6) only then remove
-or null the sensitive snapshot data from reporter-readable `reports` rows; (7)
-rollback path preserves data **without re-exposing evidence** (e.g. keep it in the
-private table, never restore the public columns on rollback); (8) `reports` keeps
-status/reason/target/workflow. Correct any linked doc that still says snapshot
-fields live on `messages` (already corrected in `schema-map.md`,
-`reports-and-moderation.md`, `conversations-channels-messages.md`,
-`deletion-and-edit-history.md`).
+
+**Category A — managed and mapped:** known Supabase bucket + object path (parses to
+`chat-attachments/{conv}/{uuid}.ext`, `mapping_confidence='high'`). Full path:
+retention copy → verify (size+checksum) → original delete → verify gone →
+finalize.
+
+**Category B — external / device-local** (`file://`, third-party URL, non-We-Glue
+host — prod-verified: 2 `file://` device URIs): redact the canonical URL + metadata;
+**do not claim deletion of the external/device-local file**; preserve historical
+metadata in founder-only history where appropriate; add a **data-health
+diagnostic**; **prevent future `file://` production records** (client validation +
+a CHECK/trigger rejecting `file:`/non-storage schemes on insert — separate task).
+`state='completed'` after DB redaction (nothing to move).
+
+**Category C — appears managed but unmappable** (unexpected shape, missing object,
+`mapping_confidence='none'`): **do not report successful deletion; do not guess the
+path; fail with a real error;** create/update a reconciliation diagnostic; require
+manual review; **preserve content unchanged** unless a separately approved
+fail-closed **quarantine** workflow exists. The first txn (§4 step 7) rolls back.
+
+**Privacy redaction ≠ physical deletion.** Category B/C: We Glue controls only the
+DB reference (redacted); it makes no claim to have deleted an object outside its
+control.
 
 ---
 
-## 12. (Change #12) Poll privacy
-Surfaces: `polls`, `poll_options`, `poll_votes`, aggregate totals, voter
-identities, `cast_poll_vote` RPC, Realtime publication (`poll_votes` in
-`supabase_realtime` 010:40), notifications, poll history, report evidence,
-deleted-message helpers. **Deletion:** snapshot poll+options+votes+voters+totals to
-founder history; guard the SELECT policies of **all three** tables via
-`is_deleted_message()` SECURITY DEFINER so no participant can read or infer
-question/options/individual votes/voter identities/totals through any table or via
-`cast_poll_vote` (which must reject a deleted poll). Guarded + message-hidden ⇒ no
-residual `poll_votes` Realtime leak. **Restoration:** re-insert from snapshot,
-clear guards, all-or-nothing. **Purge:** delete snapshot + votes + retained files
-permanently.
+## 7. (Change #3) State matrix — honest signed-URL semantics
+Corrected: an incomplete state does **not** magically invalidate previously issued
+signed URLs. A prev-issued URL (self-contained JWT, ≤1h TTL) remains usable **until
+the original object is verified removed** (`original_removed`). **Deletion success
+is never reported before original-object removal is verified** (Category A).
+
+| Dimension | pending | retained | original_removed | redacted | completed | failed_requires_reconciliation |
+|---|---|---|---|---|---|---|
+| Ordinary DB SELECT (all loaders) | Hidden | Hidden | Hidden | Hidden | Hidden | Hidden |
+| Non-member preview | Hidden | Hidden | Hidden | Hidden | Hidden | Hidden |
+| Canonical text | null | null | null | null | null | null |
+| New signed-URL | Denied | Denied | Denied | Denied | Denied | Denied |
+| **Prev-issued signed-URL** | **valid ≤1h** | **valid ≤1h** | **invalid (object removed+verified)** | invalid | invalid | invalid if removed; else ≤1h until move done |
+| Realtime msg payload | Redacted | Redacted | Redacted | Redacted | Redacted | Redacted |
+| Realtime poll-vote | Guarded | Guarded | Guarded | Guarded | Guarded | Guarded |
+| Poll visibility | Hidden | Hidden | Hidden | Hidden | Hidden | Hidden |
+| Report evidence | Founder | Founder | Founder | Founder | Founder | Founder |
+| Notification/push | scrubbed | scrubbed | scrubbed | scrubbed | scrubbed | scrubbed |
+| Retry | n/a(txn) | resume move | resume finalize | finalize | none | **retry+alert** |
+| Restoration eligible | no | no | no | yes | yes | after reconcile |
+| Purge eligible | no | no | no | yes | yes | after reconcile |
+
+Terminal `restored` (content visible again, via audited restore) and `purged`
+(gone even to founder) and `aborted` (only before redaction commits) as in v5.
+**No failed state exposes DB content or a new signed URL**; the only residual is a
+prev-issued URL until `original_removed` — explicitly documented, not hidden.
+After successful deletion We Glue no longer serves the original from the old path;
+content already downloaded/cached/screenshotted/copied off-platform cannot be
+erased.
 
 ---
 
-## 13. (Change #13) Notification & push cleanup
-Current: message pushes are AFTER-INSERT-on-`messages` → push-only (no inbox rows)
-(046:41); the push **body is built from `NEW.content`** (046:1020–1026) and stored
-in **`push_queue.body`** via `enqueue_push` (046:437). On deletion:
-- **Cancel pending push jobs:** update/delete `push_queue` rows for the message
-  where `status='pending'` (scrub `body`/`title` or set cancelled).
-- Ensure future notification reads / `get_unread_summary` / conversation previews
-  / unread summaries return generic-or-no deleted content; routes cannot fetch
-  deleted content (redaction + RLS make the underlying row null/hidden).
-- **Boundary:** pushes already delivered to devices (lock-screen payloads) cannot
-  be recalled — documented.
-- **Tests (§17):** prove pending push body is scrubbed and no new push/notification
-  serves deleted content after deletion.
+## 8. (Change #1) Edge Function + lease-based reconciliation (no DB lock during Storage)
+### 8a. `delete-message` Edge Function
+Verify JWT → authorize (§3) → require + enforce unique idempotency key → claim/
+locate the active attempt → **first PG txn (§4)** → `pending` → (Category A) storage
+retention copy + verify (size+checksum) → `retained` → delete original + verify
+gone → `original_removed` → finalize → `redacted` → `completed`. Return **minimal
+status**; never retained paths/snapshots. Duplicate invocation → idempotent no-op
+returns state. **Return success only when We Glue no longer serves the original.**
+Timeout/crash after any step → DB already fail-closed; the lease worker (below)
+resumes. **Not atomic across Storage+PostgreSQL.**
+
+### 8b. Lease-based reconciliation worker
+**Never hold `FOR UPDATE SKIP LOCKED` (or any row lock) while doing Storage
+network I/O.** Lease fields live on `message_deletion_attempts` (§5).
+
+Claim flow:
+1. Worker opens a **short** PG transaction.
+2. Select ONE eligible attempt (`state IN (pending,retained,original_removed,
+   failed_requires_reconciliation)` AND `next_retry_at <= now()` AND
+   (`claim_expires_at IS NULL` OR `claim_expires_at < now()`)) `ORDER BY started_at
+   FOR UPDATE SKIP LOCKED LIMIT 1`.
+3. Row lock used **only to assign the lease**.
+4. Generate a unique `claim_token` (uuid); set `claimed_by`, `claimed_at`,
+   `claim_expires_at = now() + lease_duration`.
+5. Commit immediately (releases the row lock).
+6. Perform Storage work **outside** any transaction.
+7. **Compare-and-set** state updates require matching `id` + `claim_token` +
+   expected current `state`:
+   `UPDATE … SET state=$next, … WHERE id=$id AND claim_token=$tok AND state=$expected`.
+   Zero rows updated ⇒ **stale worker** (lease expired / reassigned) ⇒ abort quietly.
+8. Expired lease ⇒ another worker may re-claim (step 2 condition).
+
+Specify: **lease_duration** ≈ 2–5 min (must exceed a single storage op);
+**renewal** via a heartbeat CAS extend if a step runs long; **eligible states** as
+above; **retry limit** N (e.g. 8) via `retry_count`; **exponential backoff** via
+`next_retry_at`; **max age** threshold → **dead-letter** = sticky
+`failed_requires_reconciliation` + **critical alert**; **manual** retry /
+reconciliation / restore / permanent purge via founder RPCs; **audit** every
+transition. **Schedule:** Supabase Cron invoking the worker Edge Function every
+1–2 min (open question: external runner alternative). No attempt remains
+indefinitely stuck without visibility/alerting.
 
 ---
 
-## 14. (Change #14) Realtime coverage
-- `messages`: soft-delete UPDATE fires on the publication; because §4 nulls content
-  **before commit**, the payload has **no original content**. Prove via two-session
-  assert.
-- `poll_votes`: guarded + message hidden ⇒ deleted poll activity cannot leak.
-- Web unread subscription (`useUnreadSummary.ts:82`) is **INSERT-only** → a delete
-  UPDATE never fires it; it holds no message content (only bumps a count); the
-  `get_unread_summary` RPC must exclude deleted messages.
-- Mobile invalidation/refetch: after a delete UPDATE, refetches hit the redacted
-  row / RLS-hidden row → nothing sensitive; follow-up queries by ordinary
-  subscribers cannot retrieve history/evidence (RLS deny + null content).
+## 9. (Change #8) Poll privacy
+Cover `polls`, `poll_options`, `poll_votes`, `cast_poll_vote`, totals, voter
+identities, Realtime (`poll_votes` 010:40), notifications, report evidence, restore,
+purge. **Every permissive SELECT policy on the three poll tables AND
+`cast_poll_vote` must check deletion state** via `is_deleted_message()` SECURITY
+DEFINER so no participant can read/infer question/options/votes/voters/totals or
+vote on a deleted poll. Snapshot to founder history on delete; restore re-inserts
+from snapshot (all-or-nothing); purge deletes snapshot+votes+files.
+
+## 10. (Change #6) Structured push provenance & cleanup
+`push_queue` today lacks a reliable structured message relationship (body from
+`NEW.content` 046:1020; matching relies on `dedupe_key`). Add fields:
+`source_type`, `source_message_id`, `source_conversation_id`, `source_channel_id`,
+`source_event_id` (where relevant).
+- **New message pushes:** populate structured `source_*` at enqueue; **do not rely
+  on `dedupe_key` parsing**.
+- **Existing queued rows (compatibility):** parse only when the format is verified;
+  **do not delete unrelated push jobs**; identify unparseable rows → mark for
+  data-health/manual review.
+- **On deletion:** cancel unsent message pushes (by `source_message_id` when
+  present, else verified-parse fallback); scrub pending `body`+`title`; ensure
+  retry cannot regenerate original content (the source row is redacted); update/
+  hide user-readable notification rows; keep only generic non-content metadata
+  where product requires. **Delivered pushes cannot be recalled** (documented).
+
+## 11. (Change #7) One-to-many report evidence + migration
+`reports` stays the canonical workflow table; one report → many private
+`report_evidence` rows (`evidence_type`, related entity, `content_snapshot`,
+`storage_bucket`/`storage_path`, `checksum`, `metadata`). RLS: reporter / reported-
+user / officer / participant / ordinary-authenticated **unreadable** (deny-all);
+founder/admin readable only via a future **audited RPC**; **immutable**; purge only
+via audited irreversible op. **No final architecture depends on reporter-readable
+`reports` retaining snapshot columns.** Migration: create → backfill → validate
+counts → validate checksums → verify every source row has a destination → only then
+null/remove the reporter-readable snapshot values → rollback preserves evidence in
+the private table and **never re-exposes** it on the public row. (Correct linked
+docs done: `canonical-sources-of-truth.md`.)
+
+## 12. (Change #10) SECURITY DEFINER hardening (every new helper/RPC)
+Explicit safe `search_path`; schema-qualify all objects; `REVOKE ALL … FROM
+PUBLIC`; minimal EXECUTE grants (service-role/none for admin/purge; `authenticated`
+only for the user delete RPC); **no browser service-role**; no policy recursion (use
+SECURITY DEFINER helpers); no object-shadowing; minimal status return; **never**
+return content snapshots or Storage paths to ordinary users; attacker-input tests
+(foreign `message_id`, path injection into `storage.foldername`). Covers deletion /
+restoration / purge / Storage / poll / report-evidence / deleted-message &
+-attachment helpers / future admin-read.
 
 ---
 
-## 15. (Change #15) SECURITY DEFINER hardening (every new helper/RPC)
-Deletion / restoration / purge RPCs, Storage helpers, poll helpers,
-report-evidence helpers, deleted-message/-attachment helpers, future admin-read:
-explicit safe `search_path` (`pg_catalog, public` or empty + fully schema-qualify);
-schema-qualify all objects; `REVOKE ALL … FROM PUBLIC`; grant only the intended
-role (none/service-role for admin/purge; `authenticated` only for the user delete
-RPC); no object-shadowing; no RLS recursion (read state via SECURITY DEFINER
-helpers); avoid message-existence leakage; minimal status return; **never** return
-content snapshots or Storage paths to ordinary users; test object-shadowing +
-attacker-controlled inputs (foreign `message_id`, path injection into
-`storage.foldername`).
+## 13. (Change #13) Tests
+Roles: sender · ordinary participant · group creator/admin · club officer ·
+official-chat participant · non-member preview · reporter · reported user · ordinary
+authenticated nonparticipant · service backend · future founder/admin.
+Scenarios: **worker claims · duplicate workers · expired-lease recovery ·
+stale-claim-token rejection (CAS zero-rows) · Edge timeout after copy · crash after
+original deletion · redaction retry · dead-letter alert · manual retry · legacy
+duplicate delete (idempotent) · legacy managed-attachment error with ZERO data
+changes · restore-then-delete-again · prior signed URL before vs after
+original-delete · structured push cleanup · unparseable legacy push rows · external
+URL behavior · `file://` behavior · unmappable managed attachment failure ·
+custom-group authorization (each actor) · SECURITY DEFINER hardening ·
+report-evidence migration (count+checksum) · poll privacy · Realtime (messages +
+poll_votes + web unread) · rollback**. Method: Management-API `BEGIN … ROLLBACK`
+with set JWT claim for RLS/RPC; two-session live tests for Realtime/Storage; assert
+denial for every ordinary role, allow-only-audited for founder.
 
----
+## 14. (Change #14) Retention bucket
+Initial name: **`deleted-message-retention`** (private; may change only if
+repository naming standards require). Policies: no ordinary/participant/officer
+access, no public URLs, no browser service-role, no ordinary signed-URL generation;
+access only via future audited founder/admin operations. **No automatic purge in
+v1** — purge is a deliberate, audited, manual operation.
 
-## 16. (Change #16) OTA evidence (corrected & verified)
-| Item | Value |
-|---|---|
-| Production channel | `production` (both store builds + updates on it) |
-| iOS store build 22 runtime | `d644c732…fded642` (commit `b352d050`) |
-| Android store build 24 runtime | `6549da75…2836cc` (commit `b352d050`) |
-| Current tree fingerprint iOS / Android | `d644c732…` / `6549da75…` → **MATCH** |
-| **Latest production OTA update targets** | iOS `d16bac8d…` (build **21**) · Android `de50834c…` (build **22/23**) — **OLDER runtimes**, group "Launch stability…" |
-| Implication | the existing latest production OTA does **not** target current store builds 22/24; **a new OTA must be published for each current store runtime** (`d644c732` iOS, `6549da75` Android) |
-| Publish-time verification | re-run `eas fingerprint:generate --platform ios/android`; publish only if it still equals `d644c732`/`6549da75` |
-| Native module change | none (repoint uses already-bundled supabase-js `functions.invoke`, cf. `accountService.ts:320`) |
-| Native EAS build required | **no** |
-| Only-the-deletion-call-site changes | `messagingService.ts:194` `rpc('unsend_message')` → `functions.invoke('delete-message')` |
-| Rollback | `eas update:rollback` / republish prior update on `production` |
-| Before OTA received | client still calls legacy `unsend_message` → §6b behavior (no-attachment: secure; managed-attachment: hard error) |
-| After OTA received | client calls the secure Edge Function orchestrator (move-before-success) |
+## 15. (Change #11) Operational visibility (future Admin Dashboard — design only)
+Deletion-attempts view fields: attempt ID · message · state · actor · reason ·
+started · age · retry_count · next_retry · claim owner (`claimed_by`) · claim
+expiration (`claim_expires_at`) · last_error · attachment mapping status · retention-
+copy status · original-delete status · redaction status · push cleanup status ·
+report-evidence status · poll cleanup status · manual retry · manual reconciliation
+· restore · purge · audit history · critical alerts. **Not built in this task.**
 
-**No OTA is deployed by this document.**
+## 16. (Change #15) Migration gate
+No migration 051, implementation, Edge Function, policy change, OTA, or data
+backfill until 042–044 are **statement/hash reconciled**. Status: local 042/043/044
+pristine (single files, working tree == HEAD, commits `e4f9acb1`/`53a88cfd`); remote
+*effect* confirmed applied; **byte/hash comparison pending founder-run `supabase
+migration list` / `supabase db pull`**; no mismatch proven → no `migration repair`
+proposed.
 
----
+## 17. OTA evidence (verified; unchanged from v5)
+Production channel `production`. Store builds: iOS 22 runtime `d644c732…`, Android
+24 runtime `6549da75…` (commit `b352d050`). Current tree fingerprints **match**
+both. **Latest production OTA currently targets OLDER runtimes** (iOS `d16bac8d…`
+build 21, Android `de50834c…` build 22/23) → a **new OTA must be published per
+current store runtime** (`d644c732`/`6549da75`); verify with `eas
+fingerprint:generate` at publish time. Repoint is JS-only (`messagingService.ts:194`
+→ `functions.invoke('delete-message')`, already-bundled supabase-js); **no native
+module / no native EAS build**; rollback via `eas update:rollback`. Before OTA:
+legacy §6b behavior; after: secure Edge orchestrator. **No OTA deployed here.**
 
-## 17. (Change #17) Exact tests
-**Roles:** sender · ordinary participant · group creator · custom-group admin ·
-club officer · official-chat participant · non-member preview · reporter ·
-reported user · ordinary authenticated nonparticipant · service backend · future
-founder/admin.
-**Scenarios:** concurrent attempts · duplicate Edge calls · attempt-number race
-(two txns) · restore-then-delete-again · transaction failure injection · every
-state in §7 · message SELECT · `getDirectMessages` · `getChannelMessages` ·
-`getNonMemberPreview` · text · attachment metadata · **external/`file://`
-pass-through URLs** · polls/options/votes · report evidence · Realtime (messages +
-poll_votes + web unread) · push_queue scrub · notification previews · search ·
-media/files · prior signed URL (≤1h) · new-signing denial · copy verification ·
-original-deletion verification · retained-bucket denial · restoration ·
-permanent purge · worker reconciliation (incl. dead-letter/alert) · rollback ·
-SECURITY DEFINER hardening (search_path/shadowing/attacker input).
-**Method:** Management-API `BEGIN … ROLLBACK` with set JWT claim for RLS/RPC;
-two-session live tests for Realtime/Storage; assert denial for every ordinary role
-and allow-only-audited for founder.
+## 18. Coordinated rollout & rollback
+Ship as one privacy release (attempts + attachment_map + history + report_evidence +
+`deleted-message-retention` bucket; report-evidence backfill/validate; message
+SELECT RLS `deleted_at IS NULL` + deleted-aware storage policy +
+`is_deleted_message()`/`is_deleted_attachment()` + poll guards + `push_queue`
+`source_*` + scrub; replace `unsend_message` B2 + `delete-message` Edge Function +
+lease worker; OTA repoint per runtime; backfill 4 existing soft-deleted rows —
+prod-data, separate approval). No interim window may leak text/attachment/
+Realtime/report-snapshot/poll/push. Rollback reverses in dependency order; restore-
+from-history before removing redaction; never re-expose report evidence.
 
----
+## 19. Open questions
+1. Reconciliation runner: Supabase Cron + Edge Function vs external queue runner.
+2. Lease duration + heartbeat-renewal threshold.
+3. Confirm B2 pre-OTA old-client UX acceptable (managed-attachment delete errors).
+4. `get_unread_summary` + notification preview builders exclude deleted `content` —
+   audit both.
+5. Category-B `file://` prevention mechanism (client validation + insert CHECK).
+6. Retained-bucket purge cadence (manual-only in v1).
 
-## 18. (Change #18) Operational visibility (future Admin Dashboard — design only)
-Deletion-attempts view: filter by state; stuck-job age; retry count; last error;
-attachment retention status (copy/delete verification); redaction status; report-
-evidence status; manual retry; manual reconciliation; restore; purge; audit
-history; critical alerts. **Not built in this task.**
-
----
-
-## 19. (Change #19) Migration gate
-No migration 051 or implementation until 042–044 are **statement/hash
-reconciled**. Current status: local 042/043/044 pristine (single files, working
-tree == HEAD, commits `e4f9acb1`/`53a88cfd`); remote *effect* confirmed applied
-(`universities`, `app_config`, `university_id`, `delete_own_account_atomic`,
-`reports` snapshot columns exist in prod); **byte/statement-hash comparison pending
-the founder-run `supabase migration list` / `supabase db pull`**. No mismatch
-proven → no `supabase migration repair` proposed.
-
----
-
-## 20. Coordinated rollout & rollback (one privacy release)
-Ship together so no interim state leaks: create `message_deletion_attempts` +
-`message_attachment_map` + `message_deletion_history` + `report_evidence` +
-`deleted-retention` bucket; backfill/validate report evidence; add message SELECT
-RLS `deleted_at IS NULL` + deleted-aware storage policy + `is_deleted_message()`/
-`is_deleted_attachment()` helpers + poll guards + `push_queue` scrub; replace
-`unsend_message` (B2) + deploy `delete-message` Edge Function + reconciliation
-worker; OTA-repoint the mobile call site (fingerprint-verified, per current
-runtime); backfill the 4 existing soft-deleted messages (prod-data, separate
-approval). No window may leave text-safe/attachment-leaks,
-attachment-safe/text-leaks, DB-safe/Realtime-leaks, message-hidden/report-snapshot-
-or-poll-tables-leak, or message-hidden/push-body-leaks. **Rollback** reverses in
-dependency order; restore-from-history before removing redaction; never re-expose
-report evidence on rollback.
-
-## 21. Open questions (founder/Codex)
-1. Signed-URL residual for legacy no-attachment vs managed: B2 chosen for managed
-   (hard error) — confirm the resulting old-client UX is acceptable pre-OTA.
-2. Reconciliation runner: Supabase Cron + Edge Function vs external queue runner.
-3. Retention bucket name/prefix and lifecycle (purge job cadence).
-4. Exact custom-group-admin authorization rule for deletion (`conversations.created_by`?).
-5. `get_unread_summary` + notification preview builders: confirm they exclude/omit
-   deleted `content` (audit both).
-6. The 2 `file://` records: redact-only now, or also flag for data-quality cleanup.
-
-## 22. Codex review package pointer
-Evaluate against this doc: corrected client facts (§1), attempt identity (§3),
-first-txn atomicity (§4), attachment mapping (§5), retention bucket (§6), legacy
-B2 (§6b), state matrix (§7), Edge orchestration (§8), reconciliation worker (§9),
-restoration (§10), report evidence + migration (§11), poll privacy (§12), push
-cleanup (§13), Realtime (§14), SECURITY DEFINER (§15), OTA (§16), tests (§17),
-operational visibility (§18), migration gate (§19). **Codex verdict is external and
-pending.**
+## 20. Codex review package pointer
+Evaluate against: §1 client facts · §3 authorization · §4 first-txn · §5 idempotency
+· §6 attachment categories/mapping · §7 signed-URL semantics · §8 lease worker · §9
+poll · §10 push · §11 report evidence · §12 SECURITY DEFINER · §13 tests · §14
+bucket · §15 op visibility · §16 migration gate · §17 OTA. **Codex verdict is
+external and pending.**

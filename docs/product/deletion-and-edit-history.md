@@ -18,7 +18,7 @@ Dashboard.
 | **Accounts** | Hard delete via `delete_own_account_atomic()` cascading through `auth.users` (044) | none |
 
 > 📐 **The full remediation design lives in
-> [`deleted-message-privacy.md`](deleted-message-privacy.md) (authoritative v4).**
+> [`deleted-message-privacy.md`](deleted-message-privacy.md) (authoritative v6).**
 > The note below states the current (broken) reality.
 
 > ⚠️ **Deleted-message privacy is NOT yet enforced.** The `messages` SELECT RLS

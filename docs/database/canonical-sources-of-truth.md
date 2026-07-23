@@ -27,12 +27,12 @@ it is updated transactionally (or derived by trigger). This document is the map.
 | Conversation identity | `conversations` | — |
 | Conversation membership | `conversation_participants` | `clubs.member_count` is unrelated; club chat membership must track club membership — verify sync. |
 | Channel identity/perms | `conversation_channels` (+ `channel_posters` for who may post) | — |
-| Message content | `messages` | `content_snapshot`/`attachment_snapshot` are **retention copies of deleted content**, intentionally divergent (frozen originals). |
+| Message content | `messages` | The retention snapshots `content_snapshot`/`attachment_snapshot` live on **`reports`** (040:810), NOT on `messages` — captured by `report_message()` for reported messages. They will move to a private `report_evidence` table in the future migration (see [`../product/deleted-message-privacy.md`](../product/deleted-message-privacy.md)). |
 | Poll / options / votes | `polls` / `poll_options` / `poll_votes` | vote tallies must be derived from `poll_votes`. |
 | Report | `reports` (one canonical table) | report email is a notification, not a second store (reports doc). |
 | Notification | `notifications` | `push_queue`/`push_tickets` are delivery pipeline, not identity. |
 | Deleted state | per-entity soft-delete columns (`messages.deleted_at`; `club_photos.is_visible`) | **inconsistent across entities today** — see technical-debt. |
-| Edit history | only `profiles.username_changed_at`/`email_changed_at` + message snapshots | no general history table (greenfield). |
+| Edit history | only `profiles.username_changed_at`/`email_changed_at` + `reports.content_snapshot` (reported messages) | no general history table (greenfield). |
 | Admin audit | **does not exist** (greenfield). | — |
 
 ## Officer status — the important two-place representation
@@ -61,7 +61,7 @@ other follows.
 | `profiles.university` / `clubs.university` (text) | mirror of `university_id` | `sync_university_name()` trigger | Only ever set `university_id`; never write the text directly. |
 | `club_officers` roster | display copy of member+profile | manual / RPC | Keep in sync with `club_members.role` on role changes. |
 | `reports.reporter_username` / `reporter_email` | point-in-time snapshot | captured at insert | Leave frozen; do not "fix" to current values. |
-| `messages.content_snapshot` / `attachment_snapshot` | frozen deleted original | captured at delete | Founder-only retention; never expose to clients. |
+| `reports.content_snapshot` / `attachment_snapshot` | frozen reported-message original (on **`reports`**, not `messages`) | captured at report time by `report_message()` | Founder-only; **currently reporter-readable — a confirmed gap** to be fixed by moving to private `report_evidence` (see deleted-message-privacy design). |
 | RSVP totals, poll tallies, unread counts | derived | computed / counter | Never treat a cached count as truth; derive from `event_rsvps` / `poll_votes`. |
 | `onboarding_complete` vs `onboarding_completed` | **two columns, same concept** | **UNKNOWN sync** | Verify which is canonical before any write (open-uncertainties.md #2). |
 | Legacy club-chat tables (006) | possibly-orphaned duplicate of the 040/041 system | — | Do not build on them; verify dead before cleanup. |
