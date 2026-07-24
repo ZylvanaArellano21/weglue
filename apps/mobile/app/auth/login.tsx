@@ -279,10 +279,10 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.form}>
-            <Text style={styles.label}>School Email</Text>
+            <Text style={styles.label}>Email</Text>
             <TextInput
               style={[styles.input, !!fieldErrors.email && styles.inputError]}
-              placeholder="you@school.edu"
+              placeholder="you@email.com"
               placeholderTextColor="rgba(0,0,0,0.3)"
               value={email}
               onChangeText={handleEmailChange}

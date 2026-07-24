@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { validateEducationEmail } from "@weglue/shared";
+import { validateEducationEmail } from "@weglue/shared/utils";
 import { createClient } from "../../../lib/supabase/client";
 import {
   checkPassword,
@@ -504,12 +504,12 @@ export default function SignupPage(): JSX.Element | null {
             </>
           ) : (
             <>
-              {/* School Email */}
+              {/* Email */}
               <label
                 htmlFor="email"
                 className="text-sm font-bold text-black mb-2 mt-5"
               >
-                School Email
+                Email
               </label>
               <div className="relative">
                 <input
@@ -517,7 +517,7 @@ export default function SignupPage(): JSX.Element | null {
                   name="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="you@school.edu"
+                  placeholder="you@email.com"
                   value={email}
                   onChange={(e) => handleEmailChange(e.target.value)}
                   className={inputClass(
@@ -557,7 +557,7 @@ export default function SignupPage(): JSX.Element | null {
                 ) : errors.email ||
                   (emailFeedback !== null && !emailFeedback.valid) ? (
                   <span className="text-[#F02719]">
-                    {errors.email ?? "Use a valid school email ending in .edu."}
+                    {errors.email ?? "Please enter a valid email address."}
                   </span>
                 ) : null}
               </p>
