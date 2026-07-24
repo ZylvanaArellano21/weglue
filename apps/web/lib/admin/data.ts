@@ -89,7 +89,7 @@ export interface UniversityOption {
 // is a handful of parallel lookups; at very large scale a canonical indexed
 // email mirror / SECURITY DEFINER RPC is the right move (see V2 backlog).
 
-async function emailMap(userIds: string[]): Promise<Map<string, string | null>> {
+export async function emailMap(userIds: string[]): Promise<Map<string, string | null>> {
   const admin = createAdminClient();
   const unique = Array.from(new Set(userIds.filter(Boolean)));
   const entries = await Promise.all(
@@ -306,7 +306,7 @@ export async function listUsers(params: ListUsersParams = {}): Promise<Paginated
   return { rows, total: count ?? rows.length, page, pageSize: PAGE_SIZE };
 }
 
-async function universityNameMap(
+export async function universityNameMap(
   admin: ReturnType<typeof createAdminClient>,
   universityIds: (string | null)[]
 ): Promise<Map<string, string>> {
@@ -353,6 +353,7 @@ export interface UserDetail {
   major: string | null;
   year: string | null;
   university: string | null;
+  university_id: string | null;
   onboarding_completed: boolean;
   created_at: string;
   interests: string[];
@@ -457,6 +458,7 @@ export async function getUserDetail(id: string): Promise<UserDetail | null> {
     major: p.major,
     year: p.year,
     university: (uniName as any)?.data?.name ?? null,
+    university_id: p.university_id ?? null,
     onboarding_completed: !!p.onboarding_completed,
     created_at: p.created_at,
     interests: ((interestsRes.data ?? []) as any[]).map((r) => r.interest),
@@ -734,13 +736,24 @@ export async function getClubDetail(id: string): Promise<ClubDetail | null> {
 export interface SearchResults {
   users: { id: string; full_name: string; username: string; avatar_url: string | null; email: string | null }[];
   clubs: { id: string; name: string; handle: string; avatar_url: string | null; university: string | null }[];
+  universities: { id: string; name: string; slug: string }[];
+  officers: {
+    id: string;
+    user_id: string;
+    full_name: string;
+    username: string;
+    club_name: string;
+    role_title: string | null;
+  }[];
 }
+
+const EMPTY_SEARCH: SearchResults = { users: [], clubs: [], universities: [], officers: [] };
 
 export async function searchEntities(query: string): Promise<SearchResults> {
   await requireFounder();
   const admin = createAdminClient();
   const term = query.trim();
-  if (term.length < 2) return { users: [], clubs: [] };
+  if (term.length < 2) return EMPTY_SEARCH;
 
   const like = `%${term}%`;
   const isEmail = term.includes("@");
@@ -789,6 +802,61 @@ export async function searchEntities(query: string): Promise<SearchResults> {
     }));
   })();
 
-  const [users, clubs] = await Promise.all([usersPromise, clubsPromise]);
-  return { users, clubs };
+  const universitiesPromise = (async () => {
+    const { data } = await admin
+      .from("universities")
+      .select("id, name, slug")
+      .or(`name.ilike.${like},slug.ilike.${like}`)
+      .limit(6);
+    return ((data ?? []) as any[]).map((u) => ({ id: u.id, name: u.name, slug: u.slug }));
+  })();
+
+  const officersPromise = (async () => {
+    // Officers matched by user name/username or club name/handle (Day-2 entity).
+    const [{ data: matchUsers }, { data: matchClubs }] = await Promise.all([
+      isEmail
+        ? Promise.resolve({ data: (userIdFilter ?? []).map((id) => ({ id })) as any[] })
+        : admin.from("profiles").select("id").or(`full_name.ilike.${like},username.ilike.${like}`).limit(200),
+      admin.from("clubs").select("id").or(`name.ilike.${like},handle.ilike.${like}`).limit(200),
+    ]);
+    const uIds = (matchUsers ?? []).map((u: any) => u.id);
+    const cIds = (matchClubs ?? []).map((c: any) => c.id);
+    const parts: string[] = [];
+    if (uIds.length) parts.push(`user_id.in.(${uIds.join(",")})`);
+    if (cIds.length) parts.push(`club_id.in.(${cIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("club_members")
+      .select("id, club_id, user_id, profiles!inner(full_name, username), clubs!inner(name)")
+      .eq("role", "officer")
+      .or(parts.join(","))
+      .limit(6);
+    const rows = (data ?? []) as any[];
+    // Attach role titles from the display roster.
+    const titles = new Map<string, string>();
+    if (rows.length) {
+      const { data: roster } = await admin
+        .from("club_officers")
+        .select("club_id, user_id, role_title")
+        .in("club_id", rows.map((r) => r.club_id))
+        .in("user_id", rows.map((r) => r.user_id));
+      for (const o of (roster ?? []) as any[]) if (o.user_id) titles.set(`${o.club_id}:${o.user_id}`, o.role_title);
+    }
+    return rows.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      full_name: r.profiles?.full_name ?? "",
+      username: r.profiles?.username ?? "",
+      club_name: r.clubs?.name ?? "",
+      role_title: titles.get(`${r.club_id}:${r.user_id}`) ?? null,
+    }));
+  })();
+
+  const [users, clubs, universities, officers] = await Promise.all([
+    usersPromise,
+    clubsPromise,
+    universitiesPromise,
+    officersPromise,
+  ]);
+  return { users, clubs, universities, officers };
 }

@@ -18,12 +18,13 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { label: "Overview", href: "/admin", icon: "📊", day: 1, ready: true, group: "Core" },
 
   { label: "Users", href: "/admin/users", icon: "👤", day: 1, ready: true, group: "People" },
-  { label: "Restrictions", href: "/admin/restrictions", icon: "🚫", day: 3, ready: false, group: "People" },
-  { label: "Gluemates", href: "/admin/gluemates", icon: "🔗", day: 4, ready: false, group: "People" },
+  { label: "Officers", href: "/admin/officers", icon: "🎖️", day: 2, ready: true, group: "People" },
+  { label: "Restrictions", href: "/admin/restrictions", icon: "🚫", day: 2, ready: true, group: "People" },
+  { label: "Gluemates", href: "/admin/gluemates", icon: "🔗", day: 2, ready: true, group: "People" },
 
   { label: "Clubs", href: "/admin/clubs", icon: "🏛️", day: 1, ready: true, group: "Community" },
-  { label: "Memberships", href: "/admin/memberships", icon: "🎟️", day: 2, ready: false, group: "Community" },
-  { label: "Universities", href: "/admin/universities", icon: "🎓", day: 2, ready: false, group: "Community" },
+  { label: "Memberships", href: "/admin/memberships", icon: "🎟️", day: 2, ready: true, group: "Community" },
+  { label: "Universities", href: "/admin/universities", icon: "🎓", day: 2, ready: true, group: "Community" },
 
   { label: "Posts", href: "/admin/posts", icon: "🖼️", day: 3, ready: false, group: "Content" },
   { label: "Comments", href: "/admin/comments", icon: "💬", day: 3, ready: false, group: "Content" },
