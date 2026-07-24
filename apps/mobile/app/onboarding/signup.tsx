@@ -412,8 +412,8 @@ export default function OnboardingSignupScreen() {
               </>
             ) : (
             <>
-            {/* Email */}
-            <Text style={[styles.label, { marginTop: 16 }]}>Email</Text>
+            {/* School Email */}
+            <Text style={[styles.label, { marginTop: 16 }]}>School Email</Text>
             <View style={{ position: "relative" }}>
               <TextInput
                 style={[
@@ -421,7 +421,7 @@ export default function OnboardingSignupScreen() {
                   (!!errors.email || emailExistsVerified || (emailFeedback !== null && !emailFeedback.valid)) && styles.inputError,
                   emailFeedback?.valid && !emailExistsVerified && styles.inputValid,
                 ]}
-                placeholder="yourname@email.com"
+                placeholder="yourname@university.edu"
                 placeholderTextColor="rgba(0,0,0,0.3)"
                 value={email}
                 onChangeText={handleEmailChange}
@@ -448,7 +448,7 @@ export default function OnboardingSignupScreen() {
             ) : (
               (!!errors.email || (emailFeedback !== null && !emailFeedback.valid && !errors.email)) && (
                 <Text style={styles.errorText}>
-                  {errors.email || "Please enter a valid email address"}
+                  {errors.email || "Please use your university or college email (.edu or equivalent)"}
                 </Text>
               )
             )}
