@@ -61,6 +61,7 @@ import { getClubPoll, type ClubPoll } from '../../../services/clubPollService';
 import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../../lib/chatAttachments';
 import { displayNameOrFallback, isPlaceholderUsername } from '../../../lib/displayName';
 import { uploadImageToBucket } from '../../../lib/imageUpload';
+import { useAndroidKeyboardHeight } from '../../../lib/useAndroidKeyboardHeight';
 import { Linking } from 'react-native';
 import {
   chatColors,
@@ -139,6 +140,8 @@ export default function ChatInfo() {
   const [personMenu, setPersonMenu] = useState<null | { userId: string; name: string }>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  // Android: float the rename dialog above the keyboard (iOS keeps KAV).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const [channelRenameOpen, setChannelRenameOpen] = useState(false);
   const [channelRenameValue, setChannelRenameValue] = useState('');
   const [permOpen, setPermOpen] = useState(false);
@@ -902,7 +905,13 @@ export default function ChatInfo() {
 
       {/* ─── Group rename (admin) ─── */}
       <Modal visible={renameOpen} transparent animationType="fade" onRequestClose={() => setRenameOpen(false)}>
-        <KeyboardAvoidingView style={styles.menuOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView
+          style={[
+            styles.menuOverlay,
+            Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+          ]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
           <View style={styles.renameCard}>
             <Text style={styles.renameTitle}>Group name</Text>
             <TextInput
@@ -928,7 +937,13 @@ export default function ChatInfo() {
 
       {/* ─── Channel rename (officer) ─── */}
       <Modal visible={channelRenameOpen} transparent animationType="fade" onRequestClose={() => setChannelRenameOpen(false)}>
-        <KeyboardAvoidingView style={styles.menuOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView
+          style={[
+            styles.menuOverlay,
+            Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+          ]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
           <View style={styles.renameCard}>
             <Text style={styles.renameTitle}>Rename channel</Text>
             <TextInput

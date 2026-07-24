@@ -28,6 +28,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { Avatar } from '../../components/shared/Avatar';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { usePostComments, useAddComment } from '../../hooks/useHomePostsFeed';
 import { timeAgo } from '../../components/home/PostCard';
 import type { PostComment } from '../../services/postService';
@@ -38,6 +39,8 @@ export default function CommentsScreen() {
   const { session } = useAuthStore();
   const viewerUserId = session?.user.id ?? '';
 
+  // Android: lift the sheet + composer above the keyboard (iOS keeps KAV).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const [draft, setDraft] = useState('');
   const { data: comments = [], isLoading } = usePostComments(postId);
   const { mutate: submitComment, isPending } = useAddComment();
@@ -63,7 +66,10 @@ export default function CommentsScreen() {
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
       <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} onPress={close} />
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={Platform.OS === 'android' ? { marginBottom: androidKeyboardHeight } : undefined}
+      >
         <SafeAreaView
           style={{
             backgroundColor: '#FEFCF0',
@@ -76,7 +82,7 @@ export default function CommentsScreen() {
             shadowRadius: 16,
             elevation: 24,
           }}
-          edges={['bottom']}
+          edges={androidKeyboardHeight > 0 ? [] : ['bottom']}
         >
           <View style={{ alignItems: 'center', paddingTop: 8, marginBottom: 2 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB' }} />

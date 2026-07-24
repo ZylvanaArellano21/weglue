@@ -38,6 +38,7 @@ import { resolveAttachmentUrl } from '../../lib/chatAttachments';
 import { displayNameOrFallback } from '../../lib/displayName';
 import { markConversationRead } from '../../services/chatService';
 import { setActiveThread, clearActiveThread } from '../../lib/notifications/activeThread';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { chatColors, chatFonts } from './chatTheme';
 
 // ─── Shared conversation thread ──────────────────────────────────────────────
@@ -91,6 +92,9 @@ export function ConversationThread({
   const router = useRouter();
   const queryClient = useQueryClient();
   const listRef = useRef<FlatList>(null);
+  // Android: edge-to-edge defeats adjustResize, so lift the list + composer
+  // above the keyboard ourselves (iOS keeps KeyboardAvoidingView below).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
 
   const { data: page } = useThread(conversationId, channelId, currentUserId);
   useConversationRealtime(conversationId, channelId);
@@ -149,6 +153,15 @@ export function ConversationThread({
       return () => clearTimeout(t);
     }
   }, [rows.length]);
+
+  // Keep the latest message visible when the Android keyboard opens and the
+  // list resizes underneath the composer.
+  useEffect(() => {
+    if (androidKeyboardHeight > 0 && rows.length > 0) {
+      const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+      return () => clearTimeout(t);
+    }
+  }, [androidKeyboardHeight, rows.length]);
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   useEffect(() => {
@@ -360,7 +373,12 @@ export function ConversationThread({
 
   return (
     <KeyboardAvoidingView
-      style={styles.flex}
+      style={[
+        styles.flex,
+        // Android edge-to-edge: adjustResize doesn't shrink the view, so pad by
+        // the real keyboard height to lift the list + composer above it.
+        Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+      ]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <FlatList

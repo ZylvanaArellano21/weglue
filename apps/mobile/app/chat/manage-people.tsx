@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
 import { Avatar } from '../../components/shared/Avatar';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import {
   getEligibleUniversityPeople,
   addClubMemberByOfficer,
@@ -46,6 +47,8 @@ export default function ManagePeopleScreen() {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+  // Android: lift the people list above the keyboard (iOS keeps KAV padding).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
 
   const { data: people, isLoading } = useQuery({
     queryKey: ['eligiblePeople', userId, query.trim(), mode, clubId],
@@ -139,7 +142,13 @@ export default function ManagePeopleScreen() {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={[
+          styles.flex,
+          Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+        ]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <View style={styles.searchWrap}>
           <View style={styles.searchBar}>
             <Ionicons name="search" size={16} color={chatColors.textMuted} />
