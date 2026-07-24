@@ -28,10 +28,12 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 
 export interface SearchBottomSheetProps<T> {
   visible: boolean;
@@ -72,6 +74,13 @@ export function SearchBottomSheet<T>({
   const [query, setQuery] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
   const keyboardOffset = useRef(new Animated.Value(0)).current;
+  // Android-only: expand the sheet to fill the space above the keyboard so the
+  // results list has room (matches the Instagram search behavior). iOS keeps
+  // the content-sized sheet driven purely by the Animated marginBottom below.
+  const { height: androidKbHeight, visible: androidKbVisible } = useAndroidKeyboardHeight();
+  const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const androidSheetHeight = windowHeight - androidKbHeight - insets.top - 12;
 
   // Reset search query each time sheet opens
   useEffect(() => {
@@ -168,13 +177,18 @@ export function SearchBottomSheet<T>({
           }}
         >
           <SafeAreaView
-            style={{
-              backgroundColor: '#FEFCF0',
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
-              maxHeight: '85%',
-            }}
-            edges={['bottom']}
+            style={[
+              {
+                backgroundColor: '#FEFCF0',
+                borderTopLeftRadius: 20,
+                borderTopRightRadius: 20,
+                maxHeight: '85%',
+              },
+              // Android: fill the space above the keyboard so results are visible.
+              androidKbVisible ? { height: androidSheetHeight, maxHeight: androidSheetHeight } : null,
+            ]}
+            // Drop the bottom inset while lifted above the Android keyboard.
+            edges={androidKbVisible ? [] : ['bottom']}
           >
             {/* Drag handle */}
             <View style={{ alignItems: 'center', paddingTop: 8, marginBottom: 2 }}>
@@ -302,6 +316,7 @@ export function SearchBottomSheet<T>({
                 keyExtractor={keyExtractor}
                 renderItem={listRender}
                 keyboardShouldPersistTaps="handled"
+                style={androidKbVisible ? { flex: 1 } : undefined}
                 contentContainerStyle={{ paddingBottom: 12 }}
                 ItemSeparatorComponent={() => (
                   <View style={{ height: 1, backgroundColor: '#F3F4F6', marginHorizontal: 16 }} />

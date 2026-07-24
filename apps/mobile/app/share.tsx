@@ -15,6 +15,7 @@ import {
   type ShareContentType,
   type ShareMedia,
 } from '../components/shared/ShareSheet';
+import { useAndroidKeyboardHeight } from '../lib/useAndroidKeyboardHeight';
 import { useToast, type ToastType } from '../components/Toast';
 
 export default function ShareScreen() {
@@ -22,6 +23,9 @@ export default function ShareScreen() {
   const { session } = useAuthStore();
   const params = useLocalSearchParams<{ contentType: string; contentId: string; media?: string }>();
   const { show, ToastComponent } = useToast();
+  // Android: lift the bottom-anchored share sheet above the keyboard so the
+  // search field and people results stay visible (iOS uses KeyboardAvoidingView).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
 
   const contentType = (params.contentType as ShareContentType) ?? 'post';
   const contentId = params.contentId ?? '';
@@ -52,7 +56,13 @@ export default function ShareScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={[
+          { flex: 1 },
+          Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+        ]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <ShareSheetContent
           onDone={onDone}
           userId={session?.user.id}

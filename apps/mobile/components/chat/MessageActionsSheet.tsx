@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import * as Clipboard from 'expo-clipboard';
 import type { ThreadMessage } from '../../services/messagingService';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
@@ -53,6 +54,8 @@ export function MessageActionsSheet({
   onReport,
   onSaveMedia,
 }: Props) {
+  // Android: lift the report sheet above the keyboard (iOS keeps KAV padding).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const [details, setDetails] = useState('');
@@ -98,7 +101,10 @@ export function MessageActionsSheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.overlay} onPress={close}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={Platform.OS === 'android' ? { marginBottom: androidKeyboardHeight } : undefined}
+        >
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.handle} />
 

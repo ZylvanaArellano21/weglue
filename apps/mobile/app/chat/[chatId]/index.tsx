@@ -31,6 +31,7 @@ import { getOrCreateDirectChat } from '../../../services/chatService';
 import { createGroupChat } from '../../../services/messagingService';
 import { createChannel, type HubThread } from '../../../services/channelService';
 import { recordChannelVisit } from '../../../lib/chatNavigation';
+import { useAndroidKeyboardHeight } from '../../../lib/useAndroidKeyboardHeight';
 import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
 
 // ─── Conversation screen ────────────────────────────────────────────────────
@@ -131,6 +132,8 @@ export default function ChatRoom() {
   );
   const [addChannelOpen, setAddChannelOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
+  // Android: float the New-channel dialog above the keyboard (iOS keeps KAV).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const [creatingChannel, setCreatingChannel] = useState(false);
 
   const openThreadFromHub = useCallback(
@@ -330,7 +333,10 @@ export default function ChatRoom() {
           onRequestClose={() => setAddChannelOpen(false)}
         >
           <KeyboardAvoidingView
-            style={styles.modalOverlay}
+            style={[
+              styles.modalOverlay,
+              Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+            ]}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           >
             <View style={styles.modalCard}>
