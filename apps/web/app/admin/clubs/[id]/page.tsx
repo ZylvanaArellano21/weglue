@@ -6,6 +6,7 @@ import { Badge, Field, SectionCard, EmptyState } from "../../../../components/ad
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { Table, Th, Td, RowLink } from "../../../../components/admin/Table";
 import { DisabledAction } from "../../../../components/admin/DisabledAction";
+import { AddMemberDialog, AddOfficerDialog, MemberRowActions } from "../../../../components/admin/MembershipControls";
 
 export const dynamic = "force-dynamic";
 
@@ -88,8 +89,18 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
     </div>
   );
 
+  const presetClub = { id: club.id, label: club.name };
   const membersTab = (
-    <SectionCard className="overflow-hidden">
+    <SectionCard
+      className="overflow-hidden"
+      title="Members"
+      action={
+        <div className="flex gap-2">
+          <AddMemberDialog presetClub={presetClub} />
+          <AddOfficerDialog presetClub={presetClub} />
+        </div>
+      }
+    >
       {club.members.length === 0 ? (
         <EmptyState icon="👥" title="No members yet" />
       ) : (
@@ -97,29 +108,37 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
           head={
             <>
               <Th>Member</Th>
-              <Th>Email</Th>
               <Th>Role</Th>
               <Th>Officer title</Th>
               <Th>Joined</Th>
+              <Th>Manage</Th>
             </>
           }
         >
           {club.members.map((m) => (
-            <RowLink key={m.user_id} href={`/admin/users/${m.user_id}`}>
+            <tr key={m.user_id} className="text-gray-700">
               <Td>
-                <div className="flex items-center gap-3">
+                <Link href={`/admin/users/${m.user_id}`} className="flex items-center gap-3 hover:text-teal-700">
                   <Avatar uri={m.avatar_url} name={m.full_name} size={28} />
                   <div>
                     <p className="text-sm font-medium text-gray-900">{m.full_name || m.username}</p>
-                    <p className="text-xs text-gray-500">@{m.username}</p>
+                    <p className="text-xs text-gray-500">@{m.username}{m.email ? ` · ${m.email}` : ""}</p>
                   </div>
-                </div>
+                </Link>
               </Td>
-              <Td className="text-gray-600">{m.email}</Td>
               <Td>{m.role === "officer" ? <Badge tone="teal">Officer</Badge> : <Badge>Member</Badge>}</Td>
               <Td className="text-gray-600">{m.officer_title}</Td>
               <Td className="whitespace-nowrap text-gray-600">{fmtDate(m.joined_at)}</Td>
-            </RowLink>
+              <Td>
+                <MemberRowActions
+                  clubId={club.id}
+                  userId={m.user_id}
+                  role={m.role}
+                  officerCount={club.officerCount}
+                  roleTitle={m.officer_title}
+                />
+              </Td>
+            </tr>
           ))}
         </Table>
       )}
@@ -178,7 +197,8 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
       )}
       <p className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
         Officer authority is defined by <code>club_members.role = &apos;officer&apos;</code>; this roster
-        (<code>club_officers</code>) is display-only. Officer mutations arrive on Day 2.
+        (<code>club_officers</code>) is display-only. Manage officers from the Members tab or the Officers
+        section.
       </p>
     </SectionCard>
   );
@@ -201,12 +221,12 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
     <SectionCard title="Club actions">
       <div className="space-y-3 p-4">
         <p className="text-sm text-gray-500">
-          Officer management and club moderation actions are read-only on Day 1 and land on Day 2 with
-          canonical officer RPCs and audit logging.
+          Officer &amp; membership management is <span className="font-medium text-teal-700">live</span> — use the
+          Members tab (add member, add officer, promote, demote, edit title, remove) with founder authorization and
+          audit logging. Club edit/deactivate/delete remain scheduled.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <DisabledAction label="Add / remove officer" reason="Scheduled for Day 2 (officer RPCs)" />
-          <DisabledAction label="Edit club details" reason="Scheduled for Day 2" />
+          <DisabledAction label="Edit club details" reason="Scheduled (club edit form)" />
           <DisabledAction label="Deactivate club" reason="Scheduled for Day 3 (restrictions)" tone="danger" />
           <DisabledAction label="Delete club" reason="Scheduled for Day 7 (destructive — needs safeguards)" tone="danger" />
         </div>
