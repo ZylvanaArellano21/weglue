@@ -22,14 +22,18 @@
 --   • Two entry points, both secured: the OTA `delete-message` Edge Function
 --     and the legacy `unsend_message` RPC.
 --
--- SAFETY: this migration is ADDITIVE + policy-tightening only. It creates no
--- destructive data change. The report-evidence backfill copies snapshots into a
--- new private table (idempotent); it does NOT null the reporter-readable
--- `reports.content_snapshot` columns — that destructive step is deferred to the
--- approved backfill phase (§11 / §18). Dual-platform safe: no client contract
--- breaks; old clients calling `unsend_message` still work (managed-attachment
--- messages now get a real `secure_deletion_required` error instead of an
--- insecure delete — §5b / open question §19.3).
+-- SAFETY: additive + policy-tightening, with TWO intentional destructive steps
+-- required by the privacy mandate: (1) §18 backfills report snapshots into the
+-- deny-all `report_evidence` table, asserts full coverage, then NULLs the
+-- reporter-readable `reports.content_snapshot`/`.attachment_snapshot` columns
+-- (BLOCKER 2 — snapshot nulling is NOT deferred); (2) §15b routes channel/group/
+-- official-chat bulk deletion through the canonical redaction lifecycle and
+-- retargets the message parent FKs to ON DELETE RESTRICT so no cascade can hard-
+-- delete messages (BLOCKER 3). Dual-platform safe: no client contract breaks;
+-- old clients calling `unsend_message` still work (managed-attachment messages
+-- get a real `secure_deletion_required` error instead of an insecure delete —
+-- §5b). Poll voting/creation are RPC-only, so removing direct poll_votes write
+-- policies (BLOCKER 5) does not affect clients.
 -- ============================================================================
 
 -- Tunable operational defaults (§8b). Adjust only with a documented reason.
@@ -65,7 +69,7 @@ CREATE TABLE IF NOT EXISTS message_deletion_attempts (
   actor_id                       UUID,                        -- deleter (profiles.id); no FK to survive account deletion
   reason                         TEXT,
   entry_point                    TEXT NOT NULL
-                                   CHECK (entry_point IN ('edge_function','legacy_rpc','admin')),
+                                   CHECK (entry_point IN ('edge_function','legacy_rpc','admin','bulk')),
   attachment_category            TEXT NOT NULL
                                    CHECK (attachment_category IN ('managed','external','none')),
   state                          TEXT NOT NULL DEFAULT 'pending'
@@ -75,6 +79,14 @@ CREATE TABLE IF NOT EXISTS message_deletion_attempts (
                                      'failed_requires_reconciliation',
                                      -- terminal
                                      'completed','restored','purged','aborted')),
+  -- resume state machine (§8 / BLOCKER 6). The last lifecycle step whose result
+  -- is durably committed, so a claimed `failed_requires_reconciliation` attempt
+  -- resumes from the correct safe point instead of restarting or stalling:
+  --   'created'          → nothing durable yet; resume by (re)copying to retention
+  --   'retained'         → retention copy verified; resume by deleting the original
+  --   'original_removed' → original proven absent; resume by finalizing
+  last_completed_step            TEXT NOT NULL DEFAULT 'created'
+                                   CHECK (last_completed_step IN ('created','retained','original_removed')),
   -- lease + retry (§8)
   claimed_by                     TEXT,
   claim_token                    UUID,
@@ -265,8 +277,11 @@ AS $$
     WHERE id = p_message_id AND deleted_at IS NOT NULL
   );
 $$;
-REVOKE ALL ON FUNCTION is_deleted_message(UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION is_deleted_message(UUID) TO authenticated;
+-- BLOCKER 7 (oracle): NOT granted to authenticated. A directly-callable
+-- is_deleted_message(uuid) is a deletion oracle for arbitrary UUIDs. It is used
+-- only from other SECURITY DEFINER functions (via ownership, no grant needed)
+-- and from the opaque combined RLS helpers below. Revoked from every client role.
+REVOKE ALL ON FUNCTION is_deleted_message(UUID) FROM PUBLIC, anon, authenticated;
 
 -- SECURITY DEFINER lookup of a message's conversation, bypassing messages RLS,
 -- so poll policies can check participation without depending on messages RLS.
@@ -279,8 +294,10 @@ STABLE
 AS $$
   SELECT conversation_id FROM public.messages WHERE id = p_message_id;
 $$;
-REVOKE ALL ON FUNCTION message_conversation_id(UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION message_conversation_id(UUID) TO authenticated;
+-- BLOCKER 7 (oracle): NOT granted to authenticated. Returning a conversation_id
+-- for an arbitrary message UUID leaks which conversation any message belongs to.
+-- Used only inside the opaque combined helpers (definer → no grant needed).
+REVOKE ALL ON FUNCTION message_conversation_id(UUID) FROM PUBLIC, anon, authenticated;
 
 -- True iff the exact Storage object (bucket, path) belongs to a message whose
 -- deletion attempt is active or terminal-deleted (i.e. NOT restored/aborted).
@@ -303,8 +320,9 @@ AS $$
                       'completed','failed_requires_reconciliation','purged')
   );
 $$;
-REVOKE ALL ON FUNCTION is_deleted_attachment(TEXT, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION is_deleted_attachment(TEXT, TEXT) TO authenticated;
+-- BLOCKER 7 (oracle): NOT granted to authenticated. Folded into the opaque
+-- chat_attachment_readable() helper below (definer → no grant needed).
+REVOKE ALL ON FUNCTION is_deleted_attachment(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 
 -- True iff a poll's underlying message is soft-deleted. SECURITY DEFINER so it
 -- bypasses polls/messages RLS — a guard built on an RLS-filtered subquery would
@@ -323,8 +341,111 @@ AS $$
     WHERE p.id = p_poll_id AND m.deleted_at IS NOT NULL
   );
 $$;
-REVOKE ALL ON FUNCTION is_deleted_poll(UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION is_deleted_poll(UUID) TO authenticated;
+-- BLOCKER 7 (oracle): NOT granted to authenticated. Folded into can_see_poll()
+-- / can_manage_poll() below (definer → no grant needed).
+REVOKE ALL ON FUNCTION is_deleted_poll(UUID) FROM PUBLIC, anon, authenticated;
+
+-- ── BLOCKER 7: opaque combined RLS helpers ──────────────────────────────────
+-- RLS policy expressions are evaluated with the *querying* role's privileges and
+-- Postgres DOES enforce EXECUTE on functions they call, so the poll/storage
+-- policies must call helpers `authenticated` can execute. Rather than granting
+-- the raw deletion/lookup oracles above (each of which answers a question about
+-- an arbitrary UUID/path), we grant these FUSED helpers that only ever return
+-- TRUE for a row the caller is actually entitled to and FALSE — opaquely and
+-- identically — for deleted, foreign, unauthorized, and nonexistent inputs. An
+-- attacker calling them directly learns nothing they could not already see.
+
+-- Poll (by underlying message) is visible to me: not deleted AND I participate.
+CREATE OR REPLACE FUNCTION can_see_message(p_message_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.messages m
+    WHERE m.id = p_message_id
+      AND m.deleted_at IS NULL
+      AND is_conversation_participant(m.conversation_id)
+  );
+$$;
+REVOKE ALL ON FUNCTION can_see_message(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION can_see_message(UUID) TO authenticated;
+
+-- Poll (by poll id) is visible to me: its message is not deleted AND I participate.
+CREATE OR REPLACE FUNCTION can_see_poll(p_poll_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.polls p
+    JOIN public.messages m ON m.id = p.message_id
+    WHERE p.id = p_poll_id
+      AND m.deleted_at IS NULL
+      AND is_conversation_participant(m.conversation_id)
+  );
+$$;
+REVOKE ALL ON FUNCTION can_see_poll(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION can_see_poll(UUID) TO authenticated;
+
+-- Poll (by underlying message) is manageable by me: not deleted AND I am the
+-- message sender (poll creator).
+CREATE OR REPLACE FUNCTION can_manage_poll_message(p_message_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.messages m
+    WHERE m.id = p_message_id
+      AND m.deleted_at IS NULL
+      AND m.sender_id = auth.uid()
+  );
+$$;
+REVOKE ALL ON FUNCTION can_manage_poll_message(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION can_manage_poll_message(UUID) TO authenticated;
+
+-- Poll (by poll id) is manageable by me: its message is not deleted AND I am the
+-- sender. Used by the poll_options creator-manage policy.
+CREATE OR REPLACE FUNCTION can_manage_poll(p_poll_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.polls p
+    JOIN public.messages m ON m.id = p.message_id
+    WHERE p.id = p_poll_id
+      AND m.deleted_at IS NULL
+      AND m.sender_id = auth.uid()
+  );
+$$;
+REVOKE ALL ON FUNCTION can_manage_poll(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION can_manage_poll(UUID) TO authenticated;
+
+-- Chat attachment object is readable by me: I participate in its conversation
+-- (folder segment 1) AND it is not a deleted attachment. Folds the storage
+-- deletion oracle behind the participation check.
+CREATE OR REPLACE FUNCTION chat_attachment_readable(p_name TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, storage
+STABLE
+AS $$
+  SELECT is_conversation_participant(((storage.foldername(p_name))[1])::uuid)
+     AND NOT is_deleted_attachment('chat-attachments', p_name);
+$$;
+REVOKE ALL ON FUNCTION chat_attachment_readable(TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION chat_attachment_readable(TEXT) TO authenticated;
 
 -- Backoff schedule for retryable failures (§8d). Exponential, capped at 30 min.
 CREATE OR REPLACE FUNCTION _dmp_backoff(p_retry_count INT)
@@ -336,6 +457,26 @@ AS $$
   SELECT least(make_interval(secs => 30 * power(2, greatest(p_retry_count,0))::int), interval '30 minutes');
 $$;
 REVOKE ALL ON FUNCTION _dmp_backoff(INT) FROM PUBLIC, anon, authenticated;
+
+-- BLOCKER 6 — resume-state resolver. Given an attempt's state and its
+-- last_completed_step, return the ACTIVE state a worker should drive on claim.
+-- Active states pass through unchanged; a failed_requires_reconciliation attempt
+-- is mapped back to the resumable active state implied by the durably-recorded
+-- last completed step. Deterministic + idempotent.
+CREATE OR REPLACE FUNCTION _dmp_resume_state(p_state TEXT, p_last_completed_step TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+  SELECT CASE
+    WHEN p_state <> 'failed_requires_reconciliation' THEN p_state
+    WHEN p_last_completed_step = 'original_removed'   THEN 'original_removed'
+    WHEN p_last_completed_step = 'retained'           THEN 'retained'
+    ELSE 'pending'
+  END;
+$$;
+REVOKE ALL ON FUNCTION _dmp_resume_state(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 
 -- ============================================================================
 -- SECTION 8 — Message SELECT RLS: require deleted_at IS NULL (§1/§4)
@@ -372,87 +513,86 @@ CREATE POLICY "messages: non-member club preview"
 -- unaffected (they do not run as anon/authenticated).
 REVOKE DELETE ON messages FROM anon, authenticated;
 
+-- BLOCKER 1 — deleted-message UPDATE bypass. The ordinary `messages: senders can
+-- update own` policy (040) let a sender UPDATE their own row with no
+-- `deleted_at IS NULL` guard, so a client could clear deleted_at, rehydrate
+-- content/attachment fields, or mutate deletion state — bypassing audited
+-- founder restoration. There is NO legitimate client message-edit feature (the
+-- app never UPDATEs `messages`; every mutation goes through SECURITY DEFINER
+-- RPCs owned by postgres, which bypass RLS as the table owner and need no client
+-- grant). So we remove ordinary direct UPDATE rights entirely rather than
+-- retaining unnecessary, dangerous access. Restoration is available only through
+-- the controlled admin_restore_message() operation (§10). A future edit feature
+-- must be a new SECURITY DEFINER RPC that itself requires `deleted_at IS NULL`.
+DROP POLICY IF EXISTS "messages: senders can update own" ON messages;
+DROP POLICY IF EXISTS "messages: senders can update" ON messages;
+REVOKE UPDATE ON messages FROM anon, authenticated;
+
 -- ============================================================================
 -- SECTION 9 — Poll privacy (§9)
 -- ============================================================================
 -- Every permissive SELECT policy on the three poll tables AND cast_poll_vote
--- must check deletion state via is_deleted_message() so no participant can
--- read/infer question/options/votes/voters/totals or vote on a deleted poll.
+-- must check deletion state so no participant can read/infer
+-- question/options/votes/voters/totals or vote on a deleted poll. The policies
+-- call the opaque combined helpers (§7 / BLOCKER 7): they return TRUE only for a
+-- poll the caller is entitled to see and FALSE identically for
+-- deleted/foreign/nonexistent — no raw deletion or conversation-id oracle is
+-- exposed to `authenticated`.
+--
+-- BLOCKER 5 — legacy permissive policies OR-combine. Postgres permissive
+-- policies are OR'd, so an unguarded legacy policy re-opens what a new guarded
+-- policy closes. We DROP every legacy poll policy that lacks the deletion guard
+-- or bypasses the canonical RPCs, and recreate only the guarded set below.
+
+-- polls SELECT: drop BOTH the prior guarded name AND migration 010's unguarded
+-- duplicate ("polls: participants can read"), which leaked deleted polls via OR.
 DROP POLICY IF EXISTS "polls: conversation participants can read" ON polls;
+DROP POLICY IF EXISTS "polls: participants can read" ON polls;
 CREATE POLICY "polls: conversation participants can read"
   ON polls FOR SELECT TO authenticated
-  USING (
-    NOT is_deleted_message(polls.message_id)
-    AND is_conversation_participant(message_conversation_id(polls.message_id))
-  );
+  USING ( can_see_message(polls.message_id) );
 
 DROP POLICY IF EXISTS "poll_options: participants can read" ON poll_options;
 CREATE POLICY "poll_options: participants can read"
   ON poll_options FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM polls p
-      WHERE p.id = poll_options.poll_id
-        AND NOT is_deleted_message(p.message_id)
-        AND is_conversation_participant(message_conversation_id(p.message_id))
-    )
-  );
+  USING ( can_see_poll(poll_options.poll_id) );
 
 DROP POLICY IF EXISTS "poll_votes: participants can read" ON poll_votes;
 CREATE POLICY "poll_votes: participants can read"
   ON poll_votes FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM polls p
-      WHERE p.id = poll_votes.poll_id
-        AND NOT is_deleted_message(p.message_id)
-        AND is_conversation_participant(message_conversation_id(p.message_id))
-    )
-  );
+  USING ( can_see_poll(poll_votes.poll_id) );
 
--- CRITICAL LEAK FIX: migration 010's "poll_votes: users manage own" is a FOR ALL
--- policy keyed only on user_id, so its SELECT arm let a voter still read THEIR
--- OWN vote row on a DELETED poll (leaking that the poll existed + their choice).
--- Recreate it guarded with is_deleted_poll() (SECURITY DEFINER, so the guard
--- cannot fail open). Live-poll vote management is unchanged.
+-- BLOCKER 5 — poll_votes writes are RPC-ONLY. The app never writes poll_votes
+-- directly; every vote goes through cast_poll_vote() (SECURITY DEFINER, owned by
+-- postgres → bypasses RLS). Remove ALL direct-write policies so an ordinary
+-- client cannot INSERT/UPDATE/DELETE a vote row — including on a deleted poll or
+-- to fabricate/erase totals. Migration 010's guarded "users manage own" is also
+-- dropped (its SELECT arm is superseded by "participants can read" above; its
+-- write arm is exactly what we are removing). Legacy 001 direct INSERT/DELETE
+-- policies are dropped too.
 DROP POLICY IF EXISTS "poll_votes: users manage own" ON poll_votes;
-CREATE POLICY "poll_votes: users manage own"
-  ON poll_votes FOR ALL TO authenticated
-  USING (user_id = auth.uid() AND NOT is_deleted_poll(poll_votes.poll_id))
-  WITH CHECK (user_id = auth.uid() AND NOT is_deleted_poll(poll_votes.poll_id));
+DROP POLICY IF EXISTS "poll_votes: authenticated can vote" ON poll_votes;
+DROP POLICY IF EXISTS "poll_votes: users can remove own vote" ON poll_votes;
 
--- Defense in depth: the poll/option "manage" FOR ALL policies (migration 001)
--- self-filter deleted polls today only because their message subquery is
--- RLS-filtered. Recreate them with an explicit is_deleted_message() guard so
--- the poll SENDER/creator (who may be the deleter) cannot read/manage a deleted
--- poll's rows regardless of any future change to messages RLS (§9).
+-- Defense in depth: the poll/option creator "manage" FOR ALL policies self-filter
+-- deleted polls today only because their message subquery is RLS-filtered.
+-- Recreate them with the opaque manage helpers so the poll SENDER/creator (who
+-- may be the deleter) cannot read/manage a deleted poll's rows regardless of any
+-- future change to messages RLS (§9). Also drop migration 010's unguarded
+-- "poll_options: poll creator can insert" (creation is via create_poll RPC;
+-- the guarded manage policy covers legitimate active-poll option writes).
 DROP POLICY IF EXISTS "polls: message senders can manage" ON polls;
 CREATE POLICY "polls: message senders can manage"
   ON polls FOR ALL TO authenticated
-  USING (
-    NOT is_deleted_message(polls.message_id)
-    AND EXISTS (SELECT 1 FROM messages m WHERE m.id = polls.message_id AND m.sender_id = auth.uid())
-  )
-  WITH CHECK (
-    NOT is_deleted_message(polls.message_id)
-    AND EXISTS (SELECT 1 FROM messages m WHERE m.id = polls.message_id AND m.sender_id = auth.uid())
-  );
+  USING ( can_manage_poll_message(polls.message_id) )
+  WITH CHECK ( can_manage_poll_message(polls.message_id) );
 
+DROP POLICY IF EXISTS "poll_options: poll creator can insert" ON poll_options;
 DROP POLICY IF EXISTS "poll_options: poll creator can manage" ON poll_options;
 CREATE POLICY "poll_options: poll creator can manage"
   ON poll_options FOR ALL TO authenticated
-  USING (
-    NOT is_deleted_poll(poll_options.poll_id)
-    AND EXISTS (
-      SELECT 1 FROM polls p JOIN messages m ON m.id = p.message_id
-      WHERE p.id = poll_options.poll_id AND m.sender_id = auth.uid())
-  )
-  WITH CHECK (
-    NOT is_deleted_poll(poll_options.poll_id)
-    AND EXISTS (
-      SELECT 1 FROM polls p JOIN messages m ON m.id = p.message_id
-      WHERE p.id = poll_options.poll_id AND m.sender_id = auth.uid())
-  );
+  USING ( can_manage_poll(poll_options.poll_id) )
+  WITH CHECK ( can_manage_poll(poll_options.poll_id) );
 
 -- Voting on a deleted poll is denied (§9). Recreate cast_poll_vote with the
 -- deletion guard added; behavior otherwise identical to migration 010.
@@ -526,9 +666,26 @@ DROP POLICY IF EXISTS "chat-attachments: participants can read" ON storage.objec
 CREATE POLICY "chat-attachments: participants can read" ON storage.objects
   FOR SELECT USING (
     bucket_id = 'chat-attachments'
-    AND is_conversation_participant(((storage.foldername(name))[1])::uuid)
-    AND NOT is_deleted_attachment('chat-attachments', name)
+    AND chat_attachment_readable(name)
   );
+
+-- BLOCKER 4 — client Storage DELETE bypass. Migration 006's
+-- "chat-attachments: uploader can delete" (USING owner = auth.uid()) let an
+-- ordinary uploader physically remove the original attachment object at any
+-- time — before retention, defeating the entire deletion lifecycle (an uploader
+-- could destroy their own attachment without a retained copy, and there was no
+-- server audit). Attachment removal must occur ONLY through the secure
+-- server-side flow (delete-message / reconcile-deletions Edge Functions running
+-- as service_role, which bypass RLS). Drop the client DELETE policy entirely;
+-- there is no INSERT/SELECT change (uploading + reading active attachments still
+-- work). Account-deletion cleanup already removes objects via the service-role
+-- Edge Function (migration 044), not an ordinary client DELETE.
+DROP POLICY IF EXISTS "chat-attachments: uploader can delete" ON storage.objects;
+
+-- The private `deleted-message-retention` bucket has NO storage.objects policy,
+-- so RLS default-denies every anon/authenticated SELECT/INSERT/UPDATE/DELETE on
+-- it. Retained originals are reachable only by the service role (Edge worker)
+-- and a future audited founder/admin path. (Re-asserted here for the audit.)
 
 -- ============================================================================
 -- SECTION 11 — Push provenance + cleanup (§10)
@@ -909,14 +1066,17 @@ BEGIN
     RAISE EXCEPTION 'not_found_or_not_authorized' USING ERRCODE = '42501';
   END IF;
 
-  -- Already securely deleted -> idempotent signal (no new attempt here).
-  IF v_msg.deleted_at IS NOT NULL THEN
-    RETURN jsonb_build_object('status','already_deleted','message_id', p_message_id);
-  END IF;
-
   SELECT c.type, c.club_id, c.created_by INTO v_conv
   FROM conversations c WHERE c.id = v_msg.conversation_id;
 
+  -- BLOCKER 7 (deletion oracle) — authorization runs BEFORE any existence /
+  -- deletion signal is returned. Previously `already_deleted` was returned here
+  -- before this check, so an UNAUTHORIZED caller could distinguish a foreign
+  -- *deleted* message (got 'already_deleted') from a foreign *live* or
+  -- nonexistent message (got the opaque error) — an oracle. Now every
+  -- unauthorized/foreign/nonexistent input collapses to the SAME opaque error,
+  -- and only an authorized caller ever learns the message is already deleted.
+  --
   -- Authorization (§3) — identical to unsend_message (040:173-181), but the
   -- officer check is actor-parameterized: is_club_officer() reads auth.uid(),
   -- which is NULL when the Edge Function calls this as service_role with
@@ -930,6 +1090,11 @@ BEGIN
      OR (v_conv.type = 'group' AND v_conv.created_by = p_actor_id)
   ) THEN
     RAISE EXCEPTION 'not_found_or_not_authorized' USING ERRCODE = '42501';
+  END IF;
+
+  -- Authorized: only now may we reveal the idempotent already-deleted signal.
+  IF v_msg.deleted_at IS NOT NULL THEN
+    RETURN jsonb_build_object('status','already_deleted','message_id', p_message_id);
   END IF;
 
   -- Classify the attachment.
@@ -1006,7 +1171,7 @@ BEGIN
   IF p_actor_id IS NULL THEN
     RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
   END IF;
-  IF p_entry_point NOT IN ('edge_function','legacy_rpc','admin') THEN
+  IF p_entry_point NOT IN ('edge_function','legacy_rpc','admin','bulk') THEN
     RAISE EXCEPTION 'invalid_entry_point' USING ERRCODE = '22023';
   END IF;
   IF p_entry_point = 'edge_function' AND (p_idempotency_key IS NULL OR length(trim(p_idempotency_key)) = 0) THEN
@@ -1025,7 +1190,29 @@ BEGIN
     RAISE EXCEPTION 'not_found_or_not_authorized' USING ERRCODE = '42501';
   END IF;
 
-  -- Already securely deleted: idempotent success, no new attempt (§5b rule 3).
+  SELECT c.type, c.club_id, c.created_by INTO v_conv
+  FROM conversations c WHERE c.id = v_msg.conversation_id;
+
+  -- BLOCKER 7 (deletion oracle) — authorize BEFORE returning the already-deleted
+  -- signal, so an unauthorized caller cannot distinguish a foreign deleted
+  -- message from a foreign live/nonexistent one. Re-confirm authorization under
+  -- the lock (§4b step 1). Officer check is actor-parameterized (see
+  -- preflight_message_deletion). Entry points 'admin' and 'bulk' are trusted
+  -- server-only callers (this function is REVOKE'd from anon/authenticated); the
+  -- bulk conversation/channel operations authorize the actor themselves before
+  -- looping (BLOCKER 3).
+  IF NOT (
+        v_msg.sender_id = p_actor_id
+     OR (v_conv.type IN ('club_group','officer_chat')
+         AND EXISTS (SELECT 1 FROM club_members
+                     WHERE club_id = v_conv.club_id AND user_id = p_actor_id AND role = 'officer'))
+     OR (v_conv.type = 'group' AND v_conv.created_by = p_actor_id)
+     OR p_entry_point IN ('admin','bulk')
+  ) THEN
+    RAISE EXCEPTION 'not_found_or_not_authorized' USING ERRCODE = '42501';
+  END IF;
+
+  -- Authorized: only now reveal the idempotent already-deleted signal (§5b rule 3).
   IF v_msg.deleted_at IS NOT NULL THEN
     SELECT id, state INTO v_existing
     FROM message_deletion_attempts
@@ -1033,22 +1220,6 @@ BEGIN
     ORDER BY attempt_no DESC LIMIT 1;
     RETURN jsonb_build_object('status','already_deleted','message_id', p_message_id,
       'attempt_id', v_existing.id, 'state', v_existing.state);
-  END IF;
-
-  SELECT c.type, c.club_id, c.created_by INTO v_conv
-  FROM conversations c WHERE c.id = v_msg.conversation_id;
-
-  -- Re-confirm authorization under the lock (§4b step 1). Officer check is
-  -- actor-parameterized (see preflight_message_deletion for the rationale).
-  IF NOT (
-        v_msg.sender_id = p_actor_id
-     OR (v_conv.type IN ('club_group','officer_chat')
-         AND EXISTS (SELECT 1 FROM club_members
-                     WHERE club_id = v_conv.club_id AND user_id = p_actor_id AND role = 'officer'))
-     OR (v_conv.type = 'group' AND v_conv.created_by = p_actor_id)
-     OR p_entry_point = 'admin'
-  ) THEN
-    RAISE EXCEPTION 'not_found_or_not_authorized' USING ERRCODE = '42501';
   END IF;
 
   -- Reuse a compatible active attempt if one exists (§5b rule 2 + edge dup).
@@ -1224,6 +1395,158 @@ REVOKE ALL ON FUNCTION unsend_message(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION unsend_message(UUID) TO authenticated;
 
 -- ============================================================================
+-- SECTION 15b — BLOCKER 3: safe bulk deletion (channel / group / official chat)
+-- ============================================================================
+-- Three product operations remove a whole channel/conversation's messages:
+--   • delete_conversation_channel (041) — physically DELETE'd the channel, which
+--     CASCADE-HARD-DELETED every message via messages.channel_id / the composite
+--     FK: no history, no attachment retention, no redaction, no push/poll
+--     cleanup. A catastrophic privacy bypass.
+--   • delete_group_conversation (040) and clear_official_chat (040) — merely set
+--     messages.deleted_at WITHOUT redacting content, retaining attachments,
+--     snapshotting history, or scrubbing pushes. The original content stayed in
+--     the row and Storage.
+--
+-- Decision (§ Blocker 3): Approach A — route EVERY message through the canonical
+-- deletion lifecycle, and forbid any FK cascade from physically erasing product
+-- messages.
+--
+-- (1) Retarget the message parent FKs from ON DELETE CASCADE to ON DELETE
+--     RESTRICT so neither a channel nor a conversation delete can ever erase
+--     messages outside the lifecycle. (Deleting a child message row is
+--     unaffected — RESTRICT constrains deleting the PARENT.)
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_channel_id_fkey;
+ALTER TABLE messages ADD CONSTRAINT messages_channel_id_fkey
+  FOREIGN KEY (channel_id) REFERENCES conversation_channels(id) ON DELETE RESTRICT;
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_channel_conversation_fkey;
+ALTER TABLE messages ADD CONSTRAINT messages_channel_conversation_fkey
+  FOREIGN KEY (channel_id, conversation_id)
+  REFERENCES conversation_channels(id, conversation_id) ON DELETE RESTRICT;
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_conversation_id_fkey;
+ALTER TABLE messages ADD CONSTRAINT messages_conversation_id_fkey
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE RESTRICT;
+
+-- (2) Remove the client-facing channel DELETE policy: channel removal must go
+--     through the secure RPC below, never a direct client DELETE. (With RESTRICT
+--     a direct delete of a channel with messages already fails, but we close the
+--     path entirely — the app deletes only via delete_conversation_channel.)
+DROP POLICY IF EXISTS "conv_channels: officers can delete" ON conversation_channels;
+
+-- (3) Bulk secure-delete helper: route EVERY active message in a conversation
+--     (optionally a single channel) through begin_message_deletion with
+--     entry_point='bulk' — snapshot to founder history, map + schedule
+--     managed-attachment retention/removal, redact canonical content, set
+--     deleted_at, scrub pending pushes. Managed attachments become 'pending'
+--     attempts the reconcile worker retains + removes asynchronously; the DB is
+--     fail-closed immediately and synchronously. The caller MUST authorize the
+--     actor first (these helpers do not re-check the actor's role). Returns the
+--     count processed. NOTE: redaction is one transaction; the physical Storage
+--     work is bounded + resumable in the worker (§8). For very large channels the
+--     redaction batch is large but cheap (no in-txn Storage) — acceptable at
+--     launch scale; a future chunked variant can page by created_at if needed.
+CREATE OR REPLACE FUNCTION _dmp_bulk_secure_delete(
+  p_conversation_id UUID, p_channel_id UUID, p_actor UUID)
+RETURNS INT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE r RECORD; v_n INT := 0;
+BEGIN
+  FOR r IN
+    SELECT id FROM messages
+    WHERE conversation_id = p_conversation_id
+      AND (p_channel_id IS NULL OR channel_id = p_channel_id)
+      AND deleted_at IS NULL
+    ORDER BY created_at, id
+  LOOP
+    PERFORM begin_message_deletion(r.id, p_actor, 'bulk', NULL, 'bulk_delete');
+    v_n := v_n + 1;
+  END LOOP;
+  RETURN v_n;
+END;
+$$;
+REVOKE ALL ON FUNCTION _dmp_bulk_secure_delete(UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;
+
+-- (4) delete_conversation_channel — securely redact every message in the
+--     channel, DETACH them (channel_id -> NULL) so the RESTRICT FK is satisfied,
+--     then physically remove the now-empty channel container. Messages have
+--     ALREADY completed secure deletion (redaction) before the parent is
+--     removed, and their retained originals live under message_id, not the
+--     channel — so nothing is orphaned or bypassed.
+CREATE OR REPLACE FUNCTION delete_conversation_channel(p_channel_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE v RECORD;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  SELECT cc.kind, cc.conversation_id, c.type, c.club_id INTO v
+  FROM conversation_channels cc JOIN conversations c ON c.id = cc.conversation_id
+  WHERE cc.id = p_channel_id;
+  IF NOT FOUND THEN RETURN; END IF;
+  IF v.kind = 'main' THEN RAISE EXCEPTION 'cannot_delete_main'; END IF;
+  IF v.type NOT IN ('club_group','officer_chat') OR NOT is_club_officer(v.club_id) THEN
+    RAISE EXCEPTION 'not_authorized';
+  END IF;
+
+  PERFORM _dmp_bulk_secure_delete(v.conversation_id, p_channel_id, auth.uid());
+  -- Detach the redacted messages so the ON DELETE RESTRICT parent FK is
+  -- satisfied and no cascade can fire (the composite FK with NULL channel_id is
+  -- unenforced). History already holds the original channel_id snapshot.
+  UPDATE messages SET channel_id = NULL WHERE channel_id = p_channel_id;
+  DELETE FROM conversation_channels WHERE id = p_channel_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION delete_conversation_channel(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION delete_conversation_channel(UUID) TO authenticated;
+
+-- (5) delete_group_conversation — secure-redact every message, then soft-delete
+--     the conversation (never physical → no cascade) and drop participants.
+CREATE OR REPLACE FUNCTION delete_group_conversation(p_conversation_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM conversations
+    WHERE id = p_conversation_id AND type = 'group' AND created_by = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'not_authorized';
+  END IF;
+
+  PERFORM _dmp_bulk_secure_delete(p_conversation_id, NULL, auth.uid());
+  UPDATE conversations SET deleted_at = now() WHERE id = p_conversation_id;
+  DELETE FROM conversation_participants WHERE conversation_id = p_conversation_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION delete_group_conversation(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION delete_group_conversation(UUID) TO authenticated;
+
+-- (6) clear_official_chat — secure-redact every message, then hide the thread
+--     for participants (conversation itself is retained).
+CREATE OR REPLACE FUNCTION clear_official_chat(p_conversation_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE v_conv RECORD;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+
+  SELECT type, club_id INTO v_conv FROM conversations WHERE id = p_conversation_id;
+  IF NOT FOUND OR v_conv.type NOT IN ('club_group','officer_chat') THEN
+    RAISE EXCEPTION 'not_official_chat';
+  END IF;
+  IF NOT is_club_officer(v_conv.club_id) THEN RAISE EXCEPTION 'not_authorized'; END IF;
+
+  PERFORM _dmp_bulk_secure_delete(p_conversation_id, NULL, auth.uid());
+  UPDATE conversation_participants SET hidden_at = now()
+  WHERE conversation_id = p_conversation_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION clear_official_chat(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION clear_official_chat(UUID) TO authenticated;
+
+-- ============================================================================
 -- SECTION 16 — Worker: claim, heartbeat, CAS transitions, fail/dead-letter (§8)
 -- ============================================================================
 -- Claim ONE eligible attempt (§8c predicate) with a 5-minute lease. Short PG
@@ -1236,11 +1559,14 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_id    UUID;
-  v_token UUID := gen_random_uuid();
-  v_row   RECORD;
+  v_id     UUID;
+  v_state  TEXT;
+  v_step   TEXT;
+  v_resume TEXT;
+  v_token  UUID := gen_random_uuid();
+  v_row    RECORD;
 BEGIN
-  SELECT a.id INTO v_id
+  SELECT a.id, a.state, a.last_completed_step INTO v_id, v_state, v_step
   FROM message_deletion_attempts a
   WHERE a.state IN ('pending','retained','original_removed','failed_requires_reconciliation')
     AND a.requires_manual_reconciliation = false
@@ -1256,15 +1582,27 @@ BEGIN
     RETURN jsonb_build_object('claimed', false);
   END IF;
 
+  -- BLOCKER 6 — resume-state normalization. A `failed_requires_reconciliation`
+  -- attempt carries no active step of its own, and the CAS transitions only
+  -- accept the happy-path prior state (pending/retained/original_removed). Map it
+  -- back to the correct resumable state from the durably-recorded
+  -- last_completed_step so the normal CAS transitions apply and the worker
+  -- resumes from the right point (never restarting after the original is gone,
+  -- never finalizing before retention). Idempotent: re-normalizes to the same
+  -- state on every reclaim.
+  v_resume := _dmp_resume_state(v_state, v_step);
+
   UPDATE message_deletion_attempts
-  SET claimed_by = p_worker,
+  SET state = v_resume,
+      claimed_by = p_worker,
       claim_token = v_token,
       claimed_at = now(),
       claim_expires_at = now() + interval '5 minutes',   -- lease
       last_attempt_at = now(),
       updated_at = now()
   WHERE id = v_id
-  RETURNING id, message_id, attempt_no, state, attachment_category, retry_count
+  RETURNING id, message_id, attempt_no, state, attachment_category, retry_count,
+            last_completed_step
     INTO v_row;
 
   RETURN jsonb_build_object(
@@ -1273,6 +1611,7 @@ BEGIN
     'message_id', v_row.message_id,
     'claim_token', v_token,
     'state', v_row.state,
+    'last_completed_step', v_row.last_completed_step,
     'category', v_row.attachment_category,
     'retry_count', v_row.retry_count,
     'mapping', (
@@ -1292,11 +1631,14 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_id    UUID;
-  v_token UUID := gen_random_uuid();
-  v_row   RECORD;
+  v_id     UUID;
+  v_state  TEXT;
+  v_step   TEXT;
+  v_resume TEXT;
+  v_token  UUID := gen_random_uuid();
+  v_row    RECORD;
 BEGIN
-  SELECT a.id INTO v_id
+  SELECT a.id, a.state, a.last_completed_step INTO v_id, v_state, v_step
   FROM message_deletion_attempts a
   WHERE a.id = p_attempt
     AND a.state IN ('pending','retained','original_removed','failed_requires_reconciliation')
@@ -1312,16 +1654,23 @@ BEGIN
     RETURN jsonb_build_object('claimed', false);
   END IF;
 
+  -- BLOCKER 6 — same resume-state normalization as claim_deletion_attempt.
+  v_resume := _dmp_resume_state(v_state, v_step);
+
   UPDATE message_deletion_attempts
-  SET claimed_by = p_worker, claim_token = v_token, claimed_at = now(),
+  SET state = v_resume,
+      claimed_by = p_worker, claim_token = v_token, claimed_at = now(),
       claim_expires_at = now() + interval '5 minutes',
       last_attempt_at = now(), updated_at = now()
   WHERE id = v_id
-  RETURNING id, message_id, attempt_no, state, attachment_category, retry_count INTO v_row;
+  RETURNING id, message_id, attempt_no, state, attachment_category, retry_count,
+            last_completed_step INTO v_row;
 
   RETURN jsonb_build_object(
     'claimed', true, 'attempt_id', v_row.id, 'message_id', v_row.message_id,
-    'claim_token', v_token, 'state', v_row.state, 'category', v_row.attachment_category,
+    'claim_token', v_token, 'state', v_row.state,
+    'last_completed_step', v_row.last_completed_step,
+    'category', v_row.attachment_category,
     'retry_count', v_row.retry_count,
     'mapping', (SELECT to_jsonb(m) FROM message_attachment_map m WHERE m.attempt_id = v_row.id LIMIT 1));
 END;
@@ -1359,7 +1708,7 @@ AS $$
 DECLARE v_n INT;
 BEGIN
   UPDATE message_deletion_attempts
-  SET state = 'retained', updated_at = now()
+  SET state = 'retained', last_completed_step = 'retained', updated_at = now()
   WHERE id = p_attempt AND claim_token = p_claim_token
     AND claim_expires_at > now() AND state = 'pending';
   GET DIAGNOSTICS v_n = ROW_COUNT;
@@ -1387,7 +1736,7 @@ AS $$
 DECLARE v_n INT;
 BEGIN
   UPDATE message_deletion_attempts
-  SET state = 'original_removed', updated_at = now()
+  SET state = 'original_removed', last_completed_step = 'original_removed', updated_at = now()
   WHERE id = p_attempt AND claim_token = p_claim_token
     AND claim_expires_at > now() AND state = 'retained';
   GET DIAGNOSTICS v_n = ROW_COUNT;
@@ -1629,11 +1978,90 @@ $$;
 REVOKE ALL ON FUNCTION admin_purge_deleted_message(UUID, TEXT) FROM PUBLIC, anon, authenticated;
 
 -- ============================================================================
--- SECTION 18 — Report-evidence backfill (§11, NON-destructive)
+-- SECTION 18 — BLOCKER 2: confidential report evidence (§11)
 -- ============================================================================
--- Copy existing reporter-readable snapshots into the private one-to-many table.
--- Idempotent (guarded by NOT EXISTS). Does NOT null reporters' snapshot columns
--- — that destructive step is deferred to the approved backfill phase (§18).
+-- Migration 040's report_message() wrote the reported message's content +
+-- attachment snapshot into `reports.content_snapshot` / `.attachment_snapshot`,
+-- which are reporter-readable. So a reporter (or anyone who can read the report
+-- row) could retrieve a deleted message's original content/attachment forever —
+-- the exact §0 violation this release exists to fix. We move ALL confidential
+-- evidence into the private, deny-all `report_evidence` table and strip it from
+-- the reporter-facing `reports` row, which now carries WORKFLOW fields only.
+
+-- (a) Harden report_message: write evidence to private report_evidence only;
+--     never populate the reporter-readable snapshot columns. The reporter row
+--     keeps report id, reason, details, target type/id, status, timestamps.
+CREATE OR REPLACE FUNCTION report_message(
+  p_message_id UUID,
+  p_reason TEXT,
+  p_details TEXT DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  v_msg RECORD;
+  v_conv RECORD;
+  v_reporter RECORD;
+  v_report_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+
+  SELECT m.*, p.question AS poll_question INTO v_msg
+  FROM messages m
+  LEFT JOIN polls p ON p.message_id = m.id
+  WHERE m.id = p_message_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'message_not_found'; END IF;
+  IF NOT is_conversation_participant(v_msg.conversation_id) THEN
+    RAISE EXCEPTION 'not_a_participant';
+  END IF;
+  IF v_msg.sender_id = auth.uid() THEN RAISE EXCEPTION 'cannot_report_own'; END IF;
+
+  SELECT type, club_id INTO v_conv FROM conversations WHERE id = v_msg.conversation_id;
+  SELECT username, id INTO v_reporter FROM profiles WHERE id = auth.uid();
+
+  -- Workflow-only reporter row (NO content/attachment snapshot columns written).
+  INSERT INTO reports (
+    reporter_id, reporter_username, entity_type, entity_id, club_id,
+    reason, details, status,
+    message_id, conversation_id, conversation_type, message_type,
+    message_sender_id
+  ) VALUES (
+    auth.uid(), v_reporter.username, 'message', p_message_id, v_conv.club_id,
+    p_reason, p_details, 'pending',
+    p_message_id, v_msg.conversation_id, v_conv.type, v_msg.message_type,
+    v_msg.sender_id
+  ) RETURNING id INTO v_report_id;
+
+  -- Confidential evidence -> private, deny-all report_evidence (moderator-only
+  -- via a future audited path). Captured at report time so a later unsend cannot
+  -- destroy it, but NEVER reader-visible on the reports row.
+  IF COALESCE(v_msg.content, v_msg.poll_question) IS NOT NULL THEN
+    INSERT INTO report_evidence (report_id, evidence_type, related_entity_type,
+                                 related_entity_id, content_snapshot)
+    VALUES (v_report_id, 'message_content', 'message', p_message_id,
+            COALESCE(v_msg.content, v_msg.poll_question));
+  END IF;
+  IF v_msg.attachment_url IS NOT NULL THEN
+    INSERT INTO report_evidence (report_id, evidence_type, related_entity_type,
+                                 related_entity_id, storage_bucket, storage_path, metadata)
+    VALUES (v_report_id, 'attachment', 'message', p_message_id,
+            'chat-attachments', v_msg.attachment_url,
+            jsonb_build_object(
+              'url', v_msg.attachment_url,
+              'name', v_msg.attachment_name,
+              'size', v_msg.attachment_size,
+              'mime', v_msg.attachment_mime));
+  END IF;
+
+  RETURN v_report_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION report_message(UUID, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION report_message(UUID, TEXT, TEXT) TO authenticated;
+
+-- (b) Backfill existing snapshots into private report_evidence (idempotent,
+--     NOT EXISTS-guarded). Service-role/migration runs this.
 INSERT INTO report_evidence (report_id, evidence_type, related_entity_type, related_entity_id, content_snapshot, metadata)
 SELECT r.id, 'message_content', 'message', r.message_id, r.content_snapshot, NULL
 FROM reports r
@@ -1650,6 +2078,40 @@ WHERE r.attachment_snapshot IS NOT NULL
   AND NOT EXISTS (
     SELECT 1 FROM report_evidence e
     WHERE e.report_id = r.id AND e.evidence_type = 'attachment');
+
+-- (c) Coverage assertion: EVERY reporter-readable snapshot must now have a
+--     matching private report_evidence row before we null the source. Abort the
+--     whole migration if any snapshot would be lost.
+DO $$
+DECLARE v_missing INT;
+BEGIN
+  SELECT count(*) INTO v_missing
+  FROM reports r
+  WHERE (r.content_snapshot IS NOT NULL AND NOT EXISTS (
+           SELECT 1 FROM report_evidence e
+           WHERE e.report_id = r.id AND e.evidence_type = 'message_content'))
+     OR (r.attachment_snapshot IS NOT NULL AND NOT EXISTS (
+           SELECT 1 FROM report_evidence e
+           WHERE e.report_id = r.id AND e.evidence_type = 'attachment'));
+  IF v_missing > 0 THEN
+    RAISE EXCEPTION 'report_evidence backfill incomplete: % report(s) uncovered', v_missing;
+  END IF;
+END $$;
+
+-- (d) Now-safe destructive step (BLOCKER 2 requires this in THIS release, not a
+--     deferred phase): null the reporter-readable snapshot columns. Evidence is
+--     preserved only in the deny-all report_evidence table. Rollback of 051
+--     leaves these NULLs in place (data already gone), so it can never re-grant
+--     reporter access to retained evidence.
+UPDATE reports SET content_snapshot = NULL WHERE content_snapshot IS NOT NULL;
+UPDATE reports SET attachment_snapshot = NULL WHERE attachment_snapshot IS NOT NULL;
+
+COMMENT ON COLUMN reports.content_snapshot IS
+  'DEPRECATED / always NULL since migration 051. Confidential report content '
+  'lives in the deny-all report_evidence table. Never write this column.';
+COMMENT ON COLUMN reports.attachment_snapshot IS
+  'DEPRECATED / always NULL since migration 051. Confidential attachment evidence '
+  'lives in the deny-all report_evidence table. Never write this column.';
 
 -- ============================================================================
 -- SECTION 19 — Realtime redaction note (§7)
