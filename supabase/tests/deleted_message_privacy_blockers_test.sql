@@ -173,6 +173,16 @@ SELECT count(*) AS n FROM report_evidence WHERE report_id=:'b2_rid' \gset b28_
 RESET ROLE;
 INSERT INTO test_results VALUES ('B2.8 service role can read report_evidence (backfill/moderation)', :b28_n = 2);
 
+-- An ordinary club OFFICER (not reporter, not reported) cannot read report_evidence
+-- (deny-all applies to every role; moderation is a future audited service path).
+INSERT INTO club_members (club_id, user_id, role) VALUES (:'club', :'e3', 'officer')
+  ON CONFLICT (club_id, user_id) DO UPDATE SET role='officer';
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claims" = '{"sub":"e3e3e3e3-0000-4000-8000-000000000003","role":"authenticated"}';
+SELECT count(*) AS n FROM report_evidence WHERE report_id=:'b2_rid' \gset b29_
+RESET ROLE;
+INSERT INTO test_results VALUES ('B2.9 club officer cannot read report_evidence', :b29_n = 0);
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- BLOCKER 3 — channel/group/official-chat bulk ops never hard-delete messages.
 -- ════════════════════════════════════════════════════════════════════════════
@@ -241,6 +251,70 @@ INSERT INTO test_results VALUES ('B4.2 no DELETE policy references chat-attachme
 INSERT INTO test_results VALUES ('B4.3 retention bucket has NO storage policy (deny-all)',
   (SELECT count(*)=0 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
      AND (qual LIKE '%deleted-message-retention%' OR with_check LIKE '%deleted-message-retention%')));
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- BLOCKER 1 (round 2) — no ordinary-participant direct channel mutation.
+--   Fresh club_group so this is independent of the B3-mutated ck. e1=officer,
+--   e2=ordinary member/participant.
+-- ════════════════════════════════════════════════════════════════════════════
+\set ck2 'cbcbcbcb-0000-4000-8000-0000000000c2'
+\set ch2 'c8a17e10-0000-4000-8000-0000000000c2'
+INSERT INTO conversations (id, type, club_id) VALUES (:'ck2','club_group', :'club');
+INSERT INTO conversation_participants (conversation_id, user_id) VALUES (:'ck2', :'e1'), (:'ck2', :'e2');
+INSERT INTO conversation_channels (id, conversation_id, name, kind) VALUES (:'ch2', :'ck2', 'main', 'main');
+
+-- Final policy inspection: NO FOR ALL / INSERT / UPDATE / DELETE policy remains.
+INSERT INTO test_results VALUES ('R1.1 participants-can-manage (FOR ALL) policy removed',
+  (SELECT count(*)=0 FROM pg_policies WHERE tablename='conversation_channels'
+     AND policyname='conv_channels: participants can manage'));
+INSERT INTO test_results VALUES ('R1.2 no INSERT/UPDATE/DELETE/ALL policy on conversation_channels',
+  (SELECT count(*)=0 FROM pg_policies WHERE tablename='conversation_channels'
+     AND cmd IN ('INSERT','UPDATE','DELETE','ALL')));
+INSERT INTO test_results VALUES ('R1.3 only SELECT policies remain',
+  (SELECT count(*)=2 FROM pg_policies WHERE tablename='conversation_channels' AND cmd='SELECT'));
+
+-- Ordinary participant e2: direct INSERT / UPDATE / DELETE all denied by RLS.
+DO $$
+DECLARE ins text := NULL; upd text := NULL; del_n int;
+BEGIN
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claims','{"sub":"e2e2e2e2-0000-4000-8000-000000000002","role":"authenticated"}', true);
+  BEGIN INSERT INTO conversation_channels (conversation_id, name, kind)
+        VALUES ('cbcbcbcb-0000-4000-8000-0000000000c2','sneaky','channel');
+  EXCEPTION WHEN OTHERS THEN ins := SQLSTATE; END;
+  BEGIN UPDATE conversation_channels SET name='hacked' WHERE id='c8a17e10-0000-4000-8000-0000000000c2';
+  EXCEPTION WHEN OTHERS THEN upd := SQLSTATE; END;
+  DELETE FROM conversation_channels WHERE id='c8a17e10-0000-4000-8000-0000000000c2';
+  GET DIAGNOSTICS del_n = ROW_COUNT;
+  RESET ROLE;
+  INSERT INTO test_results VALUES ('R1.4 ordinary participant direct INSERT denied', ins = '42501');
+  INSERT INTO test_results VALUES ('R1.5 ordinary participant direct UPDATE affects 0 rows (RLS)', upd IS NULL);
+  INSERT INTO test_results VALUES ('R1.6 ordinary participant direct DELETE affects 0 rows (RLS)', del_n = 0);
+END $$;
+-- The channel is untouched by the blocked UPDATE/DELETE.
+INSERT INTO test_results VALUES ('R1.7 channel unchanged after blocked participant writes',
+  (SELECT name='main' FROM conversation_channels WHERE id=:'ch2'));
+
+-- Ordinary participant CAN still read channels they belong to.
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claims" = '{"sub":"e2e2e2e2-0000-4000-8000-000000000002","role":"authenticated"}';
+SELECT count(*) AS n FROM conversation_channels WHERE id=:'ch2' \gset r18_
+RESET ROLE;
+INSERT INTO test_results VALUES ('R1.8 ordinary participant can still read allowed channel', :r18_n = 1);
+
+-- Officer/server-controlled operations still work via the SECURITY DEFINER RPC.
+SELECT set_config('request.jwt.claims','{"sub":"e1e1e1e1-0000-4000-8000-000000000001","role":"authenticated"}', true);
+SELECT create_conversation_channel(:'ck2', 'announcements', NULL) AS newid \gset r19_
+INSERT INTO test_results VALUES ('R1.9 officer create_conversation_channel RPC still works',
+  (SELECT count(*)=1 FROM conversation_channels WHERE id=:'r19_newid' AND conversation_id=:'ck2'));
+-- And a group participant may create a group channel via the RPC (server-authorized).
+SELECT set_config('request.jwt.claims','{"sub":"e2e2e2e2-0000-4000-8000-000000000002","role":"authenticated"}', true);
+INSERT INTO conversations (id, type, created_by) VALUES ('cacacaca-0000-4000-8000-0000000000c9','group','e2e2e2e2-0000-4000-8000-000000000002');
+INSERT INTO conversation_participants (conversation_id, user_id) VALUES ('cacacaca-0000-4000-8000-0000000000c9','e2e2e2e2-0000-4000-8000-000000000002');
+SELECT create_conversation_channel('cacacaca-0000-4000-8000-0000000000c9','side', NULL) AS gid \gset r110_
+INSERT INTO test_results VALUES ('R1.10 group participant create channel via RPC still works',
+  (SELECT count(*)=1 FROM conversation_channels WHERE id=:'r110_gid'));
+SELECT set_config('request.jwt.claims','', true);
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- BLOCKER 5 — legacy poll_votes/polls policies dropped; RPC-only writes.
@@ -374,18 +448,77 @@ UPDATE message_deletion_attempts SET claim_expires_at = now() - interval '1 minu
 SELECT (claim_specific_deletion_attempt(:'b6i_aid','wC')->>'claimed') AS c \gset b6n_
 INSERT INTO test_results VALUES ('B6.16 expired lease reclaimable by another worker', :'b6n_c' = 'true');
 
--- Retry limit + dead-letter exclusion + manual retry.
-UPDATE message_deletion_attempts SET retry_count=8, claim_token=NULL, claim_expires_at=NULL, next_retry_at=now()
-  WHERE id=:'b6i_aid';
-SELECT (claim_specific_deletion_attempt(:'b6i_aid','wD')->>'claimed') AS c \gset b6o_
-INSERT INTO test_results VALUES ('B6.17 retry-limit-exceeded attempt not claimable', :'b6o_c' = 'false');
-UPDATE message_deletion_attempts SET retry_count=0, requires_manual_reconciliation=true, dead_lettered_at=now()
-  WHERE id=:'b6i_aid';
-SELECT (claim_specific_deletion_attempt(:'b6i_aid','wE')->>'claimed') AS c \gset b6p_
-INSERT INTO test_results VALUES ('B6.18 dead-lettered attempt excluded from claim', :'b6p_c' = 'false');
-SELECT (admin_manual_retry_deletion(:'b6i_aid','ops')->>'ok') AS ok \gset b6q_
-SELECT (claim_specific_deletion_attempt(:'b6i_aid','wF')->>'claimed') AS c \gset b6r_
-INSERT INTO test_results VALUES ('B6.19 manual retry re-enables claim', :'b6q_ok'='true' AND :'b6r_c'='true');
+-- ════════════════════════════════════════════════════════════════════════════
+-- BLOCKER 2 (round 2) — retry-limit manual recovery actually works.
+--   Drives the retry limit NATURALLY (no manual retry_count=0) and proves the
+--   full dead-letter -> audited manual retry -> exactly-one-controlled-retry loop.
+-- ════════════════════════════════════════════════════════════════════════════
+\set m_rt  'aaaae100-0000-4000-8000-000000000008'
+\set rt_img 'cdcdcdcd-0000-4000-8000-000000000001/rt.jpg'
+INSERT INTO messages (id, conversation_id, sender_id, message_type, content, attachment_url, attachment_mime, attachment_size)
+VALUES (:'m_rt', :'cd', :'e1', 'image', 'rt', :'rt_img', 'image/jpeg', 9);
+INSERT INTO storage.objects (bucket_id, name) VALUES ('chat-attachments', :'rt_img');
+SELECT (begin_message_deletion(:'m_rt', :'e1', 'edge_function', 'rt-1', NULL)->>'attempt_id') AS aid \gset rt_
+
+-- Simulate 7 prior automatic failures (retry_count=7, NOT 0), claim, then one
+-- more failure crosses the limit -> dead-letter.
+UPDATE message_deletion_attempts SET retry_count=7, next_retry_at=now(), claim_token=NULL, claim_expires_at=NULL
+  WHERE id=:'rt_aid';
+SELECT (claim_specific_deletion_attempt(:'rt_aid','rw1')->>'claim_token') AS tok \gset rt1_
+SELECT (fail_deletion_attempt(:'rt_aid', :'rt1_tok', 'copy_failed', false)->>'dead_lettered') AS dl \gset rt2_
+INSERT INTO test_results VALUES ('R2.1 attempt reaching retry_count=8 is dead-lettered', :'rt2_dl' = 'true');
+INSERT INTO test_results VALUES ('R2.2 dead-letter sets manual flag + retry_count=8',
+  (SELECT requires_manual_reconciliation AND retry_count=8 AND dead_lettered_at IS NOT NULL
+     FROM message_deletion_attempts WHERE id=:'rt_aid'));
+
+-- Cron/worker cannot auto-claim a dead-lettered attempt.
+UPDATE message_deletion_attempts SET next_retry_at=now() WHERE id=:'rt_aid';
+SELECT (claim_specific_deletion_attempt(:'rt_aid','auto')->>'claimed') AS c \gset rt3_
+INSERT INTO test_results VALUES ('R2.3 auto worker cannot claim dead-lettered attempt', :'rt3_c' = 'false');
+
+-- Audited manual retry re-enables EXACTLY ONE controlled retry (retry_count is
+-- preserved as the lifetime total; a one-shot override is set).
+SELECT admin_manual_retry_deletion(:'rt_aid','moderator reason') AS j \gset rt4_
+INSERT INTO test_results VALUES ('R2.4 manual retry ok + audited (count=1, lifetime=8)',
+  (:'rt4_j'::jsonb->>'ok')='true' AND (:'rt4_j'::jsonb->>'manual_retry_count')='1'
+   AND (:'rt4_j'::jsonb->>'lifetime_retry_count')='8');
+INSERT INTO test_results VALUES ('R2.5 manual retry preserves retry_count + clears dead-letter + sets override',
+  (SELECT retry_count=8 AND manual_retry_override AND NOT requires_manual_reconciliation
+      AND dead_lettered_at IS NULL AND manual_retry_count=1 FROM message_deletion_attempts WHERE id=:'rt_aid'));
+
+-- The next worker claim SUCCEEDS despite retry_count=8 (override honored), and
+-- CONSUMES the one-shot override.
+SELECT (claim_specific_deletion_attempt(:'rt_aid','rw2')->>'claimed') AS c \gset rt5_
+INSERT INTO test_results VALUES ('R2.6 next worker claim succeeds after manual retry', :'rt5_c' = 'true');
+INSERT INTO test_results VALUES ('R2.7 claim consumes the one-shot override',
+  (SELECT NOT manual_retry_override FROM message_deletion_attempts WHERE id=:'rt_aid'));
+
+-- EXACTLY ONE: if that single controlled retry fails, it dead-letters again and
+-- is NOT auto-claimable at the limit until another manual retry.
+SELECT claim_token AS tok FROM message_deletion_attempts WHERE id=:'rt_aid' \gset rt6_
+SELECT fail_deletion_attempt(:'rt_aid', :'rt6_tok', 'copy_failed_again', false);
+UPDATE message_deletion_attempts SET next_retry_at=now() WHERE id=:'rt_aid';
+SELECT (claim_specific_deletion_attempt(:'rt_aid','rw3')->>'claimed') AS c \gset rt7_
+INSERT INTO test_results VALUES ('R2.8 exactly-one: re-failed attempt not auto-claimable at limit', :'rt7_c' = 'false');
+
+-- Repeated manual retries remain audited.
+SELECT admin_manual_retry_deletion(:'rt_aid','second reason') AS j \gset rt8_
+INSERT INTO test_results VALUES ('R2.9 repeated manual retry audited (count=2)',
+  (:'rt8_j'::jsonb->>'manual_retry_count')='2');
+
+-- Unauthorized users cannot invoke manual retry.
+INSERT INTO test_results VALUES ('R2.10 authenticated cannot EXECUTE admin_manual_retry_deletion',
+  NOT has_function_privilege('authenticated','admin_manual_retry_deletion(uuid,text)','EXECUTE'));
+INSERT INTO test_results VALUES ('R2.11 anon cannot EXECUTE admin_manual_retry_deletion',
+  NOT has_function_privilege('anon','admin_manual_retry_deletion(uuid,text)','EXECUTE'));
+
+-- After the 2nd manual retry: claim once, then a duplicate worker + a stale token
+-- are both rejected.
+SELECT (claim_specific_deletion_attempt(:'rt_aid','rw4')->>'claim_token') AS tok \gset rt9_
+SELECT (claim_specific_deletion_attempt(:'rt_aid','rw5')->>'claimed') AS c \gset rt10_
+INSERT INTO test_results VALUES ('R2.12 second worker cannot claim the leased attempt', :'rt10_c' = 'false');
+SELECT mark_retention_copied(:'rt_aid','00000000-0000-0000-0000-000000000000','b','p',NULL) AS ok \gset rt11_
+INSERT INTO test_results VALUES ('R2.13 stale claim token rejected after manual retry', :'rt11_ok' = 'f');
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- BLOCKER 7 — no existence/deletion oracles; internal helpers not client-callable.

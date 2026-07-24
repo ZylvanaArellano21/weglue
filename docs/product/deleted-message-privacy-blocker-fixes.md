@@ -75,7 +75,11 @@ normalizes resume state for it too.
 | | participants can upload | INSERT | unchanged | retained |
 | | *(uploader can delete)* | DELETE | client physical delete | **dropped (B4)** |
 | `storage.objects` (`deleted-message-retention`) | *(none)* | — | RLS deny-all | retained |
-| `conversation_channels` | *(officers can delete)* | DELETE | client physical delete | **dropped (B3)** |
+| `conversation_channels` | participants can read | SELECT | `is_conversation_participant` | retained |
+| | non-members see club group channels | SELECT | club-group visibility | retained |
+| | *(participants can manage)* | ALL | direct participant INSERT/UPDATE/DELETE | **dropped (R1)** |
+| | *(officers can create)* | INSERT | vestigial (creation via RPC) | **dropped (R1)** |
+| | *(officers can delete)* | DELETE | client physical delete | **dropped (B3)** |
 | `public.reports` | (existing workflow policies) | — | snapshot columns forced NULL | evidence moved (B2) |
 | `report_evidence`, `message_deletion_attempts`, `message_attachment_map`, `deleted_message_history`, `data_health_diagnostics` | *(none)* | — | RLS enabled, deny-all | service-role only |
 
@@ -133,6 +137,48 @@ deleted/foreign/nonexistent/unauthorized alike.
 
 ---
 
+## 5b. Round-2 blocker fixes
+
+**R1 — channel mutation policy (`conversation_channels`).** Migration 001's FOR
+ALL `conv_channels: participants can manage` OR-combined with the officer
+policies, so an ordinary participant could directly INSERT/UPDATE/DELETE channels.
+All channel mutation is server-controlled via SECURITY DEFINER RPCs
+(`create_conversation_channel` authorizes club officers *and* group participants;
+`rename_conversation_channel`, `set_channel_*`, `delete_conversation_channel`),
+which bypass RLS as owner and need no client write policy. Dropped `participants
+can manage` (FOR ALL) and the now-vestigial `officers can create` (INSERT). Final
+effective set = **two SELECT policies only** (see §3). No FOR ALL / INSERT /
+UPDATE / DELETE policy remains for ordinary participants; participant SELECT is
+preserved; officer/group RPC creation still works.
+
+**R2 — retry-limit manual recovery.** `admin_manual_retry_deletion` cleared the
+dead-letter flags but left `retry_count` at the limit, and the claim requires
+`retry_count < 8`, so an attempt dead-lettered at the limit could never be
+retried. Added a one-shot `manual_retry_override` the claim honors and consumes,
+plus `manual_retry_count` for audit; `retry_count` is preserved as the lifetime
+automatic-failure total.
+
+State transition (attempt dead-lettered at the limit):
+
+```
+retry_count=8, requires_manual_reconciliation=true, dead_lettered_at=set,
+manual_retry_override=false
+   │  admin_manual_retry_deletion(reason)   [service-role only, audited]
+   ▼
+retry_count=8 (preserved), requires_manual_reconciliation=false,
+dead_lettered_at=NULL, manual_retry_override=TRUE, manual_retry_count+=1,
+next_retry_at=now(), claim_token=NULL
+   │  claim_deletion_attempt / claim_specific   [honors override despite cap]
+   ▼
+claimed once; manual_retry_override=FALSE (consumed)  → exactly ONE controlled retry
+   │  success → completed        │  failure → fail_deletion_attempt: (8+1)>=8
+   ▼                             ▼
+completed                        dead-lettered again (needs another manual retry)
+```
+
+Automatic workers still cannot claim dead-lettered attempts; stale tokens and
+duplicate workers remain rejected; the action is REVOKE'd from anon/authenticated.
+
 ## 6. Tests & exact results
 
 Run against the local shadow DB (`supabase db reset --local` first):
@@ -141,14 +187,18 @@ Run against the local shadow DB (`supabase db reset --local` first):
 docker exec -i supabase_db_weglue psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
   -f supabase/tests/deleted_message_privacy_test.sql          # 73 passed / 0 failed / 73
 docker exec -i supabase_db_weglue psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-  -f supabase/tests/deleted_message_privacy_blockers_test.sql # 68 passed / 0 failed / 68
+  -f supabase/tests/deleted_message_privacy_blockers_test.sql # 89 passed / 0 failed / 89
 ```
+
+The blocker suite now includes the two round-2 fixes (R1 channel-mutation
+policy, R2 retry-limit manual recovery) and the officer-denial evidence check
+(B2.9).
 
 | Check | Command | Result |
 | --- | --- | --- |
 | Migrations apply clean | `supabase db reset --local` | ✅ 001→051, no errors |
 | Original privacy suite | psql `deleted_message_privacy_test.sql` | ✅ 73/73 |
-| Blocker regression suite | psql `deleted_message_privacy_blockers_test.sql` | ✅ 68/68 |
+| Blocker regression suite | psql `deleted_message_privacy_blockers_test.sql` | ✅ 89/89 |
 | Account deletion under RESTRICT | simulated `delete_own_account_atomic()` | ✅ shared kept + anonymized, solo hard-deleted |
 | Edge type-check | `deno check delete-message reconcile-deletions` | ✅ |
 | Edge lint | `deno lint …` | ✅ |
@@ -178,7 +228,17 @@ never production:
 4. Worker resume: kill the function after the copy and after the original delete;
    re-run `reconcile-deletions`; assert it resumes to `completed` without
    re-exposing content; duplicate invocation is idempotent.
-5. Delete all disposable objects/buckets.
+5. **Failure before retention copy:** fail the download/copy step; assert the
+   attempt returns to `pending` (via `last_completed_step='created'`), the
+   original object is untouched, and no partial retained object remains.
+6. **Retry-limit dead-letter:** force repeated copy failures until
+   `retry_count = 8`; assert the attempt is dead-lettered
+   (`requires_manual_reconciliation = true`), the Cron worker no longer claims
+   it, and content stays redacted.
+7. **Manual-retry recovery:** call `admin_manual_retry_deletion`; assert exactly
+   one worker claim then succeeds (override consumed), the retained copy + original
+   removal complete, and a fresh signed URL for the original is denied.
+8. Delete all disposable objects/buckets.
 
 ---
 
