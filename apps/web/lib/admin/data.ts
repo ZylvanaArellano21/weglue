@@ -1,0 +1,794 @@
+// ============================================================================
+// Admin Dashboard — canonical read-only data access  (SERVER-ONLY)
+// ============================================================================
+//
+// Every exported function calls `requireFounder()` FIRST, then reads through the
+// service-role client. That ordering is the contract: authorization is enforced
+// per-operation, and the service-role key never leaves the server (this module
+// must never be imported by a Client Component).
+//
+// CANONICAL SOURCES OF TRUTH used here (derived from supabase/migrations/*.sql,
+// never from the stale generated types):
+//   • profiles            — id, username, full_name, avatar_url, major, bio,
+//                            year, university_id, onboarding_completed, created_at
+//   • auth.users          — email (via GoTrue admin API; NOT a public column)
+//   • universities        — id, name
+//   • clubs               — id, name, handle, description, avatar_url,
+//                            cover_image_url/banner_url, meeting_*, is_active,
+//                            claimed, university_id, created_at
+//   • club_members        — (club_id, user_id, role in {member,officer}, joined_at)
+//                            ← officer authority + live membership counts
+//   • club_officers       — display roster (display_name, role_title) — display only
+//   • events              — club_id, created_by, event_date, ...
+//   • posts               — author_id, club_id, ...
+//   • reports             — entity_type, entity_id, status, ...
+//
+// Counts are computed LIVE (count queries / aggregation), never read from the
+// cached clubs.member_count mirror.
+// ============================================================================
+
+if (typeof window !== "undefined") {
+  throw new Error(
+    "lib/admin/data.ts is server-only and must not be imported in the browser."
+  );
+}
+
+import { createAdminClient } from "../supabase/admin";
+import { requireFounder } from "./founder";
+
+export const PAGE_SIZE = 25;
+
+// ── Shared row types ────────────────────────────────────────────────────────
+
+export interface AdminUserRow {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+  email: string | null;
+  university: string | null;
+  onboarding_completed: boolean;
+  created_at: string;
+  club_count: number;
+  officer_count: number;
+  report_count: number;
+}
+
+export interface AdminClubRow {
+  id: string;
+  name: string;
+  handle: string;
+  avatar_url: string | null;
+  university: string | null;
+  is_active: boolean;
+  claimed: boolean;
+  member_count: number;
+  officer_count: number;
+  post_count: number;
+  event_count: number;
+  report_count: number;
+  created_at: string;
+}
+
+export interface Paginated<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface UniversityOption {
+  id: string;
+  name: string;
+}
+
+// ── Email helpers (auth.users via GoTrue admin API) ─────────────────────────
+//
+// Email is NOT a column on public.profiles — it lives in auth.users. We resolve
+// it through the service-role GoTrue admin API. For a bounded page of rows this
+// is a handful of parallel lookups; at very large scale a canonical indexed
+// email mirror / SECURITY DEFINER RPC is the right move (see V2 backlog).
+
+async function emailMap(userIds: string[]): Promise<Map<string, string | null>> {
+  const admin = createAdminClient();
+  const unique = Array.from(new Set(userIds.filter(Boolean)));
+  const entries = await Promise.all(
+    unique.map(async (id): Promise<[string, string | null]> => {
+      try {
+        const { data } = await admin.auth.admin.getUserById(id);
+        return [id, data.user?.email ?? null];
+      } catch {
+        return [id, null];
+      }
+    })
+  );
+  return new Map(entries);
+}
+
+/**
+ * Best-effort email search via a bounded scan of the GoTrue user directory.
+ * Returns the matching auth user IDs. Bounded so a huge directory can't stall a
+ * request; a proper indexed email search is a V2 improvement.
+ */
+async function findUserIdsByEmail(query: string, cap = 2000): Promise<string[]> {
+  const admin = createAdminClient();
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const perPage = 200;
+  const ids: string[] = [];
+  let page = 1;
+  let scanned = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (scanned < cap) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error || !data?.users?.length) break;
+    for (const u of data.users) {
+      if (u.email && u.email.toLowerCase().includes(needle)) ids.push(u.id);
+    }
+    scanned += data.users.length;
+    if (data.users.length < perPage) break;
+    page += 1;
+  }
+  return ids;
+}
+
+// ── Universities (filter options) ───────────────────────────────────────────
+
+export async function listUniversities(): Promise<UniversityOption[]> {
+  await requireFounder();
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("universities")
+    .select("id, name")
+    .order("name", { ascending: true });
+  return (data ?? []) as UniversityOption[];
+}
+
+// ── Overview ─────────────────────────────────────────────────────────────────
+
+export interface OverviewStats {
+  users: number | null;
+  clubs: number | null;
+  posts: number | null;
+  events: number | null;
+  reports: number | null;
+  openReports: number | null;
+  memberships: number | null;
+  officers: number | null;
+  universities: number | null;
+  recentUsers: { id: string; full_name: string; username: string; avatar_url: string | null; created_at: string }[];
+  recentClubs: { id: string; name: string; handle: string; avatar_url: string | null; created_at: string }[];
+}
+
+async function safeCount(
+  admin: ReturnType<typeof createAdminClient>,
+  table: string,
+  apply?: (q: any) => any
+): Promise<number | null> {
+  try {
+    let q = admin.from(table).select("*", { count: "exact", head: true });
+    if (apply) q = apply(q);
+    const { count, error } = await q;
+    if (error) return null;
+    return count ?? 0;
+  } catch {
+    return null;
+  }
+}
+
+export async function getOverviewStats(): Promise<OverviewStats> {
+  await requireFounder();
+  const admin = createAdminClient();
+
+  const [
+    users,
+    clubs,
+    posts,
+    events,
+    reports,
+    openReports,
+    memberships,
+    officers,
+    universities,
+    recentUsersRes,
+    recentClubsRes,
+  ] = await Promise.all([
+    safeCount(admin, "profiles"),
+    safeCount(admin, "clubs"),
+    safeCount(admin, "posts"),
+    safeCount(admin, "events"),
+    safeCount(admin, "reports"),
+    safeCount(admin, "reports", (q) => q.in("status", ["pending", "reviewing"])),
+    safeCount(admin, "club_members"),
+    safeCount(admin, "club_members", (q) => q.eq("role", "officer")),
+    safeCount(admin, "universities"),
+    admin
+      .from("profiles")
+      .select("id, full_name, username, avatar_url, created_at")
+      .order("created_at", { ascending: false })
+      .limit(6),
+    admin
+      .from("clubs")
+      .select("id, name, handle, avatar_url, created_at")
+      .order("created_at", { ascending: false })
+      .limit(6),
+  ]);
+
+  return {
+    users,
+    clubs,
+    posts,
+    events,
+    reports,
+    openReports,
+    memberships,
+    officers,
+    universities,
+    recentUsers: (recentUsersRes.data ?? []) as OverviewStats["recentUsers"],
+    recentClubs: (recentClubsRes.data ?? []) as OverviewStats["recentClubs"],
+  };
+}
+
+// ── Users list ───────────────────────────────────────────────────────────────
+
+export interface ListUsersParams {
+  search?: string;
+  universityId?: string;
+  onboarding?: "all" | "completed" | "pending";
+  sort?: "created_at" | "full_name" | "username";
+  dir?: "asc" | "desc";
+  page?: number;
+}
+
+export async function listUsers(params: ListUsersParams = {}): Promise<Paginated<AdminUserRow>> {
+  await requireFounder();
+  const admin = createAdminClient();
+
+  const page = Math.max(1, params.page ?? 1);
+  const sort = params.sort ?? "created_at";
+  const dir = params.dir ?? "desc";
+  const search = params.search?.trim();
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
+  let q = admin
+    .from("profiles")
+    .select("id, username, full_name, avatar_url, university_id, onboarding_completed, created_at", {
+      count: "exact",
+    });
+
+  if (params.universityId) q = q.eq("university_id", params.universityId);
+  if (params.onboarding === "completed") q = q.eq("onboarding_completed", true);
+  if (params.onboarding === "pending") q = q.eq("onboarding_completed", false);
+
+  if (search) {
+    if (search.includes("@")) {
+      // Email search → resolve auth ids, then constrain by id.
+      const ids = await findUserIdsByEmail(search);
+      if (ids.length === 0) {
+        return { rows: [], total: 0, page, pageSize: PAGE_SIZE };
+      }
+      q = q.in("id", ids);
+    } else {
+      const like = `%${search}%`;
+      q = q.or(`full_name.ilike.${like},username.ilike.${like}`);
+    }
+  }
+
+  q = q.order(sort, { ascending: dir === "asc" }).range(from, to);
+
+  const { data, count, error } = await q;
+  if (error) throw error;
+
+  const profiles = (data ?? []) as any[];
+  const ids = profiles.map((p) => p.id);
+
+  const [emails, uniMap, aggregates] = await Promise.all([
+    emailMap(ids),
+    universityNameMap(admin, profiles.map((p) => p.university_id)),
+    userAggregates(admin, ids),
+  ]);
+
+  const rows: AdminUserRow[] = profiles.map((p) => ({
+    id: p.id,
+    username: p.username,
+    full_name: p.full_name,
+    avatar_url: p.avatar_url,
+    email: emails.get(p.id) ?? null,
+    university: p.university_id ? uniMap.get(p.university_id) ?? null : null,
+    onboarding_completed: !!p.onboarding_completed,
+    created_at: p.created_at,
+    club_count: aggregates.clubs.get(p.id) ?? 0,
+    officer_count: aggregates.officer.get(p.id) ?? 0,
+    report_count: aggregates.reports.get(p.id) ?? 0,
+  }));
+
+  return { rows, total: count ?? rows.length, page, pageSize: PAGE_SIZE };
+}
+
+async function universityNameMap(
+  admin: ReturnType<typeof createAdminClient>,
+  universityIds: (string | null)[]
+): Promise<Map<string, string>> {
+  const ids = Array.from(new Set(universityIds.filter(Boolean))) as string[];
+  if (ids.length === 0) return new Map();
+  const { data } = await admin.from("universities").select("id, name").in("id", ids);
+  return new Map((data ?? []).map((u: any) => [u.id, u.name]));
+}
+
+/** Batched per-user counts (club memberships, officer roles, reports-against). */
+async function userAggregates(
+  admin: ReturnType<typeof createAdminClient>,
+  userIds: string[]
+): Promise<{ clubs: Map<string, number>; officer: Map<string, number>; reports: Map<string, number> }> {
+  const clubs = new Map<string, number>();
+  const officer = new Map<string, number>();
+  const reports = new Map<string, number>();
+  if (userIds.length === 0) return { clubs, officer, reports };
+
+  const [memberRes, reportRes] = await Promise.all([
+    admin.from("club_members").select("user_id, role").in("user_id", userIds),
+    admin.from("reports").select("entity_id").eq("entity_type", "user").in("entity_id", userIds),
+  ]);
+
+  for (const m of (memberRes.data ?? []) as any[]) {
+    clubs.set(m.user_id, (clubs.get(m.user_id) ?? 0) + 1);
+    if (m.role === "officer") officer.set(m.user_id, (officer.get(m.user_id) ?? 0) + 1);
+  }
+  for (const r of (reportRes.data ?? []) as any[]) {
+    if (r.entity_id) reports.set(r.entity_id, (reports.get(r.entity_id) ?? 0) + 1);
+  }
+  return { clubs, officer, reports };
+}
+
+// ── User detail ──────────────────────────────────────────────────────────────
+
+export interface UserDetail {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+  email: string | null;
+  bio: string | null;
+  major: string | null;
+  year: string | null;
+  university: string | null;
+  onboarding_completed: boolean;
+  created_at: string;
+  interests: string[];
+  activities: string[];
+  memberships: {
+    club_id: string;
+    club_name: string;
+    club_handle: string;
+    avatar_url: string | null;
+    role: string;
+    officer_title: string | null;
+    joined_at: string;
+  }[];
+  officerRoles: {
+    club_id: string;
+    club_name: string;
+    club_handle: string;
+    role_title: string;
+  }[];
+  postCount: number;
+  eventCount: number;
+  reportCount: number;
+}
+
+export async function getUserDetail(id: string): Promise<UserDetail | null> {
+  await requireFounder();
+  const admin = createAdminClient();
+
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id, username, full_name, avatar_url, bio, major, year, university_id, onboarding_completed, created_at")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!profile) return null;
+  const p = profile as any;
+
+  const [
+    emails,
+    uniName,
+    interestsRes,
+    activitiesRes,
+    membersRes,
+    officersRes,
+    postCount,
+    eventCount,
+    reportCount,
+  ] = await Promise.all([
+    emailMap([p.id]),
+    p.university_id
+      ? admin.from("universities").select("name").eq("id", p.university_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    admin.from("user_interests").select("interest").eq("user_id", id),
+    admin.from("user_activities").select("activity").eq("user_id", id),
+    admin
+      .from("club_members")
+      .select("role, joined_at, clubs(id, name, handle, avatar_url)")
+      .eq("user_id", id)
+      .order("joined_at", { ascending: false }),
+    admin
+      .from("club_officers")
+      .select("role_title, clubs(id, name, handle)")
+      .eq("user_id", id),
+    safeCount(admin, "posts", (q) => q.eq("author_id", id)),
+    safeCount(admin, "events", (q) => q.eq("created_by", id)),
+    safeCount(admin, "reports", (q) => q.eq("entity_type", "user").eq("entity_id", id)),
+  ]);
+
+  const officerTitleByClub = new Map<string, string>();
+  for (const o of (officersRes.data ?? []) as any[]) {
+    if (o.clubs?.id) officerTitleByClub.set(o.clubs.id, o.role_title);
+  }
+
+  const memberships = ((membersRes.data ?? []) as any[])
+    .filter((m) => m.clubs)
+    .map((m) => ({
+      club_id: m.clubs.id,
+      club_name: m.clubs.name,
+      club_handle: m.clubs.handle,
+      avatar_url: m.clubs.avatar_url ?? null,
+      role: m.role,
+      officer_title: officerTitleByClub.get(m.clubs.id) ?? null,
+      joined_at: m.joined_at,
+    }));
+
+  const officerRoles = ((officersRes.data ?? []) as any[])
+    .filter((o) => o.clubs)
+    .map((o) => ({
+      club_id: o.clubs.id,
+      club_name: o.clubs.name,
+      club_handle: o.clubs.handle,
+      role_title: o.role_title,
+    }));
+
+  return {
+    id: p.id,
+    username: p.username,
+    full_name: p.full_name,
+    avatar_url: p.avatar_url,
+    email: emails.get(p.id) ?? null,
+    bio: p.bio,
+    major: p.major,
+    year: p.year,
+    university: (uniName as any)?.data?.name ?? null,
+    onboarding_completed: !!p.onboarding_completed,
+    created_at: p.created_at,
+    interests: ((interestsRes.data ?? []) as any[]).map((r) => r.interest),
+    activities: ((activitiesRes.data ?? []) as any[]).map((r) => r.activity),
+    memberships,
+    officerRoles,
+    postCount: postCount ?? 0,
+    eventCount: eventCount ?? 0,
+    reportCount: reportCount ?? 0,
+  };
+}
+
+// ── Clubs list ───────────────────────────────────────────────────────────────
+
+export interface ListClubsParams {
+  search?: string;
+  universityId?: string;
+  status?: "all" | "active" | "inactive";
+  sort?: "created_at" | "name" | "handle";
+  dir?: "asc" | "desc";
+  page?: number;
+}
+
+export async function listClubs(params: ListClubsParams = {}): Promise<Paginated<AdminClubRow>> {
+  await requireFounder();
+  const admin = createAdminClient();
+
+  const page = Math.max(1, params.page ?? 1);
+  const sort = params.sort ?? "created_at";
+  const dir = params.dir ?? "desc";
+  const search = params.search?.trim();
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
+  let q = admin
+    .from("clubs")
+    .select("id, name, handle, avatar_url, university_id, is_active, claimed, created_at", {
+      count: "exact",
+    });
+
+  if (params.universityId) q = q.eq("university_id", params.universityId);
+  if (params.status === "active") q = q.eq("is_active", true);
+  if (params.status === "inactive") q = q.eq("is_active", false);
+  if (search) {
+    const like = `%${search}%`;
+    q = q.or(`name.ilike.${like},handle.ilike.${like}`);
+  }
+
+  q = q.order(sort, { ascending: dir === "asc" }).range(from, to);
+
+  const { data, count, error } = await q;
+  if (error) throw error;
+
+  const clubs = (data ?? []) as any[];
+  const ids = clubs.map((c) => c.id);
+
+  const [uniMap, aggregates] = await Promise.all([
+    universityNameMap(admin, clubs.map((c) => c.university_id)),
+    clubAggregates(admin, ids),
+  ]);
+
+  const rows: AdminClubRow[] = clubs.map((c) => ({
+    id: c.id,
+    name: c.name,
+    handle: c.handle,
+    avatar_url: c.avatar_url,
+    university: c.university_id ? uniMap.get(c.university_id) ?? null : null,
+    is_active: !!c.is_active,
+    claimed: !!c.claimed,
+    member_count: aggregates.members.get(c.id) ?? 0,
+    officer_count: aggregates.officers.get(c.id) ?? 0,
+    post_count: aggregates.posts.get(c.id) ?? 0,
+    event_count: aggregates.events.get(c.id) ?? 0,
+    report_count: aggregates.reports.get(c.id) ?? 0,
+    created_at: c.created_at,
+  }));
+
+  return { rows, total: count ?? rows.length, page, pageSize: PAGE_SIZE };
+}
+
+/** Batched per-club counts (live membership/officer/post/event/report totals). */
+async function clubAggregates(
+  admin: ReturnType<typeof createAdminClient>,
+  clubIds: string[]
+): Promise<{
+  members: Map<string, number>;
+  officers: Map<string, number>;
+  posts: Map<string, number>;
+  events: Map<string, number>;
+  reports: Map<string, number>;
+}> {
+  const members = new Map<string, number>();
+  const officers = new Map<string, number>();
+  const posts = new Map<string, number>();
+  const events = new Map<string, number>();
+  const reports = new Map<string, number>();
+  const empty = { members, officers, posts, events, reports };
+  if (clubIds.length === 0) return empty;
+
+  const [memberRes, postRes, eventRes, reportRes] = await Promise.all([
+    admin.from("club_members").select("club_id, role").in("club_id", clubIds),
+    admin.from("posts").select("club_id").in("club_id", clubIds),
+    admin.from("events").select("club_id").in("club_id", clubIds),
+    admin.from("reports").select("entity_id").eq("entity_type", "club").in("entity_id", clubIds),
+  ]);
+
+  for (const m of (memberRes.data ?? []) as any[]) {
+    members.set(m.club_id, (members.get(m.club_id) ?? 0) + 1);
+    if (m.role === "officer") officers.set(m.club_id, (officers.get(m.club_id) ?? 0) + 1);
+  }
+  for (const p of (postRes.data ?? []) as any[]) {
+    if (p.club_id) posts.set(p.club_id, (posts.get(p.club_id) ?? 0) + 1);
+  }
+  for (const e of (eventRes.data ?? []) as any[]) {
+    if (e.club_id) events.set(e.club_id, (events.get(e.club_id) ?? 0) + 1);
+  }
+  for (const r of (reportRes.data ?? []) as any[]) {
+    if (r.entity_id) reports.set(r.entity_id, (reports.get(r.entity_id) ?? 0) + 1);
+  }
+  return empty;
+}
+
+// ── Club detail ──────────────────────────────────────────────────────────────
+
+export interface ClubDetail {
+  id: string;
+  name: string;
+  handle: string;
+  description: string | null;
+  avatar_url: string | null;
+  cover_image_url: string | null;
+  university: string | null;
+  meeting_day: string | null;
+  meeting_time_start: string | null;
+  meeting_time_end: string | null;
+  meeting_location: string | null;
+  meeting_building: string | null;
+  meeting_room: string | null;
+  is_active: boolean;
+  claimed: boolean;
+  created_at: string;
+  memberCount: number;
+  officerCount: number;
+  postCount: number;
+  eventCount: number;
+  reportCount: number;
+  conversationCount: number | null;
+  members: {
+    user_id: string;
+    full_name: string;
+    username: string;
+    avatar_url: string | null;
+    email: string | null;
+    role: string;
+    officer_title: string | null;
+    joined_at: string;
+  }[];
+  officers: {
+    user_id: string | null;
+    display_name: string;
+    role_title: string;
+    username: string | null;
+    email: string | null;
+    avatar_url: string | null;
+  }[];
+}
+
+export async function getClubDetail(id: string): Promise<ClubDetail | null> {
+  await requireFounder();
+  const admin = createAdminClient();
+
+  const { data: club } = await admin
+    .from("clubs")
+    .select(
+      "id, name, handle, description, avatar_url, cover_image_url, banner_url, university_id, meeting_day, meeting_time_start, meeting_time_end, meeting_location, meeting_building, meeting_room, is_active, claimed, created_at"
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!club) return null;
+  const c = club as any;
+
+  const [
+    uniName,
+    membersRes,
+    officersRes,
+    postCount,
+    eventCount,
+    reportCount,
+    conversationCount,
+  ] = await Promise.all([
+    c.university_id
+      ? admin.from("universities").select("name").eq("id", c.university_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    admin
+      .from("club_members")
+      .select("user_id, role, joined_at, profiles(id, username, full_name, avatar_url)")
+      .eq("club_id", id)
+      .order("joined_at", { ascending: true }),
+    admin
+      .from("club_officers")
+      .select("user_id, display_name, role_title, avatar_url, display_order, profiles(username, avatar_url)")
+      .eq("club_id", id)
+      .order("display_order", { ascending: true }),
+    safeCount(admin, "posts", (q) => q.eq("club_id", id)),
+    safeCount(admin, "events", (q) => q.eq("club_id", id)),
+    safeCount(admin, "reports", (q) => q.eq("entity_type", "club").eq("entity_id", id)),
+    safeCount(admin, "conversations", (q) => q.eq("club_id", id)),
+  ]);
+
+  const memberRows = ((membersRes.data ?? []) as any[]).filter((m) => m.profiles);
+  const officerRows = (officersRes.data ?? []) as any[];
+
+  const allUserIds = [
+    ...memberRows.map((m) => m.user_id),
+    ...officerRows.map((o) => o.user_id).filter(Boolean),
+  ];
+  const emails = await emailMap(allUserIds);
+
+  const officerTitleByUser = new Map<string, string>();
+  for (const o of officerRows) {
+    if (o.user_id) officerTitleByUser.set(o.user_id, o.role_title);
+  }
+
+  const members = memberRows.map((m) => ({
+    user_id: m.user_id,
+    full_name: m.profiles.full_name,
+    username: m.profiles.username,
+    avatar_url: m.profiles.avatar_url ?? null,
+    email: emails.get(m.user_id) ?? null,
+    role: m.role,
+    officer_title: officerTitleByUser.get(m.user_id) ?? null,
+    joined_at: m.joined_at,
+  }));
+
+  const officers = officerRows.map((o) => ({
+    user_id: o.user_id ?? null,
+    display_name: o.display_name,
+    role_title: o.role_title,
+    username: o.profiles?.username ?? null,
+    email: o.user_id ? emails.get(o.user_id) ?? null : null,
+    avatar_url: o.avatar_url ?? o.profiles?.avatar_url ?? null,
+  }));
+
+  return {
+    id: c.id,
+    name: c.name,
+    handle: c.handle,
+    description: c.description,
+    avatar_url: c.avatar_url,
+    cover_image_url: c.cover_image_url ?? c.banner_url ?? null,
+    university: (uniName as any)?.data?.name ?? null,
+    meeting_day: c.meeting_day,
+    meeting_time_start: c.meeting_time_start,
+    meeting_time_end: c.meeting_time_end,
+    meeting_location: c.meeting_location,
+    meeting_building: c.meeting_building,
+    meeting_room: c.meeting_room,
+    is_active: !!c.is_active,
+    claimed: !!c.claimed,
+    created_at: c.created_at,
+    memberCount: members.length,
+    officerCount: members.filter((m) => m.role === "officer").length,
+    postCount: postCount ?? 0,
+    eventCount: eventCount ?? 0,
+    reportCount: reportCount ?? 0,
+    conversationCount: conversationCount,
+    members,
+    officers,
+  };
+}
+
+// ── Global search ────────────────────────────────────────────────────────────
+
+export interface SearchResults {
+  users: { id: string; full_name: string; username: string; avatar_url: string | null; email: string | null }[];
+  clubs: { id: string; name: string; handle: string; avatar_url: string | null; university: string | null }[];
+}
+
+export async function searchEntities(query: string): Promise<SearchResults> {
+  await requireFounder();
+  const admin = createAdminClient();
+  const term = query.trim();
+  if (term.length < 2) return { users: [], clubs: [] };
+
+  const like = `%${term}%`;
+  const isEmail = term.includes("@");
+
+  // Users
+  let userIdFilter: string[] | null = null;
+  if (isEmail) userIdFilter = await findUserIdsByEmail(term);
+
+  const usersPromise = (async () => {
+    let uq = admin
+      .from("profiles")
+      .select("id, full_name, username, avatar_url")
+      .limit(8);
+    if (isEmail) {
+      if (!userIdFilter || userIdFilter.length === 0) return [];
+      uq = uq.in("id", userIdFilter);
+    } else {
+      uq = uq.or(`full_name.ilike.${like},username.ilike.${like}`);
+    }
+    const { data } = await uq;
+    const rows = (data ?? []) as any[];
+    const emails = await emailMap(rows.map((r) => r.id));
+    return rows.map((r) => ({
+      id: r.id,
+      full_name: r.full_name,
+      username: r.username,
+      avatar_url: r.avatar_url ?? null,
+      email: emails.get(r.id) ?? null,
+    }));
+  })();
+
+  const clubsPromise = (async () => {
+    const { data } = await admin
+      .from("clubs")
+      .select("id, name, handle, avatar_url, university_id")
+      .or(`name.ilike.${like},handle.ilike.${like}`)
+      .limit(8);
+    const rows = (data ?? []) as any[];
+    const uniMap = await universityNameMap(admin, rows.map((r) => r.university_id));
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      handle: r.handle,
+      avatar_url: r.avatar_url ?? null,
+      university: r.university_id ? uniMap.get(r.university_id) ?? null : null,
+    }));
+  })();
+
+  const [users, clubs] = await Promise.all([usersPromise, clubsPromise]);
+  return { users, clubs };
+}
