@@ -101,7 +101,7 @@ describe("founder query shaping", () => {
   it("short-circuits queries under 2 chars to empty results", async () => {
     asFounder();
     h.adminHolder.impl = makeFakeAdmin({});
-    await expect(searchEntities("a")).resolves.toEqual({ users: [], clubs: [] });
+    await expect(searchEntities("a")).resolves.toEqual({ users: [], clubs: [], universities: [], officers: [] });
   });
 
   it("returns human-readable, correctly-shaped user and club hits for the founder", async () => {

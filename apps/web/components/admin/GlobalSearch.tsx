@@ -18,6 +18,19 @@ interface ClubHit {
   avatar_url: string | null;
   university: string | null;
 }
+interface UniversityHit {
+  id: string;
+  name: string;
+  slug: string;
+}
+interface OfficerHit {
+  id: string;
+  user_id: string;
+  full_name: string;
+  username: string;
+  club_name: string;
+  role_title: string | null;
+}
 
 /**
  * Global entity search. Debounced, founder-authorized server-side via
@@ -32,6 +45,8 @@ export function GlobalSearch() {
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<UserHit[]>([]);
   const [clubs, setClubs] = useState<ClubHit[]>([]);
+  const [universities, setUniversities] = useState<UniversityHit[]>([]);
+  const [officers, setOfficers] = useState<OfficerHit[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -49,6 +64,8 @@ export function GlobalSearch() {
     if (q.length < 2) {
       setUsers([]);
       setClubs([]);
+      setUniversities([]);
+      setOfficers([]);
       setLoading(false);
       return;
     }
@@ -62,10 +79,14 @@ export function GlobalSearch() {
         const data = await res.json();
         setUsers(data.users ?? []);
         setClubs(data.clubs ?? []);
+        setUniversities(data.universities ?? []);
+        setOfficers(data.officers ?? []);
         setOpen(true);
       } catch {
         setUsers([]);
         setClubs([]);
+        setUniversities([]);
+        setOfficers([]);
       } finally {
         setLoading(false);
       }
@@ -79,7 +100,8 @@ export function GlobalSearch() {
     router.push(href);
   }
 
-  const hasResults = users.length > 0 || clubs.length > 0;
+  const hasResults =
+    users.length > 0 || clubs.length > 0 || universities.length > 0 || officers.length > 0;
 
   return (
     <div ref={boxRef} className="relative w-full max-w-xl">
@@ -152,6 +174,53 @@ export function GlobalSearch() {
                         </span>
                       </span>
                       <span className="text-[10px] uppercase text-gray-400">Club</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {officers.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Officers
+                  </p>
+                  {officers.map((o) => (
+                    <button
+                      key={o.id}
+                      onClick={() => go(`/admin/users/${o.user_id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🎖️</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{o.full_name || o.username}</span>
+                        <span className="block truncate text-xs text-gray-500">
+                          {o.role_title ? `${o.role_title} · ` : ""}
+                          {o.club_name}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Officer</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {universities.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Universities
+                  </p>
+                  {universities.map((u) => (
+                    <button
+                      key={u.id}
+                      onClick={() => go(`/admin/universities/${u.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🎓</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{u.name}</span>
+                        <span className="block truncate text-xs text-gray-500">@{u.slug}</span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">University</span>
                     </button>
                   ))}
                 </>

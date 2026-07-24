@@ -70,6 +70,33 @@ improvements, non-critical refactors, or advanced-moderation features.
   conversations, universities…).
 - Keyboard navigation (arrow keys + Enter) and recent-search history.
 
+## Day-2 deferrals (memberships / officers / gluemates / universities / restrictions)
+
+- **Persistent audit table.** `adminAudit()` writes structured JSON to server logs
+  today; add a canonical `admin_audit` table (INSERT inside `adminAudit`, no caller
+  changes) — planned Day 5.
+- **Gluemates at scale.** `listGluemates` loads accepted `follows` and pairs them
+  in memory (fine at current scale). Add a SQL view / RPC deriving mutual follows
+  with keyset pagination for millions of rows. Same for `getUserGluemates`.
+- **Membership/officer club filter.** `listClubOptions` is capped at 200 for the
+  filter dropdown; swap for a searchable club picker when club count grows.
+- **Officer title search in global search.** Global search matches officers by
+  user/club; add role-title matching there too (the Officers list already does).
+- **Admin-action notifications.** The canonical officer/member RPCs notify the
+  affected user; admin writes intentionally skip notifications for now (moderation
+  context, avoids actor mismatch). Decide whether admin adds/removals should notify.
+- **University domain mapping.** `universities` has no `domain` column; a
+  `university_domains` mapping table is referenced in migration 042 but not built.
+  Add it before multi-campus, then surface domain on the Universities screen.
+- **Restrictions system (greenfield).** No suspensions/timeouts/blocks/shadow/
+  content/club-restriction tables exist. Building any requires a canonical
+  restrictions table (type, status, reason, expiration, created_by, related
+  report, audit), an explicit product decision, and safe iOS/Android/web
+  enforcement. The page is an honest disabled state until then.
+- **Membership status.** `club_members` has no status column — membership is
+  binary (row exists = active). If soft-deactivation is ever needed, add a status
+  column + restore action.
+
 ## Misc / polish
 
 - Mobile-width (<1024) drawer navigation for the sidebar (desktop-first today).

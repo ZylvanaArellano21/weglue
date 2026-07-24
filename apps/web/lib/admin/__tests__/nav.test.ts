@@ -2,9 +2,24 @@ import { describe, it, expect } from "vitest";
 import { ADMIN_NAV, findNavItem } from "../nav";
 
 describe("admin navigation", () => {
-  it("marks only the Day-1 sections as ready", () => {
+  it("marks Day-1 and Day-2 sections as ready", () => {
     const ready = ADMIN_NAV.filter((i) => i.ready).map((i) => i.href).sort();
-    expect(ready).toEqual(["/admin", "/admin/clubs", "/admin/users"]);
+    expect(ready).toEqual([
+      "/admin",
+      "/admin/clubs",
+      "/admin/gluemates",
+      "/admin/memberships",
+      "/admin/officers",
+      "/admin/restrictions",
+      "/admin/universities",
+      "/admin/users",
+    ]);
+  });
+
+  it("every ready section has a corresponding built route intent", () => {
+    for (const item of ADMIN_NAV.filter((i) => i.ready)) {
+      expect(item.day).toBeLessThanOrEqual(2);
+    }
   });
 
   it("resolves a detail route to its section (longest-prefix wins over Overview)", () => {
