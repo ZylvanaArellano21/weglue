@@ -180,9 +180,19 @@ async function resume(
       return "completed";
     }
 
-    // failed_requires_reconciliation that is not dead-lettered starts over from
-    // its mapping state; treat as retry so the next claim re-drives it.
-    return "retry";
+    // Unreachable in practice: claim_deletion_attempt normalizes a
+    // `failed_requires_reconciliation` attempt back to its resumable active
+    // state (pending/retained/original_removed) from last_completed_step
+    // (BLOCKER 6), so `claim.state` handled above is always one of those. If an
+    // unexpected state is ever seen, fail it retryably rather than silently
+    // holding the lease and spinning (the old bug: this returned "retry" without
+    // releasing, so the attempt was reclaimed forever with zero progress).
+    return await failRetry(
+      admin,
+      attemptId,
+      token,
+      `unexpected_state:${state}`,
+    );
   } catch (e) {
     await failRetry(
       admin,
