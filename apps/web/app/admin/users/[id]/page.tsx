@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getUserDetail } from "../../../../lib/admin/data";
+import { getUserGluemates } from "../../../../lib/admin/data2";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
@@ -16,6 +17,7 @@ function fmtDate(iso: string): string {
 export default async function AdminUserDetailPage({ params }: { params: { id: string } }) {
   const user = await getUserDetail(params.id);
   if (!user) notFound();
+  const gluemates = await getUserGluemates(params.id);
 
   const profileTab = (
     <div className="grid gap-6 md:grid-cols-3">
@@ -24,7 +26,15 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
           <Field label="Full name">{user.full_name}</Field>
           <Field label="Username">@{user.username}</Field>
           <Field label="Email">{user.email}</Field>
-          <Field label="University">{user.university}</Field>
+          <Field label="University">
+            {user.university_id && user.university ? (
+              <Link href={`/admin/universities/${user.university_id}`} className="text-teal-700 hover:underline">
+                {user.university}
+              </Link>
+            ) : (
+              user.university
+            )}
+          </Field>
           <Field label="Major">{user.major}</Field>
           <Field label="Year">{user.year}</Field>
           <Field label="Onboarding">
@@ -140,6 +150,33 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
     </SectionCard>
   );
 
+  const gluematesTab = (
+    <SectionCard className="overflow-hidden" title={`Gluemates (${gluemates.mutual.length})`}>
+      <div className="flex gap-4 border-b border-gray-100 px-4 py-3 text-xs text-gray-500">
+        <span><span className="font-semibold text-gray-900">{gluemates.mutual.length}</span> mutual</span>
+        <span><span className="font-semibold text-gray-900">{gluemates.followingOnly}</span> following only</span>
+        <span><span className="font-semibold text-gray-900">{gluemates.followerOnly}</span> followers only</span>
+      </div>
+      {gluemates.mutual.length === 0 ? (
+        <EmptyState icon="🔗" title="No gluemates" message="This user has no mutual-follow relationships." />
+      ) : (
+        <ul className="divide-y divide-gray-100">
+          {gluemates.mutual.map((g) => (
+            <li key={g.id}>
+              <Link href={`/admin/users/${g.id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50">
+                <Avatar uri={g.avatar_url} name={g.full_name} size={28} />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-gray-900">{g.full_name || g.username}</span>
+                  <span className="block truncate text-xs text-gray-500">@{g.username}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
+
   const actionsTab = (
     <SectionCard title="Account actions">
       <div className="space-y-3 p-4">
@@ -200,6 +237,7 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
           { key: "profile", label: "Profile", content: profileTab },
           { key: "clubs", label: "Clubs", count: user.memberships.length, content: clubsTab },
           { key: "officer", label: "Officer Roles", count: user.officerRoles.length, content: officerTab },
+          { key: "gluemates", label: "Gluemates", count: gluemates.mutual.length, content: gluematesTab },
           { key: "activity", label: "Activity", content: activityTab },
           { key: "actions", label: "Actions", content: actionsTab },
         ]}
