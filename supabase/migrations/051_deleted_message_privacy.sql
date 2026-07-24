@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS message_deletion_attempts (
   claimed_at                     TIMESTAMPTZ,
   claim_expires_at               TIMESTAMPTZ,
   retry_count                    INT NOT NULL DEFAULT 0,
+  -- manual recovery (§8d / BLOCKER 2). An audited manual retry of an attempt
+  -- dead-lettered at the automatic retry limit sets a one-shot override that the
+  -- claim honors regardless of retry_count; the claim consumes it so EXACTLY ONE
+  -- controlled retry is scheduled. retry_count is preserved as the lifetime
+  -- automatic-failure total; manual_retry_count audits how many manual retries
+  -- have been performed.
+  manual_retry_override          BOOLEAN NOT NULL DEFAULT false,
+  manual_retry_count             INT NOT NULL DEFAULT 0,
   next_retry_at                  TIMESTAMPTZ,
   last_error                     TEXT,
   last_attempt_at                TIMESTAMPTZ,
@@ -1426,11 +1434,23 @@ ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_conversation_id_fkey;
 ALTER TABLE messages ADD CONSTRAINT messages_conversation_id_fkey
   FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE RESTRICT;
 
--- (2) Remove the client-facing channel DELETE policy: channel removal must go
---     through the secure RPC below, never a direct client DELETE. (With RESTRICT
---     a direct delete of a channel with messages already fails, but we close the
---     path entirely — the app deletes only via delete_conversation_channel.)
+-- (2) Close EVERY ordinary-participant direct channel-mutation path. PostgreSQL
+--     permissive policies OR-combine, so migration 001's FOR ALL
+--     "conv_channels: participants can manage" (USING/CHECK = is_conversation_
+--     participant) let any participant directly INSERT/UPDATE/DELETE channels,
+--     re-opening what the officer-only policies close. All channel mutation is
+--     server-controlled via SECURITY DEFINER RPCs (create/rename/set_*/
+--     delete_conversation_channel), which authorize officers (club chats) and
+--     participants (custom groups) and bypass RLS as owner — so NO client
+--     INSERT/UPDATE/DELETE policy is needed. Drop all of them; keep only the two
+--     SELECT policies so ordinary participants can still READ channels.
+DROP POLICY IF EXISTS "conv_channels: participants can manage" ON conversation_channels;
+DROP POLICY IF EXISTS "conv_channels: officers can create" ON conversation_channels;
 DROP POLICY IF EXISTS "conv_channels: officers can delete" ON conversation_channels;
+-- Final effective conversation_channels policy set after 051:
+--   • "conv_channels: participants can read"               (SELECT)
+--   • "conv_channels: non-members see club group channels" (SELECT)
+-- No FOR ALL / INSERT / UPDATE / DELETE policy remains for ordinary participants.
 
 -- (3) Bulk secure-delete helper: route EVERY active message in a conversation
 --     (optionally a single channel) through begin_message_deletion with
@@ -1573,7 +1593,8 @@ BEGIN
     AND a.dead_lettered_at IS NULL
     AND (a.next_retry_at IS NULL OR a.next_retry_at <= now())
     AND (a.claim_expires_at IS NULL OR a.claim_expires_at < now())
-    AND a.retry_count < 8                              -- automatic_retry_limit
+    -- automatic_retry_limit, honoring a one-shot audited manual override (§8d / B2)
+    AND (a.retry_count < 8 OR a.manual_retry_override = true)
   ORDER BY a.next_retry_at NULLS FIRST, a.started_at
   FOR UPDATE SKIP LOCKED
   LIMIT 1;
@@ -1598,6 +1619,7 @@ BEGIN
       claim_token = v_token,
       claimed_at = now(),
       claim_expires_at = now() + interval '5 minutes',   -- lease
+      manual_retry_override = false,                      -- consume one-shot override (B2)
       last_attempt_at = now(),
       updated_at = now()
   WHERE id = v_id
@@ -1646,7 +1668,7 @@ BEGIN
     AND a.dead_lettered_at IS NULL
     AND (a.next_retry_at IS NULL OR a.next_retry_at <= now())
     AND (a.claim_expires_at IS NULL OR a.claim_expires_at < now())
-    AND a.retry_count < 8
+    AND (a.retry_count < 8 OR a.manual_retry_override = true)   -- B2 one-shot override
   FOR UPDATE SKIP LOCKED
   LIMIT 1;
 
@@ -1661,6 +1683,7 @@ BEGIN
   SET state = v_resume,
       claimed_by = p_worker, claim_token = v_token, claimed_at = now(),
       claim_expires_at = now() + interval '5 minutes',
+      manual_retry_override = false,                      -- consume one-shot override (B2)
       last_attempt_at = now(), updated_at = now()
   WHERE id = v_id
   RETURNING id, message_id, attempt_no, state, attachment_category, retry_count,
@@ -1835,27 +1858,40 @@ REVOKE ALL ON FUNCTION fail_deletion_attempt(UUID, UUID, TEXT, BOOLEAN) FROM PUB
 -- ============================================================================
 -- SECTION 17 — Founder/admin foundations: manual retry, restore, purge (§8d/§10)
 -- ============================================================================
--- Clear a dead-letter and schedule EXACTLY ONE controlled attempt (§8d). Keeps
--- history. Service role only (future audited admin path).
+-- Clear a dead-letter and schedule EXACTLY ONE controlled attempt (§8d / BLOCKER
+-- 2). An attempt dead-lettered at the automatic retry limit (retry_count >= 8)
+-- could not previously be reclaimed because the claim requires retry_count < 8.
+-- We set a one-shot `manual_retry_override` that the claim honors regardless of
+-- retry_count and consumes on claim, so exactly one controlled retry runs; if it
+-- fails again it dead-letters again (needing another manual retry). retry_count
+-- is PRESERVED as the lifetime automatic-failure total; manual_retry_count audits
+-- the number of manual retries. Service role only (future audited admin path).
 CREATE OR REPLACE FUNCTION admin_manual_retry_deletion(p_attempt UUID, p_reason TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
-DECLARE v_n INT;
+DECLARE v_row RECORD;
 BEGIN
   UPDATE message_deletion_attempts
   SET requires_manual_reconciliation = false,
       dead_lettered_at = NULL,
       dead_letter_reason = NULL,
+      manual_retry_override = true,                 -- one-shot: claim bypasses retry cap once
+      manual_retry_count = manual_retry_count + 1,  -- audit: repeated manual retries counted
       next_retry_at = now(),
-      claim_token = NULL, claim_expires_at = NULL,
-      last_error = COALESCE('manual retry: ' || p_reason, last_error),
+      claim_token = NULL, claim_expires_at = NULL,  -- invalidate any stale lease/token
+      last_error = 'manual retry #' || (manual_retry_count + 1)::text ||
+                   COALESCE(': ' || p_reason, ''),
       updated_at = now()
-  WHERE id = p_attempt AND requires_manual_reconciliation = true;
-  GET DIAGNOSTICS v_n = ROW_COUNT;
-  RETURN jsonb_build_object('ok', v_n = 1);
+  WHERE id = p_attempt AND requires_manual_reconciliation = true
+  RETURNING id, manual_retry_count, retry_count INTO v_row;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'not_dead_lettered');
+  END IF;
+  RETURN jsonb_build_object('ok', true, 'manual_retry_count', v_row.manual_retry_count,
+    'lifetime_retry_count', v_row.retry_count);
 END;
 $$;
 REVOKE ALL ON FUNCTION admin_manual_retry_deletion(UUID, TEXT) FROM PUBLIC, anon, authenticated;
