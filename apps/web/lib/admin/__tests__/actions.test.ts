@@ -5,11 +5,21 @@ const h = vi.hoisted(() => {
   const holder = { db: null as any };
   return {
     getUser: vi.fn(),
+    getAAL: vi.fn(),
+    signOut: vi.fn(async () => ({ error: null })),
     holder,
     createAdminClient: vi.fn(() => holder.db),
   };
 });
-vi.mock("../../supabase/server", () => ({ createClient: () => ({ auth: { getUser: h.getUser } }) }));
+vi.mock("../../supabase/server", () => ({
+  createClient: () => ({
+    auth: {
+      getUser: h.getUser,
+      signOut: h.signOut,
+      mfa: { getAuthenticatorAssuranceLevel: h.getAAL },
+    },
+  }),
+}));
 vi.mock("../../supabase/admin", () => ({ createAdminClient: h.createAdminClient }));
 
 import {
@@ -23,24 +33,37 @@ import {
   editUniversity,
   setUniversityActive,
 } from "../actions";
-import { FounderAuthError } from "../founder";
+import { SecureAdminError } from "../secureAdmin";
 
 const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@weglue.app" };
 const U = (n: number) => `00000000-0000-0000-0000-00000000000${n}`;
 const C = (n: number) => `00000000-0000-0000-0000-0000000000c${n}`;
 const UNI = (n: number) => `00000000-0000-0000-0000-0000000000e${n}`;
 
+function aal2() {
+  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+}
 function asFounder() {
+  process.env.ADMIN_PORTAL_ENABLED = "true";
+  process.env.ADMIN_WRITES_ENABLED = "true";
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
   process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   h.getUser.mockResolvedValue({ data: { user: FOUNDER } });
+  aal2();
 }
 function asNonFounder() {
+  process.env.ADMIN_PORTAL_ENABLED = "true";
+  process.env.ADMIN_WRITES_ENABLED = "true";
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
+  process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   h.getUser.mockResolvedValue({ data: { user: { id: "student", email: "s@my.edu" } } });
+  aal2();
 }
 function asAnonymous() {
+  process.env.ADMIN_PORTAL_ENABLED = "true";
+  process.env.ADMIN_WRITES_ENABLED = "true";
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
+  process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   h.getUser.mockResolvedValue({ data: { user: null } });
 }
 
@@ -161,7 +184,10 @@ function seed() {
 
 beforeEach(() => {
   h.getUser.mockReset();
+  h.getAAL.mockReset();
   h.createAdminClient.mockClear();
+  delete process.env.ADMIN_PORTAL_ENABLED;
+  delete process.env.ADMIN_WRITES_ENABLED;
   delete process.env.ADMIN_FOUNDER_EMAILS;
   delete process.env.ADMIN_FOUNDER_USER_IDS;
   h.holder.db = seed();
@@ -171,12 +197,30 @@ beforeEach(() => {
 describe("write authorization", () => {
   it("denies a non-founder and never constructs the service-role client", async () => {
     asNonFounder();
-    await expect(addMembership(C(1), U(4))).rejects.toBeInstanceOf(FounderAuthError);
+    await expect(addMembership(C(1), U(4))).rejects.toBeInstanceOf(SecureAdminError);
     expect(h.createAdminClient).not.toHaveBeenCalled();
   });
   it("denies an unauthenticated caller", async () => {
     asAnonymous();
-    await expect(setMembershipRole(C(1), U(2), "officer")).rejects.toMatchObject({ status: "unauthenticated" });
+    await expect(setMembershipRole(C(1), U(2), "officer")).rejects.toMatchObject({ reason: "unauthenticated" });
+    expect(h.createAdminClient).not.toHaveBeenCalled();
+  });
+  it("rejects every mutation when the write kill switch is off", async () => {
+    asFounder();
+    process.env.ADMIN_WRITES_ENABLED = "false";
+    await expect(addMembership(C(1), U(4))).rejects.toMatchObject({ reason: "writes_disabled" });
+    expect(h.createAdminClient).not.toHaveBeenCalled();
+  });
+  it("rejects mutations when the portal kill switch is off", async () => {
+    asFounder();
+    process.env.ADMIN_PORTAL_ENABLED = "false";
+    await expect(addUniversity("X College", "x-college")).rejects.toMatchObject({ reason: "portal_disabled" });
+    expect(h.createAdminClient).not.toHaveBeenCalled();
+  });
+  it("denies an aal1 (MFA-not-satisfied) founder", async () => {
+    asFounder();
+    h.getAAL.mockResolvedValue({ data: { currentLevel: "aal1", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+    await expect(addMembership(C(1), U(4))).rejects.toMatchObject({ reason: "mfa_required" });
     expect(h.createAdminClient).not.toHaveBeenCalled();
   });
 });

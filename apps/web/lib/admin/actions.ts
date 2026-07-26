@@ -1,11 +1,12 @@
 "use server";
 
 // ============================================================================
-// Admin Dashboard — privileged write server actions  (Day 2)
+// Admin Dashboard — privileged write server actions  (Day 2, Day-3 hardened)
 // ============================================================================
 //
-// Every action follows the same contract:
-//   1. requireFounder()                        — server-side founder auth
+// Every write action follows the same contract:
+//   1. requireSecureAdmin({ write: true })     — portal + allowlist + aal2 MFA +
+//                                                 write kill switch, all fail-closed
 //   2. strict input validation                 — fixed shapes, no arbitrary cols
 //   3. mutation on a FIXED canonical table      — no generic mutation endpoint
 //   4. read the changed record back
@@ -13,8 +14,9 @@
 //   6. structured { ok } result — never throws to the client
 //
 // Client identity is NEVER trusted: the actor is the server-validated founder
-// from requireFounder(). The service-role client is constructed only AFTER
-// authorization passes.
+// from requireSecureAdmin(). The service-role client is constructed only AFTER
+// authorization passes. With ADMIN_WRITES_ENABLED unset/false, EVERY action
+// here throws before touching data — the dashboard stays safely read-only.
 //
 // Officer authority is `club_members.role = 'officer'` (via is_club_officer).
 // `club_officers` is the DISPLAY roster only. Promote/demote therefore writes
@@ -27,7 +29,8 @@
 // ============================================================================
 
 import { createAdminClient } from "../supabase/admin";
-import { requireFounder } from "./founder";
+import { createClient as createServerClient } from "../supabase/server";
+import { requireSecureAdmin } from "./secureAdmin";
 import { adminAudit } from "./audit";
 import type { User } from "@supabase/supabase-js";
 
@@ -51,7 +54,7 @@ function fail(action: string, actor: User, error: string, target: Record<string,
 
 /** Add an existing user to a club as an ordinary member (canonical: club_members). */
 export async function addMembership(clubId: string, userId: string): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "membership.add";
   const target = { clubId, userId };
   if (!isUuid(clubId) || !isUuid(userId)) return fail(action, actor, "Invalid club or user id.", target);
@@ -93,7 +96,7 @@ export async function addMembership(clubId: string, userId: string): Promise<Act
 
 /** Remove an ordinary member from a club. Officers must be demoted first. */
 export async function removeMembership(clubId: string, userId: string): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "membership.remove";
   const target = { clubId, userId };
   if (!isUuid(clubId) || !isUuid(userId)) return fail(action, actor, "Invalid club or user id.", target);
@@ -171,7 +174,7 @@ export async function setMembershipRole(
   role: "member" | "officer",
   roleTitle?: string
 ): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = role === "officer" ? "officer.promote" : "officer.demote";
   const target = { clubId, userId, role };
   if (!isUuid(clubId) || !isUuid(userId)) return fail(action, actor, "Invalid club or user id.", target);
@@ -226,7 +229,7 @@ export async function setMembershipRole(
  * already a member.
  */
 export async function addOfficer(clubId: string, userId: string, roleTitle: string): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "officer.add";
   const target = { clubId, userId };
   if (!isUuid(clubId) || !isUuid(userId)) return fail(action, actor, "Invalid club or user id.", target);
@@ -272,7 +275,7 @@ export async function addOfficer(clubId: string, userId: string, roleTitle: stri
 
 /** Edit an existing officer's display title (canonical: club_officers roster). */
 export async function editOfficerTitle(clubId: string, userId: string, roleTitle: string): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "officer.editTitle";
   const target = { clubId, userId };
   if (!isUuid(clubId) || !isUuid(userId)) return fail(action, actor, "Invalid club or user id.", target);
@@ -304,7 +307,7 @@ export async function editOfficerTitle(clubId: string, userId: string, roleTitle
 
 /** Dissolve a mutual-follow (gluemate) relationship by deleting both directions. */
 export async function removeGluemate(userAId: string, userBId: string): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "gluemate.remove";
   const target = { userAId, userBId };
   if (!isUuid(userAId) || !isUuid(userBId)) return fail(action, actor, "Invalid user id.", target);
@@ -336,7 +339,7 @@ export async function removeGluemate(userAId: string, userBId: string): Promise<
 
 /** Create a new university (canonical: universities). */
 export async function addUniversity(name: string, slug: string): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "university.add";
   const cleanName = (name ?? "").trim();
   const cleanSlug = (slug ?? "").trim().toLowerCase();
@@ -365,7 +368,7 @@ export async function addUniversity(name: string, slug: string): Promise<ActionR
 
 /** Edit supported university fields (name, slug). */
 export async function editUniversity(id: string, fields: { name?: string; slug?: string }): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "university.edit";
   const target = { id, fields };
   if (!isUuid(id)) return fail(action, actor, "Invalid university id.", target);
@@ -398,7 +401,7 @@ export async function editUniversity(id: string, fields: { name?: string; slug?:
 
 /** Activate or deactivate a university (canonical: universities.is_active). */
 export async function setUniversityActive(id: string, isActive: boolean): Promise<ActionResult> {
-  const actor = await requireFounder();
+  const actor = await requireSecureAdmin({ write: true });
   const action = "university.setActive";
   const target = { id, isActive };
   if (!isUuid(id)) return fail(action, actor, "Invalid university id.", target);
@@ -415,4 +418,29 @@ export async function setUniversityActive(id: string, isActive: boolean): Promis
 
   adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
   return { ok: true, data: row };
+}
+
+// ── Portal lock (session control) ─────────────────────────────────────────────
+
+/**
+ * Lock the admin portal: sign out the current administrator session so the next
+ * visit requires a fresh login AND a fresh MFA challenge (the session drops back
+ * to aal1). Backs both the explicit "Lock Admin Portal" control and the
+ * inactivity auto-lock. Ending one's own session needs no write privilege, so
+ * this is intentionally NOT gated by ADMIN_WRITES_ENABLED — it must always work.
+ */
+export async function lockAdminPortal(): Promise<ActionResult> {
+  const supabase = createServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    // Best-effort — cookies may already be cleared.
+  }
+  if (user) {
+    adminAudit({ action: "portal.lock", actorId: user.id, actorEmail: user.email, target: {}, ok: true });
+  }
+  return { ok: true, data: { locked: true } };
 }

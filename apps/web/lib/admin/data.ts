@@ -2,7 +2,7 @@
 // Admin Dashboard — canonical read-only data access  (SERVER-ONLY)
 // ============================================================================
 //
-// Every exported function calls `requireFounder()` FIRST, then reads through the
+// Every exported function calls `requireSecureAdmin()` FIRST, then reads through the
 // service-role client. That ordering is the contract: authorization is enforced
 // per-operation, and the service-role key never leaves the server (this module
 // must never be imported by a Client Component).
@@ -34,7 +34,7 @@ if (typeof window !== "undefined") {
 }
 
 import { createAdminClient } from "../supabase/admin";
-import { requireFounder } from "./founder";
+import { requireSecureAdmin } from "./secureAdmin";
 
 export const PAGE_SIZE = 25;
 
@@ -135,7 +135,7 @@ async function findUserIdsByEmail(query: string, cap = 2000): Promise<string[]> 
 // ── Universities (filter options) ───────────────────────────────────────────
 
 export async function listUniversities(): Promise<UniversityOption[]> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const { data } = await admin
     .from("universities")
@@ -177,7 +177,7 @@ async function safeCount(
 }
 
 export async function getOverviewStats(): Promise<OverviewStats> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
 
   const [
@@ -241,7 +241,7 @@ export interface ListUsersParams {
 }
 
 export async function listUsers(params: ListUsersParams = {}): Promise<Paginated<AdminUserRow>> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
 
   const page = Math.max(1, params.page ?? 1);
@@ -379,7 +379,7 @@ export interface UserDetail {
 }
 
 export async function getUserDetail(id: string): Promise<UserDetail | null> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
 
   const { data: profile } = await admin
@@ -483,7 +483,7 @@ export interface ListClubsParams {
 }
 
 export async function listClubs(params: ListClubsParams = {}): Promise<Paginated<AdminClubRow>> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
 
   const page = Math.max(1, params.page ?? 1);
@@ -627,7 +627,7 @@ export interface ClubDetail {
 }
 
 export async function getClubDetail(id: string): Promise<ClubDetail | null> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
 
   const { data: club } = await admin
@@ -750,7 +750,7 @@ export interface SearchResults {
 const EMPTY_SEARCH: SearchResults = { users: [], clubs: [], universities: [], officers: [] };
 
 export async function searchEntities(query: string): Promise<SearchResults> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const term = query.trim();
   if (term.length < 2) return EMPTY_SEARCH;

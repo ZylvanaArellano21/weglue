@@ -5,6 +5,7 @@ const h = vi.hoisted(() => {
   const adminHolder = { impl: null as any };
   return {
     getUser: vi.fn(),
+    getAAL: vi.fn(),
     adminHolder,
     // Spy on the SERVICE-ROLE client so we can prove it is never constructed for
     // a non-founder (service-role isolation) and inject a fake DB for founders.
@@ -13,30 +14,42 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("../../supabase/server", () => ({
-  createClient: () => ({ auth: { getUser: h.getUser } }),
+  createClient: () => ({
+    auth: { getUser: h.getUser, mfa: { getAuthenticatorAssuranceLevel: h.getAAL } },
+  }),
 }));
 vi.mock("../../supabase/admin", () => ({ createAdminClient: h.createAdminClient }));
 
 const getUser = h.getUser;
+const getAAL = h.getAAL;
 const createAdminClient = h.createAdminClient;
 
 import { searchEntities, listUsers } from "../data";
-import { FounderAuthError } from "../founder";
+import { SecureAdminError } from "../secureAdmin";
 
 const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@weglue.app" };
 
+function aal2() {
+  getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+}
 function asFounder() {
+  process.env.ADMIN_PORTAL_ENABLED = "true";
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
   process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   getUser.mockResolvedValue({ data: { user: FOUNDER } });
+  aal2();
 }
 function asNonFounder() {
+  process.env.ADMIN_PORTAL_ENABLED = "true";
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
   process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   getUser.mockResolvedValue({ data: { user: { id: "student", email: "student@my.lonestar.edu" } } });
+  aal2();
 }
 function asAnonymous() {
+  process.env.ADMIN_PORTAL_ENABLED = "true";
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
+  process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   getUser.mockResolvedValue({ data: { user: null } });
 }
 
@@ -72,8 +85,11 @@ function makeFakeAdmin(tables: Record<string, any[]>, emails: Record<string, str
 
 beforeEach(() => {
   getUser.mockReset();
+  getAAL.mockReset();
   createAdminClient.mockClear();
   h.adminHolder.impl = null;
+  delete process.env.ADMIN_PORTAL_ENABLED;
+  delete process.env.ADMIN_WRITES_ENABLED;
   delete process.env.ADMIN_FOUNDER_EMAILS;
   delete process.env.ADMIN_FOUNDER_USER_IDS;
 });
@@ -81,19 +97,19 @@ beforeEach(() => {
 describe("authorization gate precedes data access", () => {
   it("searchEntities denies a non-founder and never constructs the service-role client", async () => {
     asNonFounder();
-    await expect(searchEntities("robotics")).rejects.toBeInstanceOf(FounderAuthError);
+    await expect(searchEntities("robotics")).rejects.toBeInstanceOf(SecureAdminError);
     expect(createAdminClient).not.toHaveBeenCalled(); // service-role isolation
   });
 
   it("listUsers denies an unauthenticated caller and never touches the service-role client", async () => {
     asAnonymous();
-    await expect(listUsers({})).rejects.toMatchObject({ status: "unauthenticated" });
+    await expect(listUsers({})).rejects.toMatchObject({ reason: "unauthenticated" });
     expect(createAdminClient).not.toHaveBeenCalled();
   });
 
   it("searchEntities denies a non-founder for club/user queries alike", async () => {
     asNonFounder();
-    await expect(searchEntities("chess club")).rejects.toBeInstanceOf(FounderAuthError);
+    await expect(searchEntities("chess club")).rejects.toBeInstanceOf(SecureAdminError);
   });
 });
 

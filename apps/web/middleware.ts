@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "./lib/supabase/middleware";
+import { isAllowlistedAdmin } from "./lib/admin/adminEnv";
 
 // Auth-flow pages a signed-in, fully-onboarded user has no business visiting —
 // they bounce to the dashboard instead.
@@ -35,6 +36,12 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // ── Admin portal: hardened routing + non-cacheable, non-indexable headers ──
+  // Runs before the ordinary app routing so /admin has its own security posture.
+  if (pathname.startsWith("/admin")) {
+    return handleAdminRequest(request, response, supabase, user, pathname);
+  }
 
   const isProtected = PROTECTED_PREFIXES.some((r) => pathname.startsWith(r));
   const isAuthFlow = AUTH_FLOW_ROUTES.some(
@@ -100,6 +107,69 @@ export async function middleware(request: NextRequest) {
   }
 
   return response;
+}
+
+/**
+ * Admin portal request handling. Every /admin response is stamped no-store +
+ * X-Robots-Tag noindex. Routing (defense-in-depth on top of the per-loader
+ * requireSecureAdmin gate):
+ *   • portal off              → pass through; the layout renders "unavailable"
+ *   • /admin/api/*            → pass through; the Route Handler enforces auth/JSON
+ *   • /admin/mfa (gate page)  → always reachable so the founder can step up
+ *   • no session              → redirect to login with a return path
+ *   • not allowlisted         → pass through; the layout renders "access denied"
+ *   • aal1 (MFA not satisfied)→ redirect to the MFA challenge
+ *   • aal2 sitting on /mfa    → bounce forward to the intended admin path
+ */
+async function handleAdminRequest(
+  request: NextRequest,
+  response: NextResponse,
+  supabase: ReturnType<typeof createMiddlewareClient>,
+  user: { id: string; email?: string | null } | null,
+  pathname: string
+): Promise<NextResponse> {
+  const secure = (res: NextResponse): NextResponse => {
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.headers.set("Pragma", "no-cache");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");
+    return res;
+  };
+  const redirectTo = (path: string): NextResponse =>
+    secure(NextResponse.redirect(new URL(path, request.url)));
+
+  // Kill switch: the layout/route own the "unavailable" state; just pass through.
+  if (process.env.ADMIN_PORTAL_ENABLED !== "true") return secure(response);
+
+  // APIs and Route Handlers enforce their own auth and must return JSON, never a
+  // redirect, so a fetch() never silently follows a 3xx to an HTML page.
+  if (pathname.startsWith("/admin/api")) return secure(response);
+
+  const isGatePage = pathname === "/admin/mfa";
+
+  if (!user) {
+    if (isGatePage) return secure(response);
+    return redirectTo(`/login?next=${encodeURIComponent(pathname)}`);
+  }
+
+  // Non-allowlisted signed-in users are handled by the layout (access denied).
+  if (!isAllowlistedAdmin(user)) return secure(response);
+
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const level = aal?.currentLevel;
+
+  if (level !== "aal2") {
+    if (isGatePage) return secure(response);
+    return redirectTo(`/admin/mfa?next=${encodeURIComponent(pathname)}`);
+  }
+
+  // Fully verified admin already on the challenge page → forward to destination.
+  if (isGatePage) {
+    const rawNext = request.nextUrl.searchParams.get("next") ?? "/admin";
+    const next = rawNext.startsWith("/admin") && !rawNext.startsWith("//") ? rawNext : "/admin";
+    return redirectTo(next);
+  }
+
+  return secure(response);
 }
 
 export const config = {

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { ADMIN_NAV, ADMIN_NAV_GROUPS, findNavItem } from "../../lib/admin/nav";
 import { GlobalSearch } from "./GlobalSearch";
+import { AdminSessionGuard } from "./AdminSessionGuard";
 
 /**
  * The Admin Dashboard application shell: persistent collapsible sidebar, top bar
@@ -100,7 +101,8 @@ export function AdminShell({
           <div className="flex-1">
             <GlobalSearch />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <AdminSessionGuard />
             <span className="hidden text-right text-xs leading-tight sm:block">
               <span className="block font-medium text-gray-900">Founder</span>
               <span className="block max-w-[180px] truncate text-gray-400">{founderEmail}</span>

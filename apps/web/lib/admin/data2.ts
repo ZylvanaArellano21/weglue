@@ -2,7 +2,7 @@
 // Admin Dashboard — Day-2 canonical read-only data access  (SERVER-ONLY)
 // ============================================================================
 // Memberships, officers, gluemates (mutual follows), universities. Same rules
-// as data.ts: requireFounder() first, service-role reads, canonical tables,
+// as data.ts: requireSecureAdmin() first, service-role reads, canonical tables,
 // live counts. Emails from auth.users via emailMap().
 // ============================================================================
 
@@ -11,7 +11,7 @@ if (typeof window !== "undefined") {
 }
 
 import { createAdminClient } from "../supabase/admin";
-import { requireFounder } from "./founder";
+import { requireSecureAdmin } from "./secureAdmin";
 import { emailMap, PAGE_SIZE } from "./data";
 import type { Paginated } from "./data";
 
@@ -21,7 +21,7 @@ function fmtIds(ids: string[]): string {
 
 /** Club options for filter dropdowns (capped; a searchable picker is the scale answer). */
 export async function listClubOptions(): Promise<{ id: string; name: string }[]> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const { data } = await admin.from("clubs").select("id, name").order("name", { ascending: true }).limit(200);
   return (data ?? []) as { id: string; name: string }[];
@@ -33,7 +33,7 @@ export async function listClubOptions(): Promise<{ id: string; name: string }[]>
  * which is otherwise an honest "no restriction system yet" surface.
  */
 export async function reportStatusCounts(): Promise<Record<string, number>> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const statuses = ["pending", "reviewing", "resolved", "dismissed"];
   const entries = await Promise.all(
@@ -93,7 +93,7 @@ async function membershipSearchFilter(
 }
 
 export async function listMemberships(params: ListMembershipsParams = {}): Promise<Paginated<MembershipRow>> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const page = Math.max(1, params.page ?? 1);
   const from = (page - 1) * PAGE_SIZE;
@@ -172,7 +172,7 @@ async function officerTitleMap(
 }
 
 export async function getMembershipDetail(id: string): Promise<MembershipRow | null> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const { data: r } = await admin
     .from("club_members")
@@ -217,7 +217,7 @@ export interface ListOfficersParams {
 }
 
 export async function listOfficers(params: ListOfficersParams = {}): Promise<Paginated<OfficerRow>> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const page = Math.max(1, params.page ?? 1);
   const from = (page - 1) * PAGE_SIZE;
@@ -299,7 +299,7 @@ export async function clubOfficerCounts(clubIds: string[]): Promise<Map<string, 
 
 /** Live officer count for a club — for last-officer UI hints. */
 export async function clubOfficerCount(clubId: string): Promise<number> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const { count } = await admin
     .from("club_members")
@@ -329,7 +329,7 @@ export interface ListGluematesParams {
  * (see V2 backlog). Gluemates are NOT a separate table.
  */
 export async function listGluemates(params: ListGluematesParams = {}): Promise<Paginated<GluemateRow>> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const page = Math.max(1, params.page ?? 1);
 
@@ -410,7 +410,7 @@ export async function getUserGluemates(userId: string): Promise<{
   followingOnly: number;
   followerOnly: number;
 }> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const [{ data: following }, { data: followers }] = await Promise.all([
     admin.from("follows").select("following_id").eq("follower_id", userId).eq("status", "accepted"),
@@ -446,7 +446,7 @@ export interface UniversityRow {
 }
 
 export async function listUniversitiesFull(search?: string): Promise<UniversityRow[]> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
 
   let q = admin.from("universities").select("id, name, slug, is_active, created_at").order("name", { ascending: true });
@@ -494,7 +494,7 @@ export interface UniversityDetail {
 }
 
 export async function getUniversityDetail(id: string): Promise<UniversityDetail | null> {
-  await requireFounder();
+  await requireSecureAdmin();
   const admin = createAdminClient();
   const { data: uni } = await admin
     .from("universities")
