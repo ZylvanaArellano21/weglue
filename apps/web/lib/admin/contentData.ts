@@ -635,3 +635,461 @@ export async function getCommentDetail(id: string): Promise<CommentDetail | null
     university: uniName,
   };
 }
+
+// ============================================================================
+// Events + RSVPs
+// ============================================================================
+//   • events      — club_id (NOT NULL), created_by, title, emoji, description,
+//                    cover_image_url, event_date (DATE), start_time/end_time
+//                    (TIME), location, building, room, visibility
+//                    ('everyone'|'members'|'specific'), is_seed, created_at,
+//                    updated_at, specific_user_ids (uuid[]). Single-day model:
+//                    there is NO multi-day column and NO hidden/archived/status
+//                    column beyond visibility.
+//   • event_rsvps — (event_id, user_id UNIQUE), status ('going'|'cant').
+
+/** Today's date (YYYY-MM-DD) in the app's canonical timezone (America/Chicago). */
+function todayChicago(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+}
+
+async function eventReportCounts(
+  admin: ReturnType<typeof createAdminClient>,
+  eventIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (eventIds.length === 0) return map;
+  const { data } = await admin.from("reports").select("entity_id").eq("entity_type", "event").in("entity_id", eventIds);
+  for (const r of (data ?? []) as any[]) if (r.entity_id) map.set(r.entity_id, (map.get(r.entity_id) ?? 0) + 1);
+  return map;
+}
+
+async function allReportedEventIds(admin: ReturnType<typeof createAdminClient>): Promise<string[]> {
+  const { data } = await admin
+    .from("reports")
+    .select("entity_id")
+    .eq("entity_type", "event")
+    .not("entity_id", "is", null)
+    .limit(5000);
+  return Array.from(new Set((data ?? []).map((r: any) => r.entity_id).filter(Boolean)));
+}
+
+/** Live "going" RSVP counts per event (attendee totals). */
+async function goingCounts(
+  admin: ReturnType<typeof createAdminClient>,
+  eventIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (eventIds.length === 0) return map;
+  const { data } = await admin.from("event_rsvps").select("event_id").eq("status", "going").in("event_id", eventIds);
+  for (const r of (data ?? []) as any[]) if (r.event_id) map.set(r.event_id, (map.get(r.event_id) ?? 0) + 1);
+  return map;
+}
+
+// ── Events list ────────────────────────────────────────────────────────────────
+
+export interface AdminEventRow {
+  id: string;
+  title: string;
+  emoji: string | null;
+  club_id: string;
+  club_name: string | null;
+  club_handle: string | null;
+  creator_id: string;
+  creator_name: string;
+  creator_username: string;
+  university: string | null;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  location: string | null;
+  building: string | null;
+  room: string | null;
+  visibility: string;
+  rsvp_count: number;
+  report_count: number;
+  created_at: string;
+  is_past: boolean;
+}
+
+export interface ListEventsParams {
+  search?: string;
+  universityId?: string;
+  clubId?: string;
+  when?: "all" | "upcoming" | "past";
+  visibility?: "all" | "everyone" | "members" | "specific";
+  reports?: "all" | "reported";
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: "event_date" | "created_at";
+  dir?: "asc" | "desc";
+  page?: number;
+}
+
+export async function listEvents(params: ListEventsParams = {}): Promise<Paginated<AdminEventRow>> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+
+  const page = Math.max(1, params.page ?? 1);
+  const sort = params.sort ?? "event_date";
+  const dir = params.dir ?? "desc";
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+  const search = params.search?.trim();
+  const today = todayChicago();
+
+  let q = admin
+    .from("events")
+    .select(
+      "id, club_id, created_by, title, emoji, event_date, start_time, end_time, location, building, room, visibility, created_at",
+      { count: "exact" }
+    );
+
+  if (params.clubId) q = q.eq("club_id", params.clubId);
+  if (params.visibility && params.visibility !== "all") q = q.eq("visibility", params.visibility);
+  if (params.when === "upcoming") q = q.gte("event_date", today);
+  if (params.when === "past") q = q.lt("event_date", today);
+  if (params.dateFrom) q = q.gte("event_date", params.dateFrom);
+  if (params.dateTo) q = q.lte("event_date", params.dateTo);
+
+  if (params.reports === "reported") {
+    const ids = await allReportedEventIds(admin);
+    if (ids.length === 0) return { rows: [], total: 0, page, pageSize: PAGE_SIZE };
+    q = q.in("id", ids);
+  }
+
+  if (params.universityId) {
+    const { data: clubs } = await admin.from("clubs").select("id").eq("university_id", params.universityId).limit(2000);
+    const clubIds = (clubs ?? []).map((c: any) => c.id);
+    if (clubIds.length === 0) return { rows: [], total: 0, page, pageSize: PAGE_SIZE };
+    q = q.in("club_id", clubIds);
+  }
+
+  if (search) {
+    const like = `%${search}%`;
+    const isEmail = search.includes("@");
+    const [{ data: creators }, { data: clubs }] = await Promise.all([
+      isEmail
+        ? Promise.resolve({ data: [] as any[] })
+        : admin.from("profiles").select("id").or(`full_name.ilike.${like},username.ilike.${like}`).limit(500),
+      admin.from("clubs").select("id").or(`name.ilike.${like},handle.ilike.${like}`).limit(500),
+    ]);
+    const emailCreatorIds = isEmail ? await findAuthorIdsByEmail(admin, search) : [];
+    const creatorIds = Array.from(new Set([...(creators ?? []).map((c: any) => c.id), ...emailCreatorIds]));
+    const clubIds = (clubs ?? []).map((c: any) => c.id);
+    const parts: string[] = [];
+    if (!isEmail) parts.push(`title.ilike.${like}`);
+    if (creatorIds.length) parts.push(`created_by.in.${fmtIds(creatorIds)}`);
+    if (clubIds.length) parts.push(`club_id.in.${fmtIds(clubIds)}`);
+    if (parts.length === 0) return { rows: [], total: 0, page, pageSize: PAGE_SIZE };
+    q = q.or(parts.join(","));
+  }
+
+  q = q.order(sort, { ascending: dir === "asc" }).range(from, to);
+  const { data, count, error } = await q;
+  if (error) throw error;
+
+  const events = (data ?? []) as any[];
+  const ids = events.map((e) => e.id);
+  const clubIds = events.map((e) => e.club_id);
+  const creatorIds = events.map((e) => e.created_by);
+
+  const [clubMap, creatorMap, rsvps, reports] = await Promise.all([
+    clubMap_(admin, clubIds),
+    profileMap(admin, creatorIds),
+    goingCounts(admin, ids),
+    eventReportCounts(admin, ids),
+  ]);
+  const uniIds = [...clubMap.values()].map((c) => c.university_id).filter(Boolean) as string[];
+  const uniMap = await universityNameMap(admin, uniIds);
+
+  const rows: AdminEventRow[] = events.map((e) => {
+    const club = clubMap.get(e.club_id);
+    const creator = creatorMap.get(e.created_by);
+    const uniId = club?.university_id ?? null;
+    return {
+      id: e.id,
+      title: e.title,
+      emoji: e.emoji ?? null,
+      club_id: e.club_id,
+      club_name: club?.name ?? null,
+      club_handle: club?.handle ?? null,
+      creator_id: e.created_by,
+      creator_name: creator?.full_name ?? "",
+      creator_username: creator?.username ?? "",
+      university: uniId ? uniMap.get(uniId) ?? null : null,
+      event_date: e.event_date,
+      start_time: e.start_time,
+      end_time: e.end_time,
+      location: e.location ?? null,
+      building: e.building ?? null,
+      room: e.room ?? null,
+      visibility: e.visibility,
+      rsvp_count: rsvps.get(e.id) ?? 0,
+      report_count: reports.get(e.id) ?? 0,
+      created_at: e.created_at,
+      is_past: e.event_date < today,
+    };
+  });
+
+  return { rows, total: count ?? rows.length, page, pageSize: PAGE_SIZE };
+}
+
+// ── Event detail ────────────────────────────────────────────────────────────
+
+export interface EventAttendee {
+  user_id: string;
+  full_name: string;
+  username: string;
+  avatar_url: string | null;
+  status: string;
+}
+
+export interface EventRelatedPost {
+  id: string;
+  caption: string | null;
+  author_username: string;
+  created_at: string;
+}
+
+export interface EventReport {
+  id: string;
+  reason: string | null;
+  details: string | null;
+  status: string;
+  reporter_username: string | null;
+  created_at: string;
+}
+
+export interface EventDetail {
+  id: string;
+  title: string;
+  emoji: string | null;
+  description: string | null;
+  cover_image_url: string | null;
+  club_id: string;
+  club_name: string | null;
+  club_handle: string | null;
+  creator_id: string;
+  creator_name: string;
+  creator_username: string;
+  creator_avatar: string | null;
+  university: string | null;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  location: string | null;
+  building: string | null;
+  room: string | null;
+  visibility: string;
+  specific_user_count: number;
+  created_at: string;
+  updated_at: string | null;
+  is_past: boolean;
+  goingCount: number;
+  cantCount: number;
+  reportCount: number;
+  attendees: EventAttendee[];
+  relatedPosts: EventRelatedPost[];
+  reports: EventReport[];
+}
+
+export async function getEventDetail(id: string): Promise<EventDetail | null> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+
+  const { data: event } = await admin
+    .from("events")
+    .select(
+      "id, club_id, created_by, title, emoji, description, cover_image_url, event_date, start_time, end_time, location, building, room, visibility, specific_user_ids, created_at, updated_at"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!event) return null;
+  const e = event as any;
+
+  const [clubMap, creatorMap, rsvpsRes, relatedRes, reportsRes] = await Promise.all([
+    clubMap_(admin, [e.club_id]),
+    profileMap(admin, [e.created_by]),
+    admin
+      .from("event_rsvps")
+      .select("user_id, status, profiles!inner(full_name, username, avatar_url)")
+      .eq("event_id", id)
+      .order("created_at", { ascending: true })
+      .limit(500),
+    admin.from("posts").select("id, caption, author_id, created_at").eq("linked_event_id", id).order("created_at", { ascending: false }).limit(50),
+    admin
+      .from("reports")
+      .select("id, reason, details, status, reporter_username, created_at")
+      .eq("entity_type", "event")
+      .eq("entity_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  const club = clubMap.get(e.club_id);
+  const creator = creatorMap.get(e.created_by);
+  const uniId = club?.university_id ?? null;
+  const uniName = uniId ? (await universityNameMap(admin, [uniId])).get(uniId) ?? null : null;
+
+  const rsvps = (rsvpsRes.data ?? []) as any[];
+  const going = rsvps.filter((r) => r.status === "going");
+  const cant = rsvps.filter((r) => r.status === "cant");
+
+  const relatedRaw = (relatedRes.data ?? []) as any[];
+  const relAuthorMap = await profileMap(admin, relatedRaw.map((p) => p.author_id));
+
+  const today = todayChicago();
+
+  return {
+    id: e.id,
+    title: e.title,
+    emoji: e.emoji ?? null,
+    description: e.description ?? null,
+    cover_image_url: e.cover_image_url ?? null,
+    club_id: e.club_id,
+    club_name: club?.name ?? null,
+    club_handle: club?.handle ?? null,
+    creator_id: e.created_by,
+    creator_name: creator?.full_name ?? "",
+    creator_username: creator?.username ?? "",
+    creator_avatar: creator?.avatar_url ?? null,
+    university: uniName,
+    event_date: e.event_date,
+    start_time: e.start_time,
+    end_time: e.end_time,
+    location: e.location ?? null,
+    building: e.building ?? null,
+    room: e.room ?? null,
+    visibility: e.visibility,
+    specific_user_count: Array.isArray(e.specific_user_ids) ? e.specific_user_ids.length : 0,
+    created_at: e.created_at,
+    updated_at: e.updated_at ?? null,
+    is_past: e.event_date < today,
+    goingCount: going.length,
+    cantCount: cant.length,
+    reportCount: (reportsRes.data ?? []).length,
+    attendees: rsvps.map((r) => ({
+      user_id: r.user_id,
+      full_name: r.profiles?.full_name ?? "",
+      username: r.profiles?.username ?? "",
+      avatar_url: r.profiles?.avatar_url ?? null,
+      status: r.status,
+    })),
+    relatedPosts: relatedRaw.map((p) => ({
+      id: p.id,
+      caption: captionPreview(p.caption, 80),
+      author_username: relAuthorMap.get(p.author_id)?.username ?? "",
+      created_at: p.created_at,
+    })),
+    reports: ((reportsRes.data ?? []) as any[]).map((r) => ({
+      id: r.id,
+      reason: r.reason ?? null,
+      details: r.details ?? null,
+      status: r.status,
+      reporter_username: r.reporter_username ?? null,
+      created_at: r.created_at,
+    })),
+  };
+}
+
+// ── RSVPs list ────────────────────────────────────────────────────────────────
+
+export interface AdminRsvpRow {
+  id: string;
+  event_id: string;
+  event_title: string;
+  event_date: string;
+  user_id: string;
+  attendee_name: string;
+  attendee_username: string;
+  attendee_email: string | null;
+  avatar_url: string | null;
+  status: string;
+  created_at: string;
+  club_id: string | null;
+  club_name: string | null;
+  university: string | null;
+}
+
+export interface ListRsvpsParams {
+  search?: string;
+  status?: "all" | "going" | "cant";
+  clubId?: string;
+  universityId?: string;
+  eventId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: "created_at";
+  dir?: "asc" | "desc";
+  page?: number;
+}
+
+export async function listRsvps(params: ListRsvpsParams = {}): Promise<Paginated<AdminRsvpRow>> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+
+  const page = Math.max(1, params.page ?? 1);
+  const dir = params.dir ?? "desc";
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+  const search = params.search?.trim();
+
+  let q = admin
+    .from("event_rsvps")
+    .select(
+      "id, event_id, user_id, status, created_at, profiles!inner(full_name, username, avatar_url), events!inner(title, event_date, club_id, clubs(name, handle, university_id, universities(name)))",
+      { count: "exact" }
+    );
+
+  if (params.status === "going" || params.status === "cant") q = q.eq("status", params.status);
+  if (params.eventId) q = q.eq("event_id", params.eventId);
+  if (params.clubId) q = q.eq("events.club_id", params.clubId);
+  if (params.universityId) q = q.eq("events.clubs.university_id", params.universityId);
+  if (params.dateFrom) q = q.gte("created_at", params.dateFrom);
+  if (params.dateTo) q = q.lte("created_at", params.dateTo);
+
+  if (search) {
+    const like = `%${search}%`;
+    const isEmail = search.includes("@");
+    const [{ data: users }, { data: events }] = await Promise.all([
+      isEmail
+        ? Promise.resolve({ data: [] as any[] })
+        : admin.from("profiles").select("id").or(`full_name.ilike.${like},username.ilike.${like}`).limit(500),
+      admin.from("events").select("id").ilike("title", like).limit(500),
+    ]);
+    const emailUserIds = isEmail ? await findAuthorIdsByEmail(admin, search) : [];
+    const userIds = Array.from(new Set([...(users ?? []).map((u: any) => u.id), ...emailUserIds]));
+    const eventIds = (events ?? []).map((e: any) => e.id);
+    const parts: string[] = [];
+    if (userIds.length) parts.push(`user_id.in.${fmtIds(userIds)}`);
+    if (eventIds.length) parts.push(`event_id.in.${fmtIds(eventIds)}`);
+    if (parts.length === 0) return { rows: [], total: 0, page, pageSize: PAGE_SIZE };
+    q = q.or(parts.join(","));
+  }
+
+  q = q.order("created_at", { ascending: dir === "asc" }).range(from, to);
+  const { data, count, error } = await q;
+  if (error) throw error;
+
+  const raw = (data ?? []) as any[];
+  const emails = await emailMap(raw.map((r) => r.user_id));
+
+  const rows: AdminRsvpRow[] = raw.map((r) => ({
+    id: r.id,
+    event_id: r.event_id,
+    event_title: r.events?.title ?? "",
+    event_date: r.events?.event_date ?? "",
+    user_id: r.user_id,
+    attendee_name: r.profiles?.full_name ?? "",
+    attendee_username: r.profiles?.username ?? "",
+    attendee_email: emails.get(r.user_id) ?? null,
+    avatar_url: r.profiles?.avatar_url ?? null,
+    status: r.status,
+    created_at: r.created_at,
+    club_id: r.events?.club_id ?? null,
+    club_name: r.events?.clubs?.name ?? null,
+    university: r.events?.clubs?.universities?.name ?? null,
+  }));
+
+  return { rows, total: count ?? rows.length, page, pageSize: PAGE_SIZE };
+}
