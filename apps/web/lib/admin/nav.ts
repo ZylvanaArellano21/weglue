@@ -26,8 +26,8 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { label: "Memberships", href: "/admin/memberships", icon: "🎟️", day: 2, ready: true, group: "Community" },
   { label: "Universities", href: "/admin/universities", icon: "🎓", day: 2, ready: true, group: "Community" },
 
-  { label: "Posts", href: "/admin/posts", icon: "🖼️", day: 3, ready: false, group: "Content" },
-  { label: "Comments", href: "/admin/comments", icon: "💬", day: 3, ready: false, group: "Content" },
+  { label: "Posts", href: "/admin/posts", icon: "🖼️", day: 3, ready: true, group: "Content" },
+  { label: "Comments", href: "/admin/comments", icon: "💬", day: 3, ready: true, group: "Content" },
   { label: "Events", href: "/admin/events", icon: "📅", day: 3, ready: false, group: "Content" },
   { label: "RSVPs", href: "/admin/rsvps", icon: "✅", day: 3, ready: false, group: "Content" },
 

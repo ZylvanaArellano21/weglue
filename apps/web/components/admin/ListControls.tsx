@@ -23,10 +23,13 @@ export function ListControls({
   searchPlaceholder,
   filters = [],
   sorts = [],
+  dateFilter = false,
 }: {
   searchPlaceholder: string;
   filters?: FilterDef[];
   sorts?: SortDef[];
+  /** Render a created-date range (from/to → `dateFrom`/`dateTo` query params). */
+  dateFilter?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -91,6 +94,26 @@ export function ListControls({
           ))}
         </select>
       ))}
+
+      {dateFilter ? (
+        <div className="flex items-center gap-1 text-sm text-gray-600">
+          <input
+            type="date"
+            value={params.get("dateFrom") ?? ""}
+            onChange={(e) => update({ dateFrom: e.target.value || undefined })}
+            aria-label="From date"
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100"
+          />
+          <span className="text-gray-400">→</span>
+          <input
+            type="date"
+            value={params.get("dateTo") ?? ""}
+            onChange={(e) => update({ dateTo: e.target.value || undefined })}
+            aria-label="To date"
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100"
+          />
+        </div>
+      ) : null}
 
       {sorts.length > 0 ? (
         <div className="flex items-center gap-1">
