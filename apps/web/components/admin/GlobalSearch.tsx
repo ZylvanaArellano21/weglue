@@ -31,6 +31,30 @@ interface OfficerHit {
   club_name: string;
   role_title: string | null;
 }
+interface PostHit {
+  id: string;
+  caption: string | null;
+  author_username: string;
+  club_name: string | null;
+}
+interface CommentHit {
+  id: string;
+  content: string;
+  author_username: string;
+}
+interface EventHit {
+  id: string;
+  title: string;
+  club_name: string | null;
+  event_date: string;
+}
+interface RsvpHit {
+  id: string;
+  event_id: string;
+  attendee_username: string;
+  event_title: string;
+  status: string;
+}
 
 /**
  * Global entity search. Debounced, founder-authorized server-side via
@@ -47,8 +71,23 @@ export function GlobalSearch() {
   const [clubs, setClubs] = useState<ClubHit[]>([]);
   const [universities, setUniversities] = useState<UniversityHit[]>([]);
   const [officers, setOfficers] = useState<OfficerHit[]>([]);
+  const [posts, setPosts] = useState<PostHit[]>([]);
+  const [comments, setComments] = useState<CommentHit[]>([]);
+  const [events, setEvents] = useState<EventHit[]>([]);
+  const [rsvps, setRsvps] = useState<RsvpHit[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  function clearAll() {
+    setUsers([]);
+    setClubs([]);
+    setUniversities([]);
+    setOfficers([]);
+    setPosts([]);
+    setComments([]);
+    setEvents([]);
+    setRsvps([]);
+  }
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -62,10 +101,7 @@ export function GlobalSearch() {
     clearTimeout(debounceRef.current);
     const q = term.trim();
     if (q.length < 2) {
-      setUsers([]);
-      setClubs([]);
-      setUniversities([]);
-      setOfficers([]);
+      clearAll();
       setLoading(false);
       return;
     }
@@ -81,12 +117,13 @@ export function GlobalSearch() {
         setClubs(data.clubs ?? []);
         setUniversities(data.universities ?? []);
         setOfficers(data.officers ?? []);
+        setPosts(data.posts ?? []);
+        setComments(data.comments ?? []);
+        setEvents(data.events ?? []);
+        setRsvps(data.rsvps ?? []);
         setOpen(true);
       } catch {
-        setUsers([]);
-        setClubs([]);
-        setUniversities([]);
-        setOfficers([]);
+        clearAll();
       } finally {
         setLoading(false);
       }
@@ -101,7 +138,14 @@ export function GlobalSearch() {
   }
 
   const hasResults =
-    users.length > 0 || clubs.length > 0 || universities.length > 0 || officers.length > 0;
+    users.length > 0 ||
+    clubs.length > 0 ||
+    universities.length > 0 ||
+    officers.length > 0 ||
+    posts.length > 0 ||
+    comments.length > 0 ||
+    events.length > 0 ||
+    rsvps.length > 0;
 
   return (
     <div ref={boxRef} className="relative w-full max-w-xl">
@@ -199,6 +243,104 @@ export function GlobalSearch() {
                         </span>
                       </span>
                       <span className="text-[10px] uppercase text-gray-400">Officer</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {events.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Events
+                  </p>
+                  {events.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => go(`/admin/events/${e.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">📅</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{e.title}</span>
+                        <span className="block truncate text-xs text-gray-500">
+                          {e.club_name ? `${e.club_name} · ` : ""}
+                          {e.event_date}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Event</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {posts.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Posts
+                  </p>
+                  {posts.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => go(`/admin/posts/${p.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🖼️</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">
+                          {p.caption || "No caption"}
+                        </span>
+                        <span className="block truncate text-xs text-gray-500">
+                          @{p.author_username}
+                          {p.club_name ? ` · ${p.club_name}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Post</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {comments.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Comments
+                  </p>
+                  {comments.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => go(`/admin/comments/${c.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">💬</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{c.content}</span>
+                        <span className="block truncate text-xs text-gray-500">@{c.author_username}</span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Comment</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {rsvps.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    RSVPs
+                  </p>
+                  {rsvps.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => go(`/admin/rsvps?event=${r.event_id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">✅</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">
+                          @{r.attendee_username} · {r.event_title}
+                        </span>
+                        <span className="block truncate text-xs text-gray-500 capitalize">{r.status}</span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">RSVP</span>
                     </button>
                   ))}
                 </>

@@ -8,11 +8,13 @@ describe("admin navigation", () => {
       "/admin",
       "/admin/clubs",
       "/admin/comments",
+      "/admin/events",
       "/admin/gluemates",
       "/admin/memberships",
       "/admin/officers",
       "/admin/posts",
       "/admin/restrictions",
+      "/admin/rsvps",
       "/admin/universities",
       "/admin/users",
     ]);

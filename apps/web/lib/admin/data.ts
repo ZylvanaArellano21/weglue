@@ -745,9 +745,28 @@ export interface SearchResults {
     club_name: string;
     role_title: string | null;
   }[];
+  posts: { id: string; caption: string | null; author_username: string; club_name: string | null }[];
+  comments: { id: string; content: string; author_username: string }[];
+  events: { id: string; title: string; club_name: string | null; event_date: string }[];
+  rsvps: { id: string; event_id: string; attendee_username: string; event_title: string; status: string }[];
 }
 
-const EMPTY_SEARCH: SearchResults = { users: [], clubs: [], universities: [], officers: [] };
+const EMPTY_SEARCH: SearchResults = {
+  users: [],
+  clubs: [],
+  universities: [],
+  officers: [],
+  posts: [],
+  comments: [],
+  events: [],
+  rsvps: [],
+};
+
+function preview(text: string | null, len = 80): string | null {
+  if (!text) return null;
+  const t = text.trim();
+  return t.length > len ? `${t.slice(0, len)}…` : t;
+}
 
 export async function searchEntities(query: string): Promise<SearchResults> {
   await requireSecureAdmin();
@@ -852,11 +871,144 @@ export async function searchEntities(query: string): Promise<SearchResults> {
     }));
   })();
 
-  const [users, clubs, universities, officers] = await Promise.all([
+  // Shared matched user/club id sets for Day-3 content search (bounded).
+  const matchedIdsPromise = (async () => {
+    const [{ data: mUsers }, { data: mClubs }] = await Promise.all([
+      isEmail
+        ? Promise.resolve({ data: (userIdFilter ?? []).map((id) => ({ id })) as any[] })
+        : admin.from("profiles").select("id").or(`full_name.ilike.${like},username.ilike.${like}`).limit(200),
+      admin.from("clubs").select("id").or(`name.ilike.${like},handle.ilike.${like}`).limit(200),
+    ]);
+    return {
+      userIds: (mUsers ?? []).map((u: any) => u.id),
+      clubIds: (mClubs ?? []).map((c: any) => c.id),
+    };
+  })();
+
+  const postsPromise = (async () => {
+    const { userIds, clubIds } = await matchedIdsPromise;
+    const parts: string[] = [];
+    if (!isEmail) parts.push(`caption.ilike.${like}`);
+    if (userIds.length) parts.push(`author_id.in.(${userIds.join(",")})`);
+    if (clubIds.length) parts.push(`club_id.in.(${clubIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("posts")
+      .select("id, caption, author_id, club_id")
+      .or(parts.join(","))
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const rows = (data ?? []) as any[];
+    const [authors, clubsMap] = await Promise.all([
+      (async () => {
+        const m = new Map<string, string>();
+        const ids = Array.from(new Set(rows.map((r) => r.author_id)));
+        if (ids.length) {
+          const { data: p } = await admin.from("profiles").select("id, username").in("id", ids);
+          for (const x of (p ?? []) as any[]) m.set(x.id, x.username);
+        }
+        return m;
+      })(),
+      (async () => {
+        const m = new Map<string, string>();
+        const ids = Array.from(new Set(rows.map((r) => r.club_id).filter(Boolean)));
+        if (ids.length) {
+          const { data: c } = await admin.from("clubs").select("id, name").in("id", ids as string[]);
+          for (const x of (c ?? []) as any[]) m.set(x.id, x.name);
+        }
+        return m;
+      })(),
+    ]);
+    return rows.map((r) => ({
+      id: r.id,
+      caption: preview(r.caption),
+      author_username: authors.get(r.author_id) ?? "",
+      club_name: r.club_id ? clubsMap.get(r.club_id) ?? null : null,
+    }));
+  })();
+
+  const commentsPromise = (async () => {
+    const { userIds } = await matchedIdsPromise;
+    const parts: string[] = [];
+    if (!isEmail) parts.push(`content.ilike.${like}`);
+    if (userIds.length) parts.push(`user_id.in.(${userIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("post_comments")
+      .select("id, content, user_id")
+      .or(parts.join(","))
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const rows = (data ?? []) as any[];
+    const authors = new Map<string, string>();
+    const ids = Array.from(new Set(rows.map((r) => r.user_id)));
+    if (ids.length) {
+      const { data: p } = await admin.from("profiles").select("id, username").in("id", ids);
+      for (const x of (p ?? []) as any[]) authors.set(x.id, x.username);
+    }
+    return rows.map((r) => ({
+      id: r.id,
+      content: preview(r.content) ?? "",
+      author_username: authors.get(r.user_id) ?? "",
+    }));
+  })();
+
+  const eventsPromise = (async () => {
+    const { userIds, clubIds } = await matchedIdsPromise;
+    const parts: string[] = [];
+    if (!isEmail) parts.push(`title.ilike.${like}`);
+    if (userIds.length) parts.push(`created_by.in.(${userIds.join(",")})`);
+    if (clubIds.length) parts.push(`club_id.in.(${clubIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("events")
+      .select("id, title, event_date, club_id, clubs(name)")
+      .or(parts.join(","))
+      .order("event_date", { ascending: false })
+      .limit(6);
+    return ((data ?? []) as any[]).map((e) => ({
+      id: e.id,
+      title: e.title,
+      club_name: e.clubs?.name ?? null,
+      event_date: e.event_date,
+    }));
+  })();
+
+  const rsvpsPromise = (async () => {
+    const { userIds } = await matchedIdsPromise;
+    // RSVPs by attendee OR by matching event title.
+    const { data: evByTitle } = isEmail
+      ? { data: [] as any[] }
+      : await admin.from("events").select("id").ilike("title", like).limit(200);
+    const eventIds = (evByTitle ?? []).map((e: any) => e.id);
+    const parts: string[] = [];
+    if (userIds.length) parts.push(`user_id.in.(${userIds.join(",")})`);
+    if (eventIds.length) parts.push(`event_id.in.(${eventIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("event_rsvps")
+      .select("id, event_id, user_id, status, profiles!inner(username), events!inner(title)")
+      .or(parts.join(","))
+      .order("created_at", { ascending: false })
+      .limit(6);
+    return ((data ?? []) as any[]).map((r) => ({
+      id: r.id,
+      event_id: r.event_id,
+      attendee_username: r.profiles?.username ?? "",
+      event_title: r.events?.title ?? "",
+      status: r.status,
+    }));
+  })();
+
+  const [users, clubs, universities, officers, posts, comments, events, rsvps] = await Promise.all([
     usersPromise,
     clubsPromise,
     universitiesPromise,
     officersPromise,
+    postsPromise,
+    commentsPromise,
+    eventsPromise,
+    rsvpsPromise,
   ]);
-  return { users, clubs, universities, officers };
+  return { users, clubs, universities, officers, posts, comments, events, rsvps };
 }
