@@ -40,6 +40,12 @@ const AUTHED_STORAGE_KEYS = [
   QUERY_CACHE_KEY,
   '@weglue/pending_confirmation_email',
   '@weglue/resend_cooldown_until',
+  // A parked push-tap destination belongs to the account that parked it. It was
+  // already safe to leave behind (consuming it re-checks the recipient under
+  // RLS, so it can never open inside someone else's session), but after an
+  // account deletion the row it points at no longer exists, so keeping it just
+  // leaves dead state on the device. Cleared with everything else.
+  'weglue-pending-notification-route-v1',
 ];
 
 /**

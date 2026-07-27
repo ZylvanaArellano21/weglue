@@ -16,6 +16,7 @@ import {
   rememberTokenForRevocation,
   tearDownAuthenticatedSession,
 } from '../lib/sessionCleanup';
+import { isDeletionConfirmed } from '../lib/deletionConfirmation';
 
 // Username availability — debounced 400ms to avoid hammering the DB
 export function useUsernameAvailability(
@@ -76,48 +77,58 @@ export function useChangePassword() {
   });
 }
 
-// Account deletion — two-step confirmation enforced by the hook
+// Account deletion.
+//
+// The confirmation is passed IN rather than tracked as step state inside the
+// hook. The old shape kept a `confirmStep` in React state and the mutation read
+// it — so a screen that advanced the step and fired the mutation in the same
+// tick raced its own setState and could be rejected as "steps not completed".
+// An argument cannot race.
 export function useDeleteAccount(userId: string | undefined) {
   const queryClient = useQueryClient();
 
-  const [confirmStep, setConfirmStep] = useState<0 | 1 | 2>(0);
+  // Double-submit guard that does NOT depend on a render. isPending only flips
+  // after React re-renders, so two taps inside one frame both pass it; this ref
+  // is set synchronously and closes that window.
+  const inFlight = useRef(false);
 
-  const resetConfirmation = useCallback(() => setConfirmStep(0), []);
-  const advanceToStep1    = useCallback(() => setConfirmStep(1), []);
-  const advanceToStep2    = useCallback(() => setConfirmStep(2), []);
-
-  const mutation = useMutation<void, Error, void>({
-    mutationFn: async () => {
+  const mutation = useMutation<void, Error, string>({
+    mutationFn: async (confirmation: string) => {
       if (!userId) throw new Error('Not authenticated');
-      if (confirmStep !== 2) throw new Error('Deletion confirmation steps not completed');
+      if (!isDeletionConfirmed(confirmation)) {
+        throw new Error('Type DELETE to confirm.');
+      }
+      if (inFlight.current) throw new Error('Deletion already in progress');
+      inFlight.current = true;
 
-      // Capture the token up front: after the server deletes the account the
-      // session is void, and teardown needs something to revoke.
-      const { data } = await supabase.auth.getSession();
-      rememberTokenForRevocation(data.session?.access_token);
+      try {
+        // Capture the token up front: after the server deletes the account the
+        // session is void, and teardown needs something to revoke.
+        const { data } = await supabase.auth.getSession();
+        rememberTokenForRevocation(data.session?.access_token);
 
-      // Throws unless the account (data AND auth record) is really gone. On a
-      // throw we fall through to onError and change NOTHING locally — the
-      // account stays intact and usable, which is the whole point.
-      await deleteOwnAccount();
+        // Throws unless the account (data AND auth record) is really gone. On a
+        // throw we fall through to onError and change NOTHING locally — the
+        // account stays intact and usable, which is the whole point.
+        await deleteOwnAccount();
 
-      // Only now, with deletion server-confirmed, do we touch local state.
-      // AWAITED — the old code fired sign-out with `void` and navigated
-      // immediately, so the router raced the session clear: the guard still saw
-      // a session and bounced back into the app, and a relaunch mid-flight
-      // restored the dead session. Awaiting the single shared teardown closes
-      // that race, and it runs the same path as logout.
-      await tearDownAuthenticatedSession(queryClient, userId);
+        // Only now, with deletion server-confirmed, do we touch local state.
+        // AWAITED — the old code fired sign-out with `void` and navigated
+        // immediately, so the router raced the session clear: the guard still
+        // saw a session and bounced back into the app, and a relaunch mid-flight
+        // restored the dead session. Awaiting the single shared teardown closes
+        // that race, and it runs the same path as logout.
+        await tearDownAuthenticatedSession(queryClient, userId);
+      } finally {
+        inFlight.current = false;
+      }
     },
   });
 
   return {
-    confirmStep,
-    advanceToStep1,
-    advanceToStep2,
-    resetConfirmation,
     executeDeletion: mutation.mutateAsync,
     isDeleting: mutation.isPending,
     deletionError: mutation.error,
+    resetDeletionError: mutation.reset,
   };
 }

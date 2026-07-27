@@ -17,14 +17,10 @@ import {
   useChangeUsername,
   useChangeEmail,
   useChangePassword,
-  useDeleteAccount,
   useUsernameAvailability,
 } from '../../hooks/useAccountCenter';
 import { useOwnProfile } from '../../hooks/useOwnProfile';
-import { resetToWelcome } from '../../lib/sessionCleanup';
-import { SUPPORT_EMAIL } from '../../lib/support';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
-import { ProfileConfirmationModal } from '../../components/profile/ProfileConfirmationModal';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
 
 export default function AccountCenterScreen() {
@@ -47,15 +43,6 @@ export default function AccountCenterScreen() {
   const changeUsernameMutation = useChangeUsername(userId);
   const changeEmailMutation = useChangeEmail(userId);
   const changePasswordMutation = useChangePassword();
-  const {
-    confirmStep,
-    advanceToStep1,
-    advanceToStep2,
-    resetConfirmation,
-    executeDeletion,
-    isDeleting,
-    deletionError,
-  } = useDeleteAccount(userId);
 
   const [usernameMsg, setUsernameMsg] = useState<string | null>(null);
   const [emailMsg, setEmailMsg] = useState<{ text: string; isError: boolean } | null>(null);
@@ -156,22 +143,6 @@ export default function AccountCenterScreen() {
       confirmPassword: confirmPasswordInput,
     });
     if (!result.success) setPasswordMsg(result.message);
-  };
-
-  const handleFinalDelete = async () => {
-    try {
-      // Resolves only once the server has confirmed the deletion; the shared
-      // teardown (session, caches, sidebar state) has already run inside it.
-      await executeDeletion();
-      // Land on Welcome as a full-screen root screen. Account Center is a normal
-      // opaque push now that the sidebar is an overlay rather than a
-      // transparent-modal container, so there is no sheet left around this —
-      // dismissAll+replace leaves Welcome as the only screen in the stack.
-      resetToWelcome(router);
-    } catch {
-      // Deletion failed: the account and session are untouched and the user
-      // stays here on the full-screen Account Center. deletionError renders below.
-    }
   };
 
   return (
@@ -306,52 +277,27 @@ export default function AccountCenterScreen() {
 
         <View style={styles.divider} />
 
-        {/* Delete */}
+        {/* Delete. The confirmation flow lives on its own screen so the
+            permanent-deletion warning, the categories of data destroyed and the
+            typed DELETE step all get room to be read — a modal stack could not
+            show them, and App Review has to be able to see them. */}
         <Text style={styles.sectionLabel}>Delete Account</Text>
         <Text style={styles.deleteWarning}>
           Permanently delete your account and all associated data. This cannot be undone.
         </Text>
         <TouchableOpacity
           style={styles.deleteBtn}
-          onPress={advanceToStep1}
+          onPress={() => router.push('/account-center/delete-account')}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+          accessibilityHint="Opens the permanent account deletion flow"
         >
           <Text style={styles.deleteBtnText}>Delete Account</Text>
         </TouchableOpacity>
 
-        {deletionError && (
-          <Text style={styles.feedbackError}>
-            {`Could not delete account. Please try again or contact ${SUPPORT_EMAIL}.`}
-          </Text>
-        )}
-
         <View style={{ height: 40 }} />
       </ScrollView>
-
-      <ProfileConfirmationModal
-        visible={confirmStep === 1}
-        title="Are you sure you want to delete your account?"
-        message="This is the first step. You will need to confirm again before anything is deleted."
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        destructive
-        onConfirm={advanceToStep2}
-        onCancel={resetConfirmation}
-      />
-
-      <ProfileConfirmationModal
-        visible={confirmStep === 2}
-        title="Delete your account permanently?"
-        message={
-          'This will permanently remove your profile, posts, saved events, club memberships, messages, and all other data tied to your account. This action cannot be undone.\n\nYou will be signed out immediately.'
-        }
-        confirmLabel="Yes, delete my account"
-        cancelLabel="Cancel"
-        destructive
-        onConfirm={handleFinalDelete}
-        onCancel={resetConfirmation}
-        loading={isDeleting}
-      />
     </SafeAreaView>
   );
 }
