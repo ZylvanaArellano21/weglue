@@ -32,6 +32,8 @@ function LoginContent(): JSX.Element {
   const searchParams = useSearchParams();
   const prefillEmail = searchParams.get("prefillEmail") ?? "";
   const showVerifiedBanner = searchParams.get("verified") === "1";
+  // Landing here after a completed permanent deletion.
+  const showDeletedBanner = searchParams.get("deleted") === "1";
 
   const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");
@@ -216,7 +218,13 @@ function LoginContent(): JSX.Element {
             )}
 
             <div aria-live="polite" className="mt-3">
-              {showVerifiedBanner && !loginError && (
+              {showDeletedBanner && !loginError && (
+                <p className="text-[13px] font-semibold text-gray-700">
+                  Your account has been permanently deleted. Thanks for being
+                  part of We Glue.
+                </p>
+              )}
+              {showVerifiedBanner && !loginError && !showDeletedBanner && (
                 <p className="text-[13px] font-semibold text-[#0FA6A6]">
                   Your email is verified. Log in to continue.
                 </p>
