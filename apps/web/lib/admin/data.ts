@@ -749,6 +749,10 @@ export interface SearchResults {
   comments: { id: string; content: string; author_username: string }[];
   events: { id: string; title: string; club_name: string | null; event_date: string }[];
   rsvps: { id: string; event_id: string; attendee_username: string; event_title: string; status: string }[];
+  conversations: { id: string; title: string; type_label: string; club_name: string | null }[];
+  channels: { id: string; name: string; conversation_title: string; club_name: string | null }[];
+  messages: { id: string; conversation_id: string; sender_username: string; conversation_title: string; message_type: string; deleted: boolean }[];
+  notifications: { id: string; type: string; recipient_username: string; title: string | null }[];
 }
 
 const EMPTY_SEARCH: SearchResults = {
@@ -760,6 +764,10 @@ const EMPTY_SEARCH: SearchResults = {
   comments: [],
   events: [],
   rsvps: [],
+  conversations: [],
+  channels: [],
+  messages: [],
+  notifications: [],
 };
 
 function preview(text: string | null, len = 80): string | null {
@@ -1000,7 +1008,163 @@ export async function searchEntities(query: string): Promise<SearchResults> {
     }));
   })();
 
-  const [users, clubs, universities, officers, posts, comments, events, rsvps] = await Promise.all([
+  // ── Day-4 messaging + notifications (METADATA ONLY) ─────────────────────────
+  // Message-CONTENT search is NOT here — that requires a fresh MFA step-up and
+  // lives behind /admin/api/message-search. These match on names/identities only.
+
+  const conversationsPromise = (async () => {
+    const { userIds, clubIds } = await matchedIdsPromise;
+    // Conversations by name, club, or a matched participant.
+    let participantConvIds: string[] = [];
+    if (userIds.length) {
+      const { data: cp } = await admin.from("conversation_participants").select("conversation_id").in("user_id", userIds).limit(2000);
+      participantConvIds = Array.from(new Set((cp ?? []).map((r: any) => r.conversation_id)));
+    }
+    const parts: string[] = [];
+    if (!isEmail) parts.push(`name.ilike.${like}`);
+    if (clubIds.length) parts.push(`club_id.in.(${clubIds.join(",")})`);
+    if (participantConvIds.length) parts.push(`id.in.(${participantConvIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("conversations")
+      .select("id, type, name, club_id")
+      .or(parts.join(","))
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const rows = (data ?? []) as any[];
+    const cIds = Array.from(new Set(rows.map((r) => r.club_id).filter(Boolean))) as string[];
+    const cMap = new Map<string, string>();
+    if (cIds.length) {
+      const { data: cs } = await admin.from("clubs").select("id, name").in("id", cIds);
+      for (const c of (cs ?? []) as any[]) cMap.set(c.id, c.name);
+    }
+    const LABEL: Record<string, string> = { direct: "Direct message", group: "Custom group", club_group: "Club chat", officer_chat: "Official club chat" };
+    return rows.map((r) => ({
+      id: r.id,
+      title: (r.name && r.name.trim()) || (r.club_id ? cMap.get(r.club_id) ?? "Club conversation" : LABEL[r.type] ?? r.type),
+      type_label: LABEL[r.type] ?? r.type,
+      club_name: r.club_id ? cMap.get(r.club_id) ?? null : null,
+    }));
+  })();
+
+  const channelsPromise = (async () => {
+    const { clubIds } = await matchedIdsPromise;
+    // Channels by their own name, or by matching club → conversation.
+    let convIds: string[] = [];
+    if (clubIds.length) {
+      const { data: convs } = await admin.from("conversations").select("id").in("club_id", clubIds).limit(2000);
+      convIds = (convs ?? []).map((c: any) => c.id);
+    }
+    const parts: string[] = [`name.ilike.${like}`];
+    if (convIds.length) parts.push(`conversation_id.in.(${convIds.join(",")})`);
+    const { data } = await admin
+      .from("conversation_channels")
+      .select("id, name, conversation_id")
+      .or(parts.join(","))
+      .limit(6);
+    const rows = (data ?? []) as any[];
+    const cvIds = Array.from(new Set(rows.map((r) => r.conversation_id)));
+    const cvMap = new Map<string, any>();
+    if (cvIds.length) {
+      const { data: cvs } = await admin.from("conversations").select("id, name, type, club_id").in("id", cvIds);
+      for (const cv of (cvs ?? []) as any[]) cvMap.set(cv.id, cv);
+    }
+    const clubById = new Map<string, string>();
+    const clubIdSet = Array.from(new Set([...cvMap.values()].map((cv) => cv.club_id).filter(Boolean))) as string[];
+    if (clubIdSet.length) {
+      const { data: cs } = await admin.from("clubs").select("id, name").in("id", clubIdSet);
+      for (const c of (cs ?? []) as any[]) clubById.set(c.id, c.name);
+    }
+    return rows.map((r) => {
+      const cv = cvMap.get(r.conversation_id);
+      const clubName = cv?.club_id ? clubById.get(cv.club_id) ?? null : null;
+      return {
+        id: r.id,
+        name: r.name,
+        conversation_title: (cv?.name && cv.name.trim()) || clubName || "Conversation",
+        club_name: clubName,
+      };
+    });
+  })();
+
+  const messagesPromise = (async () => {
+    // METADATA-only message search: sender identity or conversation name (never
+    // message content — that path requires recent MFA).
+    const { userIds } = await matchedIdsPromise;
+    const { data: convByName } = isEmail ? { data: [] as any[] } : await admin.from("conversations").select("id").ilike("name", like).limit(200);
+    const convIds = (convByName ?? []).map((c: any) => c.id);
+    const parts: string[] = [];
+    if (userIds.length) parts.push(`sender_id.in.(${userIds.join(",")})`);
+    if (convIds.length) parts.push(`conversation_id.in.(${convIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("messages")
+      .select("id, conversation_id, sender_id, message_type, deleted_at")
+      .or(parts.join(","))
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const rows = (data ?? []) as any[];
+    const sMap = new Map<string, string>();
+    const sIds = Array.from(new Set(rows.map((r) => r.sender_id)));
+    if (sIds.length) {
+      const { data: ps } = await admin.from("profiles").select("id, username").in("id", sIds);
+      for (const p of (ps ?? []) as any[]) sMap.set(p.id, p.username);
+    }
+    const cvMap = new Map<string, any>();
+    const cvIds = Array.from(new Set(rows.map((r) => r.conversation_id)));
+    if (cvIds.length) {
+      const { data: cvs } = await admin.from("conversations").select("id, name, club_id, type").in("id", cvIds);
+      for (const cv of (cvs ?? []) as any[]) cvMap.set(cv.id, cv);
+    }
+    const clubById = new Map<string, string>();
+    const clubIdSet = Array.from(new Set([...cvMap.values()].map((cv) => cv.club_id).filter(Boolean))) as string[];
+    if (clubIdSet.length) {
+      const { data: cs } = await admin.from("clubs").select("id, name").in("id", clubIdSet);
+      for (const c of (cs ?? []) as any[]) clubById.set(c.id, c.name);
+    }
+    const LABEL: Record<string, string> = { direct: "Direct message", group: "Custom group", club_group: "Club chat", officer_chat: "Official club chat" };
+    return rows.map((r) => {
+      const cv = cvMap.get(r.conversation_id);
+      const clubName = cv?.club_id ? clubById.get(cv.club_id) ?? null : null;
+      return {
+        id: r.id,
+        conversation_id: r.conversation_id,
+        sender_username: sMap.get(r.sender_id) ?? "",
+        conversation_title: (cv?.name && cv.name.trim()) || clubName || (cv ? LABEL[cv.type] ?? cv.type : "Conversation"),
+        message_type: r.message_type,
+        deleted: !!r.deleted_at,
+      };
+    });
+  })();
+
+  const notificationsPromise = (async () => {
+    const { userIds } = await matchedIdsPromise;
+    const parts: string[] = [];
+    if (userIds.length) parts.push(`user_id.in.(${userIds.join(",")})`);
+    if (!isEmail) parts.push(`type.ilike.${like}`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("notifications")
+      .select("id, type, user_id, message")
+      .or(parts.join(","))
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const rows = (data ?? []) as any[];
+    const rMap = new Map<string, string>();
+    const rIds = Array.from(new Set(rows.map((r) => r.user_id)));
+    if (rIds.length) {
+      const { data: ps } = await admin.from("profiles").select("id, username").in("id", rIds);
+      for (const p of (ps ?? []) as any[]) rMap.set(p.id, p.username);
+    }
+    return rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      recipient_username: rMap.get(r.user_id) ?? "",
+      title: r.message ?? null,
+    }));
+  })();
+
+  const [users, clubs, universities, officers, posts, comments, events, rsvps, conversations, channels, messages, notifications] = await Promise.all([
     usersPromise,
     clubsPromise,
     universitiesPromise,
@@ -1009,6 +1173,10 @@ export async function searchEntities(query: string): Promise<SearchResults> {
     commentsPromise,
     eventsPromise,
     rsvpsPromise,
+    conversationsPromise,
+    channelsPromise,
+    messagesPromise,
+    notificationsPromise,
   ]);
-  return { users, clubs, universities, officers, posts, comments, events, rsvps };
+  return { users, clubs, universities, officers, posts, comments, events, rsvps, conversations, channels, messages, notifications };
 }

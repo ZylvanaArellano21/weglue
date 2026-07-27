@@ -126,6 +126,10 @@ describe("founder query shaping", () => {
       comments: [],
       events: [],
       rsvps: [],
+      conversations: [],
+      channels: [],
+      messages: [],
+      notifications: [],
     });
   });
 

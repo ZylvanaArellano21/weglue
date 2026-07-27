@@ -31,10 +31,10 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { label: "Events", href: "/admin/events", icon: "📅", day: 3, ready: true, group: "Content" },
   { label: "RSVPs", href: "/admin/rsvps", icon: "✅", day: 3, ready: true, group: "Content" },
 
-  { label: "Conversations", href: "/admin/conversations", icon: "🗨️", day: 4, ready: false, group: "Messaging" },
-  { label: "Channels", href: "/admin/channels", icon: "📢", day: 4, ready: false, group: "Messaging" },
-  { label: "Messages", href: "/admin/messages", icon: "✉️", day: 4, ready: false, group: "Messaging" },
-  { label: "Notifications", href: "/admin/notifications", icon: "🔔", day: 4, ready: false, group: "Messaging" },
+  { label: "Conversations", href: "/admin/conversations", icon: "🗨️", day: 4, ready: true, group: "Messaging" },
+  { label: "Channels", href: "/admin/channels", icon: "📢", day: 4, ready: true, group: "Messaging" },
+  { label: "Messages", href: "/admin/messages", icon: "✉️", day: 4, ready: true, group: "Messaging" },
+  { label: "Notifications", href: "/admin/notifications", icon: "🔔", day: 4, ready: true, group: "Messaging" },
 
   { label: "Reports", href: "/admin/reports", icon: "🚩", day: 2, ready: false, group: "Moderation" },
   { label: "Deleted Content", href: "/admin/deleted-content", icon: "🗑️", day: 5, ready: false, group: "Moderation" },

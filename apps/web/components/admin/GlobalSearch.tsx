@@ -55,6 +55,32 @@ interface RsvpHit {
   event_title: string;
   status: string;
 }
+interface ConversationHit {
+  id: string;
+  title: string;
+  type_label: string;
+  club_name: string | null;
+}
+interface ChannelHit {
+  id: string;
+  name: string;
+  conversation_title: string;
+  club_name: string | null;
+}
+interface MessageHit {
+  id: string;
+  conversation_id: string;
+  sender_username: string;
+  conversation_title: string;
+  message_type: string;
+  deleted: boolean;
+}
+interface NotificationHit {
+  id: string;
+  type: string;
+  recipient_username: string;
+  title: string | null;
+}
 
 /**
  * Global entity search. Debounced, founder-authorized server-side via
@@ -75,6 +101,10 @@ export function GlobalSearch() {
   const [comments, setComments] = useState<CommentHit[]>([]);
   const [events, setEvents] = useState<EventHit[]>([]);
   const [rsvps, setRsvps] = useState<RsvpHit[]>([]);
+  const [conversations, setConversations] = useState<ConversationHit[]>([]);
+  const [channels, setChannels] = useState<ChannelHit[]>([]);
+  const [messages, setMessages] = useState<MessageHit[]>([]);
+  const [notifications, setNotifications] = useState<NotificationHit[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -87,6 +117,10 @@ export function GlobalSearch() {
     setComments([]);
     setEvents([]);
     setRsvps([]);
+    setConversations([]);
+    setChannels([]);
+    setMessages([]);
+    setNotifications([]);
   }
 
   useEffect(() => {
@@ -121,6 +155,10 @@ export function GlobalSearch() {
         setComments(data.comments ?? []);
         setEvents(data.events ?? []);
         setRsvps(data.rsvps ?? []);
+        setConversations(data.conversations ?? []);
+        setChannels(data.channels ?? []);
+        setMessages(data.messages ?? []);
+        setNotifications(data.notifications ?? []);
         setOpen(true);
       } catch {
         clearAll();
@@ -145,7 +183,11 @@ export function GlobalSearch() {
     posts.length > 0 ||
     comments.length > 0 ||
     events.length > 0 ||
-    rsvps.length > 0;
+    rsvps.length > 0 ||
+    conversations.length > 0 ||
+    channels.length > 0 ||
+    messages.length > 0 ||
+    notifications.length > 0;
 
   return (
     <div ref={boxRef} className="relative w-full max-w-xl">
@@ -341,6 +383,98 @@ export function GlobalSearch() {
                         <span className="block truncate text-xs text-gray-500 capitalize">{r.status}</span>
                       </span>
                       <span className="text-[10px] uppercase text-gray-400">RSVP</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {conversations.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Conversations</p>
+                  {conversations.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => go(`/admin/conversations/${c.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🗨️</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{c.title}</span>
+                        <span className="block truncate text-xs text-gray-500">
+                          {c.type_label}
+                          {c.club_name ? ` · ${c.club_name}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Conversation</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {channels.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Channels</p>
+                  {channels.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => go(`/admin/channels/${c.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">📢</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">#{c.name}</span>
+                        <span className="block truncate text-xs text-gray-500">
+                          {c.conversation_title}
+                          {c.club_name ? ` · ${c.club_name}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Channel</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {messages.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Messages</p>
+                  {messages.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => go(`/admin/messages/${m.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">✉️</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">
+                          {m.deleted ? "Deleted message" : `@${m.sender_username}`}
+                          <span className="ml-1 text-xs font-normal capitalize text-gray-400">· {m.message_type.replace("_", " ")}</span>
+                        </span>
+                        <span className="block truncate text-xs text-gray-500">{m.conversation_title}</span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Message</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {notifications.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Notifications</p>
+                  {notifications.map((n) => (
+                    <button
+                      key={n.id}
+                      onClick={() => go(`/admin/notifications/${n.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🔔</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{n.type}</span>
+                        <span className="block truncate text-xs text-gray-500">
+                          @{n.recipient_username}
+                          {n.title ? ` · ${n.title}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Notification</span>
                     </button>
                   ))}
                 </>
