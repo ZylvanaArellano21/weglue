@@ -2,48 +2,22 @@ import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { supabase } from "../lib/supabase";
-import {
-  completeMicrosoftCallback,
-  isMicrosoftSignInActive,
-} from "../lib/microsoftAuth";
 
 /**
- * Handles auth links that open the app:
+ * Handles first-party auth links that open the app:
  *   - weglue://auth/confirmed#access_token=…            (legacy deep link)
  *   - https://weglue.app/auth/confirm#access_token=…    (Android App Link
  *     intercepts the web confirmation URL before the browser sees it)
- *   - weglue://auth/callback?code=…                     (Microsoft OAuth
- *     return when the app was backgrounded/killed during the browser step;
- *     the foreground path resolves inside openAuthSessionAsync instead)
- * Tokens land in the URL fragment. Expired/invalid links arrive as
- * #error=…&error_code=otp_expired — route those to the confirm-email screen
- * with a clear resend path instead of dropping them.
+ * Both are email-verification / password-recovery links issued by We Glue's
+ * own email/password auth. Tokens land in the URL fragment. Expired/invalid
+ * links arrive as #error=…&error_code=otp_expired — route those to the
+ * confirm-email screen with a clear resend path instead of dropping them.
  */
 async function handleUrl(url: string) {
   // Guard against a malformed/non-string payload from the native Linking
   // bridge — calling string methods on a non-string would throw during the
   // cold-start deep-link path and take the whole launch down.
   if (typeof url !== "string" || url.length === 0) return;
-
-  if (url.includes("auth/callback")) {
-    // Microsoft OAuth return. completeMicrosoftCallback deduplicates by code,
-    // so this coexisting with the openAuthSessionAsync result is harmless.
-    // When the foreground flow is active (Android can deliver the redirect
-    // both ways), the screen that opened the browser owns navigation/errors.
-    const foregroundOwns = isMicrosoftSignInActive();
-    const result = await completeMicrosoftCallback(url);
-    if (foregroundOwns) return;
-    if (result.status === "success") {
-      // Session is on the main client; the root guard routes from "/".
-      router.replace("/");
-    } else if (result.status === "error") {
-      router.replace({
-        pathname: "/auth/login",
-        params: { oauthError: result.message },
-      });
-    }
-    return;
-  }
 
   const isAuthLink =
     url.includes("auth/confirmed") || url.includes("auth/confirm");

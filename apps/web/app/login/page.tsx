@@ -11,9 +11,7 @@ import {
   sendVerificationEmail,
   setPendingSignupEmail,
 } from "../../lib/authFlow";
-import { startMicrosoftSignIn } from "../../lib/microsoftAuth";
 import { resetOnboardingState } from "../../lib/onboardingState";
-import { MicrosoftButton } from "../../components/auth/MicrosoftButton";
 
 type LoginError =
   | null
@@ -34,7 +32,6 @@ function LoginContent(): JSX.Element {
   const searchParams = useSearchParams();
   const prefillEmail = searchParams.get("prefillEmail") ?? "";
   const showVerifiedBanner = searchParams.get("verified") === "1";
-  const oauthError = searchParams.get("oauthError");
 
   const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");
@@ -42,24 +39,17 @@ function LoginContent(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [loginError, setLoginError] = useState<LoginError>(null);
-  const [msLoading, setMsLoading] = useState(false);
-  const [msError, setMsError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const verifyingRef = useRef(false);
-
-  useEffect(() => {
-    if (oauthError) setMsError(oauthError);
-  }, [oauthError]);
 
   function clearAllErrors() {
     setFieldErrors({});
     setLoginError(null);
-    setMsError(null);
   }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    if (loading || msLoading) return;
+    if (loading) return;
 
     const newFieldErrors: { email?: string; password?: string } = {};
     if (!email.trim()) {
@@ -136,7 +126,6 @@ function LoginContent(): JSX.Element {
     try {
       const result = await sendVerificationEmail(normalizedEmail);
       if (!result.ok && "message" in result) {
-        setMsError(null);
         setLoginError(null);
         setFieldErrors({ email: result.message });
         return;
@@ -151,19 +140,6 @@ function LoginContent(): JSX.Element {
       verifyingRef.current = false;
       setVerifying(false);
     }
-  }
-
-  async function handleMicrosoftLogin() {
-    if (msLoading || loading) return;
-    clearAllErrors();
-    setMsLoading(true);
-    const result = await startMicrosoftSignIn();
-    if (!result.ok) {
-      if (result.message) setMsError(result.message);
-      setMsLoading(false);
-      return;
-    }
-    // Page navigates away to Microsoft.
   }
 
   return (
@@ -271,21 +247,12 @@ function LoginContent(): JSX.Element {
                   )}
                 </p>
               )}
-              {msError && <p className="text-[13px] text-[#F02719]">{msError}</p>}
-            </div>
-
-            <div className="mt-6">
-              <MicrosoftButton
-                onClick={handleMicrosoftLogin}
-                loading={msLoading}
-                disabled={loading}
-              />
             </div>
 
             <button
               type="submit"
-              disabled={loading || msLoading}
-              className="w-full h-[52px] bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-base rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center justify-center mt-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+              disabled={loading}
+              className="w-full h-[52px] bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-base rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center justify-center mt-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
             >
               {loading ? (
                 <span

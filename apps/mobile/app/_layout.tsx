@@ -195,11 +195,10 @@ export default function RootLayout() {
       );
       const onboarded = (interestsResult.data?.length ?? 0) > 0;
       if (profileResult.data) {
-        // Onboarding completion is monotonic (only complete_oauth_onboarding
-        // flips it, and only to true). A fetch that started BEFORE the
-        // Microsoft onboarding RPC finished can resolve AFTER it — never let
-        // that stale snapshot un-complete the profile and bounce the user
-        // back into the onboarding flow.
+        // Onboarding completion is monotonic (it only ever flips to true).
+        // A fetch that started BEFORE the completion write can resolve AFTER
+        // it — never let that stale snapshot un-complete the profile and
+        // bounce the user back into the onboarding flow.
         const current = useAuthStore.getState().profile;
         const staleOnboardingSnapshot =
           current?.id === profileResult.data.id &&

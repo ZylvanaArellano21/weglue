@@ -10,10 +10,9 @@ export interface Profile {
   bio: string | null;
   is_seed: boolean;
   /**
-   * True for every password account (042 backfilled the legacy gate away).
-   * False ONLY for an OAuth (Microsoft) account that has not yet completed
-   * Interests → Activities → username — the root guard routes those into the
-   * onboarding flow until complete_oauth_onboarding flips this to true.
+   * True for every email/password account (042 backfilled the legacy gate
+   * away, and password signups set it at creation). The root guard treats a
+   * false value as "onboarding unfinished" and routes into the survey flow.
    */
   onboarding_completed?: boolean;
   /** Canonical campus (single-campus launch mode assigns this server-side). */
