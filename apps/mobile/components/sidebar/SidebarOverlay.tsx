@@ -54,7 +54,7 @@ const MENU_KEYS: SidebarItemKey[] = [
   'notifications',
   'privacyCenter',
 ];
-const FOOTER_KEYS: SidebarItemKey[] = ['help', 'terms', 'logout'];
+const FOOTER_KEYS: SidebarItemKey[] = ['help', 'terms', 'deleteAccount', 'logout'];
 
 export function SidebarOverlay() {
   const router = useRouter();

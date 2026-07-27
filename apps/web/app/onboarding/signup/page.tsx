@@ -16,17 +16,12 @@ import {
   setPendingSignupEmail,
 } from "../../../lib/authFlow";
 import {
-  completeOAuthOnboarding,
-  startMicrosoftSignIn,
-} from "../../../lib/microsoftAuth";
-import {
   getTransientPassword,
   readOnboardingState,
   resetOnboardingState,
   setTransientPassword,
   writeOnboardingState,
 } from "../../../lib/onboardingState";
-import { MicrosoftButton } from "../../../components/auth/MicrosoftButton";
 import { recordSignupConsent } from "../../actions/auth";
 
 const inputClass = (invalid: boolean, valid?: boolean) =>
@@ -52,11 +47,6 @@ export default function SignupPage(): JSX.Element | null {
   } | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [msLoading, setMsLoading] = useState(false);
-
-  // Microsoft-completion mode: OAuth succeeded but We Glue onboarding never
-  // finished — only the explicit username choice is missing.
-  const [msSession, setMsSession] = useState<{ email: string } | null>(null);
   const submittingRef = useRef(false);
 
   // Restore flow state (survey selections, match count, form fields,
@@ -76,30 +66,6 @@ export default function SignupPage(): JSX.Element | null {
       const result = validateEducationEmail(state.pendingEmail);
       setEmailFeedback({ valid: result.valid, reason: result.reason });
     }
-  }, []);
-
-  // Detect a Microsoft account that still needs onboarding completion (the
-  // /auth/callback route sends new Microsoft users here).
-  useEffect(() => {
-    const supabase = createClient();
-    let cancelled = false;
-    (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user || cancelled) return;
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("onboarding_completed")
-        .eq("id", user.id)
-        .maybeSingle();
-      if (!cancelled && profile && profile.onboarding_completed === false) {
-        setMsSession({ email: user.email ?? "" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   function requireLegalConfirmations(): boolean {
@@ -161,7 +127,7 @@ export default function SignupPage(): JSX.Element | null {
 
   async function handleNext(e: React.FormEvent) {
     e.preventDefault();
-    if (submittingRef.current || loading || msLoading) return;
+    if (submittingRef.current || loading) return;
     if (!validate()) return;
 
     submittingRef.current = true;
@@ -283,105 +249,6 @@ export default function SignupPage(): JSX.Element | null {
     }
   }
 
-  /** "Continue with Microsoft": username + legal confirmations first, then
-   * the full-page OAuth redirect. The pending survey + username live in
-   * sessionStorage and are applied by completion mode after the return. */
-  async function handleMicrosoftSignup() {
-    if (msLoading || loading) return;
-
-    const cleanUsername = username.trim().replace(/^@/, "");
-    if (!cleanUsername) {
-      setErrors((prev) => ({
-        ...prev,
-        username:
-          "Choose a username first — you'll use it with your Microsoft account.",
-      }));
-      return;
-    }
-    if (!requireLegalConfirmations()) return;
-
-    setMsLoading(true);
-    setGeneralError(null);
-    writeOnboardingState({ pendingUsername: cleanUsername });
-
-    if (msSession) {
-      // Already authenticated with Microsoft — just finish onboarding.
-      await finishMicrosoftOnboarding(cleanUsername);
-      setMsLoading(false);
-      return;
-    }
-
-    const result = await startMicrosoftSignIn();
-    if (!result.ok) {
-      if (result.message) setGeneralError(result.message);
-      setMsLoading(false);
-      return;
-    }
-    // Page navigates away to Microsoft; nothing more to do here.
-  }
-
-  async function finishMicrosoftOnboarding(cleanUsername: string) {
-    const { selectedInterests, selectedActivities } = readOnboardingState();
-    const result = await completeOAuthOnboarding(
-      cleanUsername,
-      selectedInterests,
-      selectedActivities
-    );
-
-    switch (result.status) {
-      case "completed":
-      case "already_completed": {
-        const supabase = createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (user) void recordSignupConsent(user.id);
-        resetOnboardingState();
-        router.push("/dashboard");
-        router.refresh();
-        return;
-      }
-      case "username_taken":
-        setErrors((prev) => ({
-          ...prev,
-          username: "This username is already taken. Try another one.",
-        }));
-        return;
-      case "username_invalid":
-        setErrors((prev) => ({
-          ...prev,
-          username: "Please choose a valid username.",
-        }));
-        return;
-      case "not_eligible":
-        setGeneralError(
-          "This Microsoft account isn't connected to an eligible school email (.edu or equivalent)."
-        );
-        return;
-      case "email_unverified":
-        setGeneralError(
-          "We couldn't verify a school email on that Microsoft account."
-        );
-        return;
-      default:
-        setGeneralError("Account setup could not be completed. Please try again.");
-    }
-  }
-
-  /** "Not you?" in Microsoft-completion mode — leave the session entirely. */
-  async function handleMicrosoftSwitchAccount() {
-    if (msLoading) return;
-    setMsLoading(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      setMsSession(null);
-      router.refresh();
-    } finally {
-      setMsLoading(false);
-    }
-  }
-
   const pw = checkPassword(password);
   const hintColor = (ok: boolean) =>
     password.length === 0 ? "text-[#9CA3AF]" : ok ? "text-[#0FA6A6]" : "text-[#F02719]";
@@ -442,241 +309,173 @@ export default function SignupPage(): JSX.Element | null {
             </p>
           )}
 
-          {msSession ? (
-            <>
-              <p className="text-[13px] text-[#5F5D5D] leading-relaxed mt-5">
-                You&apos;re signed in with Microsoft as{" "}
-                <span className="font-bold">{msSession.email}</span>. Choose your
-                username to finish.
-              </p>
-
-              <LegalCheckboxes
-                agreedToTerms={agreedToTerms}
-                isOfAge={isOfAge}
-                errors={errors}
-                onTermsChange={(v) => {
-                  setAgreedToTerms(v);
-                  writeOnboardingState({ agreedToTerms: v });
-                  setErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.terms;
-                    return next;
-                  });
-                }}
-                onAgeChange={(v) => {
-                  setIsOfAge(v);
-                  writeOnboardingState({ isOfAge: v });
-                  setErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.age;
-                    return next;
-                  });
-                }}
-              />
-
-              <button
-                type="button"
-                onClick={handleMicrosoftSignup}
-                disabled={msLoading}
-                className="w-full h-[52px] bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-base rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center justify-center mt-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
-              >
-                {msLoading ? (
-                  <span
-                    aria-hidden
-                    className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
-                  />
-                ) : (
-                  "Finish"
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleMicrosoftSwitchAccount}
-                disabled={msLoading}
-                className="text-xs text-[#5F5D5D] mt-4 self-center hover:opacity-80"
-              >
-                Not you?{" "}
-                <span className="font-semibold text-[#0FA6A6]">
-                  Use a different account
-                </span>
-              </button>
-            </>
-          ) : (
-            <>
-              {/* School Email */}
-              <label
-                htmlFor="email"
-                className="text-sm font-bold text-black mb-2 mt-5"
-              >
-                School Email
-              </label>
-              <div className="relative">
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@school.edu"
-                  value={email}
-                  onChange={(e) => handleEmailChange(e.target.value)}
-                  className={inputClass(
-                    !!errors.email ||
-                      emailExistsVerified ||
-                      (emailFeedback !== null && !emailFeedback.valid),
-                    emailFeedback?.valid && !emailExistsVerified
-                  )}
-                  aria-invalid={
-                    !!errors.email ||
+            {/* School Email */}
+            <label
+              htmlFor="email"
+              className="text-sm font-bold text-black mb-2 mt-5"
+            >
+              School Email
+            </label>
+            <div className="relative">
+              <input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@school.edu"
+                value={email}
+                onChange={(e) => handleEmailChange(e.target.value)}
+                className={inputClass(
+                  !!errors.email ||
                     emailExistsVerified ||
-                    (emailFeedback !== null && !emailFeedback.valid)
-                  }
-                  aria-describedby="email-error"
-                />
-                {emailFeedback?.valid && !emailExistsVerified && (
-                  <span
-                    aria-hidden
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-[#0FA6A6] font-bold"
-                  >
-                    ✓
-                  </span>
+                    (emailFeedback !== null && !emailFeedback.valid),
+                  emailFeedback?.valid && !emailExistsVerified
                 )}
-              </div>
-              <p id="email-error" aria-live="polite" className="text-xs mt-1.5">
-                {emailExistsVerified ? (
-                  <span className="text-[#F02719]">
-                    An account already exists with this email.{" "}
-                    <Link
-                      href={`/login?prefillEmail=${encodeURIComponent(email.trim().toLowerCase())}`}
-                      className="text-[#0FA6A6] font-semibold underline"
-                    >
-                      Log in
-                    </Link>{" "}
-                    instead.
-                  </span>
-                ) : errors.email ||
-                  (emailFeedback !== null && !emailFeedback.valid) ? (
-                  <span className="text-[#F02719]">
-                    {errors.email ?? "Use a valid school email ending in .edu."}
-                  </span>
-                ) : null}
-              </p>
-
-              {/* Password */}
-              <label
-                htmlFor="password"
-                className="text-sm font-bold text-black mb-2 mt-4"
-              >
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  placeholder="Min.8 characters"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setTransientPassword(e.target.value);
-                    setErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.password;
-                      return next;
-                    });
-                  }}
-                  className={`${inputClass(!!errors.password)} pr-16`}
-                  aria-invalid={!!errors.password}
-                  aria-describedby="password-rules"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-black hover:opacity-70"
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="text-xs text-[#F02719] mt-1.5">{errors.password}</p>
-              )}
-              <div
-                id="password-rules"
-                className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5"
-              >
-                <span className={`text-[11px] font-medium ${hintColor(pw.minLength)}`}>
-                  Min. 8 characters
-                </span>
-                <span className={`text-[11px] font-medium ${hintColor(pw.hasCapital)}`}>
-                  1 capital letter
-                </span>
-                <span className={`text-[11px] font-medium ${hintColor(pw.hasNumber)}`}>
-                  1 number
-                </span>
-              </div>
-
-              <LegalCheckboxes
-                agreedToTerms={agreedToTerms}
-                isOfAge={isOfAge}
-                errors={errors}
-                onTermsChange={(v) => {
-                  setAgreedToTerms(v);
-                  writeOnboardingState({ agreedToTerms: v });
-                  setErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.terms;
-                    return next;
-                  });
-                }}
-                onAgeChange={(v) => {
-                  setIsOfAge(v);
-                  writeOnboardingState({ isOfAge: v });
-                  setErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.age;
-                    return next;
-                  });
-                }}
+                aria-invalid={
+                  !!errors.email ||
+                  emailExistsVerified ||
+                  (emailFeedback !== null && !emailFeedback.valid)
+                }
+                aria-describedby="email-error"
               />
-
-              <div className="mt-6">
-                <MicrosoftButton onClick={handleMicrosoftSignup} loading={msLoading} disabled={loading} />
-              </div>
-
-              {generalError && (
-                <p aria-live="assertive" className="text-[13px] text-[#F02719] mt-3">
-                  {generalError}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading || msLoading}
-                className="w-full h-[52px] bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-base rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center justify-center mt-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
-              >
-                {loading ? (
-                  <span
-                    aria-hidden
-                    className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
-                  />
-                ) : (
-                  "Next"
-                )}
-              </button>
-
-              <p className="text-center text-xs font-semibold text-black mt-5">
-                Already have an account?{" "}
-                <Link
-                  href="/login"
-                  className="text-[#0FA6A6] hover:underline"
+              {emailFeedback?.valid && !emailExistsVerified && (
+                <span
+                  aria-hidden
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#0FA6A6] font-bold"
                 >
-                  Log in
-                </Link>
+                  ✓
+                </span>
+              )}
+            </div>
+            <p id="email-error" aria-live="polite" className="text-xs mt-1.5">
+              {emailExistsVerified ? (
+                <span className="text-[#F02719]">
+                  An account already exists with this email.{" "}
+                  <Link
+                    href={`/login?prefillEmail=${encodeURIComponent(email.trim().toLowerCase())}`}
+                    className="text-[#0FA6A6] font-semibold underline"
+                  >
+                    Log in
+                  </Link>{" "}
+                  instead.
+                </span>
+              ) : errors.email ||
+                (emailFeedback !== null && !emailFeedback.valid) ? (
+                <span className="text-[#F02719]">
+                  {errors.email ?? "Use a valid school email ending in .edu."}
+                </span>
+              ) : null}
+            </p>
+
+            {/* Password */}
+            <label
+              htmlFor="password"
+              className="text-sm font-bold text-black mb-2 mt-4"
+            >
+              Password
+            </label>
+            <div className="relative">
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                placeholder="Min.8 characters"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setTransientPassword(e.target.value);
+                  setErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.password;
+                    return next;
+                  });
+                }}
+                className={`${inputClass(!!errors.password)} pr-16`}
+                aria-invalid={!!errors.password}
+                aria-describedby="password-rules"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-black hover:opacity-70"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+            {errors.password && (
+              <p className="text-xs text-[#F02719] mt-1.5">{errors.password}</p>
+            )}
+            <div
+              id="password-rules"
+              className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5"
+            >
+              <span className={`text-[11px] font-medium ${hintColor(pw.minLength)}`}>
+                Min. 8 characters
+              </span>
+              <span className={`text-[11px] font-medium ${hintColor(pw.hasCapital)}`}>
+                1 capital letter
+              </span>
+              <span className={`text-[11px] font-medium ${hintColor(pw.hasNumber)}`}>
+                1 number
+              </span>
+            </div>
+
+            <LegalCheckboxes
+              agreedToTerms={agreedToTerms}
+              isOfAge={isOfAge}
+              errors={errors}
+              onTermsChange={(v) => {
+                setAgreedToTerms(v);
+                writeOnboardingState({ agreedToTerms: v });
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.terms;
+                  return next;
+                });
+              }}
+              onAgeChange={(v) => {
+                setIsOfAge(v);
+                writeOnboardingState({ isOfAge: v });
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.age;
+                  return next;
+                });
+              }}
+            />
+
+            {generalError && (
+              <p aria-live="assertive" className="text-[13px] text-[#F02719] mt-4">
+                {generalError}
               </p>
-            </>
-          )}
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-[52px] bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-base rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors disabled:opacity-60 flex items-center justify-center mt-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+            >
+              {loading ? (
+                <span
+                  aria-hidden
+                  className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+                />
+              ) : (
+                "Next"
+              )}
+            </button>
+
+            <p className="text-center text-xs font-semibold text-black mt-5">
+              Already have an account?{" "}
+              <Link
+                href="/login"
+                className="text-[#0FA6A6] hover:underline"
+              >
+                Log in
+              </Link>
+            </p>
         </form>
       </div>
     </main>

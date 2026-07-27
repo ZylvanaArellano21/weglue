@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useChatSearch, useSuggestedPeople } from '../../hooks/useChats';
 import { Avatar } from '../../components/shared/Avatar';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../components/chat/chatTheme';
 
 // ─── New group chat ──────────────────────────────────────────────────────────
@@ -38,6 +39,8 @@ export default function NewGroupScreen() {
   const [groupName, setGroupName] = useState('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Selected[]>([]);
+  // Android: lift the people list above the keyboard (iOS keeps KAV padding).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
 
   const isTyping = query.trim().length > 0;
   const { data: suggested, isLoading: suggestLoading } = useSuggestedPeople(isTyping ? undefined : userId);
@@ -87,7 +90,13 @@ export default function NewGroupScreen() {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={[
+          styles.flex,
+          Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+        ]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <TextInput
           style={styles.nameInput}
           placeholder="Group name (optional)"

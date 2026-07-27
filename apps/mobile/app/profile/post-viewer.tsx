@@ -28,6 +28,7 @@ import { PostViewerBlock } from '../../components/post/PostViewerBlock';
 import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { ProfileConfirmationModal } from '../../components/profile/ProfileConfirmationModal';
 import { useToast } from '../../components/Toast';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { profileColors, profileFonts } from '../../components/profile/profileTheme';
 import type { FeedPost } from '../../services/postService';
 
@@ -155,6 +156,8 @@ export default function ProfilePostViewerScreen() {
   // ─── Own-post edit/delete ─────────────────────────────────────────────────
   const [optionsPostId, setOptionsPostId] = useState<string | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  // Android: float the edit-caption dialog above the keyboard (iOS keeps KAV).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const [editTarget, setEditTarget] = useState<FeedPost | null>(null);
   const [captionDraft, setCaptionDraft] = useState('');
 
@@ -328,7 +331,10 @@ export default function ProfilePostViewerScreen() {
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.editOverlay}
+          style={[
+            styles.editOverlay,
+            Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+          ]}
         >
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setEditTarget(null)} />
           <View style={styles.editCard}>

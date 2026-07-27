@@ -114,6 +114,17 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
           <span style={{ color: "#0FA6A6" }}>{profile?.gluemates_count ?? 0}</span>
         </Link>
       </MenuCard>
+
+      {/* Account. Permanent self-service deletion must be reachable from inside
+          the signed-in app, not only from the public help form. */}
+      <MenuCard>
+        <Link
+          href="/account/delete"
+          className="flex items-center gap-2.5 px-4 py-3 text-[15px] font-medium text-[#F02719] hover:bg-red-50"
+        >
+          <span className="flex-1">Delete Account</span>
+        </Link>
+      </MenuCard>
     </aside>
   );
 }
