@@ -36,13 +36,13 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { label: "Messages", href: "/admin/messages", icon: "✉️", day: 4, ready: true, group: "Messaging" },
   { label: "Notifications", href: "/admin/notifications", icon: "🔔", day: 4, ready: true, group: "Messaging" },
 
-  { label: "Reports", href: "/admin/reports", icon: "🚩", day: 2, ready: false, group: "Moderation" },
-  { label: "Deleted Content", href: "/admin/deleted-content", icon: "🗑️", day: 5, ready: false, group: "Moderation" },
-  { label: "Edit History", href: "/admin/edit-history", icon: "📝", day: 5, ready: false, group: "Moderation" },
-  { label: "Audit History", href: "/admin/audit-history", icon: "🕵️", day: 5, ready: false, group: "Moderation" },
+  { label: "Reports", href: "/admin/reports", icon: "🚩", day: 5, ready: true, group: "Moderation" },
+  { label: "Deleted Content", href: "/admin/deleted-content", icon: "🗑️", day: 5, ready: true, group: "Moderation" },
+  { label: "Edit History", href: "/admin/edit-history", icon: "📝", day: 5, ready: true, group: "Moderation" },
+  { label: "Audit History", href: "/admin/audit-history", icon: "🕵️", day: 5, ready: true, group: "Moderation" },
 
-  { label: "Data Health", href: "/admin/data-health", icon: "🩺", day: 6, ready: false, group: "System" },
-  { label: "Admin Settings", href: "/admin/settings", icon: "⚙️", day: 7, ready: false, group: "System" },
+  { label: "Data Health", href: "/admin/data-health", icon: "🩺", day: 5, ready: true, group: "System" },
+  { label: "Admin Settings", href: "/admin/settings", icon: "⚙️", day: 5, ready: true, group: "System" },
 ];
 
 export const ADMIN_NAV_GROUPS: AdminNavItem["group"][] = [

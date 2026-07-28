@@ -130,6 +130,9 @@ describe("founder query shaping", () => {
       channels: [],
       messages: [],
       notifications: [],
+      reports: [],
+      deletedContent: [],
+      diagnostics: [],
     });
   });
 

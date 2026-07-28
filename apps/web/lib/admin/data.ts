@@ -753,6 +753,9 @@ export interface SearchResults {
   channels: { id: string; name: string; conversation_title: string; club_name: string | null }[];
   messages: { id: string; conversation_id: string; sender_username: string; conversation_title: string; message_type: string; deleted: boolean }[];
   notifications: { id: string; type: string; recipient_username: string; title: string | null }[];
+  reports: { id: string; target_label: string; entity_type_label: string; reason: string | null; status: string; reporter_username: string | null }[];
+  deletedContent: { key: string; entity_type_label: string; identity: string; href: string }[];
+  diagnostics: { key: string; label: string; description: string; href: string }[];
 }
 
 const EMPTY_SEARCH: SearchResults = {
@@ -768,6 +771,9 @@ const EMPTY_SEARCH: SearchResults = {
   channels: [],
   messages: [],
   notifications: [],
+  reports: [],
+  deletedContent: [],
+  diagnostics: [],
 };
 
 function preview(text: string | null, len = 80): string | null {
@@ -1164,7 +1170,94 @@ export async function searchEntities(query: string): Promise<SearchResults> {
     }));
   })();
 
-  const [users, clubs, universities, officers, posts, comments, events, rsvps, conversations, channels, messages, notifications] = await Promise.all([
+  // ── Day-5 moderation search (SAFE METADATA ONLY) ────────────────────────────
+  // Reports by reporter / reported user / target name / reason / status. NEVER
+  // the content_snapshot/attachment_snapshot evidence columns.
+
+  const REPORT_ENTITY_LABEL: Record<string, string> = {
+    club: "Club",
+    event: "Event",
+    post: "Post",
+    user: "User",
+    message: "Message",
+    chat: "Conversation",
+  };
+
+  const reportsPromise = (async () => {
+    const { userIds } = await matchedIdsPromise;
+    const statusToken = ["pending", "reviewing", "resolved", "dismissed"].includes(term.toLowerCase()) ? term.toLowerCase() : null;
+    // Target entity ids matched by name.
+    const [{ data: clubsT }, { data: eventsT }, { data: postsT }] = await Promise.all([
+      admin.from("clubs").select("id").or(`name.ilike.${like},handle.ilike.${like}`).limit(100),
+      isEmail ? Promise.resolve({ data: [] as any[] }) : admin.from("events").select("id").ilike("title", like).limit(100),
+      isEmail ? Promise.resolve({ data: [] as any[] }) : admin.from("posts").select("id").ilike("caption", like).limit(100),
+    ]);
+    const targetIds = [...(clubsT ?? []), ...(eventsT ?? []), ...(postsT ?? [])].map((r: any) => r.id);
+    const parts: string[] = [];
+    if (!isEmail) parts.push(`entity_name.ilike.${like}`);
+    if (!isEmail) parts.push(`reporter_username.ilike.${like}`);
+    parts.push(`reporter_email.ilike.${like}`);
+    if (!isEmail) parts.push(`reason.ilike.${like}`);
+    if (statusToken) parts.push(`status.eq.${statusToken}`);
+    if (userIds.length) {
+      parts.push(`reporter_id.in.(${userIds.join(",")})`);
+      parts.push(`entity_id.in.(${userIds.join(",")})`);
+      parts.push(`message_sender_id.in.(${userIds.join(",")})`);
+    }
+    if (targetIds.length) parts.push(`entity_id.in.(${targetIds.join(",")})`);
+    if (parts.length === 0) return [];
+    const { data } = await admin
+      .from("reports")
+      .select("id, status, entity_type, entity_name, reason, reporter_username")
+      .or(parts.join(","))
+      .order("created_at", { ascending: false })
+      .limit(6);
+    return ((data ?? []) as any[]).map((r) => ({
+      id: r.id,
+      target_label: r.entity_name || REPORT_ENTITY_LABEL[r.entity_type] || r.entity_type,
+      entity_type_label: REPORT_ENTITY_LABEL[r.entity_type] ?? r.entity_type,
+      reason: r.reason ?? null,
+      status: r.status,
+      reporter_username: r.reporter_username ?? null,
+    }));
+  })();
+
+  // Deleted content: deactivated clubs + deleted conversations matched by name
+  // (safe metadata; deleted messages are not surfaced in quick search).
+  const deletedContentPromise = (async () => {
+    const [{ data: clubsD }, { data: convD }] = await Promise.all([
+      admin.from("clubs").select("id, name, handle").eq("is_active", false).or(`name.ilike.${like},handle.ilike.${like}`).limit(4),
+      isEmail
+        ? Promise.resolve({ data: [] as any[] })
+        : admin.from("conversations").select("id, name").not("deleted_at", "is", null).ilike("name", like).limit(4),
+    ]);
+    const out: { key: string; entity_type_label: string; identity: string; href: string }[] = [];
+    for (const c of (clubsD ?? []) as any[]) out.push({ key: `club:${c.id}`, entity_type_label: "Deactivated club", identity: c.name, href: `/admin/clubs/${c.id}` });
+    for (const c of (convD ?? []) as any[]) out.push({ key: `conversation:${c.id}`, entity_type_label: "Deleted conversation", identity: c.name || "Conversation", href: `/admin/conversations/${c.id}` });
+    return out;
+  })();
+
+  // Data Health issues by category + moderation tools (navigational shortcuts).
+  const diagnosticsPromise = (async () => {
+    const catalog = [
+      { key: "accounts", label: "Data Health · Accounts", description: "Auth ↔ profile consistency checks", href: "/admin/data-health", keywords: ["account", "auth", "profile", "orphan", "signup", "health"] },
+      { key: "clubs", label: "Data Health · Clubs", description: "Officer roster & membership integrity", href: "/admin/data-health", keywords: ["officer", "member", "club", "roster", "duplicate", "health"] },
+      { key: "content", label: "Data Health · Content", description: "Posts/comments reference integrity", href: "/admin/data-health", keywords: ["post", "comment", "content", "orphan", "health"] },
+      { key: "messaging", label: "Data Health · Messaging", description: "Conversation/channel/message references", href: "/admin/data-health", keywords: ["message", "channel", "conversation", "notification", "health"] },
+      { key: "moderation", label: "Data Health · Moderation", description: "Reports pointing at missing targets", href: "/admin/data-health", keywords: ["report", "moderation", "target", "health"] },
+      { key: "edit-history", label: "Edit History", description: "Recently-edited entities (no before/after)", href: "/admin/edit-history", keywords: ["edit", "history", "updated", "changed"] },
+      { key: "audit-history", label: "Audit History", description: "Structured audit coverage & status", href: "/admin/audit-history", keywords: ["audit", "log", "trail", "history"] },
+      { key: "deleted-content", label: "Deleted Content", description: "Deactivated/deleted entities", href: "/admin/deleted-content", keywords: ["deleted", "removed", "archived", "deactivated", "restore", "purge"] },
+      { key: "settings", label: "Admin Settings", description: "Operational status & kill switches", href: "/admin/settings", keywords: ["setting", "mfa", "kill switch", "env", "status"] },
+    ];
+    const t = term.toLowerCase();
+    return catalog
+      .filter((c) => c.keywords.some((k) => k.includes(t) || t.includes(k)))
+      .slice(0, 5)
+      .map(({ key, label, description, href }) => ({ key, label, description, href }));
+  })();
+
+  const [users, clubs, universities, officers, posts, comments, events, rsvps, conversations, channels, messages, notifications, reports, deletedContent, diagnostics] = await Promise.all([
     usersPromise,
     clubsPromise,
     universitiesPromise,
@@ -1177,6 +1270,9 @@ export async function searchEntities(query: string): Promise<SearchResults> {
     channelsPromise,
     messagesPromise,
     notificationsPromise,
+    reportsPromise,
+    deletedContentPromise,
+    diagnosticsPromise,
   ]);
-  return { users, clubs, universities, officers, posts, comments, events, rsvps, conversations, channels, messages, notifications };
+  return { users, clubs, universities, officers, posts, comments, events, rsvps, conversations, channels, messages, notifications, reports, deletedContent, diagnostics };
 }

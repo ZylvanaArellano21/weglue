@@ -81,6 +81,26 @@ interface NotificationHit {
   recipient_username: string;
   title: string | null;
 }
+interface ReportHit {
+  id: string;
+  target_label: string;
+  entity_type_label: string;
+  reason: string | null;
+  status: string;
+  reporter_username: string | null;
+}
+interface DeletedHit {
+  key: string;
+  entity_type_label: string;
+  identity: string;
+  href: string;
+}
+interface DiagnosticHit {
+  key: string;
+  label: string;
+  description: string;
+  href: string;
+}
 
 /**
  * Global entity search. Debounced, founder-authorized server-side via
@@ -105,6 +125,9 @@ export function GlobalSearch() {
   const [channels, setChannels] = useState<ChannelHit[]>([]);
   const [messages, setMessages] = useState<MessageHit[]>([]);
   const [notifications, setNotifications] = useState<NotificationHit[]>([]);
+  const [reports, setReports] = useState<ReportHit[]>([]);
+  const [deletedContent, setDeletedContent] = useState<DeletedHit[]>([]);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticHit[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -121,6 +144,9 @@ export function GlobalSearch() {
     setChannels([]);
     setMessages([]);
     setNotifications([]);
+    setReports([]);
+    setDeletedContent([]);
+    setDiagnostics([]);
   }
 
   useEffect(() => {
@@ -159,6 +185,9 @@ export function GlobalSearch() {
         setChannels(data.channels ?? []);
         setMessages(data.messages ?? []);
         setNotifications(data.notifications ?? []);
+        setReports(data.reports ?? []);
+        setDeletedContent(data.deletedContent ?? []);
+        setDiagnostics(data.diagnostics ?? []);
         setOpen(true);
       } catch {
         clearAll();
@@ -187,7 +216,10 @@ export function GlobalSearch() {
     conversations.length > 0 ||
     channels.length > 0 ||
     messages.length > 0 ||
-    notifications.length > 0;
+    notifications.length > 0 ||
+    reports.length > 0 ||
+    deletedContent.length > 0 ||
+    diagnostics.length > 0;
 
   return (
     <div ref={boxRef} className="relative w-full max-w-xl">
@@ -475,6 +507,72 @@ export function GlobalSearch() {
                         </span>
                       </span>
                       <span className="text-[10px] uppercase text-gray-400">Notification</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {reports.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Reports</p>
+                  {reports.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => go(`/admin/reports/${r.id}`)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🚩</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">
+                          {r.reason ?? "Report"}
+                          <span className="ml-1 text-xs font-normal capitalize text-gray-400">· {r.status}</span>
+                        </span>
+                        <span className="block truncate text-xs text-gray-500">
+                          {r.entity_type_label}: {r.target_label}
+                          {r.reporter_username ? ` · by @${r.reporter_username}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Report</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {deletedContent.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Deleted content</p>
+                  {deletedContent.map((d) => (
+                    <button
+                      key={d.key}
+                      onClick={() => go(d.href)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🗑️</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{d.identity}</span>
+                        <span className="block truncate text-xs text-gray-500">{d.entity_type_label}</span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Deleted</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+
+              {diagnostics.length > 0 ? (
+                <>
+                  <p className="px-4 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Diagnostics &amp; tools</p>
+                  {diagnostics.map((d) => (
+                    <button
+                      key={d.key}
+                      onClick={() => go(d.href)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-sm">🩺</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-900">{d.label}</span>
+                        <span className="block truncate text-xs text-gray-500">{d.description}</span>
+                      </span>
+                      <span className="text-[10px] uppercase text-gray-400">Tool</span>
                     </button>
                   ))}
                 </>
