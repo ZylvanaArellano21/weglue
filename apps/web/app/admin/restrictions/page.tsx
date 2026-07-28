@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { reportStatusCounts } from "../../../lib/admin/data2";
 import { SectionCard, Badge } from "../../../components/admin/primitives";
 import { DisabledAction } from "../../../components/admin/DisabledAction";
@@ -30,18 +31,30 @@ export default async function AdminRestrictionsPage() {
         </p>
       </div>
 
-      <SectionCard title="Report triage — the only restriction-adjacent system that exists today">
+      <SectionCard
+        title="Report triage — the only restriction-adjacent system that exists today"
+        action={
+          <Link href="/admin/reports" className="text-xs text-teal-600 hover:underline">
+            Open Reports →
+          </Link>
+        }
+      >
         <div className="p-4">
           <p className="mb-3 text-sm text-gray-500">
             The closest existing canonical signal is <code className="rounded bg-gray-100 px-1 text-xs">reports.status</code>.
-            This is read-only here; a report → sanction workflow is future work.
+            The full moderation queue lives in <Link href="/admin/reports" className="text-teal-600 hover:underline">Reports</Link>;
+            a report → sanction workflow is future work (no canonical sanction table exists).
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {(["pending", "reviewing", "resolved", "dismissed"] as const).map((s) => (
-              <div key={s} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+              <Link
+                key={s}
+                href={`/admin/reports?status=${s}`}
+                className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 transition hover:border-teal-200"
+              >
                 <p className="text-lg font-semibold tabular-nums text-gray-900">{(reports[s] ?? 0).toLocaleString()}</p>
                 <p className="text-xs capitalize text-gray-500">{s}</p>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
