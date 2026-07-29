@@ -1,41 +1,49 @@
-// Deletes the calling user's account end-to-end.
+// Permanently deletes the calling user's account, end to end.
 //
 //   1. Verify the caller's JWT (service client → auth.getUser). The user id is
 //      taken from the verified token, NEVER from the request body, so a caller
-//      can only ever delete themself.
-//   2. Collect the user's Storage object paths while the rows still exist.
-//   3. delete_own_account_atomic() — ONE transaction: hard-deletes solo-thread
-//      messages, then DELETE FROM auth.users, which cascades through profiles
-//      to every owned table and anonymizes shared messages (SET NULL).
-//   4. Only after that succeeds, remove the Storage objects (service role).
+//      can only ever delete themself. There is no parameter to point elsewhere.
+//   2. delete_own_account_atomic() — ONE transaction: scrubs the residues that
+//      have no foreign key, de-identifies moderation evidence, removes rows the
+//      FKs would have orphaned, hard-deletes solo-thread messages, applies every
+//      SET NULL explicitly, then DELETE FROM auth.users. It returns the Storage
+//      object keys, grouped by bucket, that this function must now sweep.
+//   3. Remove those objects with the service role.
 //
 // The service-role key never leaves this function; the client never sees one.
 //
 // WHY IT LOOKS LIKE THIS
 //
-// The previous version ran delete_own_user_data() and then called
-// admin.auth.admin.deleteUser() as a SEPARATE API call. Those do not share a
-// transaction. When the auth deletion failed, the data deletion had already
-// COMMITTED — profile, interests, activities, memberships and posts gone, while
-// auth.users survived and could still sign in. An authenticated user with no
-// profile is the "Unknown User" ghost account, and returning HTTP 500 does not
-// undo it. Confirmed on the live project by forcing a failure at the auth step:
-// auth.users=1, profiles=0, interests=0, login still worked.
+// The original version ran delete_own_user_data() and then a SEPARATE
+// admin.auth.admin.deleteUser() call. Those do not share a transaction, so when
+// the auth step failed the data deletion had already COMMITTED: profile,
+// interests, memberships and posts gone, while auth.users survived and could
+// still sign in. That is the "Unknown User" ghost account, and returning HTTP
+// 500 does not undo it. Migration 044 collapsed the whole thing into one
+// transaction; migration 052 completed its data coverage and fixed an ordering
+// bug that made deletion fail outright for any user with a club post.
 //
-// Step 3 is now a single transaction, so the outcome is binary: the account is
-// entirely gone, or entirely intact. Partial deletion is structurally
-// impossible, not merely unlikely. Retrying a failed attempt is therefore
-// always safe — it starts from a fully intact account.
+// The outcome is binary: the account is entirely gone, or entirely intact.
+// Partial deletion is structurally impossible rather than merely unlikely, so
+// retrying a failed attempt is always safe — it starts from an intact account.
 //
 // STORAGE IS DELIBERATELY OUTSIDE THE TRANSACTION
 //
-// Object storage is not transactional. If storage cleanup fails AFTER the
-// account is gone, we log it and STILL report success: the account really is
+// Object storage is not transactional. If the sweep fails AFTER the account is
+// gone we log it loudly and STILL report success: the account really is
 // deleted, and reporting failure would trap the user in an account that no
-// longer exists (and would make them retry forever). The cost of that choice is
-// orphaned files, which are a recoverable cleanup task — never a ghost account.
+// longer exists and make them retry forever. The cost is orphaned files — a
+// recoverable cleanup task, never a ghost account.
+//
+// The path list now comes FROM the transaction rather than from a separate
+// pre-pass. The old pre-pass read only the avatars and posts buckets, so it
+// could not see club-gallery uploads or chat attachments at all, and it read
+// rows a second time, racing its own deletion.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+
+/** Buckets the deletion RPC may return keys for. Anything else is ignored. */
+const SWEEPABLE_BUCKETS = ["avatars", "posts", "club-photos", "chat-attachments"] as const;
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -60,63 +68,38 @@ Deno.serve(async (req) => {
   } = await admin.auth.getUser(token);
 
   if (userError || !user) {
+    // Also the shape a retry takes once the account is already gone: the token
+    // no longer resolves to a user. Terminal, not retryable — the client should
+    // sign out rather than loop.
     return json({ error: "Invalid or expired session" }, 401);
   }
 
   const userId = user.id;
 
-  // ── 1. Collect Storage paths while the rows still point at them ───────────
-  // Best effort: losing track of an object must not block the deletion. An
-  // orphaned file is recoverable; a half-deleted account is not.
-  const avatarPaths: string[] = [];
-  const postPaths: string[] = [];
-  try {
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("avatar_url, avatar_type")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profile?.avatar_url && profile.avatar_type !== "text") {
-      const p = storagePathFromPublicUrl(profile.avatar_url as string, "avatars");
-      if (p) avatarPaths.push(p);
-    }
-
-    const { data: posts } = await admin
-      .from("posts")
-      .select("image_url")
-      .eq("author_id", userId)
-      .not("image_url", "is", null);
-
-    for (const row of posts ?? []) {
-      const p = storagePathFromPublicUrl((row as { image_url: string }).image_url, "posts");
-      if (p) postPaths.push(p);
-    }
-  } catch (e) {
-    console.error("[delete-account] storage path collection failed (continuing):", e);
-  }
-
-  // ── 2. Delete the account atomically, as the user (RPC checks auth.uid()) ──
+  // ── Delete the account atomically, AS the user (the RPC reads auth.uid()) ──
   const asUser = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
 
-  const { error: rpcError } = await asUser.rpc("delete_own_account_atomic");
+  const { data: paths, error: rpcError } = await asUser.rpc("delete_own_account_atomic");
+
   if (rpcError) {
     console.error("[delete-account] delete_own_account_atomic failed:", rpcError);
     // The transaction rolled back: the account and ALL of its data are fully
-    // intact and still usable. Nothing destructive has happened anywhere —
-    // the client keeps the session and surfaces the error. Retry is safe.
+    // intact and still usable. Nothing destructive has happened anywhere — the
+    // client keeps its session and surfaces the error. Retry is safe.
     return json(
       { error: "Could not delete your account. Please try again." },
       500,
     );
   }
 
-  // ── 3. The account is gone. Storage cleanup can no longer endanger it. ────
-  const orphanedAvatars = await removeAll(admin, "avatars", avatarPaths);
-  const orphanedPosts = await removeAll(admin, "posts", postPaths);
-  const orphaned = orphanedAvatars + orphanedPosts;
+  // ── The account is gone. Storage cleanup can no longer endanger it. ───────
+  let orphaned = 0;
+  for (const bucket of SWEEPABLE_BUCKETS) {
+    orphaned += await removeAll(admin, bucket, readPaths(paths, bucket));
+  }
+
   if (orphaned > 0) {
     // Loud, greppable, and NOT an error to the caller: the deletion succeeded.
     console.error(
@@ -131,13 +114,12 @@ Deno.serve(async (req) => {
   );
 });
 
-/** `.../storage/v1/object/public/<bucket>/<path>` → `<path>` (null if not ours). */
-function storagePathFromPublicUrl(url: string, bucket: string): string | null {
-  const marker = `/storage/v1/object/public/${bucket}/`;
-  const i = url.indexOf(marker);
-  if (i === -1) return null;
-  const path = url.slice(i + marker.length);
-  return path.length > 0 ? decodeURIComponent(path) : null;
+/** Pulls one bucket's key list out of the RPC payload, defensively. */
+function readPaths(payload: unknown, bucket: string): string[] {
+  if (!payload || typeof payload !== "object") return [];
+  const raw = (payload as Record<string, unknown>)[bucket];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((p): p is string => typeof p === "string" && p.length > 0);
 }
 
 /** Removes objects; returns how many could NOT be removed (orphans). */

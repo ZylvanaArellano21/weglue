@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { usePostComments, useAddComment } from '../../hooks/useHomePostsFeed';
 import { timeAgo } from './PostCard';
 import type { PostComment } from '../../services/postService';
@@ -30,6 +31,9 @@ interface CommentsSheetProps {
 export function CommentsSheet({ visible, postId, viewerUserId, onClose }: CommentsSheetProps) {
   const router = useRouter();
   const [draft, setDraft] = useState('');
+  // Android: lift the sheet (and its composer) above the keyboard; iOS keeps
+  // KeyboardAvoidingView. See useAndroidKeyboardHeight for why.
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const { data: comments = [], isLoading } = usePostComments(visible ? postId : undefined);
   const { mutate: submitComment, isPending } = useAddComment();
 
@@ -61,7 +65,10 @@ export function CommentsSheet({ visible, postId, viewerUserId, onClose }: Commen
           }}
         />
 
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={Platform.OS === 'android' ? { marginBottom: androidKeyboardHeight } : undefined}
+        >
           <SafeAreaView
             style={{
               backgroundColor: '#FEFCF0',
@@ -74,7 +81,9 @@ export function CommentsSheet({ visible, postId, viewerUserId, onClose }: Commen
               shadowRadius: 16,
               elevation: 24,
             }}
-            edges={['bottom']}
+            // While lifted above the Android keyboard the bottom inset would
+            // add a nav-bar-sized gap under the composer — drop it then.
+            edges={androidKeyboardHeight > 0 ? [] : ['bottom']}
           >
             <View style={{ alignItems: 'center', paddingTop: 8, marginBottom: 2 }}>
               <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB' }} />

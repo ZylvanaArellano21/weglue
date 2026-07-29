@@ -61,8 +61,54 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
           </h2>
           <p className="text-sm text-[#5F5D5D] leading-relaxed">
             We retain your data as long as your account is active or as needed
-            to provide services. You may request deletion of your account and
-            associated data at any time by contacting us.
+            to provide services.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold text-black mb-2">
+            Deleting Your Account
+          </h2>
+          <p className="text-sm text-[#5F5D5D] leading-relaxed">
+            You can permanently delete your We Glue account yourself, at any
+            time, from inside We Glue. You never need to email us, call us or
+            contact support to do it, and there is no waiting period — deletion
+            is immediate and cannot be undone.
+          </p>
+          <ul className="mt-3 space-y-1 text-sm text-[#5F5D5D] leading-relaxed list-disc pl-5">
+            <li>
+              On the web: <strong>Your Profile → Delete Account</strong>
+            </li>
+            <li>
+              In the mobile app: <strong>Profile menu → Delete Account</strong>{" "}
+              (also available in <strong>Account Center → Delete Account</strong>)
+            </li>
+          </ul>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            Deleting your account permanently removes your account record and
+            your personal data, including your profile, username, email address,
+            posts, photos, comments, likes, messages, club memberships, officer
+            roles, RSVPs, saved events, interests, activities, followers and
+            following, notifications, notification settings and registered
+            devices, together with the files you uploaded.
+          </p>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            Two things are deliberately not erased, and we want to be precise
+            about them. Messages you sent in conversations that other people are
+            still part of remain in those conversations so their history stays
+            readable, but they are permanently disconnected from you and are no
+            longer linked to your name, profile or account. Separately, where a
+            safety or abuse report exists, we keep the minimum record needed to
+            act on it, with your name and email address removed from it. Nothing
+            else about you is kept.
+          </p>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            If you have lost access to your account and cannot sign in, you can
+            request deletion using our{" "}
+            <a href="/delete-account" className="text-[#0FA6A6] hover:underline">
+              account deletion request form
+            </a>
+            .
           </p>
         </section>
 

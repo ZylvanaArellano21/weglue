@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
 import { Avatar } from '../../../components/shared/Avatar';
+import { useAndroidKeyboardHeight } from '../../../lib/useAndroidKeyboardHeight';
 import { searchConversation, type ConversationSearchHit } from '../../../services/messagingService';
 import { displayNameOrFallback } from '../../../lib/displayName';
 import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../components/chat/chatTheme';
@@ -70,6 +71,8 @@ export default function SearchInChatScreen() {
   const userId = user?.id ?? '';
 
   const [query, setQuery] = useState('');
+  // Android: lift results above the keyboard (iOS keeps KAV padding).
+  const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const trimmed = query.trim();
 
   const { data: hits, isFetching } = useQuery({
@@ -121,7 +124,13 @@ export default function SearchInChatScreen() {
         </View>
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={[
+          styles.flex,
+          Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
+        ]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         {isFetching ? (
           <ActivityIndicator color={chatColors.teal} style={{ marginTop: 32 }} />
         ) : (

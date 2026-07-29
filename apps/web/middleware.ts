@@ -90,8 +90,8 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Verified session. A Microsoft account that never finished We Glue
-  // onboarding must complete it (username + survey) before entering the app.
+  // Verified session. An account that never finished We Glue onboarding must
+  // complete it (username + survey) before entering the app.
   if (isProtected || isAuthFlow) {
     const { data: profile } = await supabase
       .from("profiles")

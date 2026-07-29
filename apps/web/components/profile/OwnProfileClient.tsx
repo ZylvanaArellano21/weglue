@@ -68,13 +68,24 @@ export function OwnProfileClient({ userId }: { userId: string }): JSX.Element {
             onOpenPost={(id) => setParam("post", id)}
             onOpenEvent={(id) => setParam("event", id)}
             action={
-              <Link
-                href="/profile/edit"
-                className="block w-full rounded-full border-[1.5px] py-2.5 text-center text-[15px] font-semibold"
-                style={{ borderColor: "#0FA6A6", color: "#0FA6A6" }}
-              >
-                Edit Profile
-              </Link>
+              <>
+                <Link
+                  href="/profile/edit"
+                  className="block w-full rounded-full border-[1.5px] py-2.5 text-center text-[15px] font-semibold"
+                  style={{ borderColor: "#0FA6A6", color: "#0FA6A6" }}
+                >
+                  Edit Profile
+                </Link>
+                {/* Permanent, self-service account deletion. Sits with the
+                    account actions so it is findable without leaving the app
+                    or contacting support (App Store Guideline 5.1.1(v)). */}
+                <Link
+                  href="/account/delete"
+                  className="mt-2.5 block w-full text-center text-[13px] font-semibold text-[#F02719] hover:underline"
+                >
+                  Delete Account
+                </Link>
+              </>
             }
           />
         )}

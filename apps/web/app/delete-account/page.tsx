@@ -1,6 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
+
+// Public FALLBACK deletion route, for people who cannot sign in (lost password,
+// lost school email). It is NOT the normal way to delete an account: signed-in
+// users delete permanently and instantly from inside the app —
+//   web:     Your Profile → Delete Account   (/account/delete)
+//   mobile:  Profile menu → Delete Account, or → Account Center → Delete Account
+// App Store Guideline 5.1.1(v) requires that in-app path to exist and requires
+// that we never make a user email support to delete their account, so this page
+// leads with the self-service option instead of the form.
 
 export default function DeleteAccountPage(): JSX.Element {
   const [email, setEmail] = useState("");
@@ -46,14 +56,15 @@ export default function DeleteAccountPage(): JSX.Element {
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-4 tracking-tight">Request Received</h1>
           <p className="text-gray-600 leading-relaxed">
-            We&apos;ve received your account deletion request. Your account will be permanently
-            deleted within <strong>5 business days</strong>.
+            We&apos;ve received your account deletion request and will permanently delete your
+            account and associated personal data within <strong>5 business days</strong>.
           </p>
-          <p className="text-gray-500 text-sm mt-6 leading-relaxed">
-            If you have questions, email us at{" "}
-            <a href="mailto:support@weglue.app" className="text-[#0FA6A6] underline font-medium">
-              support@weglue.app
-            </a>
+          <p className="text-gray-600 text-sm mt-6 leading-relaxed">
+            If you can still sign in, you don&apos;t have to wait — deleting your account from
+            inside We Glue is permanent and takes effect immediately.{" "}
+            <Link href="/login" className="text-[#0FA6A6] underline font-medium">
+              Sign in to delete it now
+            </Link>
             .
           </p>
         </div>
@@ -66,10 +77,37 @@ export default function DeleteAccountPage(): JSX.Element {
       <div className="max-w-md w-full">
         <p className="text-[#0FA6A6] font-semibold text-sm tracking-wide uppercase mb-2">We Glue</p>
         <h1 className="text-2xl font-bold text-gray-900 mb-2 tracking-tight">Delete Your Account</h1>
+
+        <div className="rounded-xl border border-[#0FA6A6]/30 bg-[#0FA6A6]/5 p-4 mb-6">
+          <p className="text-sm font-semibold text-gray-900 mb-1">
+            You can delete your account yourself, right now
+          </p>
+          <p className="text-sm leading-relaxed text-gray-700">
+            Deletion is permanent and takes effect immediately — you never need to email us or
+            contact support.
+          </p>
+          <ul className="mt-3 space-y-1 text-sm leading-relaxed text-gray-700">
+            <li>
+              <span className="font-medium">On the web:</span> Your Profile → Delete Account
+            </li>
+            <li>
+              <span className="font-medium">In the app:</span> Profile menu → Delete Account (also
+              in Account Center)
+            </li>
+          </ul>
+          <Link
+            href="/account/delete"
+            className="mt-4 inline-flex items-center justify-center rounded-full bg-[#0FA6A6] px-5 py-2.5 text-sm font-semibold text-[#FEFCF0] transition-colors hover:bg-[#0d9494]"
+          >
+            Delete my account now
+          </Link>
+        </div>
+
+        <h2 className="text-base font-bold text-gray-900 mb-2">Can&apos;t sign in?</h2>
         <p className="text-gray-600 mb-8 text-sm leading-relaxed">
-          Submitting this form will permanently delete your We Glue account and all associated
-          data. This action cannot be undone. We will process your request within{" "}
-          <strong>5 business days</strong>.
+          Use this form only if you have lost access to your account and cannot sign in. It
+          permanently deletes your We Glue account and associated personal data. This action
+          cannot be undone. We will process your request within <strong>5 business days</strong>.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">

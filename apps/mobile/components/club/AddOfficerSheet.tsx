@@ -11,9 +11,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
+import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import {
   searchUniversityUsers,
   type UniversityUser,
@@ -54,6 +57,11 @@ export function AddOfficerSheet({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Android: lift + expand the sheet above the keyboard (iOS keeps KAV padding).
+  const { height: androidKbHeight, visible: androidKbVisible } = useAndroidKeyboardHeight();
+  const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const androidSheetHeight = windowHeight - androidKbHeight - insets.top - 12;
 
   // Reset per open so a previous session's selection never leaks in.
   useEffect(() => {
@@ -106,10 +114,21 @@ export function AddOfficerSheet({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.overlay}
+        style={[
+          styles.overlay,
+          Platform.OS === 'android' ? { paddingBottom: androidKbHeight } : null,
+        ]}
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={styles.sheet}>
+        <View
+          style={[
+            styles.sheet,
+            // Android: fill the space above the keyboard while searching so the
+            // people list is visible; trim the bottom padding (no nav-bar gap).
+            androidKbVisible ? { paddingBottom: 12 } : null,
+            androidKbVisible && !selected ? { height: androidSheetHeight } : null,
+          ]}
+        >
           <View style={styles.headerRow}>
             <Text style={styles.title}>Add Officer</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -141,7 +160,7 @@ export function AddOfficerSheet({
                   data={results}
                   keyExtractor={(u) => u.id}
                   keyboardShouldPersistTaps="handled"
-                  style={{ maxHeight: 340 }}
+                  style={androidKbVisible ? { flex: 1 } : { maxHeight: 340 }}
                   renderItem={({ item }) => {
                     const alreadyOfficer = existingOfficerIds.includes(item.id);
                     return (
