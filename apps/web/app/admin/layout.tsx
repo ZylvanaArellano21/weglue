@@ -37,7 +37,14 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   }
 
   if (status === "unauthenticated") {
-    redirect("/login?next=/admin");
+    // Render the gate page bare (the dashboard's own /admin/login, or /admin/mfa
+    // reached without a session). Middleware already redirects every OTHER
+    // unauthenticated admin path to /admin/login before this layout runs, so
+    // reaching here on a data page would mean middleware was bypassed — and
+    // that page's own requireSecureAdmin() still throws. Fail-closed either way.
+    // Deliberately NOT the student /login: admin sign-in is separate from
+    // student onboarding, and the student login ignores ?next=.
+    return <SecureBareShell>{children}</SecureBareShell>;
   }
 
   if (status === "denied") {

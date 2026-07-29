@@ -1,10 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
+import { isPlatformAdminAuthUser } from "@weglue/shared/auth/platformAdmin";
+import { PLATFORM_ADMIN_BLOCKED_PATH } from "../../../lib/auth/platformAdminGuard";
 
 /**
  * OAuth / PKCE callback for the web app (Microsoft sign-in, plus any legacy
  * code-based email links). Exchanges the code for a session, then routes:
+ *   - platform-admin identity                           → /account-restricted
  *   - Microsoft account that finished We Glue onboarding → /dashboard
  *   - Microsoft account that never finished onboarding  → /onboarding/signup
  *     (username choice + survey completion, mirroring the mobile flow)
@@ -70,6 +73,12 @@ export async function GET(request: NextRequest) {
             "We couldn't verify a school email on that Microsoft account. Try again, or sign up with your school email and password."
           )}`
         );
+      }
+
+      // A platform-admin identity never enters the student app and must never
+      // reach the profile lookup below — it has no profiles row by design.
+      if (isPlatformAdminAuthUser(user)) {
+        return NextResponse.redirect(`${origin}${PLATFORM_ADMIN_BLOCKED_PATH}`);
       }
 
       const { data: profile } = await supabase

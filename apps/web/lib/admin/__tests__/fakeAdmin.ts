@@ -8,6 +8,8 @@ import { vi } from "vitest";
 export interface FakeAuthUser {
   id: string;
   email: string | null;
+  /** Server-controlled metadata; carries account_type for platform admins. */
+  app_metadata?: Record<string, unknown> | null;
 }
 
 export function makeDb(initial: Record<string, any[]>, authUsers: FakeAuthUser[] = []) {

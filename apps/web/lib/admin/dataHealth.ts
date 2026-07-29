@@ -20,6 +20,7 @@ if (typeof window !== "undefined") {
 
 import { createAdminClient } from "../supabase/admin";
 import { requireSecureAdmin } from "./secureAdmin";
+import { isPlatformAdminAuthUser } from "@weglue/shared/auth/platformAdmin";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -79,30 +80,94 @@ function severityFor(affected: number, critical: boolean): HealthSeverity {
 
 // ── Individual checks ────────────────────────────────────────────────────────
 
-async function checkAuthUsersWithoutProfiles(admin: Admin): Promise<HealthCheck> {
-  // Bounded GoTrue scan; check profile existence in one chunked pass.
-  const users: { id: string; email: string | null }[] = [];
+/**
+ * Bounded GoTrue scan, shared by the two account-consistency checks below so a
+ * single pass classifies every sampled auth user.
+ *
+ * `platformAdmin` is decided by the server-controlled app_metadata marker
+ * (migration 053) — the same predicate the database uses. It is read here ONLY
+ * to classify a diagnostic, never to grant anything.
+ */
+async function sampleAuthUsers(
+  admin: Admin
+): Promise<{ id: string; email: string | null; platformAdmin: boolean }[]> {
+  const users: { id: string; email: string | null; platformAdmin: boolean }[] = [];
   let page = 1;
   while (users.length < AUTH_SAMPLE) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
     if (error || !data?.users?.length) break;
-    for (const u of data.users) users.push({ id: u.id, email: u.email ?? null });
+    for (const u of data.users) {
+      users.push({
+        id: u.id,
+        email: u.email ?? null,
+        platformAdmin: isPlatformAdminAuthUser(u),
+      });
+    }
     if (data.users.length < 200) break;
     page += 1;
   }
-  const have = await existingIds(admin, "profiles", "id", users.map((u) => u.id));
-  const missing = users.filter((u) => !have.has(u.id));
+  return users;
+}
+
+async function checkAuthUsersWithoutProfiles(
+  admin: Admin,
+  users: { id: string; email: string | null; platformAdmin: boolean }[]
+): Promise<HealthCheck> {
+  // Platform-admin identities are SUPPOSED to have no profiles row — that is the
+  // whole design (migration 053). Counting them here would make this critical
+  // check permanently red for an intentional state, which is exactly how an
+  // operator learns to ignore it and then misses a real partial-signup drift.
+  // They are surfaced separately, as info, by checkPlatformAdminIdentities.
+  // The check is NOT weakened for anyone else: every ordinary auth user with no
+  // profile is still counted and still critical.
+  const students = users.filter((u) => !u.platformAdmin);
+  const have = await existingIds(admin, "profiles", "id", students.map((u) => u.id));
+  const missing = students.filter((u) => !have.has(u.id));
   return {
     key: "auth_users_without_profiles",
     category: "Accounts",
     title: "Auth users without a profile",
-    description: "Signed-up auth users that have no public.profiles row (the classic partial-signup drift).",
+    description:
+      "Signed-up auth users that have no public.profiles row (the classic partial-signup drift). Platform-admin identities are excluded — they are intentionally profile-less and are listed separately.",
     severity: severityFor(missing.length, true),
     affected: missing.length,
-    scanned: users.length,
+    scanned: students.length,
     capped: users.length >= AUTH_SAMPLE,
     examples: missing.slice(0, EXAMPLE_CAP).map((u) => ({ id: u.id, label: u.email ?? u.id, href: null })),
     repairHint: "Backfill the missing profile (or delete the orphan auth user) after a manual review.",
+  };
+}
+
+/**
+ * The positive counterpart: intentional platform-admin identities, and whether
+ * any of them has drifted back into having a student profile row (which would
+ * mean a guard in migration 053 regressed, or a row was restored by hand).
+ */
+async function checkPlatformAdminIdentities(
+  admin: Admin,
+  users: { id: string; email: string | null; platformAdmin: boolean }[]
+): Promise<HealthCheck> {
+  const admins = users.filter((u) => u.platformAdmin);
+  const have = await existingIds(admin, "profiles", "id", admins.map((u) => u.id));
+  const withProfile = admins.filter((u) => have.has(u.id));
+
+  return {
+    key: "platform_admin_identities",
+    category: "Accounts",
+    title: "Platform-admin identities",
+    description:
+      "Auth users marked account_type=platform_admin. These intentionally have NO public.profiles row and never appear in student surfaces. A non-zero count below means one has a student profile again — investigate.",
+    // Only a DRIFTED admin (one that has a profile) is a problem. A healthy
+    // platform admin contributes 0 to `affected`, so this reads "ok".
+    severity: severityFor(withProfile.length, true),
+    affected: withProfile.length,
+    scanned: admins.length,
+    capped: users.length >= AUTH_SAMPLE,
+    examples: withProfile
+      .slice(0, EXAMPLE_CAP)
+      .map((u) => ({ id: u.id, label: u.email ?? u.id, href: null })),
+    repairHint:
+      "A platform-admin identity must not have a profiles row. Confirm migration 053's handle_new_user/ensure_profile guards are live, then remove the row after review.",
   };
 }
 
@@ -413,8 +478,14 @@ export async function runDataHealth(): Promise<DataHealthReport> {
   const admin = createAdminClient();
   const start = Date.now();
 
+  // One bounded GoTrue pass feeds both account-consistency checks, so the
+  // "missing profile" and "platform admin" views can never disagree about which
+  // users were sampled.
+  const authSample = await sampleAuthUsers(admin);
+
   const [
     authNoProfile,
+    platformAdmins,
     profileNoAuth,
     dupMembership,
     clubsNoOfficer,
@@ -433,7 +504,8 @@ export async function runDataHealth(): Promise<DataHealthReport> {
     media,
     statuses,
   ] = await Promise.all([
-    checkAuthUsersWithoutProfiles(admin),
+    checkAuthUsersWithoutProfiles(admin, authSample),
+    checkPlatformAdminIdentities(admin, authSample),
     checkProfilesWithoutAuthUsers(admin),
     checkDuplicateMemberships(admin),
     checkClubsWithoutOfficers(admin),
@@ -544,6 +616,7 @@ export async function runDataHealth(): Promise<DataHealthReport> {
 
   const checks: HealthCheck[] = [
     authNoProfile,
+    platformAdmins,
     profileNoAuth,
     dupMembership,
     clubsNoOfficer,
