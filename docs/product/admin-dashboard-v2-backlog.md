@@ -130,3 +130,35 @@ officer-title `ilike` `.limit(500)`). Before scale, add supporting indexes:
 - `reports (status)`, `event_rsvps (event_id, user_id)` (UNIQUE already), and
   `*.deleted_at` / `clubs (is_active)` partial indexes for deleted-content scans.
 Sequence these AFTER migration 051 is reconciled to avoid migration collisions.
+
+## Codex final-review nonblocking follow-ups (preview pass)
+
+Parked from the final read-only security review before the founder preview. All
+are nonblocking for preview / read-only production / enabling writes. Do NOT fix
+during the preview deployment; do NOT reopen the release candidate for these.
+
+1. **PostgREST filter-string interpolation (founder-only).** Search/dupe-check
+   helpers interpolate unsanitized input into `.or(...)` / `.ilike(...)` filter
+   strings (e.g. `data.ts` search, `messagingData.ts` search, `actions.ts`
+   `addUniversity` dupe-check — name is length- but not charset-validated).
+   Founder-only surface, so no privilege escalation; worst case a broadened or
+   errored query. Escape the values or split into `.eq` queries.
+2. **Server-side administrator session maximum age.** The 15-min inactivity lock
+   is client-side (UI) only; server-side, ordinary aal2 reads/writes stay callable
+   until the Supabase session/JWT expires. Only sensitive reveal/search carry the
+   5-min server freshness bound (`requireRecentMfa`). Consider a server-side admin
+   session max-age / last-activity check on writes.
+3. **Atomic last-officer protection.** `setMembershipRole` demote does a
+   check-then-write count (TOCTOU) with no backing constraint. Memberships / RSVPs
+   / gluemates ARE backstopped by UNIQUE constraints; last-officer is not. Add a
+   guarded UPDATE (`... AND (SELECT count(*) officers) > 1`) or advisory lock.
+4. **`server-only` package import guard.** (Already noted under "Misc / polish".)
+   Add build-time `import "server-only"` to the admin server modules on top of the
+   runtime `typeof window` throw.
+5. **Aggregate RPCs for bounded large scans.** (Reinforces "Day-6 performance
+   backlog" + "Data access / performance".) Replace `SCAN_CAP` full-scans and the
+   reports breakdown scan with aggregate SQL/RPCs as data grows.
+6. **Active-message 100-char previews.** List/detail render a 100-char preview of
+   currently-visible (non-deleted) message content to the aal2 founder without a
+   fresh-MFA step-up (full body + content search already require `requireRecentMfa`).
+   Decide whether the preview level should also require recent MFA.
