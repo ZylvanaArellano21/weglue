@@ -102,4 +102,31 @@ improvements, non-critical refactors, or advanced-moderation features.
 - Mobile-width (<1024) drawer navigation for the sidebar (desktop-first today).
 - Empty-state illustrations; per-column sort indicators in table headers.
 - CSV export of list views.
-- `server-only` package import guard (using a runtime `window` check today).
+- `server-only` package import guard. Day 6 added a runtime `typeof window`
+  throw to `lib/supabase/admin.ts` (matching `secureAdmin.ts`/`audit.ts`);
+  consider the `server-only` npm package for a build-time guarantee too.
+
+## Day-6 notes (release-candidate pass)
+
+- **React 18/19 type/build fix (permanent).** `apps/web/tsconfig.json` now pins
+  `react`/`react-dom` type resolution to web's own `@types/react@18` via
+  `compilerOptions.paths`. Root cause: `@weglue/shared` is consumed as TS source
+  and its zustand dep dragged `@types/react@19` into the web type program next to
+  web's 18, breaking `next build` type-check (TS2742). Type-check only — Next's
+  webpack still aliases the real React runtime, so the browser bundle is
+  unchanged. Full write-up: `docs/admin/day6-release-candidate.md` §2. Do NOT
+  "fix" this by forcing one React version repo-wide (mobile needs 19, web needs 18).
+- **vitest** is now declared in `apps/web` (was only in `apps/mobile`, resolved
+  via hoisting). `pnpm test` from `apps/web` works on a clean checkout.
+
+## Day-6 performance backlog (recommended indexes — NOT built on Day 6)
+
+Data Health and some list/search loaders do bounded full-scans (`SCAN_CAP=5000`,
+officer-title `ilike` `.limit(500)`). Before scale, add supporting indexes:
+- `messages (content)` — trigram (`gin_trgm_ops`) for content search `ilike`.
+- `club_members (role)` / `(club_id, role)` — officer roster + last-officer checks.
+- `club_officers (role_title)` — trigram for officer-title search.
+- `follows (following_id, follower_id)` — mutual-follow (Gluemate) lookups.
+- `reports (status)`, `event_rsvps (event_id, user_id)` (UNIQUE already), and
+  `*.deleted_at` / `clubs (is_active)` partial indexes for deleted-content scans.
+Sequence these AFTER migration 051 is reconciled to avoid migration collisions.
