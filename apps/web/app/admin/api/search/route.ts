@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { notFound } from "next/navigation";
 import { searchEntities } from "../../../../lib/admin/data";
 import { SecureAdminError } from "../../../../lib/admin/secureAdmin";
+import { hasValidEntryTicket } from "../../../../lib/admin/entryTicket";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,12 @@ export const dynamic = "force-dynamic";
  * never any admin data. Responses are explicitly non-cacheable.
  */
 export async function GET(request: NextRequest) {
+  // Private entry gateway: without a valid ticket this endpoint does not exist.
+  // notFound() yields Next's ordinary 404 — no JSON, no error shape, no hint that
+  // an administration API is here. Concealment only; the authorization chain
+  // inside the called function is unchanged.
+  if (!(await hasValidEntryTicket())) notFound();
+
   const q = request.nextUrl.searchParams.get("q") ?? "";
   try {
     const results = await searchEntities(q);

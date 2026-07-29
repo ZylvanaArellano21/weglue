@@ -2,6 +2,17 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "./lib/supabase/middleware";
 import { isAllowlistedAdmin } from "./lib/admin/adminEnv";
 import { platformAdminRedirectPath } from "./lib/auth/platformAdminGuard";
+import {
+  ADMIN_ENTRY_COOKIE_NAME,
+  ADMIN_ENTRY_INTERNAL_ROUTE,
+  ADMIN_NOT_FOUND_ROUTE,
+  adminEntryDecision,
+  adminEntryCookieSecret,
+  adminEntryPath,
+  isEntryGateConfigured,
+  readCookie,
+  verifyEntryTicket,
+} from "./lib/admin/entryGate";
 
 // Auth-flow pages a signed-in, fully-onboarded user has no business visiting —
 // they bounce to the dashboard instead.
@@ -28,6 +39,70 @@ export async function middleware(request: NextRequest) {
     /\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map)$/.test(pathname)
   ) {
     return NextResponse.next({ request });
+  }
+
+  // ── Private administrator entry gateway (defense in depth) ─────────────────
+  // Runs BEFORE getUser() on purpose: a concealed request must cost no Supabase
+  // round-trip (so probing /admin cannot be used to generate auth load) and must
+  // not depend on the auth service being reachable to stay concealed.
+  //
+  // This gate NEVER grants administrator access. A valid ticket only lifts the
+  // 404 concealment so the existing chain below can run exactly as before:
+  // portal switch → validated session → founder UUID → founder email → aal2 →
+  // recent MFA → write switch. See lib/admin/entryGate.ts.
+  const entryPath = adminEntryPath();
+  const gateApplies =
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname === ADMIN_ENTRY_INTERNAL_ROUTE ||
+    pathname.startsWith(`${ADMIN_ENTRY_INTERNAL_ROUTE}/`) ||
+    pathname === ADMIN_NOT_FOUND_ROUTE ||
+    pathname.startsWith(`${ADMIN_NOT_FOUND_ROUTE}/`) ||
+    (!!entryPath && (pathname === entryPath || pathname === `${entryPath}/`));
+
+  if (gateApplies) {
+    // Only verify the ticket for paths the gate governs — student requests do no
+    // crypto work at all (two string comparisons and out).
+    const cookieSecret = adminEntryCookieSecret();
+    const hasValidTicket = cookieSecret
+      ? (await verifyEntryTicket(
+          cookieSecret,
+          readCookie(request.headers.get("cookie"), ADMIN_ENTRY_COOKIE_NAME)
+        )) !== null
+      : false;
+
+    const decision = adminEntryDecision({
+      pathname,
+      hasValidTicket,
+      entryPath,
+      configured: isEntryGateConfigured(),
+    });
+
+    if (decision.action === "gateway") {
+      // The private external path is served by the fixed internal handler. A
+      // rewrite keeps the configured path out of any redirect Location header.
+      return NextResponse.rewrite(new URL(ADMIN_ENTRY_INTERNAL_ROUTE, request.url));
+    }
+
+    if (decision.action === "conceal_admin") {
+      // Pass through WITHOUT the Supabase session lookup below, so probing
+      // /admin costs no auth round-trip. The /admin layout and each /admin/api
+      // route call notFound() when the ticket is absent, which makes Next render
+      // its OWN 404 for the requested URL.
+      //
+      // Deliberately NOT a rewrite: NextResponse.rewrite() stamps an
+      // `x-middleware-rewrite` header that a genuine 404 does not carry, which
+      // would itself reveal that /admin is handled specially.
+      return NextResponse.next({ request });
+    }
+
+    if (decision.action === "conceal_internal") {
+      // The internal implementation paths are not the secret, so a rewrite
+      // artifact here reveals nothing. Rewriting to a route that does not exist
+      // yields Next's ordinary not-found response.
+      return NextResponse.rewrite(new URL(ADMIN_NOT_FOUND_ROUTE, request.url));
+    }
+    // decision.action === "admin_allowed" → fall through to the existing chain.
   }
 
   let response = NextResponse.next({ request });

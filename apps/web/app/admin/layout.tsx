@@ -1,17 +1,34 @@
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { getSecureAdminContext } from "../../lib/admin/secureAdmin";
+import { hasValidEntryTicket } from "../../lib/admin/entryTicket";
 import { AdminShell } from "../../components/admin/AdminShell";
 
 // The dashboard reads live data per request and must never be statically cached.
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
-export const metadata = {
-  title: "We Glue Admin",
-  robots: { index: false, follow: false, nocache: true, noarchive: true },
-};
+/**
+ * Metadata must be ticket-aware, and this is NOT cosmetic.
+ *
+ * Next resolves a segment's metadata independently of whether the segment renders
+ * — so a STATIC `metadata` export here still emitted `<title>We Glue Admin</title>`
+ * and `noindex` onto the concealed 404 page, announcing the dashboard's existence
+ * to anyone probing /admin. Verified locally before this fix.
+ *
+ * Returning `{}` while concealed lets the root layout's metadata apply unchanged,
+ * so the 404 matches what any mistyped URL produces. The real admin metadata is
+ * only attached once a valid entry ticket is present.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  if (!(await hasValidEntryTicket())) return {};
+  return {
+    title: "We Glue Admin",
+    robots: { index: false, follow: false, nocache: true, noarchive: true },
+  };
+}
 
 /**
  * Server-side secure gate for the ENTIRE /admin subtree. Runs on every request.
@@ -30,6 +47,18 @@ export const metadata = {
  *   • authorized      → the full dashboard shell
  */
 export default async function AdminLayout({ children }: { children: ReactNode }) {
+  // ── Private entry gateway: concealment BEFORE anything else ────────────────
+  // Without a valid entry ticket this whole subtree does not exist. notFound()
+  // renders Next's ordinary 404 for the requested URL — same body, same headers,
+  // real 404 status — so /admin is indistinguishable from a mistyped path. It runs
+  // first so no session lookup, no service-role client and none of the states
+  // below (which name the portal, the founder, or MFA) can be reached or observed.
+  //
+  // This is concealment only. It grants nothing: getSecureAdminContext() below
+  // still applies the portal switch, the validated session, the immutable founder
+  // UUID allowlist, the founder email check and aal2 MFA, unchanged.
+  if (!(await hasValidEntryTicket())) notFound();
+
   const { status, user, nextLevel } = await getSecureAdminContext();
 
   if (status === "portal_disabled") {

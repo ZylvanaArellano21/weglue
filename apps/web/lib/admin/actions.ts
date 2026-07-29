@@ -32,6 +32,7 @@ import { createAdminClient } from "../supabase/admin";
 import { createClient as createServerClient } from "../supabase/server";
 import { requireSecureAdmin } from "./secureAdmin";
 import { adminAudit } from "./audit";
+import { clearEntryTicketCookie } from "./entryTicketCookie";
 import type { User } from "@supabase/supabase-js";
 
 export type ActionResult<T = unknown> =
@@ -428,6 +429,12 @@ export async function setUniversityActive(id: string, isActive: boolean): Promis
  * to aal1). Backs both the explicit "Lock Admin Portal" control and the
  * inactivity auto-lock. Ending one's own session needs no write privilege, so
  * this is intentionally NOT gated by ADMIN_WRITES_ENABLED — it must always work.
+ *
+ * This is the single combined Lock-portal / Sign-out action for the dashboard, so
+ * it is also the one place that must revoke the private entry-gate ticket. After
+ * it runs, /admin returns an ordinary 404 again and the private entry gateway
+ * must be passed a second time — on top of Gmail/password and TOTP MFA, which
+ * remain required exactly as before.
  */
 export async function lockAdminPortal(): Promise<ActionResult> {
   const supabase = createServerClient();
@@ -439,6 +446,9 @@ export async function lockAdminPortal(): Promise<ActionResult> {
   } catch {
     // Best-effort — cookies may already be cleared.
   }
+  // Revoke the entry ticket regardless of whether the sign-out succeeded: the
+  // concealment must never outlive an explicit lock.
+  clearEntryTicketCookie();
   if (user) {
     adminAudit({ action: "portal.lock", actorId: user.id, actorEmail: user.email, target: {}, ok: true });
   }
