@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
+import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
+import { shouldHandleDeepLinkNavigation } from "../lib/platformAdmin";
 
 /**
  * Handles first-party auth links that open the app:
@@ -45,7 +47,18 @@ async function handleUrl(url: string) {
 }
 
 export function useAuthDeepLink() {
+  const session = useAuthStore((s) => s.session);
+  // While a platform-admin session is active the root layout renders the
+  // blocking screen instead of the navigator, so there is nothing to navigate:
+  // every router.replace above would target an unmounted stack. Gating on the
+  // CURRENT session is deliberate — during an admin's own sign-in the session
+  // is still null here, so the link is processed normally and the block screen
+  // appears only once the session lands.
+  const allowDeepLinks = shouldHandleDeepLinkNavigation(session);
+
   useEffect(() => {
+    if (!allowDeepLinks) return;
+
     // Cold start: app launched from the deep link
     Linking.getInitialURL().then((url) => {
       if (url) handleUrl(url);
@@ -57,5 +70,5 @@ export function useAuthDeepLink() {
     );
 
     return () => subscription.remove();
-  }, []);
+  }, [allowDeepLinks]);
 }

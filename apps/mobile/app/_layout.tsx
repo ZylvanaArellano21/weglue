@@ -34,6 +34,12 @@ import {
   readCachedProfile,
   writeCachedProfile,
 } from "../lib/profileCache";
+import { PlatformAdminBlock } from "../components/auth/PlatformAdminBlock";
+import {
+  resolveMobileSessionRoute,
+  shouldSyncStudentProfile,
+} from "../lib/platformAdmin";
+import { tearDownAuthenticatedSession } from "../lib/sessionCleanup";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -129,7 +135,15 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
-  const { setSession, setProfile, setOnboarded, setLoading } = useAuthStore();
+  const { session, setSession, setProfile, setOnboarded, setLoading } =
+    useAuthStore();
+
+  // ONE decision, identical on iOS and Android (no Platform.OS branch anywhere
+  // in this path). A platform-admin Auth identity is not a student: the whole
+  // navigator below is replaced by a blocking screen, so no student route ever
+  // mounts and no student query ever runs.
+  const sessionRoute = resolveMobileSessionRoute(session);
+  const isPlatformAdmin = sessionRoute === "platform-admin-blocked";
 
   useAuthDeepLink();
   useInviteDeepLink();
@@ -142,6 +156,16 @@ export default function RootLayout() {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       if (!session) {
+        setLoading(false);
+        return;
+      }
+
+      // A platform-admin identity has no student profile and must never get
+      // one. Skip the disk cache, the profiles fetch and the ensure_profile()
+      // repair entirely — the blocking screen renders from the session alone.
+      if (!shouldSyncStudentProfile(session)) {
+        setProfile(null);
+        setOnboarded(false);
         setLoading(false);
         return;
       }
@@ -169,7 +193,15 @@ export default function RootLayout() {
       // routes to the profile-pic screen before syncProfile resolves — the flash.
       if (event === "SIGNED_IN") setLoading(true);
       setSession(session);
-      if (session) {
+      if (session && !shouldSyncStudentProfile(session)) {
+        // Same guard on the live auth-state path (an admin signing in on a
+        // device that previously held a student session).
+        setProfile(null);
+        setOnboarded(false);
+        setLoading(false);
+        void queryClient.clear();
+        void AsyncStorage.removeItem("weglue-query-cache-v1");
+      } else if (session) {
         await syncProfile(session.user.id);
       } else {
         setProfile(null);
@@ -185,6 +217,13 @@ export default function RootLayout() {
   }, []);
 
   async function syncProfile(userId: string) {
+    // Defense in depth: even if a future caller forgets the guard above, the
+    // profiles fetch and the ensure_profile() repair below must never run for
+    // a platform-admin identity.
+    if (!shouldSyncStudentProfile(useAuthStore.getState().session)) {
+      setLoading(false);
+      return;
+    }
     try {
       const [profileResult, interestsResult] = await timedQuery(
         "startup.syncProfile",
@@ -233,6 +272,23 @@ export default function RootLayout() {
   }
 
   if (!fontsLoaded) return null;
+
+  // Platform-admin identities stop here. Returning the blocking screen INSTEAD
+  // of the navigator (not over it) is what guarantees the rest of the
+  // requirement: with no <Stack> mounted, index.tsx never runs its routing, no
+  // tab/Home/onboarding screen mounts, no recommendation or feed query fires,
+  // and the push/realtime hosts below are never created. The only affordance
+  // is Sign out; there is no dashboard link of any kind.
+  if (isPlatformAdmin) {
+    return (
+      <PlatformAdminBlock
+        email={session?.user?.email ?? null}
+        onSignOut={() =>
+          tearDownAuthenticatedSession(queryClient, session?.user?.id)
+        }
+      />
+    );
+  }
 
   return (
     <PersistQueryClientProvider

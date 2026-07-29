@@ -21,6 +21,28 @@
       ],
       "@/*": [
         "./*"
+      ],
+      // React type-resolution pin (fixes TS2742 duplicate-@types/react).
+      // This monorepo intentionally runs two React majors: web = 18 (Next 14),
+      // mobile = 19 (Expo/RN 0.81). @weglue/shared is consumed as TS *source*
+      // (see the @weglue/shared paths above), and its zustand dependency drags a
+      // second @types/react (19.x) into the web type program, competing with
+      // web's @types/react@18 and producing "inferred type ... not portable"
+      // errors on every page during `next build`. Pinning react/react-dom
+      // resolution to web's own @types collapses the program to a single React
+      // 18 typings copy. This affects TYPE-CHECK ONLY — Next's webpack aliases
+      // the real react runtime, so the browser bundle is unchanged (verified).
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react/*": [
+        "./node_modules/@types/react/*"
+      ],
+      "react-dom": [
+        "./node_modules/@types/react-dom"
+      ],
+      "react-dom/*": [
+        "./node_modules/@types/react-dom/*"
       ]
     },
     "plugins": [

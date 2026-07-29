@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "./lib/supabase/middleware";
+import { isAllowlistedAdmin } from "./lib/admin/adminEnv";
+import { platformAdminRedirectPath } from "./lib/auth/platformAdminGuard";
 
 // Auth-flow pages a signed-in, fully-onboarded user has no business visiting —
 // they bounce to the dashboard instead.
@@ -35,6 +37,23 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // ── Admin portal: hardened routing + non-cacheable, non-indexable headers ──
+  // Runs before the ordinary app routing so /admin has its own security posture.
+  if (pathname.startsWith("/admin")) {
+    return handleAdminRequest(request, response, supabase, user, pathname);
+  }
+
+  // ── Platform-admin containment ────────────────────────────────────────────
+  // A platform-admin Auth identity is not a student and has no profiles row.
+  // This runs BEFORE any student routing, so the onboarding_completed lookup
+  // below (and every student page, feed, club and recommendation behind it) is
+  // unreachable for it — nothing can create or require a student profile.
+  // Returns null for every ordinary user, so student routing is untouched.
+  const adminBlockPath = platformAdminRedirectPath(user, pathname);
+  if (adminBlockPath) {
+    return NextResponse.redirect(new URL(adminBlockPath, request.url));
+  }
 
   const isProtected = PROTECTED_PREFIXES.some((r) => pathname.startsWith(r));
   const isAuthFlow = AUTH_FLOW_ROUTES.some(
@@ -100,6 +119,80 @@ export async function middleware(request: NextRequest) {
   }
 
   return response;
+}
+
+/**
+ * Admin portal request handling. Every /admin response is stamped no-store +
+ * X-Robots-Tag noindex. Routing (defense-in-depth on top of the per-loader
+ * requireSecureAdmin gate):
+ *   • portal off              → pass through; the layout renders "unavailable"
+ *   • /admin/api/*            → pass through; the Route Handler enforces auth/JSON
+ *   • /admin/mfa (gate page)  → always reachable so the founder can step up
+ *   • no session              → redirect to login with a return path
+ *   • not allowlisted         → pass through; the layout renders "access denied"
+ *   • aal1 (MFA not satisfied)→ redirect to the MFA challenge
+ *   • aal2 sitting on /mfa    → bounce forward to the intended admin path
+ */
+async function handleAdminRequest(
+  request: NextRequest,
+  response: NextResponse,
+  supabase: ReturnType<typeof createMiddlewareClient>,
+  user: { id: string; email?: string | null } | null,
+  pathname: string
+): Promise<NextResponse> {
+  const secure = (res: NextResponse): NextResponse => {
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.headers.set("Pragma", "no-cache");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");
+    return res;
+  };
+  const redirectTo = (path: string): NextResponse =>
+    secure(NextResponse.redirect(new URL(path, request.url)));
+
+  // Kill switch: the layout/route own the "unavailable" state; just pass through.
+  if (process.env.ADMIN_PORTAL_ENABLED !== "true") return secure(response);
+
+  // APIs and Route Handlers enforce their own auth and must return JSON, never a
+  // redirect, so a fetch() never silently follows a 3xx to an HTML page.
+  if (pathname.startsWith("/admin/api")) return secure(response);
+
+  // Pages that must stay reachable while the session is not yet fully verified:
+  // the dashboard's OWN login (never the student /login — admin sign-in is
+  // deliberately separate from student onboarding) and the MFA challenge.
+  const isLoginPage = pathname === "/admin/login";
+  const isGatePage = isLoginPage || pathname === "/admin/mfa";
+
+  if (!user) {
+    if (isGatePage) return secure(response);
+    return redirectTo(`/admin/login?next=${encodeURIComponent(pathname)}`);
+  }
+
+  // Non-allowlisted signed-in users are handled by the layout (access denied).
+  if (!isAllowlistedAdmin(user)) return secure(response);
+
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const level = aal?.currentLevel;
+
+  if (level !== "aal2") {
+    // An allowlisted aal1 session sitting on the login page has already signed
+    // in — send it forward to the MFA challenge rather than leaving it there.
+    if (isLoginPage) {
+      const rawNext = request.nextUrl.searchParams.get("next") ?? "/admin";
+      const nx = rawNext.startsWith("/admin") && !rawNext.startsWith("//") ? rawNext : "/admin";
+      return redirectTo(`/admin/mfa?next=${encodeURIComponent(nx)}`);
+    }
+    if (isGatePage) return secure(response);
+    return redirectTo(`/admin/mfa?next=${encodeURIComponent(pathname)}`);
+  }
+
+  // Fully verified admin already on a gate page → forward to destination.
+  if (isGatePage) {
+    const rawNext = request.nextUrl.searchParams.get("next") ?? "/admin";
+    const next = rawNext.startsWith("/admin") && !rawNext.startsWith("//") ? rawNext : "/admin";
+    return redirectTo(next);
+  }
+
+  return secure(response);
 }
 
 export const config = {
