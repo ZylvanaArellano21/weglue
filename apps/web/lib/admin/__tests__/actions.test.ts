@@ -153,7 +153,116 @@ function makeDb(initial: Record<string, any[]>) {
     }
     return b;
   }
-  return { from, tables };
+
+  // ── migration-054 administrator RPCs ───────────────────────────────────────
+  // Faithful in-memory stand-ins for admin_set_club_member_role /
+  // admin_remove_club_member / admin_transfer_club_officer: same status codes,
+  // same order of checks, same officer-floor rule. The REAL atomicity and
+  // concurrency behaviour is proven against Postgres in the migration harness
+  // (supabase/scripts/test_054_last_officer.sql) — this fake exists so the
+  // action layer's mapping of statuses to founder-facing results stays honest.
+  function rpc(name: string, args: any) {
+    const cm = tables.club_members || (tables.club_members = []);
+    const co = tables.club_officers || (tables.club_officers = []);
+    const officerCount = (clubId: string) =>
+      cm.filter((r) => r.club_id === clubId && r.role === "officer").length;
+    const dropRoster = (clubId: string, userId: string) => {
+      tables.club_officers = co.filter((r) => !(r.club_id === clubId && r.user_id === userId));
+    };
+    const upsertRoster = (clubId: string, userId: string, title: string) => {
+      const prof = (tables.profiles ?? []).find((p) => p.id === userId);
+      const existing = co.find((r) => r.club_id === clubId && r.user_id === userId);
+      const display = (prof?.full_name?.trim() || prof?.username || "Officer") as string;
+      if (existing) {
+        existing.role_title = title;
+        existing.display_name = display;
+        existing.avatar_url = prof?.avatar_url ?? null;
+      } else {
+        co.push({
+          id: `gen-${idc++}`,
+          club_id: clubId,
+          user_id: userId,
+          role_title: title,
+          display_name: display,
+          avatar_url: prof?.avatar_url ?? null,
+        });
+      }
+    };
+
+    const done = (status: string) => Promise.resolve({ data: status, error: null });
+
+    if (name === "admin_set_club_member_role") {
+      const { p_club_id, p_user_id, p_role, p_role_title, p_add_if_missing } = args;
+      if (p_role !== "member" && p_role !== "officer") return done("invalid_role");
+      const title = String(p_role_title ?? "Officer").trim();
+      let member = cm.find((r) => r.club_id === p_club_id && r.user_id === p_user_id);
+
+      if (!member) {
+        if (!p_add_if_missing || p_role !== "officer") return done("not_member");
+        if (title.length < 2 || title.length > 40) return done("invalid_role_title");
+        const club = (tables.clubs ?? []).find((c) => c.id === p_club_id);
+        if (!club) return done("club_not_found");
+        const prof = (tables.profiles ?? []).find((p) => p.id === p_user_id);
+        if (!prof) return done("user_not_found");
+        if (club.university_id && prof.university_id && club.university_id !== prof.university_id) {
+          return done("different_university");
+        }
+        member = { id: `gen-${idc++}`, club_id: p_club_id, user_id: p_user_id, role: "officer" };
+        cm.push(member);
+      }
+
+      if (p_role === "officer") {
+        if (title.length < 2 || title.length > 40) return done("invalid_role_title");
+        member.role = "officer";
+        upsertRoster(p_club_id, p_user_id, title);
+        return done("ok");
+      }
+      if (member.role !== "officer") return done("not_officer");
+      if (officerCount(p_club_id) <= 1) return done("last_officer");
+      member.role = "member";
+      dropRoster(p_club_id, p_user_id);
+      return done("ok");
+    }
+
+    if (name === "admin_remove_club_member") {
+      const { p_club_id, p_user_id } = args;
+      const member = cm.find((r) => r.club_id === p_club_id && r.user_id === p_user_id);
+      if (!member) return done("not_member");
+      if (member.role === "officer") {
+        if (officerCount(p_club_id) <= 1) return done("last_officer");
+        dropRoster(p_club_id, p_user_id);
+      }
+      tables.club_members = cm.filter((r) => !(r.club_id === p_club_id && r.user_id === p_user_id));
+      return done("ok");
+    }
+
+    if (name === "admin_transfer_club_officer") {
+      const { p_club_id, p_from_user_id, p_to_user_id, p_role_title } = args;
+      if (p_from_user_id === p_to_user_id) return done("same_user");
+      const title = String(p_role_title ?? "Officer").trim();
+      if (title.length < 2 || title.length > 40) return done("invalid_role_title");
+      const club = (tables.clubs ?? []).find((c) => c.id === p_club_id);
+      if (!club) return done("club_not_found");
+      const from = cm.find((r) => r.club_id === p_club_id && r.user_id === p_from_user_id);
+      if (!from || from.role !== "officer") return done("from_not_officer");
+      const prof = (tables.profiles ?? []).find((p) => p.id === p_to_user_id);
+      if (!prof) return done("user_not_found");
+      if (club.university_id && prof.university_id && club.university_id !== prof.university_id) {
+        return done("different_university");
+      }
+      const to = cm.find((r) => r.club_id === p_club_id && r.user_id === p_to_user_id);
+      if (!to) cm.push({ id: `gen-${idc++}`, club_id: p_club_id, user_id: p_to_user_id, role: "officer" });
+      else to.role = "officer";
+      upsertRoster(p_club_id, p_to_user_id, title);
+      from.role = "member";
+      dropRoster(p_club_id, p_from_user_id);
+      return done("ok");
+    }
+
+    return Promise.resolve({ data: null, error: { message: `unknown rpc ${name}` } });
+  }
+
+  return { from, rpc, tables };
 }
 
 function seed() {
@@ -278,7 +387,8 @@ describe("officers", () => {
     asFounder();
     const res = await setMembershipRole(C(1), U(1), "member"); // U(1) is the only officer
     expect(res).toMatchObject({ ok: false });
-    if (!res.ok) expect(res.error).toMatch(/only officer/i);
+    // Wording now comes from the migration-054 `last_officer` status.
+    if (!res.ok) expect(res.error).toMatch(/without any officer/i);
   });
   it("demotes an officer when another officer remains", async () => {
     asFounder();
