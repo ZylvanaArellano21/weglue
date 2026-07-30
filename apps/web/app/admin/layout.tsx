@@ -59,7 +59,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // UUID allowlist, the founder email check and aal2 MFA, unchanged.
   if (!(await hasValidEntryTicket())) notFound();
 
-  const { status, user, nextLevel } = await getSecureAdminContext();
+  const { status, user, sessionExpiresAtMs } = await getSecureAdminContext();
 
   if (status === "portal_disabled") {
     return <PortalUnavailable />;
@@ -80,13 +80,25 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     return <AccessDenied email={user?.email ?? null} />;
   }
 
+  if (status === "session_expired") {
+    // The session outlived its absolute maximum age. Every loader on this page
+    // independently throws `session_expired`, so nothing renders with data —
+    // this is only the human-readable landing for that state.
+    return <SessionExpired />;
+  }
+
   if (status === "mfa_required") {
     // Only the MFA page belongs here; middleware routes other admin paths to it.
     return <SecureBareShell>{children}</SecureBareShell>;
   }
 
   return (
-    <AdminShell founderEmail={user?.email ?? "founder"}>{children}</AdminShell>
+    <AdminShell
+      founderEmail={user?.email ?? "founder"}
+      sessionExpiresAtMs={sessionExpiresAtMs}
+    >
+      {children}
+    </AdminShell>
   );
 }
 
@@ -112,6 +124,36 @@ function PortalUnavailable() {
             className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-medium text-white hover:bg-teal-600"
           >
             Go to We Glue
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Absolute-session-age landing. Deliberately states no timings: not when the
+ * session started, not how long the window is, not how far past it the session
+ * is. "Sign in again" is the whole message.
+ */
+function SessionExpired() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-2xl">
+          ⏳
+        </div>
+        <h1 className="mt-5 text-lg font-semibold text-gray-900">Administrator session expired</h1>
+        <p className="mt-2 text-sm text-gray-500">
+          For security, administrator sessions end after a fixed period. Sign in again and complete
+          multi-factor verification to continue.
+        </p>
+        <div className="mt-6 flex justify-center">
+          <Link
+            href="/admin/login?expired=1"
+            className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-medium text-white hover:bg-teal-600"
+          >
+            Sign in again
           </Link>
         </div>
       </div>

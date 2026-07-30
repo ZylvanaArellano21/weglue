@@ -17,7 +17,7 @@ import { createClient } from "../../lib/supabase/client";
  * or whether it is an administrator account. An admin portal must not double as
  * an account-enumeration oracle.
  */
-export function AdminLoginForm({ next }: { next: string }) {
+export function AdminLoginForm({ next, expired = false }: { next: string; expired?: boolean }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -61,6 +61,12 @@ export function AdminLoginForm({ next }: { next: string }) {
         <p className="mt-2 text-center text-sm text-gray-500">
           Authorized administrators only. Multi-factor verification is required.
         </p>
+
+        {expired ? (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-800">
+            Your previous administrator session expired. Sign in again to continue.
+          </p>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>

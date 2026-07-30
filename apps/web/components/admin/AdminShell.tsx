@@ -15,9 +15,12 @@ import { AdminSessionGuard } from "./AdminSessionGuard";
  */
 export function AdminShell({
   founderEmail,
+  sessionExpiresAtMs = null,
   children,
 }: {
   founderEmail: string;
+  /** Server-computed absolute session deadline (epoch ms), or null if unknown. */
+  sessionExpiresAtMs?: number | null;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -102,7 +105,7 @@ export function AdminShell({
             <GlobalSearch />
           </div>
           <div className="flex items-center gap-3">
-            <AdminSessionGuard />
+            <AdminSessionGuard sessionExpiresAtMs={sessionExpiresAtMs} />
             <span className="hidden text-right text-xs leading-tight sm:block">
               <span className="block font-medium text-gray-900">Founder</span>
               <span className="block max-w-[180px] truncate text-gray-400">{founderEmail}</span>

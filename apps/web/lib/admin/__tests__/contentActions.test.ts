@@ -37,7 +37,7 @@ const EV = (n: number) => `0000000d-0000-0000-0000-00000000000${n}`;
 const US = (n: number) => `0000000f-0000-0000-0000-00000000000${n}`;
 
 function aal2() {
-  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
 }
 function asFounder() {
   process.env.ADMIN_PORTAL_ENABLED = "true";

@@ -113,6 +113,127 @@ export function hasRecentMfa(
   );
 }
 
+// ── Absolute administrator session maximum age (SERVER-ENFORCED) ─────────────
+//
+// The inactivity lock below is a CLIENT convenience. This block is the real,
+// server-side bound: an administrator session is refused once it is older than
+// the configured maximum, no matter how active the administrator has been.
+//
+// THE ANCHOR — why `amr` and not `iat`/`exp`
+// -----------------------------------------
+// GoTrue stamps every session's access token with an `amr` claim: one entry per
+// authentication event, each carrying the unix second it was satisfied
+// (`password` at sign-in, `totp` at MFA verification). supabase-js surfaces it as
+// `getAuthenticatorAssuranceLevel().currentAuthenticationMethods`.
+//
+//   • It is part of the SIGNED token — a client cannot forge or move it without
+//     the project's JWT secret.
+//   • It carries FORWARD unchanged across token refreshes, so unlike `iat`/`exp`
+//     it measures the true age of the authentication, not the age of the
+//     current access token. A session that silently refreshes for hours still
+//     reports its original sign-in second.
+//   • Verifying TOTP again on the SAME session appends a `totp` entry but never
+//     moves the earliest one, so step-up cannot launder an aged session.
+//
+// The comparison is always `serverNow - earliest(amr)`. The client's clock is
+// never an input, so changing it cannot extend a session.
+//
+// FAIL-CLOSED: a session whose amr is missing or carries no usable timestamp
+// cannot be proven fresh, so it is treated as EXPIRED.
+
+/** Used when ADMIN_SESSION_MAX_AGE_MINUTES is absent, malformed or unusable. */
+export const ADMIN_SESSION_MAX_AGE_DEFAULT_MINUTES = 15;
+/** Lower bound — anything below this is treated as a misconfiguration. */
+export const ADMIN_SESSION_MAX_AGE_MIN_MINUTES = 1;
+/** Upper bound — larger values are CLAMPED down (clamping can only shorten). */
+export const ADMIN_SESSION_MAX_AGE_MAX_MINUTES = 240;
+
+/**
+ * Configured maximum administrator session age, in minutes.
+ *
+ * Missing, non-numeric, non-integer, zero, negative or below the floor → the
+ * safe default (15). Above the ceiling → clamped to the ceiling, which only ever
+ * shortens the window, never extends it.
+ */
+export function adminSessionMaxAgeMinutes(): number {
+  const raw = process.env.ADMIN_SESSION_MAX_AGE_MINUTES;
+  if (raw === undefined) return ADMIN_SESSION_MAX_AGE_DEFAULT_MINUTES;
+  const trimmed = raw.trim();
+  if (trimmed === "") return ADMIN_SESSION_MAX_AGE_DEFAULT_MINUTES;
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+    return ADMIN_SESSION_MAX_AGE_DEFAULT_MINUTES;
+  }
+  if (parsed < ADMIN_SESSION_MAX_AGE_MIN_MINUTES) {
+    return ADMIN_SESSION_MAX_AGE_DEFAULT_MINUTES;
+  }
+  if (parsed > ADMIN_SESSION_MAX_AGE_MAX_MINUTES) {
+    return ADMIN_SESSION_MAX_AGE_MAX_MINUTES;
+  }
+  return parsed;
+}
+
+export function adminSessionMaxAgeSeconds(): number {
+  return adminSessionMaxAgeMinutes() * 60;
+}
+
+export function adminSessionMaxAgeMs(): number {
+  return adminSessionMaxAgeMinutes() * 60 * 1000;
+}
+
+/**
+ * The unix second at which THIS session's authentication began: the earliest
+ * timestamp in the signed amr claim. Returns null when no usable timestamp is
+ * present (→ callers must fail closed).
+ */
+export function sessionStartSeconds(
+  methods: AuthMethodEntry[] | null | undefined
+): number | null {
+  if (!methods || methods.length === 0) return null;
+  let earliest: number | null = null;
+  for (const m of methods) {
+    const ts = m?.timestamp;
+    if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) continue;
+    if (earliest === null || ts < earliest) earliest = ts;
+  }
+  return earliest;
+}
+
+/**
+ * True iff this administrator session has exceeded its absolute maximum age.
+ * An unprovable session (no usable amr timestamp) counts as expired.
+ *
+ * A negative age (GoTrue/host clock skew putting the stamp slightly in the
+ * future) is NOT expired: it can only be produced by a legitimately signed
+ * token, and treating skew as expiry would lock the founder out for a condition
+ * they cannot fix.
+ */
+export function isAdminSessionExpired(
+  methods: AuthMethodEntry[] | null | undefined,
+  nowSeconds: number,
+  maxAgeSeconds: number
+): boolean {
+  const start = sessionStartSeconds(methods);
+  if (start === null) return true; // fail closed — freshness unprovable
+  return nowSeconds - start > maxAgeSeconds;
+}
+
+/**
+ * Milliseconds until this session hits its absolute maximum age (0 once
+ * expired, and 0 when freshness is unprovable). Drives the honest countdown in
+ * the dashboard UI — the server check above remains the authority.
+ */
+export function adminSessionRemainingMs(
+  methods: AuthMethodEntry[] | null | undefined,
+  nowMs: number,
+  maxAgeMs: number
+): number {
+  const start = sessionStartSeconds(methods);
+  if (start === null) return 0;
+  return Math.max(0, start * 1000 + maxAgeMs - nowMs);
+}
+
 // ── Inactivity lock timing ───────────────────────────────────────────────────
 
 /** Idle window before the portal auto-locks (logout + MFA re-challenge). */

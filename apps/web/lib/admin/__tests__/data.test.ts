@@ -30,7 +30,7 @@ import { SecureAdminError } from "../secureAdmin";
 const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@weglue.app" };
 
 function aal2() {
-  getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+  getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
 }
 function asFounder() {
   process.env.ADMIN_PORTAL_ENABLED = "true";

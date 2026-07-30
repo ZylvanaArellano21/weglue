@@ -57,6 +57,9 @@ export default async function AdminSettingsPage() {
             </Field>
             <Field label="Email consistency">{emailConsistencyBadge}</Field>
             <Field label="Inactivity auto-lock">{Math.round(s.inactivityTimeoutMs / 60000)} min</Field>
+            <Field label="Session maximum age">
+              {s.sessionMaxAgeMinutes} min <span className="text-gray-400">(server-enforced)</span>
+            </Field>
           </dl>
         </SectionCard>
 

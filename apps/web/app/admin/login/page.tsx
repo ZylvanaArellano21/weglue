@@ -36,6 +36,7 @@ export default async function AdminLoginPage({
 }) {
   const rawNext = typeof searchParams.next === "string" ? searchParams.next : "/admin";
   const next = safeAdminNext(rawNext);
+  const expired = searchParams.expired === "1";
 
   const ctx = await getSecureAdminContext();
 
@@ -51,5 +52,7 @@ export default async function AdminLoginPage({
   // status === "denied" → the layout renders the access-restricted card.
   if (ctx.status === "denied") return null;
 
-  return <AdminLoginForm next={next} />;
+  // status === "session_expired" → the stale session grants nothing; this page
+  // is where re-authentication starts, so it renders the form with a notice.
+  return <AdminLoginForm next={next} expired={expired || ctx.status === "session_expired"} />;
 }

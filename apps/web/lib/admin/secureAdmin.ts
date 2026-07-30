@@ -10,8 +10,10 @@
 //   2. a valid Supabase-authenticated user  (validated JWT, never client input)
 //   3. the immutable user id is allowlisted  (email alone never grants)
 //   4. optional email consistency check      (AND, configured via env)
-//   5. the session assurance level is aal2   (MFA enforced server-side)
-//   6. for writes, ADMIN_WRITES_ENABLED === "true"  (write kill switch)
+//   5. the session is within ADMIN_SESSION_MAX_AGE_MINUTES  (absolute age,
+//      measured server-side from the signed amr claim — see adminEnv.ts)
+//   6. the session assurance level is aal2   (MFA enforced server-side)
+//   7. for writes, ADMIN_WRITES_ENABLED === "true"  (write kill switch)
 //
 // Only AFTER all checks pass may a caller construct the service-role client.
 // Because every loader/action calls this itself BEFORE createAdminClient(), a
@@ -38,6 +40,10 @@ import {
   isAllowlistedAdmin,
   meetsAdminAssurance,
   hasRecentMfa,
+  isAdminSessionExpired,
+  adminSessionMaxAgeSeconds,
+  adminSessionMaxAgeMs,
+  adminSessionRemainingMs,
   ADMIN_STEP_UP_MAX_AGE_SECONDS,
   type AuthMethodEntry,
 } from "./adminEnv";
@@ -46,6 +52,7 @@ export type SecureAdminReason =
   | "portal_disabled"
   | "unauthenticated"
   | "denied"
+  | "session_expired"
   | "mfa_required"
   | "writes_disabled"
   | "stepup_required";
@@ -54,6 +61,10 @@ const REASON_MESSAGE: Record<SecureAdminReason, string> = {
   portal_disabled: "The admin portal is currently unavailable.",
   unauthenticated: "Not authenticated.",
   denied: "Not authorized for admin access.",
+  // Deliberately says nothing about when the session started, how long the
+  // window is, or how much of it remains — an expired administrator is an
+  // unauthorized caller and gets no internal security detail.
+  session_expired: "Your administrator session has expired. Sign in again.",
   mfa_required: "Multi-factor authentication (aal2) is required for admin access.",
   writes_disabled: "Admin write operations are currently disabled.",
   stepup_required: "This action requires a recent multi-factor verification.",
@@ -108,6 +119,7 @@ export type SecureAdminStatus =
   | "portal_disabled"
   | "unauthenticated"
   | "denied"
+  | "session_expired"
   | "mfa_required"
   | "authorized";
 
@@ -118,26 +130,47 @@ export interface SecureAdminContext {
   currentLevel: string | null;
   /** aal2 when a verified factor exists (so the UI can offer "challenge"). */
   nextLevel: string | null;
+  /**
+   * Epoch ms at which this session hits its absolute maximum age — supplied ONLY
+   * for an authorized founder, so the dashboard can show an honest countdown and
+   * lock itself at the true deadline. Null in every unauthorized state, so no
+   * session timing is ever disclosed to a caller who is not the founder.
+   */
+  sessionExpiresAtMs: number | null;
 }
 
 /**
  * Resolve the current request's secure-admin status without throwing. Used by
  * the /admin layout and the MFA page to render the correct shell (unavailable /
- * login / access-denied / MFA challenge / dashboard).
+ * login / access-denied / expired / MFA challenge / dashboard).
  */
 export async function getSecureAdminContext(): Promise<SecureAdminContext> {
+  const base = { sessionExpiresAtMs: null } as const;
   if (!isPortalEnabled()) {
-    return { status: "portal_disabled", user: null, currentLevel: null, nextLevel: null };
+    return { status: "portal_disabled", user: null, currentLevel: null, nextLevel: null, ...base };
   }
   const supabase = createClient();
-  const { user, currentLevel, nextLevel } = await resolveAssurance(supabase);
+  const { user, currentLevel, nextLevel, methods } = await resolveAssurance(supabase);
 
-  if (!user) return { status: "unauthenticated", user: null, currentLevel, nextLevel };
-  if (!isAllowlistedAdmin(user)) return { status: "denied", user, currentLevel, nextLevel };
-  if (!meetsAdminAssurance(currentLevel)) {
-    return { status: "mfa_required", user, currentLevel, nextLevel };
+  if (!user) return { status: "unauthenticated", user: null, currentLevel, nextLevel, ...base };
+  if (!isAllowlistedAdmin(user)) return { status: "denied", user, currentLevel, nextLevel, ...base };
+
+  // Absolute session age is checked BEFORE assurance: an aged session must be
+  // told to sign in again, not sent around the MFA loop (re-verifying TOTP on
+  // the same session cannot reset its age — see adminEnv.ts).
+  if (isAdminSessionExpired(methods, Math.floor(Date.now() / 1000), adminSessionMaxAgeSeconds())) {
+    return { status: "session_expired", user, currentLevel, nextLevel, ...base };
   }
-  return { status: "authorized", user, currentLevel, nextLevel };
+  if (!meetsAdminAssurance(currentLevel)) {
+    return { status: "mfa_required", user, currentLevel, nextLevel, ...base };
+  }
+  return {
+    status: "authorized",
+    user,
+    currentLevel,
+    nextLevel,
+    sessionExpiresAtMs: Date.now() + adminSessionRemainingMs(methods, Date.now(), adminSessionMaxAgeMs()),
+  };
 }
 
 // ── The enforcement contract ──────────────────────────────────────────────────
@@ -162,6 +195,16 @@ export async function requireSecureAdmin(opts?: { write?: boolean }): Promise<Us
   if (!isAllowlistedAdmin(user)) throw new SecureAdminError("denied");
 
   const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const methods = (aal?.currentAuthenticationMethods ?? []) as AuthMethodEntry[];
+
+  // Absolute maximum session age — enforced here, at the single choke point every
+  // page, loader, Server Action and Route Handler passes through, so it covers
+  // reads and writes alike (including sensitive reveal/search, which layer their
+  // own 5-minute step-up freshness bound on top via requireRecentMfa).
+  if (isAdminSessionExpired(methods, Math.floor(Date.now() / 1000), adminSessionMaxAgeSeconds())) {
+    throw new SecureAdminError("session_expired");
+  }
+
   if (!meetsAdminAssurance(aal?.currentLevel)) throw new SecureAdminError("mfa_required");
 
   if (opts?.write && !isWritesEnabled()) throw new SecureAdminError("writes_disabled");

@@ -25,7 +25,7 @@ function asFounder(writes = true) {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://abc123.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = SECRET;
   h.getUser.mockResolvedValue({ data: { user: FOUNDER } });
-  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
 }
 
 beforeEach(() => {

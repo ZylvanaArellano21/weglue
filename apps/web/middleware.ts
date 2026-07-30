@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "./lib/supabase/middleware";
-import { isAllowlistedAdmin } from "./lib/admin/adminEnv";
+import {
+  isAllowlistedAdmin,
+  isAdminSessionExpired,
+  adminSessionMaxAgeSeconds,
+  type AuthMethodEntry,
+} from "./lib/admin/adminEnv";
 import { platformAdminRedirectPath } from "./lib/auth/platformAdminGuard";
 import {
   ADMIN_ENTRY_COOKIE_NAME,
@@ -205,6 +210,7 @@ export async function middleware(request: NextRequest) {
  *   • /admin/mfa (gate page)  → always reachable so the founder can step up
  *   • no session              → redirect to login with a return path
  *   • not allowlisted         → pass through; the layout renders "access denied"
+ *   • session past max age    → redirect to login (full re-auth + fresh MFA)
  *   • aal1 (MFA not satisfied)→ redirect to the MFA challenge
  *   • aal2 sitting on /mfa    → bounce forward to the intended admin path
  */
@@ -247,6 +253,19 @@ async function handleAdminRequest(
 
   const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   const level = aal?.currentLevel;
+  const methods = (aal?.currentAuthenticationMethods ?? []) as AuthMethodEntry[];
+
+  // ── Absolute administrator session maximum age ─────────────────────────────
+  // Routing mirror of the server gate in secureAdmin.ts (which is the authority
+  // and denies independently of this branch). Checked BEFORE any forwarding so
+  // an aged session is never bounced around the MFA loop or forwarded onward
+  // from a gate page. Only the sign-in page stays reachable, which is exactly
+  // what re-authentication requires: a NEW session, then a NEW MFA challenge.
+  if (isAdminSessionExpired(methods, Math.floor(Date.now() / 1000), adminSessionMaxAgeSeconds())) {
+    if (isLoginPage) return secure(response);
+    const back = pathname === "/admin/mfa" ? "/admin" : pathname;
+    return redirectTo(`/admin/login?expired=1&next=${encodeURIComponent(back)}`);
+  }
 
   if (level !== "aal2") {
     // An allowlisted aal1 session sitting on the login page has already signed

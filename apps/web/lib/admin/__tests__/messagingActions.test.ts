@@ -38,7 +38,7 @@ const MSG = (n: number) => `0000000d-0000-0000-0000-00000000000${n}`;
 const NOTIF = (n: number) => `0000000e-0000-0000-0000-00000000000${n}`;
 const now = Math.floor(Date.now() / 1000);
 
-function aal2(methods: any[] = []) {
+function aal2(methods: any[] = [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }]) {
   h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: methods } });
 }
 function asFounder() {

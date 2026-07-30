@@ -22,10 +22,24 @@
 // `club_officers` is the DISPLAY roster only. Promote/demote therefore writes
 // club_members.role (authority + officer-chat trigger) AND keeps the
 // club_officers roster in sync, exactly as the canonical add_club_officer /
-// remove_club_officer RPCs do. We replicate those RPCs with direct writes here
-// because the RPCs authorize the CALLER via auth.uid() as an officer, which the
-// admin service-role client is not — the DB triggers (member count, officer
-// chat membership, join/leave cleanup) fire on the table writes regardless.
+// remove_club_officer RPCs do. We cannot call THOSE RPCs, because they authorize
+// the CALLER via auth.uid() as an officer, which the admin service-role client
+// is not — the DB triggers (member count, officer chat membership, join/leave
+// cleanup) fire on the underlying table writes regardless.
+//
+// DAY 8 — every membership/officer change now goes through the migration-054
+// administrator RPCs (admin_set_club_member_role / admin_remove_club_member /
+// admin_transfer_club_officer) instead of separate table writes from here.
+// Reasons, in order of importance:
+//   1. The last-officer rule is enforced atomically in the database, under a
+//      per-club advisory lock, instead of by a check-then-write in this file —
+//      which two concurrent requests could interleave through, leaving a club
+//      with NO officers (proven reproducible; see the migration header).
+//   2. The authority row and the display roster move in ONE transaction, so a
+//      failure part-way cannot leave an officer with no roster entry.
+//   3. `club_members` also carries a table-level backstop trigger, so the floor
+//      holds even for a write that never goes through these actions.
+// The RPCs are executable by `service_role` only — never by anon/authenticated.
 // ============================================================================
 
 import { createAdminClient } from "../supabase/admin";
@@ -49,6 +63,30 @@ function isUuid(v: unknown): v is string {
 function fail(action: string, actor: User, error: string, target: Record<string, unknown>): { ok: false; error: string } {
   adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
   return { ok: false, error };
+}
+
+/**
+ * Status codes returned by the migration-054 officer RPCs, mapped to founder-
+ * facing wording. Deliberately plain: no SQLSTATE, no function name, no internal
+ * detail — the founder is told what happened and what to do about it.
+ */
+const OFFICER_RPC_MESSAGE: Record<string, string> = {
+  not_member: "This user is not a member of this club.",
+  not_officer: "This member is not an officer.",
+  last_officer:
+    "This club would be left without any officer. Promote another member to officer first, or transfer the role.",
+  invalid_role: "Invalid role.",
+  invalid_role_title: "Officer title must be 2–40 characters.",
+  club_not_found: "Club not found.",
+  user_not_found: "User not found.",
+  different_university: "User belongs to a different university than this club.",
+  same_user: "Choose a different member to receive the officer role.",
+  from_not_officer: "That member is not currently an officer of this club.",
+};
+
+/** Human wording for an officer-RPC status, with a safe fallback. */
+function officerRpcMessage(status: string | null | undefined): string {
+  return (status && OFFICER_RPC_MESSAGE[status]) || "Could not complete this change.";
 }
 
 // ── Memberships ──────────────────────────────────────────────────────────────
@@ -110,12 +148,19 @@ export async function removeMembership(clubId: string, userId: string): Promise<
     .eq("user_id", userId)
     .maybeSingle();
   if (!member) return fail(action, actor, "This user is not a member of this club.", target);
+  // Unchanged dashboard rule: officers are demoted (or transferred) first, so
+  // removal never doubles as an implicit demotion. The RPC below enforces the
+  // officer floor regardless of what this pre-check allows through.
   if (member.role === "officer") {
     return fail(action, actor, "Demote this officer to member before removing them.", target);
   }
 
-  const { error: delErr } = await admin.from("club_members").delete().eq("club_id", clubId).eq("user_id", userId);
-  if (delErr) return fail(action, actor, "Could not remove member.", target);
+  const { data: status, error: rpcErr } = await admin.rpc("admin_remove_club_member", {
+    p_club_id: clubId,
+    p_user_id: userId,
+  });
+  if (rpcErr) return fail(action, actor, "Could not remove member.", target);
+  if (status !== "ok") return fail(action, actor, officerRpcMessage(status as string), target);
 
   const { data: check } = await admin
     .from("club_members")
@@ -190,29 +235,29 @@ export async function setMembershipRole(
     .maybeSingle();
   if (!member) return fail(action, actor, "This user is not a member of this club.", target);
 
-  if (role === "officer") {
-    const title = (roleTitle ?? "Officer").trim();
-    if (title.length < 2 || title.length > 40) return fail(action, actor, "Officer title must be 2–40 characters.", target);
-    if (member.role !== "officer") {
-      const { error } = await admin.from("club_members").update({ role: "officer" }).eq("id", member.id);
-      if (error) return fail(action, actor, "Could not promote member.", target);
-    }
-    await upsertOfficerRoster(admin, clubId, userId, title);
-  } else {
-    if (member.role !== "officer") return fail(action, actor, "This member is not an officer.", target);
-    // Last-officer protection: never leave a club with no officer.
-    const { count } = await admin
-      .from("club_members")
-      .select("id", { count: "exact", head: true })
-      .eq("club_id", clubId)
-      .eq("role", "officer");
-    if ((count ?? 0) <= 1) {
-      return fail(action, actor, "Cannot demote the club's only officer — the club would have no leadership.", target);
-    }
-    const { error } = await admin.from("club_members").update({ role: "member" }).eq("id", member.id);
-    if (error) return fail(action, actor, "Could not demote officer.", target);
-    await admin.from("club_officers").delete().eq("club_id", clubId).eq("user_id", userId);
+  const title = role === "officer" ? (roleTitle ?? "Officer").trim() : "Officer";
+  if (role === "officer" && (title.length < 2 || title.length > 40)) {
+    return fail(action, actor, "Officer title must be 2–40 characters.", target);
   }
+
+  // One transaction in the database: role + roster together, and — for a demote —
+  // the officer floor checked atomically under the club's advisory lock rather
+  // than by a count read moments earlier in this process.
+  const { data: status, error: rpcErr } = await admin.rpc("admin_set_club_member_role", {
+    p_club_id: clubId,
+    p_user_id: userId,
+    p_role: role,
+    p_role_title: title,
+  });
+  if (rpcErr) {
+    return fail(
+      action,
+      actor,
+      role === "officer" ? "Could not promote member." : "Could not demote officer.",
+      target
+    );
+  }
+  if (status !== "ok") return fail(action, actor, officerRpcMessage(status as string), target);
 
   // Read back authoritative role + roster.
   const [{ data: after }, { data: roster }] = await Promise.all([
@@ -238,31 +283,19 @@ export async function addOfficer(clubId: string, userId: string, roleTitle: stri
   if (title.length < 2 || title.length > 40) return fail(action, actor, "Officer title must be 2–40 characters.", target);
 
   const admin = createAdminClient();
-  const [{ data: club }, { data: user }] = await Promise.all([
-    admin.from("clubs").select("id, university_id").eq("id", clubId).maybeSingle(),
-    admin.from("profiles").select("id, university_id").eq("id", userId).maybeSingle(),
-  ]);
-  if (!club) return fail(action, actor, "Club not found.", target);
-  if (!user) return fail(action, actor, "User not found.", target);
-  if (club.university_id && user.university_id && club.university_id !== user.university_id) {
-    return fail(action, actor, "User belongs to a different university than this club.", target);
-  }
 
-  const { data: member } = await admin
-    .from("club_members")
-    .select("id, role")
-    .eq("club_id", clubId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (!member) {
-    const { error } = await admin.from("club_members").insert({ club_id: clubId, user_id: userId, role: "officer" });
-    if (error) return fail(action, actor, "Could not add officer.", target);
-  } else if (member.role !== "officer") {
-    const { error } = await admin.from("club_members").update({ role: "officer" }).eq("id", member.id);
-    if (error) return fail(action, actor, "Could not promote to officer.", target);
-  }
-  await upsertOfficerRoster(admin, clubId, userId, title);
+  // Membership row + display roster in ONE transaction (p_add_if_missing), so a
+  // failure part-way cannot leave an officer without a roster entry. Club/user
+  // existence and the same-campus rule are enforced inside the RPC.
+  const { data: status, error: rpcErr } = await admin.rpc("admin_set_club_member_role", {
+    p_club_id: clubId,
+    p_user_id: userId,
+    p_role: "officer",
+    p_role_title: title,
+    p_add_if_missing: true,
+  });
+  if (rpcErr) return fail(action, actor, "Could not add officer.", target);
+  if (status !== "ok") return fail(action, actor, officerRpcMessage(status as string), target);
 
   const { data: after } = await admin
     .from("club_members")

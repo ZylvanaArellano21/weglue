@@ -42,7 +42,7 @@ function portalOn() {
 function setUser(user: unknown) {
   getUser.mockResolvedValue({ data: { user } });
 }
-function setAal(level: "aal1" | "aal2", methods: unknown[] = []) {
+function setAal(level: "aal1" | "aal2", methods: unknown[] = [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }]) {
   getAAL.mockResolvedValue({
     data: { currentLevel: level, nextLevel: "aal2", currentAuthenticationMethods: methods },
   });
