@@ -26,7 +26,7 @@ function portalOn() {
 function setUser(user: any) {
   getUser.mockResolvedValue({ data: { user } });
 }
-function setAal(level: "aal1" | "aal2", methods: any[] = []) {
+function setAal(level: "aal1" | "aal2", methods: any[] = [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }]) {
   getAAL.mockResolvedValue({
     data: { currentLevel: level, nextLevel: "aal2", currentAuthenticationMethods: methods },
   });
@@ -136,7 +136,11 @@ describe("requireRecentMfa — dangerous-operation step-up guard", () => {
   it("rejects a stale (or missing) MFA verification", async () => {
     portalOn();
     setUser(FOUNDER);
-    setAal("aal2", [{ method: "totp", timestamp: now - 4000 }]);
+    // 400s old: past the 300s step-up window but still INSIDE the 15-minute
+    // absolute session max age, so `stepup_required` is what surfaces. (A TOTP
+    // older than the session maximum makes the whole session expired instead —
+    // asserted in the session-max-age suite.)
+    setAal("aal2", [{ method: "totp", timestamp: now - 400 }]);
     await expect(requireRecentMfa(300)).rejects.toMatchObject({ reason: "stepup_required" });
   });
 });

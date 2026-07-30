@@ -21,7 +21,7 @@ function asFounder() {
   process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
   h.getUser.mockResolvedValue({ data: { user: FOUNDER } });
-  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
 }
 
 beforeEach(() => {

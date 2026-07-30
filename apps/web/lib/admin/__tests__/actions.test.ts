@@ -41,7 +41,7 @@ const C = (n: number) => `00000000-0000-0000-0000-0000000000c${n}`;
 const UNI = (n: number) => `00000000-0000-0000-0000-0000000000e${n}`;
 
 function aal2() {
-  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
 }
 function asFounder() {
   process.env.ADMIN_PORTAL_ENABLED = "true";
@@ -219,7 +219,7 @@ describe("write authorization", () => {
   });
   it("denies an aal1 (MFA-not-satisfied) founder", async () => {
     asFounder();
-    h.getAAL.mockResolvedValue({ data: { currentLevel: "aal1", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+    h.getAAL.mockResolvedValue({ data: { currentLevel: "aal1", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
     await expect(addMembership(C(1), U(4))).rejects.toMatchObject({ reason: "mfa_required" });
     expect(h.createAdminClient).not.toHaveBeenCalled();
   });

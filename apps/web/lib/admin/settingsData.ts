@@ -24,6 +24,7 @@ import {
   founderUserIds,
   founderEmails,
   hasRecentMfa,
+  adminSessionMaxAgeMinutes,
   ADMIN_INACTIVITY_TIMEOUT_MS,
   ADMIN_STEP_UP_MAX_AGE_SECONDS,
   type AuthMethodEntry,
@@ -52,6 +53,8 @@ export interface AdminSettings {
     stepUpMaxAgeSeconds: number;
   };
   inactivityTimeoutMs: number;
+  /** Server-enforced absolute administrator session maximum age, in minutes. */
+  sessionMaxAgeMinutes: number;
   auditPersistenceAvailable: boolean;
   privacyBackendDeployed: boolean;
   environment: string;
@@ -82,6 +85,12 @@ function envPresence(): EnvPresence[] {
     { name: "ADMIN_WRITES_ENABLED", present: process.env.ADMIN_WRITES_ENABLED !== undefined, hint: isWritesEnabled() ? "true" : "not true" },
     { name: "ADMIN_FOUNDER_USER_IDS", present: ids.length > 0, hint: ids.length ? `${ids.length} id(s)` : null },
     { name: "ADMIN_FOUNDER_EMAILS", present: emails.length > 0, hint: emails.length ? `${emails.length} email(s)` : "not configured" },
+    {
+      name: "ADMIN_SESSION_MAX_AGE_MINUTES",
+      present: process.env.ADMIN_SESSION_MAX_AGE_MINUTES !== undefined,
+      // The effective value, which is the safe default when unset or unusable.
+      hint: `${adminSessionMaxAgeMinutes()} min in effect`,
+    },
   ];
 }
 
@@ -125,6 +134,7 @@ export async function getAdminSettings(): Promise<AdminSettings> {
       stepUpMaxAgeSeconds: ADMIN_STEP_UP_MAX_AGE_SECONDS,
     },
     inactivityTimeoutMs: ADMIN_INACTIVITY_TIMEOUT_MS,
+    sessionMaxAgeMinutes: adminSessionMaxAgeMinutes(),
     auditPersistenceAvailable: false, // no canonical admin_audit table yet (Audit History)
     privacyBackendDeployed: false, // migration 051 not deployed
     environment: process.env.NODE_ENV ?? "unknown",

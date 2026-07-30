@@ -17,7 +17,7 @@ const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@we
 const R = (n: number) => `0000000b-0000-0000-0000-00000000000${n}`;
 
 function aal2() {
-  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
 }
 function asFounder() {
   process.env.ADMIN_PORTAL_ENABLED = "true";
@@ -102,7 +102,7 @@ describe("setReportStatus — authorization", () => {
   });
 
   it("denies an aal1 session", async () => {
-    h.getAAL.mockResolvedValue({ data: { currentLevel: "aal1", nextLevel: "aal2", currentAuthenticationMethods: [] } });
+    h.getAAL.mockResolvedValue({ data: { currentLevel: "aal1", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
     await expect(setReportStatus(R(1), "resolved")).rejects.toBeInstanceOf(SecureAdminError);
   });
 });

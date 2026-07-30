@@ -45,7 +45,7 @@ function asFounder() {
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
   h.getUser.mockResolvedValue({ data: { user: FOUNDER } });
   h.getAAL.mockResolvedValue({
-    data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [] },
+    data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] },
   });
 }
 

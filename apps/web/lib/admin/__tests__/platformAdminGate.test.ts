@@ -56,7 +56,7 @@ function env({
 
 function aal(level: "aal1" | "aal2") {
   h.getAAL.mockResolvedValue({
-    data: { currentLevel: level, nextLevel: "aal2", currentAuthenticationMethods: [] },
+    data: { currentLevel: level, nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] },
   });
 }
 
