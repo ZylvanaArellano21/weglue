@@ -88,7 +88,16 @@ export interface AdminAuditEntry {
   reason?: string | null;
   /** Supply to group the steps of one logical operation; generated otherwise. */
   correlationId?: string;
+  /**
+   * Record lifecycle. Omit for ordinary operations — it is then derived from
+   * `ok` (success/failure). Supply 'attempt' / 'reconciliation_required' only
+   * from the cross-service flow in crossService.ts, where the outcome is
+   * genuinely not yet known.
+   */
+  eventType?: AdminAuditEventType;
 }
+
+export type AdminAuditEventType = "attempt" | "success" | "failure" | "reconciliation_required";
 
 export interface AdminAuditResult {
   /** True only when the row is committed to admin_audit_events. */
@@ -143,7 +152,14 @@ export async function adminAudit(entry: AdminAuditEntry): Promise<AdminAuditResu
   const reason = sanitizeReason(entry.reason);
   // The database enforces (success XOR error_code); make the mapping explicit
   // rather than relying on callers to always pass an error on the failure path.
-  const errorCode = entry.ok ? null : sanitizeErrorCode(entry.error) ?? "unspecified_error";
+  const eventType: AdminAuditEventType = entry.eventType ?? (entry.ok ? "success" : "failure");
+  // The database validates (event_type, success, error_code) agreement and
+  // refuses a self-contradictory row, so normalize here rather than sending one.
+  const wantsError = eventType === "failure" || eventType === "reconciliation_required";
+  const errorCode = wantsError
+    ? sanitizeErrorCode(entry.error) ?? (eventType === "failure" ? "unspecified_error" : "outcome_not_recorded")
+    : null;
+  const successFlag = eventType === "success" ? true : eventType === "failure" ? false : null;
 
   const operational = {
     tag: "admin_audit",
@@ -156,6 +172,7 @@ export async function adminAudit(entry: AdminAuditEntry): Promise<AdminAuditResu
     metadata,
     before: beforeState,
     after: afterState,
+    eventType,
     ok: entry.ok,
     errorCode,
     correlationId,
@@ -173,9 +190,10 @@ export async function adminAudit(entry: AdminAuditEntry): Promise<AdminAuditResu
       p_before_state: beforeState,
       p_after_state: afterState,
       p_metadata: metadata,
-      p_success: entry.ok,
+      p_success: successFlag,
       p_error_code: errorCode,
       p_correlation_id: correlationId,
+      p_event_type: eventType,
     });
 
     if (error) {

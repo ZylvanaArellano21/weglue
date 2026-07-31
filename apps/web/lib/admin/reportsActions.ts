@@ -28,6 +28,7 @@
 import { createAdminClient } from "../supabase/admin";
 import { requireSecureAdmin } from "./secureAdmin";
 import { adminAudit } from "./audit";
+import { runAtomicMutation } from "./atomicMutation";
 import { canTransition, isReportStatus, type ReportStatus } from "./reportsData";
 import type { ActionResult } from "./actions";
 import type { User } from "@supabase/supabase-js";
@@ -48,40 +49,15 @@ async function fail(action: string, actor: User, error: string, target: Record<s
  */
 export async function setReportStatus(reportId: string, nextStatus: string): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
-  const action = "report.setStatus";
-  const target = { reportId, nextStatus };
-  if (!isUuid(reportId)) return fail(action, actor, "Invalid report id.", target);
-  if (!isReportStatus(nextStatus)) return fail(action, actor, "Unsupported report status.", target);
-
-  const admin = createAdminClient();
-  // Read the current status ONLY — never the evidence columns.
-  const { data: before } = await admin.from("reports").select("id, status, entity_type, entity_id").eq("id", reportId).maybeSingle();
-  if (!before) return fail(action, actor, "Report not found.", target);
-
-  const current = before.status as string;
-  if (current === nextStatus) return fail(action, actor, `Report is already ${nextStatus}.`, target);
-  if (!canTransition(current, nextStatus)) {
-    return fail(action, actor, `Cannot move a ${current} report to ${nextStatus}.`, target);
+  if (!isUuid(reportId)) return fail("report.setStatus", actor, "Invalid report id.", { reportId, nextStatus });
+  if (!isReportStatus(nextStatus)) {
+    return fail("report.setStatus", actor, "Invalid report status.", { reportId, nextStatus });
   }
-
-  const { data: row, error } = await admin
-    .from("reports")
-    .update({ status: nextStatus })
-    .eq("id", reportId)
-    .eq("status", current) // optimistic guard against a concurrent change
-    .select("id, status")
-    .maybeSingle();
-  if (error || !row) return fail(action, actor, "Could not update the report.", target);
-  if (row.status !== nextStatus) return fail(action, actor, "Status change did not take effect.", target);
-
-  await adminAudit({
-    action,
-    actorId: actor.id,
-    actorEmail: actor.email,
-    target: { reportId, entity_type: before.entity_type, entity_id: before.entity_id },
-    ok: true,
-    before: { status: current },
-    after: { status: row.status as ReportStatus },
+  return runAtomicMutation({
+    action: "report.setStatus",
+    actor,
+    rpc: "admin_tx_report_set_status",
+    args: { p_report_id: reportId, p_next_status: nextStatus },
+    target: { reportId, nextStatus },
   });
-  return { ok: true, data: { id: row.id, status: row.status } };
 }

@@ -24,6 +24,7 @@
 import { createAdminClient } from "../supabase/admin";
 import { requireSecureAdmin } from "./secureAdmin";
 import { adminAudit } from "./audit";
+import { runAtomicMutation } from "./atomicMutation";
 import type { ActionResult } from "./actions";
 import type { User } from "@supabase/supabase-js";
 
@@ -40,26 +41,15 @@ async function fail(action: string, actor: User, error: string, target: Record<s
  * Restore (reactivate) a deactivated club: clubs.is_active = true. Canonical,
  * reversible, and read-back verified. Refuses if the club is already active.
  */
-export async function reactivateClub(clubId: string): Promise<ActionResult> {
+export async function reactivateClub(clubId: string, reason: string): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
-  const action = "deletedContent.reactivateClub";
-  const target = { clubId };
-  if (!isUuid(clubId)) return fail(action, actor, "Invalid club id.", target);
-
-  const admin = createAdminClient();
-  const { data: before } = await admin.from("clubs").select("id, is_active").eq("id", clubId).maybeSingle();
-  if (!before) return fail(action, actor, "Club not found.", target);
-  if (before.is_active) return fail(action, actor, "Club is already active.", target);
-
-  const { data: row, error } = await admin
-    .from("clubs")
-    .update({ is_active: true })
-    .eq("id", clubId)
-    .select("id, is_active")
-    .maybeSingle();
-  if (error || !row) return fail(action, actor, "Could not reactivate the club.", target);
-  if (row.is_active !== true) return fail(action, actor, "Reactivation did not take effect.", target);
-
-  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
-  return { ok: true, data: row };
+  if (!isUuid(clubId)) return fail("deletedContent.reactivateClub", actor, "Invalid club id.", { clubId });
+  return runAtomicMutation({
+    action: "deletedContent.reactivateClub",
+    actor,
+    reason,
+    rpc: "admin_tx_club_reactivate",
+    args: { p_club_id: clubId },
+    target: { clubId },
+  });
 }
