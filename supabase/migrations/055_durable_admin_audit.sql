@@ -137,6 +137,22 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
   target_type    TEXT NOT NULL,
   target_id      UUID,
 
+  -- Lifecycle of the record itself, NOT of the operation's business outcome:
+  --   attempt                 — intention recorded BEFORE a cross-service
+  --                             operation begins (Auth/Storage/multi-service).
+  --                             Never updated; the outcome is a SEPARATE row
+  --                             sharing the correlation id.
+  --   success                 — the operation completed.
+  --   failure                 — the operation did not complete.
+  --   reconciliation_required — the external side-effect may have happened but
+  --                             the outcome row could not be persisted at the
+  --                             time. Requires human reconciliation; the
+  --                             dashboard surfaces these prominently.
+  -- Database-only mutations skip 'attempt' entirely: their audit row commits in
+  -- the SAME transaction as the mutation (migration 056), so an intention
+  -- record would describe a state that can never be observed.
+  event_type     TEXT NOT NULL DEFAULT 'success',
+
   reason         TEXT,
 
   -- Sanitized, allowlisted snapshots. Never raw request bodies, never private
@@ -146,7 +162,10 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
   after_state    JSONB,
   metadata       JSONB NOT NULL DEFAULT '{}'::JSONB,
 
-  success        BOOLEAN NOT NULL,
+  -- Nullable ONLY for 'attempt' and 'reconciliation_required', where the
+  -- outcome is genuinely not yet known. Recording those as success=false would
+  -- assert a failure that has not happened.
+  success        BOOLEAN,
   error_code     TEXT,
 
   -- Connects the steps of one logical operation (e.g. a transfer that writes
@@ -165,9 +184,14 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
     CHECK (error_code IS NULL OR char_length(error_code) <= 200),
   CONSTRAINT admin_audit_events_actor_email_len_chk
     CHECK (actor_email IS NULL OR char_length(actor_email) <= 320),
-  -- A failure record must say why; a success record must not carry an error.
-  CONSTRAINT admin_audit_events_error_consistency_chk
-    CHECK ((success AND error_code IS NULL) OR (NOT success AND error_code IS NOT NULL)),
+  -- event_type, success and error_code must agree. This is what stops a
+  -- rolled-back or never-attempted operation from being filed as a success.
+  CONSTRAINT admin_audit_events_outcome_chk CHECK (
+    (event_type = 'attempt'                 AND success IS NULL  AND error_code IS NULL)     OR
+    (event_type = 'success'                 AND success = TRUE   AND error_code IS NULL)     OR
+    (event_type = 'failure'                 AND success = FALSE  AND error_code IS NOT NULL) OR
+    (event_type = 'reconciliation_required' AND success IS NULL  AND error_code IS NOT NULL)
+  ),
   -- Bounds audit rows so a buggy or hostile caller cannot bloat the table.
   CONSTRAINT admin_audit_events_state_size_chk CHECK (
     pg_column_size(COALESCE(before_state, '{}'::JSONB)) <= 16384 AND
@@ -175,6 +199,20 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
     pg_column_size(metadata) <= 16384
   )
 );
+
+-- Closed set of record lifecycles. Added as a separate ALTER so an environment
+-- whose table pre-dates the column still gains the constraint (CREATE TABLE IF
+-- NOT EXISTS would silently skip an inline CHECK).
+DO $$ BEGIN
+  ALTER TABLE admin_audit_events ADD COLUMN event_type TEXT NOT NULL DEFAULT 'success';
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE admin_audit_events ADD CONSTRAINT admin_audit_events_event_type_chk
+    CHECK (event_type IN ('attempt', 'success', 'failure', 'reconciliation_required'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- FK into the controlled vocabulary. RESTRICT so a catalog row can never be
 -- removed while events reference it; CASCADE on update allows a rename to
@@ -207,7 +245,17 @@ CREATE INDEX IF NOT EXISTS admin_audit_events_actor_idx
 CREATE INDEX IF NOT EXISTS admin_audit_events_correlation_idx
   ON admin_audit_events (correlation_id);
 CREATE INDEX IF NOT EXISTS admin_audit_events_failures_idx
-  ON admin_audit_events (occurred_at DESC) WHERE NOT success;
+  ON admin_audit_events (occurred_at DESC) WHERE success = FALSE;
+
+-- Reconciliation items must be findable instantly: they mean an external
+-- side-effect may have happened with no recorded outcome.
+CREATE INDEX IF NOT EXISTS admin_audit_events_reconcile_idx
+  ON admin_audit_events (occurred_at DESC) WHERE event_type = 'reconciliation_required';
+
+-- Unresolved attempts (an 'attempt' with no sibling outcome) are found by
+-- correlation; this supports that scan.
+CREATE INDEX IF NOT EXISTS admin_audit_events_attempt_idx
+  ON admin_audit_events (correlation_id) WHERE event_type = 'attempt';
 
 
 -- ============================================================================
@@ -429,10 +477,16 @@ BEGIN
   END IF;
 
   -- 3. Reason requirement, declared per action in the catalog.
-  --    Enforced on SUCCESS rows only: a failure can occur before the operator
-  --    ever supplied a reason (e.g. input validation), and losing that failure
-  --    record would be worse than recording it without one.
-  IF NEW.success THEN
+  --    Enforced on SUCCESS and ATTEMPT rows: those are the points at which the
+  --    operator is committing to the action, so the justification must exist.
+  --    NOT enforced on failure/reconciliation rows — a failure can occur before
+  --    the operator ever reached a reason prompt (e.g. input validation), and
+  --    losing that record would be worse than recording it without a reason.
+  --
+  --    Because migration 056 writes this row in the SAME transaction as the
+  --    mutation, a missing reason RAISES here and rolls the mutation back. The
+  --    mutation therefore cannot commit unaudited for want of a reason.
+  IF NEW.event_type IN ('success', 'attempt') THEN
     SELECT a.requires_reason INTO needs_reason
       FROM public.admin_audit_actions a
      WHERE a.action = NEW.action;
@@ -463,6 +517,12 @@ CREATE TRIGGER admin_audit_events_validate
 -- accept: no occurred_at (server clock only) and no way to reach any other
 -- table. `search_path = ''` with fully-qualified names, no dynamic SQL, and no
 -- executable input.
+-- The pre-event_type signature is dropped first so this stays a REPLACEMENT
+-- rather than creating a second overload on a re-apply.
+DROP FUNCTION IF EXISTS public.admin_audit_log(
+  UUID, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, JSONB, JSONB, BOOLEAN, TEXT, UUID
+);
+
 CREATE OR REPLACE FUNCTION public.admin_audit_log(
   p_actor_user_id  UUID,
   p_actor_email    TEXT,
@@ -473,9 +533,10 @@ CREATE OR REPLACE FUNCTION public.admin_audit_log(
   p_before_state   JSONB   DEFAULT NULL,
   p_after_state    JSONB   DEFAULT NULL,
   p_metadata       JSONB   DEFAULT '{}'::JSONB,
-  p_success        BOOLEAN DEFAULT TRUE,
+  p_success        BOOLEAN DEFAULT NULL,
   p_error_code     TEXT    DEFAULT NULL,
-  p_correlation_id UUID    DEFAULT NULL
+  p_correlation_id UUID    DEFAULT NULL,
+  p_event_type     TEXT    DEFAULT NULL
 )
 RETURNS UUID
 LANGUAGE plpgsql
@@ -485,10 +546,67 @@ AS $$
 DECLARE
   new_id  UUID;
   catalog_target_type TEXT;
+  resolved_event_type TEXT;
+  resolved_success    BOOLEAN;
+  resolved_error      TEXT;
 BEGIN
   IF p_actor_user_id IS NULL THEN
     RAISE EXCEPTION 'admin audit: actor_user_id is required'
       USING ERRCODE = 'null_value_not_allowed';
+  END IF;
+
+  -- event_type is the authority. When a caller omits it (the pre-existing
+  -- boolean-only contract), derive it so old call sites keep working.
+  resolved_event_type := COALESCE(
+    NULLIF(btrim(COALESCE(p_event_type, '')), ''),
+    CASE WHEN COALESCE(p_success, TRUE) THEN 'success' ELSE 'failure' END
+  );
+
+  -- VALIDATE rather than normalize. A caller asserting both "this succeeded"
+  -- and "here is the error" is confused, and silently discarding one half would
+  -- write a record that misrepresents what happened. Refuse instead.
+  resolved_error := NULLIF(btrim(COALESCE(p_error_code, '')), '');
+
+  IF resolved_event_type = 'success' THEN
+    IF p_success IS NOT NULL AND p_success = FALSE THEN
+      RAISE EXCEPTION 'admin audit: error_consistency — event_type "success" contradicts success=false'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF resolved_error IS NOT NULL THEN
+      RAISE EXCEPTION 'admin audit: error_consistency — a success record cannot carry an error_code'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    resolved_success := TRUE;
+
+  ELSIF resolved_event_type = 'failure' THEN
+    IF p_success IS NOT NULL AND p_success = TRUE THEN
+      RAISE EXCEPTION 'admin audit: error_consistency — event_type "failure" contradicts success=true'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF resolved_error IS NULL THEN
+      RAISE EXCEPTION 'admin audit: error_consistency — a failure record requires an error_code'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    resolved_success := FALSE;
+
+  ELSIF resolved_event_type = 'attempt' THEN
+    -- An intention record asserts nothing about the outcome.
+    IF resolved_error IS NOT NULL THEN
+      RAISE EXCEPTION 'admin audit: error_consistency — an attempt record cannot carry an error_code'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    resolved_success := NULL;
+
+  ELSIF resolved_event_type = 'reconciliation_required' THEN
+    IF resolved_error IS NULL THEN
+      RAISE EXCEPTION 'admin audit: error_consistency — a reconciliation record requires an error_code'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    resolved_success := NULL;
+
+  ELSE
+    RAISE EXCEPTION 'admin audit: unknown event_type "%"', resolved_event_type
+      USING ERRCODE = 'check_violation';
   END IF;
 
   -- The action must exist in the controlled vocabulary, and the caller's
@@ -512,7 +630,7 @@ BEGIN
 
   INSERT INTO public.admin_audit_events (
     actor_user_id, actor_email, action, target_type, target_id, reason,
-    before_state, after_state, metadata, success, error_code, correlation_id
+    before_state, after_state, metadata, event_type, success, error_code, correlation_id
   ) VALUES (
     p_actor_user_id,
     NULLIF(btrim(COALESCE(p_actor_email, '')), ''),
@@ -523,8 +641,9 @@ BEGIN
     p_before_state,
     p_after_state,
     COALESCE(p_metadata, '{}'::JSONB),
-    COALESCE(p_success, TRUE),
-    NULLIF(btrim(COALESCE(p_error_code, '')), ''),
+    resolved_event_type,
+    resolved_success,
+    resolved_error,
     COALESCE(p_correlation_id, gen_random_uuid())
   )
   RETURNING id INTO new_id;
@@ -555,11 +674,11 @@ GRANT SELECT ON TABLE admin_audit_actions TO service_role;
 -- anon/authenticated: anything at all.
 
 REVOKE ALL ON FUNCTION public.admin_audit_log(
-  UUID, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, JSONB, JSONB, BOOLEAN, TEXT, UUID
+  UUID, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, JSONB, JSONB, BOOLEAN, TEXT, UUID, TEXT
 ) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.admin_audit_log(
-  UUID, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, JSONB, JSONB, BOOLEAN, TEXT, UUID
+  UUID, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, JSONB, JSONB, BOOLEAN, TEXT, UUID, TEXT
 ) TO service_role;
 
 -- RLS with NO policies = deny-all for any role that does not bypass it. FORCE
@@ -673,7 +792,7 @@ ON CONFLICT (action) DO UPDATE SET
 --   DROP TRIGGER IF EXISTS admin_audit_events_no_update   ON admin_audit_events;
 --   DROP TRIGGER IF EXISTS admin_audit_events_validate    ON admin_audit_events;
 --   DROP TRIGGER IF EXISTS admin_audit_actions_no_delete  ON admin_audit_actions;
---   DROP FUNCTION IF EXISTS public.admin_audit_log(UUID,TEXT,TEXT,TEXT,UUID,TEXT,JSONB,JSONB,JSONB,BOOLEAN,TEXT,UUID);
+--   DROP FUNCTION IF EXISTS public.admin_audit_log(UUID,TEXT,TEXT,TEXT,UUID,TEXT,JSONB,JSONB,JSONB,BOOLEAN,TEXT,UUID,TEXT);
 --   DROP FUNCTION IF EXISTS private.admin_audit_validate_event();
 --   DROP FUNCTION IF EXISTS private.admin_audit_find_message_content(JSONB);
 --   DROP FUNCTION IF EXISTS private.admin_audit_find_forbidden(JSONB, TEXT);
