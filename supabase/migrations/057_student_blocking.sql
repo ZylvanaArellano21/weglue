@@ -47,6 +47,11 @@
 
 BEGIN;
 
+-- Migration 055 already created this in production; the guard keeps 057
+-- self-contained so it can be applied to a fresh shadow database on its own.
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated;
+
 -- ===========================================================================
 -- 1. CANONICAL MODEL
 -- ===========================================================================
@@ -204,6 +209,111 @@ GRANT EXECUTE ON FUNCTION public.current_user_blocks(uuid)                 TO au
 GRANT EXECUTE ON FUNCTION public.target_is_blocked_from_current_user(uuid) TO authenticated, service_role;
 
 -- ===========================================================================
+-- 2b. PAIR SERIALIZATION — the concurrent block/follow race
+--
+-- FOUND BY A REAL TWO-SESSION TEST, not by inspection:
+--
+--   session 1: BEGIN; block_user(C)            -- deletes follows, holds open
+--   session 2:        INSERT INTO follows ...  -- RLS reads user_blocks
+--   session 1: COMMIT
+--
+-- Under READ COMMITTED, session 2's policy check could not see session 1's
+-- uncommitted block row, so the follow passed the WITH CHECK; and session 1 had
+-- already run its DELETE before that row existed. Final state: a block AND a
+-- live follow between the same pair — a persistent, user-visible inconsistency
+-- and exactly the "concurrent follow and block" case that must fail safely.
+--
+-- RLS alone cannot fix this: a policy is evaluated against the caller's
+-- snapshot, and no snapshot sees an uncommitted row. The two paths have to be
+-- SERIALIZED, so both take the same transaction-scoped advisory lock, keyed on
+-- the unordered pair. Whichever transaction arrives second blocks until the
+-- first commits, then re-reads committed state and does the right thing.
+--
+-- Advisory locking is the pattern migration 054 already uses for the per-club
+-- officer floor (`club_officer_lock_key`), so this is consistent with how the
+-- codebase already serializes a cross-row invariant.
+-- ===========================================================================
+
+CREATE OR REPLACE FUNCTION private.user_pair_lock_key(p_a uuid, p_b uuid)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+SET search_path = ''
+AS $$
+  -- Order-independent: (A,B) and (B,A) must map to the SAME key, or the two
+  -- directions would take different locks and never serialize against
+  -- each other.
+  SELECT ('x' || substr(
+            md5(least(p_a::text, p_b::text) || '|' || greatest(p_a::text, p_b::text)),
+            1, 16))::bit(64)::bigint;
+$$;
+
+-- Re-check a follow at INSERT/UPDATE time, holding the pair lock.
+--
+-- This is the SECOND barrier, not a replacement for the RLS policy. The policy
+-- rejects the common case cheaply and without a lock; this trigger closes the
+-- concurrent window the policy structurally cannot see.
+CREATE OR REPLACE FUNCTION public.follows_block_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  PERFORM pg_advisory_xact_lock(private.user_pair_lock_key(NEW.follower_id, NEW.following_id));
+  IF public.users_have_block_relationship(NEW.follower_id, NEW.following_id) THEN
+    RAISE EXCEPTION 'interaction_unavailable' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_follows_block_guard ON public.follows;
+CREATE TRIGGER trg_follows_block_guard
+  BEFORE INSERT OR UPDATE ON public.follows
+  FOR EACH ROW EXECUTE FUNCTION public.follows_block_guard();
+
+-- The same race exists for a direct message sent as a block commits.
+--
+-- SCOPED DELIBERATELY: the lock is taken ONLY for `direct` conversations. Group
+-- and club messages — the overwhelming majority of message volume — take no
+-- lock and pay only one cheap `conversations.type` lookup, because blocking
+-- never restricts a shared room (founder decision 2).
+CREATE OR REPLACE FUNCTION public.messages_block_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_other uuid;
+BEGIN
+  IF NEW.sender_id IS NULL THEN RETURN NEW; END IF;
+
+  SELECT cp.user_id INTO v_other
+    FROM public.conversations c
+    JOIN public.conversation_participants cp ON cp.conversation_id = c.id
+   WHERE c.id = NEW.conversation_id
+     AND c.type = 'direct'
+     AND cp.user_id <> NEW.sender_id
+   LIMIT 1;
+
+  IF v_other IS NULL THEN RETURN NEW; END IF;  -- not a direct conversation
+
+  PERFORM pg_advisory_xact_lock(private.user_pair_lock_key(NEW.sender_id, v_other));
+  IF public.users_have_block_relationship(NEW.sender_id, v_other) THEN
+    RAISE EXCEPTION 'interaction_unavailable' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_messages_block_guard ON public.messages;
+CREATE TRIGGER trg_messages_block_guard
+  BEFORE INSERT ON public.messages
+  FOR EACH ROW EXECUTE FUNCTION public.messages_block_guard();
+
+-- ===========================================================================
 -- 3. ATOMIC BLOCK / UNBLOCK RPCs
 -- ===========================================================================
 
@@ -256,13 +366,18 @@ BEGIN
     RETURN jsonb_build_object('status', 'user_not_found');
   END IF;
 
-  -- Take the row lock in a deterministic order so two students blocking each
-  -- other at the same instant cannot deadlock.
-  PERFORM 1
-    FROM public.profiles p
-   WHERE p.id IN (v_me, p_target)
-   ORDER BY p.id
-   FOR SHARE;
+  -- Serialize against a concurrent follow or direct message for THIS pair.
+  --
+  -- The key is order-independent, so it is the same lock the follows and
+  -- messages guards take, and it is transaction-scoped, so it is released on
+  -- COMMIT/ROLLBACK with no cleanup path to get wrong. A concurrent follow that
+  -- arrives mid-block now waits here, then re-reads committed state and is
+  -- correctly rejected — rather than slipping past a policy that could not yet
+  -- see the block row.
+  --
+  -- Two students blocking each other simultaneously take the SAME key, so one
+  -- simply waits for the other; there is no lock-ordering deadlock to avoid.
+  PERFORM pg_advisory_xact_lock(private.user_pair_lock_key(v_me, p_target));
 
   INSERT INTO public.user_blocks (blocker_id, blocked_id)
   VALUES (v_me, p_target)
