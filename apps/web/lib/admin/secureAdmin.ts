@@ -213,22 +213,75 @@ export async function requireSecureAdmin(opts?: { write?: boolean }): Promise<Us
 }
 
 /**
- * Step-up guard for future DANGEROUS operations (user deletion/suspension, bulk
- * actions, club deletion, permanent purge, viewing retained evidence, restoring
- * deleted messages, adding administrators). On top of a full secure-admin check,
- * it requires that a TOTP factor was re-verified within the step-up window.
+ * Step-up guard for sensitive READ-ONLY operations (currently
+ * `message.revealBody` and `message.contentSearch`). On top of a full
+ * secure-admin check, it requires that a TOTP factor was re-verified within the
+ * step-up window.
  *
- * The guard exists now so those actions can adopt it the moment they ship; the
- * actions themselves remain disabled for Day 3.
+ * DELIBERATELY DOES NOT REQUIRE THE WRITE KILL SWITCH. These are reads, and
+ * they must keep working while `ADMIN_WRITES_ENABLED` is false — which is the
+ * portal's normal, safe posture. Do not add `{ write: true }` here.
+ *
+ * ANY PRIVILEGED MUTATION MUST USE `requireRecentMfaWrite()` INSTEAD.
  */
 export async function requireRecentMfa(
   maxAgeSeconds: number = ADMIN_STEP_UP_MAX_AGE_SECONDS
 ): Promise<User> {
-  const user = await requireSecureAdmin();
+  return requireStepUp({ write: false, maxAgeSeconds });
+}
+
+/**
+ * Step-up guard for DANGEROUS MUTATIONS (account restriction/suspension, user
+ * deletion, bulk actions, permanent purge, restoring deleted messages, adding
+ * administrators).
+ *
+ * WHY THIS EXISTS AS A SEPARATE FUNCTION.
+ * `requireRecentMfa()` calls `requireSecureAdmin()` WITHOUT `{ write: true }`,
+ * so on its own it proves a recent second factor but says nothing about the
+ * global write kill switch. A mutation guarded only by it would satisfy
+ * step-up MFA while BYPASSING `ADMIN_WRITES_ENABLED` entirely.
+ *
+ * Globally adding `{ write: true }` to `requireRecentMfa()` would have closed
+ * that hole by breaking the two sensitive READS, which must keep working with
+ * writes disabled. So the two cases are separated instead, and the enforcement
+ * ORDER below is fixed and total:
+ *
+ *   1. portal kill switch          (ADMIN_PORTAL_ENABLED)
+ *   2. authenticated user          (validated JWT — never browser-supplied)
+ *   3. immutable founder allowlist (user id; email alone never grants)
+ *   4. absolute session maximum age
+ *   5. aal2 assurance              (MFA satisfied this session)
+ *   6. ADMIN_WRITES_ENABLED        ← the step requireRecentMfa() omits
+ *   7. recent-MFA freshness window
+ *
+ * Steps 1–6 are `requireSecureAdmin({ write: true })`; step 7 is layered on
+ * top. The actor is always the server-validated `User` — no caller may supply
+ * an administrator identity.
+ */
+export async function requireRecentMfaWrite(
+  maxAgeSeconds: number = ADMIN_STEP_UP_MAX_AGE_SECONDS
+): Promise<User> {
+  return requireStepUp({ write: true, maxAgeSeconds });
+}
+
+/**
+ * Shared implementation. Kept private so there is exactly ONE place where the
+ * step-up window is evaluated, and so the write/no-write distinction is a
+ * single explicit argument rather than a difference between two hand-written
+ * copies that could drift.
+ */
+async function requireStepUp(opts: {
+  write: boolean;
+  maxAgeSeconds: number;
+}): Promise<User> {
+  // Everything before the freshness check, including the write kill switch when
+  // requested. Throws SecureAdminError with the precise reason.
+  const user = await requireSecureAdmin({ write: opts.write });
+
   const supabase = createClient();
   const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   const methods = (aal?.currentAuthenticationMethods ?? []) as AuthMethodEntry[];
-  if (!hasRecentMfa(methods, Math.floor(Date.now() / 1000), maxAgeSeconds)) {
+  if (!hasRecentMfa(methods, Math.floor(Date.now() / 1000), opts.maxAgeSeconds)) {
     throw new SecureAdminError("stepup_required");
   }
   return user;
