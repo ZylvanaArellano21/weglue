@@ -125,7 +125,9 @@ export function RsvpRowActions({ eventId, userId, status }: { eventId: string; u
         confirmLabel="Remove RSVP"
         tone="danger"
         size="xs"
-        run={() => removeRsvp(eventId, userId)}
+        requireReason
+        targetSummary={`Attendee ${userId.slice(0, 8)} — event ${eventId.slice(0, 8)}`}
+        run={(reason) => removeRsvp(eventId, userId, reason)}
       />
     </div>
   );

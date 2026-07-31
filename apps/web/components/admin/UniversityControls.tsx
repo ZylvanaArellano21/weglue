@@ -17,13 +17,16 @@ function UniversityForm({
   submitLabel,
   onSubmit,
   onClose,
+  requireReason = false,
 }: {
   heading: string;
   initialName: string;
   initialSlug: string;
   submitLabel: string;
-  onSubmit: (name: string, slug: string) => Promise<{ ok: boolean; error?: string }>;
+  onSubmit: (name: string, slug: string, reason: string) => Promise<{ ok: boolean; error?: string }>;
   onClose: () => void;
+  /** Require a typed reason (recorded permanently in the audit trail). */
+  requireReason?: boolean;
 }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
@@ -31,11 +34,19 @@ function UniversityForm({
   const [slugTouched, setSlugTouched] = useState(initialSlug.length > 0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+
+  const trimmedReason = reason.trim();
+  const reasonValid = !requireReason || (trimmedReason.length >= 3 && trimmedReason.length <= 500);
 
   function submit() {
+    if (!reasonValid) {
+      setError("Enter a reason of at least 3 characters.");
+      return;
+    }
     setPending(true);
     setError(null);
-    onSubmit(name, slug)
+    onSubmit(name, slug, trimmedReason)
       .then((res) => {
         if (res.ok) {
           onClose();
@@ -73,13 +84,34 @@ function UniversityForm({
           />
           <p className="mt-1 text-xs text-gray-400">Lowercase words separated by hyphens.</p>
         </div>
+        {requireReason ? (
+          <div>
+            <label htmlFor="university-reason" className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
+              Reason <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id="university-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              disabled={pending}
+              rows={3}
+              maxLength={500}
+              placeholder="Why is this university being created? Recorded permanently in the audit trail."
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              {trimmedReason.length}/500 · recorded permanently and cannot be edited or deleted. Never include
+              passwords, codes, or links containing tokens.
+            </p>
+          </div>
+        ) : null}
         {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
             Cancel
           </button>
           <button
-            disabled={pending || name.trim().length < 2 || slug.trim().length < 2}
+            disabled={pending || name.trim().length < 2 || slug.trim().length < 2 || !reasonValid}
             onClick={submit}
             className="rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
           >
@@ -107,7 +139,8 @@ export function AddUniversityDialog() {
           initialName=""
           initialSlug=""
           submitLabel="Create"
-          onSubmit={(name, slug) => addUniversity(name, slug)}
+          requireReason
+          onSubmit={(name, slug, reason) => addUniversity(name, slug, reason)}
           onClose={() => setOpen(false)}
         />
       ) : null}
@@ -136,7 +169,7 @@ export function EditUniversityDialog({ id, name, slug }: { id: string; name: str
   );
 }
 
-export function UniversityActiveToggle({ id, isActive }: { id: string; isActive: boolean }) {
+export function UniversityActiveToggle({ id, isActive, name }: { id: string; isActive: boolean; name: string }) {
   return isActive ? (
     <ConfirmAction
       label="Deactivate"
@@ -144,7 +177,9 @@ export function UniversityActiveToggle({ id, isActive }: { id: string; isActive:
       body="It will be marked inactive. Existing users and clubs keep their association; this does not delete any data."
       confirmLabel="Deactivate"
       tone="danger"
-      run={() => setUniversityActive(id, false)}
+      requireReason
+      targetSummary={name}
+      run={(reason) => setUniversityActive(id, false, reason)}
     />
   ) : (
     <ConfirmAction
@@ -152,7 +187,9 @@ export function UniversityActiveToggle({ id, isActive }: { id: string; isActive:
       title="Activate university?"
       body="It will be marked active and available for onboarding."
       confirmLabel="Activate"
-      run={() => setUniversityActive(id, true)}
+      requireReason
+      targetSummary={name}
+      run={(reason) => setUniversityActive(id, true, reason)}
     />
   );
 }

@@ -101,7 +101,9 @@ export function RemoveFromClubButton({
       }
       confirmLabel="Remove from club"
       tone="danger"
-      run={() => removePostFromClub(postId, clubId)}
+      requireReason
+      targetSummary={`Post ${postId.slice(0, 8)} — ${clubName}`}
+      run={(reason) => removePostFromClub(postId, clubId, reason)}
     />
   );
 }

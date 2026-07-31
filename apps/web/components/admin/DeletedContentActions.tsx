@@ -17,7 +17,9 @@ export function RestoreClubButton({ clubId, name }: { clubId: string; name: stri
         </>
       }
       confirmLabel="Reactivate club"
-      run={() => reactivateClub(clubId)}
+      requireReason
+      targetSummary={name}
+      run={(reason) => reactivateClub(clubId, reason)}
     />
   );
 }

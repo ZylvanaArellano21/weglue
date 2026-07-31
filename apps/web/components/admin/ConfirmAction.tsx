@@ -10,7 +10,25 @@ import type { ActionResult } from "../../lib/admin/actions";
  * shows loading + success/error, and refreshes server data on success. If
  * `disabled` is set the button renders greyed with `disabledReason` as a tooltip
  * and no dialog opens (used for last-officer / demote-first guards).
+ *
+ * REASON COLLECTION (Day 10A). Pass `requireReason` for any action the audit
+ * catalog marks `requires_reason`. The dialog then:
+ *   • names the exact target (`targetSummary`) so there is no doubt what is
+ *     about to change,
+ *   • requires a reason of MIN_REASON..MAX_REASON characters before the confirm
+ *     button enables,
+ *   • passes the trimmed reason to `run(reason)`.
+ *
+ * This is a convenience, NOT the enforcement. The server validates the reason
+ * before any mutation, and the database refuses the audit row (rolling the
+ * mutation back) if it is missing — so calling the action directly, bypassing
+ * this dialog entirely, cannot produce an unaudited change.
+ *
+ * Cancelling closes the dialog without invoking `run` at all: no mutation, no
+ * audit event of any kind.
  */
+export const MIN_REASON = 3;
+export const MAX_REASON = 500;
 export function ConfirmAction({
   label,
   title,
@@ -21,21 +39,38 @@ export function ConfirmAction({
   disabled = false,
   disabledReason,
   size = "sm",
+  requireReason = false,
+  targetSummary,
 }: {
   label: ReactNode;
   title: string;
   body: ReactNode;
   confirmLabel?: string;
-  run: () => Promise<ActionResult>;
+  run: (reason: string) => Promise<ActionResult>;
   tone?: "default" | "danger";
   disabled?: boolean;
   disabledReason?: string;
   size?: "sm" | "xs";
+  /** Require a typed reason, recorded in the durable audit trail. */
+  requireReason?: boolean;
+  /** Exactly what is being changed, e.g. "Ann One — Chess Club". */
+  targetSummary?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+
+  const trimmedReason = reason.trim();
+  const reasonValid =
+    !requireReason || (trimmedReason.length >= MIN_REASON && trimmedReason.length <= MAX_REASON);
+
+  function close() {
+    setOpen(false);
+    setReason("");
+    setError(null);
+  }
 
   const pad = size === "xs" ? "px-2 py-1 text-xs" : "px-2.5 py-1.5 text-sm";
   const base =
@@ -44,12 +79,18 @@ export function ConfirmAction({
       : "border-gray-200 text-gray-700 hover:bg-gray-50";
 
   async function onConfirm() {
+    // Belt-and-braces: the button is disabled without a valid reason, but never
+    // rely on a disabled button to enforce a rule.
+    if (!reasonValid) {
+      setError(`Enter a reason of at least ${MIN_REASON} characters.`);
+      return;
+    }
     setError(null);
     setPending(true);
     try {
-      const res = await run();
+      const res = await run(trimmedReason);
       if (res.ok) {
-        setOpen(false);
+        close();
         router.refresh();
       } else {
         setError(res.error);
@@ -79,16 +120,47 @@ export function ConfirmAction({
         {label}
       </button>
       {open ? (
-        <Modal onClose={() => (pending ? null : setOpen(false))} maxWidth={440}>
+        <Modal onClose={() => (pending ? null : close())} maxWidth={440}>
           <div className="p-5">
             <h3 className="text-base font-semibold text-gray-900">{title}</h3>
             <div className="mt-2 text-sm text-gray-600">{body}</div>
+
+            {targetSummary ? (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">Target</p>
+                <p className="mt-0.5 break-words text-sm font-medium text-gray-900">{targetSummary}</p>
+              </div>
+            ) : null}
+
+            {requireReason ? (
+              <div className="mt-3">
+                <label htmlFor="admin-action-reason" className="block text-xs font-medium text-gray-700">
+                  Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  id="admin-action-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  disabled={pending}
+                  rows={3}
+                  maxLength={MAX_REASON}
+                  autoFocus
+                  placeholder="Why is this change being made? Recorded permanently in the audit trail."
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 outline-none focus:border-teal-400 disabled:opacity-50"
+                />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  {trimmedReason.length}/{MAX_REASON} · recorded permanently and cannot be edited or deleted. Never
+                  include passwords, codes, links containing tokens, or private message text.
+                </p>
+              </div>
+            ) : null}
+
             {error ? (
               <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
             ) : null}
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setOpen(false)}
+                onClick={close}
                 disabled={pending}
                 className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
               >
@@ -96,7 +168,7 @@ export function ConfirmAction({
               </button>
               <button
                 onClick={onConfirm}
-                disabled={pending}
+                disabled={pending || !reasonValid}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60 ${
                   tone === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-teal-500 hover:bg-teal-600"
                 }`}

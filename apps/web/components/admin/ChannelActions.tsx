@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "../shared/Modal";
 import { createChannel, renameChannel, deleteEmptyChannel, setChannelPermission } from "../../lib/admin/messagingActions";
+import { ConfirmAction } from "./ConfirmAction";
 
 const inputCls =
   "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100";
@@ -132,18 +133,6 @@ export function ChannelManageActions({
       .finally(() => setPending(false));
   }
 
-  function doDelete() {
-    setPending(true);
-    setError(null);
-    deleteEmptyChannel(channelId)
-      .then((res) => {
-        if (res.ok) router.push(`/admin/channels`);
-        else setError(res.error);
-      })
-      .catch(() => setError("Something went wrong."))
-      .finally(() => setPending(false));
-  }
-
   if (isMain) {
     return (
       <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
@@ -179,13 +168,16 @@ export function ChannelManageActions({
       </div>
 
       {isEmpty ? (
-        <button
-          onClick={doDelete}
-          disabled={pending}
-          className="rounded-md border border-red-200 bg-red-50/50 px-2.5 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-        >
-          Remove empty channel
-        </button>
+        <ConfirmAction
+          label="Remove empty channel"
+          title="Remove this channel?"
+          body="The channel holds no messages, so nothing is lost. This cannot be undone."
+          confirmLabel="Remove channel"
+          tone="danger"
+          requireReason
+          targetSummary={name}
+          run={(reason) => deleteEmptyChannel(channelId, reason)}
+        />
       ) : (
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
           <p className="text-xs text-gray-500">
