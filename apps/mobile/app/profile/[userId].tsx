@@ -7,6 +7,7 @@ import {
   Image,
   FlatList,
   ActivityIndicator,
+  Alert,
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,6 +30,15 @@ import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { useToast } from '../../components/Toast';
 import type { UserWeeklyEvent } from '../../services/followService';
 import { openDirectChatWith } from '../../lib/chatNavigation';
+import { useDidIBlock, useBlockUser, useUnblockUser } from '../../hooks/useBlocking';
+import {
+  confirmBlock,
+  confirmUnblock,
+  blockFailedAlert,
+  blockSucceededAlert,
+  UNAVAILABLE_TITLE,
+  UNAVAILABLE_BODY,
+} from '../../lib/blockPrompts';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_ITEM_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -86,6 +96,78 @@ export default function UserProfileScreen() {
   const allPosts = postsData?.pages.flatMap((p) => p) ?? [];
   const allEvents = eventsData?.pages.flatMap((p) => p) ?? [];
 
+  // Blocking. `useDidIBlock` is only meaningful for a profile the viewer can
+  // actually see — if the OTHER person did the blocking, this screen never
+  // renders, so the query never runs and no direction is ever disclosed.
+  const { data: iBlockedThem } = useDidIBlock(viewerUserId, targetUserId);
+  const blockMutation = useBlockUser(viewerUserId);
+  const unblockMutation = useUnblockUser(viewerUserId);
+
+  const handleBlock = () => {
+    confirmBlock({
+      username: profile?.username,
+      fullName: profile?.full_name,
+      onConfirm: () =>
+        blockMutation.mutate(targetUserId!, {
+          onSuccess: (result) => {
+            if (result.status !== 'ok') {
+              blockFailedAlert('block');
+              return;
+            }
+            blockSucceededAlert(profile?.username, profile?.full_name);
+            // The profile is now unreadable to this viewer by RLS, so staying
+            // here would render the unavailable state. Leave instead.
+            router.back();
+          },
+          onError: () => blockFailedAlert('block'),
+        }),
+    });
+  };
+
+  const handleUnblock = () => {
+    confirmUnblock({
+      username: profile?.username,
+      fullName: profile?.full_name,
+      onConfirm: () =>
+        unblockMutation.mutate(targetUserId!, {
+          onError: () => blockFailedAlert('unblock'),
+        }),
+    });
+  };
+
+  // One overflow menu for every safety action on another student's profile.
+  const openProfileMenu = () => {
+    const blocked = iBlockedThem === true;
+    Alert.alert(
+      profile?.username ? `@${profile.username}` : 'Options',
+      undefined,
+      [
+        {
+          text: 'Report',
+          onPress: () =>
+            openReportFlow({
+              entityType: 'user',
+              entityId: targetUserId!,
+              entityName: profile?.username ? `@${profile.username}` : profile?.full_name,
+              // Offered only when not already blocked; blocking runs first so
+              // the student is protected even if the report request fails.
+              onBlock: blocked
+                ? undefined
+                : () =>
+                    blockMutation.mutate(targetUserId!, {
+                      onSuccess: () => router.back(),
+                      onError: () => blockFailedAlert('block'),
+                    }),
+            }),
+        },
+        blocked
+          ? { text: 'Unblock', onPress: handleUnblock }
+          : { text: 'Block', style: 'destructive' as const, onPress: handleBlock },
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  };
+
   const handleFollow = () => {
     // Tapping "Requested" cancels the pending request; "Following"/"Gluemate"
     // unfollows; "Follow" follows (or sends a request to a private account).
@@ -137,7 +219,12 @@ export default function UserProfileScreen() {
           <Ionicons name="chevron-back" size={26} color="#111827" />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#6B7280', fontSize: 15 }}>Profile not found.</Text>
+          <Text style={{ color: '#111827', fontSize: 16, fontWeight: '700' }}>
+            {UNAVAILABLE_TITLE}
+          </Text>
+          <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 6 }}>
+            {UNAVAILABLE_BODY}
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -181,20 +268,14 @@ export default function UserProfileScreen() {
           >
             {profile.full_name}
           </Text>
-          {/* Report menu — other people's profiles only */}
+          {/* Safety menu (Report / Block) — other people's profiles only */}
           {!isOwnProfile && (
             <TouchableOpacity
-              onPress={() =>
-                openReportFlow({
-                  entityType: 'user',
-                  entityId: targetUserId!,
-                  entityName: profile.username ? `@${profile.username}` : profile.full_name,
-                })
-              }
+              onPress={openProfileMenu}
               activeOpacity={0.7}
               hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
               accessibilityRole="button"
-              accessibilityLabel="Report this user"
+              accessibilityLabel="Profile options"
             >
               <Ionicons name="ellipsis-horizontal" size={22} color="#6B7280" />
             </TouchableOpacity>

@@ -57,6 +57,8 @@ import {
   type PostPermission,
 } from '../../../services/channelService';
 import { openReportFlow } from '../../../components/shared/ReportButton';
+import { useDidIBlock, useBlockUser, useUnblockUser } from '../../../hooks/useBlocking';
+import { confirmBlock, confirmUnblock, blockFailedAlert, blockSucceededAlert } from '../../../lib/blockPrompts';
 import { getClubPoll, type ClubPoll } from '../../../services/clubPollService';
 import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../../lib/chatAttachments';
 import { displayNameOrFallback, isPlaceholderUsername } from '../../../lib/displayName';
@@ -152,6 +154,14 @@ export default function ChatInfo() {
     () => (chatDetails?.participants ?? []).filter((p) => p.user_id !== userId),
     [chatDetails?.participants, userId],
   );
+  // Blocking. Declared here, alongside the other participant-derived hooks and
+  // ABOVE this screen's early returns — `otherUser` is computed after those, so
+  // deriving the id from `others` is what keeps hook order unconditional.
+  const directOtherId = isDirect ? others[0]?.user_id : undefined;
+  const { data: iBlockedThem } = useDidIBlock(userId, directOtherId);
+  const blockMutation = useBlockUser(userId);
+  const unblockMutation = useUnblockUser(userId);
+
   const { data: followStates } = useFollowStates(
     userId,
     others.map((p) => p.user_id),
@@ -397,6 +407,42 @@ export default function ChatInfo() {
     setPersonMenu(null);
     openReportFlow({ entityType: 'user', entityId: target.userId, entityName: target.name });
   }
+  // Block / unblock the OTHER person in a direct conversation. Offered only
+  // for `direct`: blocking severs direct contact and never restricts a shared
+  // group or club room (founder decision 2), so there is nothing to offer there.
+  function blockFromChat() {
+    setOverflowOpen(false);
+    if (!otherUser) return;
+    confirmBlock({
+      username: otherUser.username,
+      fullName: otherUser.full_name,
+      onConfirm: () =>
+        blockMutation.mutate(otherUser.user_id, {
+          onSuccess: (result) => {
+            if (result.status !== 'ok') {
+              blockFailedAlert('block');
+              return;
+            }
+            blockSucceededAlert(otherUser.username, otherUser.full_name);
+          },
+          onError: () => blockFailedAlert('block'),
+        }),
+    });
+  }
+
+  function unblockFromChat() {
+    setOverflowOpen(false);
+    if (!otherUser) return;
+    confirmUnblock({
+      username: otherUser.username,
+      fullName: otherUser.full_name,
+      onConfirm: () =>
+        unblockMutation.mutate(otherUser.user_id, {
+          onError: () => blockFailedAlert('unblock'),
+        }),
+    });
+  }
+
   function reportConversation() {
     setOverflowOpen(false);
     if (clubId) openReportFlow({ entityType: 'club', entityId: clubId, entityName: displayName });
@@ -833,6 +879,20 @@ export default function ChatInfo() {
                 </TouchableOpacity>
               </>
             )}
+            {/* Block / Unblock (direct conversations only) */}
+            {isDirect && otherUser && (
+              iBlockedThem ? (
+                <TouchableOpacity style={styles.menuRow} onPress={unblockFromChat}>
+                  <Ionicons name="checkmark-circle-outline" size={19} color={chatColors.text} />
+                  <Text style={styles.menuLabel}>Unblock</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.menuRow} onPress={blockFromChat}>
+                  <Ionicons name="ban-outline" size={19} color="#C62828" />
+                  <Text style={[styles.menuLabel, { color: '#C62828' }]}>Block</Text>
+                </TouchableOpacity>
+              )
+            )}
             {/* Report (official chats) */}
             {isOfficialChat && (
               <TouchableOpacity style={styles.menuRow} onPress={reportConversation}>
@@ -866,6 +926,26 @@ export default function ChatInfo() {
                 <TouchableOpacity style={styles.menuRow} onPress={() => reportUserFromChat(personMenu)}>
                   <Ionicons name="flag-outline" size={19} color={chatColors.text} />
                   <Text style={styles.menuLabel}>Report {personMenu.name}</Text>
+                </TouchableOpacity>
+                {/* Blocking a co-member does NOT remove either of you from this
+                    conversation and does not filter its history — it only stops
+                    direct contact. */}
+                <TouchableOpacity
+                  style={styles.menuRow}
+                  onPress={() => {
+                    const target = personMenu;
+                    setPersonMenu(null);
+                    confirmBlock({
+                      username: target.name.replace(/^@/, ''),
+                      onConfirm: () =>
+                        blockMutation.mutate(target.userId, {
+                          onError: () => blockFailedAlert('block'),
+                        }),
+                    });
+                  }}
+                >
+                  <Ionicons name="ban-outline" size={19} color="#C62828" />
+                  <Text style={[styles.menuLabel, { color: '#C62828' }]}>Block {personMenu.name}</Text>
                 </TouchableOpacity>
                 {isCustomGroup && isGroupAdmin && (
                   <TouchableOpacity
