@@ -543,3 +543,125 @@ git status             clean (3 pre-existing untracked files, none from Day 10A)
 ## V11. Recommendation
 
 **GO** to apply migration 055 then 056 to Production and deploy the web branch, with writes left disabled — conditional on an explicit founder decision about the merge scope in §V2. Deployment sequence and verification queries: §H9.
+
+---
+---
+
+# Day 10A — PRODUCTION RELEASE REPORT (2026-07-31)
+
+**Released.** Migrations 055 and 056 are live; the merged web app is deployed. Writes remain disabled.
+
+## R1. Merge-scope resolution — my earlier finding was WRONG
+
+I compared against a **stale local `main`** (`c7e1f74e`) and reported that the parent security branch was unmerged. You were right to challenge it.
+
+After `git fetch origin`: `origin/main` was at `2583c9f9` — **PR #5 had already merged `security/admin-session-and-officer-floor`.**
+
+| Check | Result |
+|---|---|
+| `762ff94f` (session maximum) ancestor of origin/main | **Yes** |
+| `0781ab5d` (migration 054) ancestor of origin/main | **Yes** |
+| `6a748236` (fail-closed matrix) ancestor of origin/main | **Yes** |
+| Migration 054 on origin/main vs branch | **Byte-identical** |
+| Fail-closed matrix on origin/main | Present |
+| 15-minute session maximum on origin/main | Present (`ADMIN_SESSION_MAX_AGE_DEFAULT_MINUTES = 15`) |
+| Merge base | `6a748236` |
+
+So PR #6 contained **only Day 10A work** — no scope surprise, no decision required. The only file overlapping those protections was `writePathFailClosed.test.ts`, and its diff is purely additive argument passing for the new `reason` parameters: **same 25 mutation cases, nothing weakened**. Your three "keep" instructions were satisfied by leaving everything untouched. The incorrect §V2 finding is retracted in place (commit `6f732ed3`).
+
+## R2. Re-entrancy guard
+
+`useRef` latch checked and set **before any await**, released in `finally` (success and failure) and in `close()`. Dialog design unchanged — same layout, same "Working…", same disabled buttons.
+
+**Browser-verified against the real component:** synchronous triple invocation now produces **exactly 1 call** (was 3). Reopening starts clean. A second submission still succeeds, proving the latch releases. Also applied to `UniversityForm`, which backs Add University — the one reason-required action not routed through `ConfirmAction`.
+
+10 new tests (source contract + behavioural simulation). Commit `ce419c9e`.
+
+## R3. Release identifiers
+
+| Item | Value |
+|---|---|
+| Branch HEAD before merge | `c581946b` |
+| Pull request | **#6** |
+| Merge commit | **`219f295b`** |
+| Production deployment | Vercel `DUg57ivcFaa2nMaAmAzTyx1MsYod` — success, site serving HTTP 200 |
+| CI | Vercel check **pass**; PR state MERGEABLE / CLEAN |
+
+## R4. Migrations applied
+
+Applied **only** 055 then 056, as direct SQL through the Supabase Management API — which structurally guarantees no other migration could be proposed or executed. 054 was **not** re-run.
+
+```
+ledger before : 050, 052, 053, 054
+ledger after  : 050, 052, 053, 054, 055, 056
+055 applied exactly 1 time   056 applied exactly 1 time   051 absent
+```
+
+055 → 26 catalog rows, 0 events, RLS enabled **and forced**, **0 policies**, 4 triggers, `admin_audit_log` present.
+056 → 22 `admin_tx_*` functions, 9 private helpers; `service_role` may execute 22, `anon`/`authenticated` may execute **0**.
+
+## R5. Production row-count comparison
+
+| Table | Before | After | |
+|---|---|---|---|
+| profiles | 65 | 65 | unchanged |
+| clubs | 6 | 6 | unchanged |
+| club_members | 235 | 235 | unchanged |
+| posts | 25 | 25 | unchanged |
+| events | 25 | 25 | unchanged |
+| messages | 104 | 104 | unchanged |
+| reports | 14 | 14 | unchanged |
+| universities | 1 (1 active) | 1 (1 active) | unchanged |
+
+`single_campus_mode = true`; `launch_university_id = 174a1779-0281-4d20-9b0d-a075c17fc01f` = Lone Star's id, unchanged. Zero test universities, zero test clubs, zero audit events.
+
+## R6. Append-only verification (non-residual)
+
+My first pass returned "allowed" for UPDATE and DELETE — that was **vacuous**: the table was empty, so the row-level triggers never fired. Re-run properly inside a transaction with a real row present, then rolled back:
+
+```
+approved_path_insert = OK          (SECURITY DEFINER route works; rows_now=1)
+UPDATE  = DENIED  (admin_audit_events is append-only: UPDATE is not permitted)
+DELETE  = DENIED  (admin_audit_events is append-only: DELETE is not permitted)
+residue after rollback = 0 rows
+```
+
+Plus, directly against production: service_role direct INSERT **denied** · authenticated INSERT **denied** · authenticated SELECT **denied** · anon SELECT **denied** · anon and authenticated EXECUTE of `admin_audit_log` **denied** · TRUNCATE **denied** · catalog DELETE **denied** · anon and authenticated EXECUTE of `admin_tx_*` **denied** · anon REST `GET /admin_audit_events` → **401**.
+
+`admin_audit_log()` is confirmed the only insertion route. No legitimate audit event was altered or deleted — the table held zero, and holds zero.
+
+## R7. Deployed-app verification
+
+Private gateway concealment intact — `/admin`, `/admin/login`, `/admin/users`, `/admin/audit-history` all return **404** unauthenticated. Student surfaces unaffected — `/`, `/login`, `/privacy-policy`, `/terms`, `/child-safety-standards` all **200**.
+
+Dashboard read path confirmed working: `service_role` SELECT on both audit tables succeeds, so `isAuditTableAvailable()` now returns true and Audit History will render the live empty state (0 events) rather than the "not applied" notice.
+
+## R8. Test results
+
+```
+web vitest  760/760 (30 files)   type-check  pass   next build  pass (53 pages)
+secret scan clean                055 harness 70/70   056 harness 75/75
+```
+
+## R9. Confirmations
+
+- **`ADMIN_WRITES_ENABLED` = false** — unset in the repo; code default is fail-closed (`=== "true"`). No environment variable was added or changed.
+- **Migration 051 remains absent** — not in the repo, not in the ledger, no 051 objects in Production.
+- **No Production application row was modified** — every count identical; the only writes were DDL creating new objects, plus two ledger rows.
+- **Lone Star College remains the sole university**, active, with `single_campus_mode=true` and `launch_university_id` unchanged.
+- **Migration 054 byte-identical**, not re-executed.
+- **No OTA published. No iOS or Android build created.** Zero mobile/shared files changed.
+- **Day 10B not started.**
+
+## R10. Blockers
+
+**None.** The release is complete and verified.
+
+## R11. Nonblocking findings / founder follow-ups
+
+1. **Two Part-6 checks require founder credentials and could not be performed by me** — entering the private entry phrase, the founder Gmail password and a TOTP code is something I must not do. Both are quick for you:
+   - **Audit History through the secured founder path** — confirm it loads, shows the empty state, and that filters render. The data layer is verified (service_role SELECT works, 20/20 unit tests) but the authenticated page render is unconfirmed.
+   - **Live writes-disabled behaviour** — confirm a mutation is rejected in the real dashboard. The logic is deployed and covered by 248/248 fail-closed assertions.
+2. **`ADMIN_WRITES_ENABLED` in the Vercel dashboard could not be read from here** (no Vercel CLI/token). Unset is the desired state and is what the code assumes; worth an eyeball in Vercel → Settings → Environment Variables.
+3. **`message.revealBody` / `message.contentSearch` remain `requires_reason=false`** — deliberate; flip with the Phase 5 reveal-reason UI.
+4. Audit History's populated-state QA (pagination, filters against real rows) will only be meaningful once real events exist — i.e. after writes are enabled.
