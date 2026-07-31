@@ -665,3 +665,68 @@ secret scan clean                055 harness 70/70   056 harness 75/75
 2. **`ADMIN_WRITES_ENABLED` in the Vercel dashboard could not be read from here** (no Vercel CLI/token). Unset is the desired state and is what the code assumes; worth an eyeball in Vercel → Settings → Environment Variables.
 3. **`message.revealBody` / `message.contentSearch` remain `requires_reason=false`** — deliberate; flip with the Phase 5 reveal-reason UI.
 4. Audit History's populated-state QA (pagination, filters against real rows) will only be meaningful once real events exist — i.e. after writes are enabled.
+
+---
+---
+
+# Day 10A — Admin Settings status correction (2026-07-31)
+
+**Deployed.** PR #7 merged as `f126ebe6`; Vercel Production success. Web only — no migration, no data change.
+
+## S1. Root cause: the value was hardcoded
+
+`AUDIT PERSISTENCE: Deferred` was never computed:
+
+```ts
+auditPersistenceAvailable: false, // no canonical admin_audit table yet (Audit History)
+```
+
+Written on Day 5 when the comment was true, never revisited when migration 055 shipped the table. Ruling out the alternatives explicitly — it was **not** a stale environment variable, **not** the old console-log check, **not** a wrong table or function name, and **not** an inability to distinguish "table exists but empty" from "not deployed". The code never queried the database at all.
+
+The existing unit test asserted the constant (`expect(s.auditPersistenceAvailable).toBe(false)`), so it passed **because** of the bug. Replaced with behavioural tests.
+
+## S2. Corrected behaviour
+
+Three honest, fail-closed states from a live read-only probe:
+
+| State | Condition | Rendering |
+|---|---|---|
+| **active** | events table present + catalog seeded + `admin_audit_log()` exposed | green "Active" |
+| **unavailable** | any verifiably absent | grey "Unavailable" |
+| **error** | could not be determined | amber "Unverified" — **never** green |
+
+**An empty audit table reports Active.** A deployed system that has recorded nothing is working, not missing — that was Production's exact state at deploy time.
+
+**The check cannot write.** Function presence is read from PostgREST's OpenAPI description (a plain `GET`). Probing by *invocation* was rejected outright: calling `admin_audit_log` to test its existence risks writing an audit event, which is precisely what a status check must never do. The probe issues only a HEAD count, a one-row select and that GET. Verified empirically against Production — replaying the probe's exact queries left the row count at 2 → 2.
+
+Status is never derived from an env var: a test enables every admin env var with the infrastructure absent and asserts **Unavailable**.
+
+## S3. `14783580` explained — not a defect
+
+It **is** the deployed Git commit SHA, correctly read from `VERCEL_GIT_COMMIT_SHA`. It is the docs commit pushed to `main` immediately after merge `219f295b`, which triggered a second Production deployment; `219f295b` is its parent. Value and source were already right, so neither changed.
+
+Only the label: `Build / commit` → **`Deployed commit (Git)`**, now showing the branch from `VERCEL_GIT_COMMIT_REF` beside it — the detail that would have made the discrepancy self-explanatory. Still null when Vercel supplies nothing; never invented or hardcoded.
+
+## S4. Adjacent fix (flagged — veto if unwanted)
+
+`privacyBackendDeployed` was hardcoded identically. It reads correctly today only because 051 really is absent, but it would have kept saying "Not deployed" after 051 ships. Now probed the same read-only way. One line, same bug, same function.
+
+## S5. The audit system recorded its first real Production events
+
+`admin_audit_events` now holds **2 rows** — a `portal.lock` **attempt → success** pair sharing one correlation id (`7f86592c`), 0.58s apart, written 17:05:08–17:05:09Z during the founder's own secured verification session.
+
+That is the cross-service attempt→outcome pattern working exactly as designed in Production: the intention recorded before the Supabase Auth sign-out, the outcome as a separate row, never an update of the attempt. They are unrelated to this deployment and to the status probe (which ran ~5 minutes later and wrote nothing).
+
+Admin Settings will now show: **Audit persistence — Active**, "Append-only table live; 26 approved actions; 2 events recorded."
+
+## S6. Results
+
+```
+web vitest 774/774 (30 files, 14 new)   type-check pass   next build pass (53 pages)
+secret scan clean                       3 files changed, web admin only
+PR #7 MERGEABLE/CLEAN, Vercel CI pass   merge f126ebe6, deployment success
+```
+
+Production application rows — profiles 65, clubs 6, memberships 235, posts 25, events 25, messages 104, reports 14, universities 1 — **all identical to the pre-release baseline**. `single_campus_mode=true`, `launch_university_id` unchanged, ledger `054,055,056`, 051 absent, `/admin` still 404, student surfaces 200.
+
+**No migration was needed** — no database defect was found.
