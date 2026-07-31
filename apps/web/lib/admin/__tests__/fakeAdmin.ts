@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { makeAdminTxRpcs } from "./fakeAdminTx";
 
 // Shared in-memory PostgREST-style fake for the service-role client, extended
 // beyond the per-file harnesses with: neq, is/not-null, gte/lte, ilike (no-op
@@ -164,11 +165,25 @@ export function makeDb(initial: Record<string, any[]>, authUsers: FakeAuthUser[]
   const state = {
     rpcImpl: null as null | ((fn: string, args: any) => { data: any; error: any }),
   };
+  let seq = 9000;
+  const auditRows: any[] = [];
+  const txRpcs = makeAdminTxRpcs({ tables, auditRows, newId: () => `tx-${seq++}` });
+
   const rpc = vi.fn(async (fn: string, args: any) => {
     rpcCalls.push({ fn, args });
     if (state.rpcImpl) return state.rpcImpl(fn, args);
+    const handler = txRpcs[fn];
+    if (handler) {
+      try {
+        return { data: handler(args), error: null };
+      } catch (e) {
+        // Mirrors Postgres: the audit insert raised, so the whole transaction —
+        // including the mutation — is rolled back and the caller sees an error.
+        return { data: null, error: { message: e instanceof Error ? e.message : "tx failed" } };
+      }
+    }
     return { data: `audit-${rpcCalls.length}`, error: null };
   });
 
-  return { from, tables, auth, rpc, rpcCalls, state };
+  return { from, tables, auth, rpc, rpcCalls, state, auditRows };
 }

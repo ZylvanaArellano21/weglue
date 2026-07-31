@@ -103,25 +103,25 @@ describe("listDeletedContent — safe unified list", () => {
 describe("reactivateClub — the only canonical restore", () => {
   it("reactivates a deactivated club with read-back", async () => {
     asFounder(true);
-    const res = await reactivateClub(CID);
+    const res = await reactivateClub(CID, "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.clubs.find((c: any) => c.id === CID).is_active).toBe(true);
   });
 
   it("refuses an already-active club", async () => {
     asFounder(true);
-    const res = await reactivateClub("c-live");
+    const res = await reactivateClub("c-live", "Test reason for the audit trail.");
     expect(res.ok).toBe(false);
   });
 
   it("denies when writes are disabled", async () => {
     asFounder(false);
-    await expect(reactivateClub(CID)).rejects.toBeInstanceOf(SecureAdminError);
+    await expect(reactivateClub(CID, "Test reason for the audit trail.")).rejects.toBeInstanceOf(SecureAdminError);
   });
 
   it("rejects an invalid id", async () => {
     asFounder(true);
-    const res = await reactivateClub("nope");
+    const res = await reactivateClub("nope", "Test reason for the audit trail.");
     expect(res.ok).toBe(false);
   });
 });

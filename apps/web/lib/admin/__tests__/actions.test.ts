@@ -34,6 +34,7 @@ import {
   setUniversityActive,
 } from "../actions";
 import { SecureAdminError } from "../secureAdmin";
+import { makeAdminTxRpcs } from "./fakeAdminTx";
 
 const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@weglue.app" };
 const U = (n: number) => `00000000-0000-0000-0000-00000000000${n}`;
@@ -161,7 +162,19 @@ function makeDb(initial: Record<string, any[]>) {
   // concurrency behaviour is proven against Postgres in the migration harness
   // (supabase/scripts/test_054_last_officer.sql) — this fake exists so the
   // action layer's mapping of statuses to founder-facing results stays honest.
+  let txSeq = 9000;
+  const auditRows: any[] = [];
+  const txRpcs = makeAdminTxRpcs({ tables, auditRows, newId: () => `tx-${txSeq++}` });
+
   function rpc(name: string, args: any) {
+    const tx = txRpcs[name];
+    if (tx) {
+      try {
+        return Promise.resolve({ data: tx(args), error: null });
+      } catch (e) {
+        return Promise.resolve({ data: null, error: { message: e instanceof Error ? e.message : "tx failed" } });
+      }
+    }
     const cm = tables.club_members || (tables.club_members = []);
     const co = tables.club_officers || (tables.club_officers = []);
     const officerCount = (clubId: string) =>
@@ -328,7 +341,7 @@ describe("write authorization", () => {
   it("rejects mutations when the portal kill switch is off", async () => {
     asFounder();
     process.env.ADMIN_PORTAL_ENABLED = "false";
-    await expect(addUniversity("X College", "x-college")).rejects.toMatchObject({ reason: "portal_disabled" });
+    await expect(addUniversity("X College", "x-college", "Test reason for the audit trail.")).rejects.toMatchObject({ reason: "portal_disabled" });
     expect(h.createAdminClient).not.toHaveBeenCalled();
   });
   it("denies an aal1 (MFA-not-satisfied) founder", async () => {
@@ -361,13 +374,13 @@ describe("memberships", () => {
   });
   it("removes an ordinary member", async () => {
     asFounder();
-    const res = await removeMembership(C(1), U(2));
+    const res = await removeMembership(C(1), U(2), "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.club_members.some((m: any) => m.user_id === U(2))).toBe(false);
   });
   it("refuses to remove an officer (must demote first)", async () => {
     asFounder();
-    const res = await removeMembership(C(1), U(1));
+    const res = await removeMembership(C(1), U(1), "Test reason for the audit trail.");
     expect(res).toMatchObject({ ok: false });
     if (!res.ok) expect(res.error).toMatch(/demote/i);
   });
@@ -390,7 +403,7 @@ describe("officers", () => {
   });
   it("protects the last officer from demotion", async () => {
     asFounder();
-    const res = await setMembershipRole(C(1), U(1), "member"); // U(1) is the only officer
+    const res = await setMembershipRole(C(1), U(1), "member", undefined, "Test reason for the audit trail."); // U(1) is the only officer
     expect(res).toMatchObject({ ok: false });
     // Wording now comes from the migration-054 `last_officer` status.
     if (!res.ok) expect(res.error).toMatch(/without any officer/i);
@@ -398,7 +411,7 @@ describe("officers", () => {
   it("demotes an officer when another officer remains", async () => {
     asFounder();
     await setMembershipRole(C(1), U(2), "officer", "VP"); // now 2 officers
-    const res = await setMembershipRole(C(1), U(1), "member");
+    const res = await setMembershipRole(C(1), U(1), "member", undefined, "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.club_members.find((m: any) => m.user_id === U(1)).role).toBe("member");
     expect(h.holder.db.tables.club_officers.some((o: any) => o.user_id === U(1))).toBe(false);
@@ -426,7 +439,7 @@ describe("officers", () => {
 describe("gluemates", () => {
   it("removes a mutual relationship by deleting both directions", async () => {
     asFounder();
-    const res = await removeGluemate(U(1), U(2));
+    const res = await removeGluemate(U(1), U(2), "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     const f = h.holder.db.tables.follows;
     expect(f.some((r: any) => r.follower_id === U(1) && r.following_id === U(2))).toBe(false);
@@ -436,7 +449,7 @@ describe("gluemates", () => {
   });
   it("rejects a self relationship", async () => {
     asFounder();
-    const res = await removeGluemate(U(1), U(1));
+    const res = await removeGluemate(U(1), U(1), "Test reason for the audit trail.");
     expect(res).toMatchObject({ ok: false });
   });
 });
@@ -445,13 +458,13 @@ describe("gluemates", () => {
 describe("universities", () => {
   it("creates a new university", async () => {
     asFounder();
-    const res = await addUniversity("New College", "new-college");
+    const res = await addUniversity("New College", "new-college", "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.universities.some((u: any) => u.slug === "new-college")).toBe(true);
   });
   it("rejects a duplicate name", async () => {
     asFounder();
-    const res = await addUniversity("Lone Star", "lone-star-2");
+    const res = await addUniversity("Lone Star", "lone-star-2", "Test reason for the audit trail.");
     expect(res).toMatchObject({ ok: false });
   });
   it("rejects an invalid slug", async () => {
@@ -461,14 +474,14 @@ describe("universities", () => {
   });
   it("deactivates a university", async () => {
     asFounder();
-    const res = await setUniversityActive(UNI(1), false);
+    const res = await setUniversityActive(UNI(1), false, "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.universities.find((u: any) => u.id === UNI(1)).is_active).toBe(false);
   });
   it("refuses to create one while single-campus mode is on", async () => {
     asFounder();
     h.holder.db.tables.app_config[0].single_campus_mode = true;
-    const res = await addUniversity("Second Campus", "second-campus");
+    const res = await addUniversity("Second Campus", "second-campus", "Test reason for the audit trail.");
     expect(res).toMatchObject({ ok: false });
     expect(h.holder.db.tables.universities.some((u: any) => u.slug === "second-campus")).toBe(false);
   });

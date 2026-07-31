@@ -86,7 +86,7 @@ describe("getCampusMode", () => {
 describe("addUniversity is gated by single-campus mode", () => {
   it("REFUSES while single_campus_mode is true, even for the founder with writes on", async () => {
     h.holder.db = db(true);
-    const res = await addUniversity("Some Other College", "some-other-college");
+    const res = await addUniversity("Some Other College", "some-other-college", "Test reason for the audit trail.");
 
     expect(res.ok).toBe(false);
     expect((res as any).error).toMatch(/single-campus mode/i);
@@ -94,14 +94,14 @@ describe("addUniversity is gated by single-campus mode", () => {
 
   it("creates NO university row when it refuses", async () => {
     h.holder.db = db(true);
-    await addUniversity("Some Other College", "some-other-college");
+    await addUniversity("Some Other College", "some-other-college", "Test reason for the audit trail.");
     expect(h.holder.db.tables.universities).toHaveLength(1);
     expect(h.holder.db.tables.universities[0].id).toBe(LONE_STAR);
   });
 
   it("records the refusal as a durable FAILURE audit event", async () => {
     h.holder.db = db(true);
-    await addUniversity("Some Other College", "some-other-college");
+    await addUniversity("Some Other College", "some-other-college", "Test reason for the audit trail.");
 
     const call = h.holder.db.rpcCalls.find((c: any) => c.fn === "admin_audit_log");
     expect(call).toBeTruthy();
@@ -112,13 +112,13 @@ describe("addUniversity is gated by single-campus mode", () => {
 
   it("refuses BEFORE validating input, so the gate cannot be probed with a valid name", async () => {
     h.holder.db = db(true);
-    const bad = await addUniversity("x", "!!!");
+    const bad = await addUniversity("x", "!!!", "Test reason for the audit trail.");
     expect((bad as any).error).toMatch(/single-campus mode/i);
   });
 
   it("is a GATE, not a removal — it works again when single-campus mode is off", async () => {
     h.holder.db = db(false);
-    const res = await addUniversity("Second Campus", "second-campus");
+    const res = await addUniversity("Second Campus", "second-campus", "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.universities).toHaveLength(2);
   });
@@ -126,13 +126,13 @@ describe("addUniversity is gated by single-campus mode", () => {
   it("still denies a non-founder regardless of campus mode", async () => {
     h.holder.db = db(false);
     h.getUser.mockResolvedValue({ data: { user: { id: "s", email: "s@my.edu" } } });
-    await expect(addUniversity("Nope", "nope")).rejects.toBeInstanceOf(SecureAdminError);
+    await expect(addUniversity("Nope", "nope", "Test reason for the audit trail.")).rejects.toBeInstanceOf(SecureAdminError);
   });
 
   it("still denies when the write kill switch is off", async () => {
     h.holder.db = db(false);
     process.env.ADMIN_WRITES_ENABLED = "false";
-    await expect(addUniversity("Nope", "nope")).rejects.toBeInstanceOf(SecureAdminError);
+    await expect(addUniversity("Nope", "nope", "Test reason for the audit trail.")).rejects.toBeInstanceOf(SecureAdminError);
     process.env.ADMIN_WRITES_ENABLED = "true";
   });
 });
@@ -146,13 +146,13 @@ describe("the rest of university administration is untouched", () => {
 
   it("still allows activate/deactivate", async () => {
     h.holder.db = db(true);
-    const res = await setUniversityActive(LONE_STAR, true);
+    const res = await setUniversityActive(LONE_STAR, true, "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
   });
 
   it("never changes launch_university_id", async () => {
     h.holder.db = db(true);
-    await addUniversity("Some Other College", "some-other-college");
+    await addUniversity("Some Other College", "some-other-college", "Test reason for the audit trail.");
     await editUniversity(LONE_STAR, { name: "Lone Star College" });
     expect(h.holder.db.tables.app_config[0].launch_university_id).toBe(LONE_STAR);
     expect(h.holder.db.tables.app_config[0].single_campus_mode).toBe(true);

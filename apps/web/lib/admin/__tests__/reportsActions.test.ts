@@ -76,7 +76,7 @@ describe("setReportStatus — canonical transitions", () => {
   it("rejects an unsupported status value", async () => {
     const res = await setReportStatus(R(1), "banned");
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/Unsupported/);
+    if (!res.ok) expect(res.error).toMatch(/Invalid report status/);
   });
 
   it("rejects an invalid report id", async () => {
