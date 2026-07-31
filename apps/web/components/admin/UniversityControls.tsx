@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "../shared/Modal";
 import { ConfirmAction } from "./ConfirmAction";
@@ -35,6 +35,8 @@ function UniversityForm({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  /** Synchronous re-entrancy latch, same rationale as ConfirmAction. */
+  const inFlight = useRef(false);
 
   const trimmedReason = reason.trim();
   const reasonValid = !requireReason || (trimmedReason.length >= 3 && trimmedReason.length <= 500);
@@ -44,6 +46,9 @@ function UniversityForm({
       setError("Enter a reason of at least 3 characters.");
       return;
     }
+    // Set BEFORE the async call so a same-tick second submit cannot re-enter.
+    if (inFlight.current) return;
+    inFlight.current = true;
     setPending(true);
     setError(null);
     onSubmit(name, slug, trimmedReason)
@@ -54,7 +59,10 @@ function UniversityForm({
         } else setError(res.error ?? "Something went wrong.");
       })
       .catch(() => setError("Something went wrong."))
-      .finally(() => setPending(false));
+      .finally(() => {
+        inFlight.current = false;
+        setPending(false);
+      });
   }
 
   return (

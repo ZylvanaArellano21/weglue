@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "../shared/Modal";
 import type { ActionResult } from "../../lib/admin/actions";
@@ -26,6 +26,14 @@ import type { ActionResult } from "../../lib/admin/actions";
  *
  * Cancelling closes the dialog without invoking `run` at all: no mutation, no
  * audit event of any kind.
+ *
+ * DUPLICATE-SUBMISSION GUARD. `pending` drives the visible loading state, but a
+ * React state flag cannot stop a SECOND call that happens in the same tick as
+ * the first — `setPending(true)` has not committed yet, so the button is not
+ * disabled and the handler re-enters. A native double-click is slow enough that
+ * React commits in between, but a programmatic or synthetic double-invoke is
+ * not. `inFlight` is a ref, so it is set SYNCHRONOUSLY and closes that window.
+ * The ref is the correctness guarantee; `pending` remains purely the visuals.
  */
 export const MIN_REASON = 3;
 export const MAX_REASON = 500;
@@ -61,6 +69,8 @@ export function ConfirmAction({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  /** Synchronous re-entrancy latch — see the note above. Never rendered. */
+  const inFlight = useRef(false);
 
   const trimmedReason = reason.trim();
   const reasonValid =
@@ -70,6 +80,9 @@ export function ConfirmAction({
     setOpen(false);
     setReason("");
     setError(null);
+    // Reopening must start clean even if a previous attempt threw before the
+    // finally block could run.
+    inFlight.current = false;
   }
 
   const pad = size === "xs" ? "px-2 py-1 text-xs" : "px-2.5 py-1.5 text-sm";
@@ -85,6 +98,11 @@ export function ConfirmAction({
       setError(`Enter a reason of at least ${MIN_REASON} characters.`);
       return;
     }
+    // Synchronous latch, BEFORE any await. A second invocation in the same tick
+    // returns here without calling the server action.
+    if (inFlight.current) return;
+    inFlight.current = true;
+
     setError(null);
     setPending(true);
     try {
@@ -98,6 +116,8 @@ export function ConfirmAction({
     } catch {
       setError("Something went wrong.");
     } finally {
+      // Released on success AND failure, so a failed attempt can be retried.
+      inFlight.current = false;
       setPending(false);
     }
   }

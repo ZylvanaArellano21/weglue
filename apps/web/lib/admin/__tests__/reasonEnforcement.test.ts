@@ -455,3 +455,109 @@ describe("ConfirmAction dialog contract (source-level)", () => {
     expect(src).toContain("Target");
   });
 });
+
+// ── Re-entrancy guard (duplicate-submission) ────────────────────────────────
+//
+// Browser QA proved a NATIVE double-click submits exactly once, because React
+// commits `pending` between the two clicks. It also proved that three
+// SYNCHRONOUS programmatic invocations in one tick got through, since the
+// disabled attribute had not been committed yet. `inFlight` is a ref, set
+// before any await, which closes that window. These assert the source contract;
+// the behavioural proof is the browser run recorded in the release report.
+
+describe("ConfirmAction re-entrancy guard (source-level)", () => {
+  const src = readFileSync(join(__dirname, "../../../components/admin/ConfirmAction.tsx"), "utf8");
+  const onConfirm = src.slice(src.indexOf("async function onConfirm"), src.indexOf("if (disabled)"));
+
+  it("uses a ref, not state, for the latch", () => {
+    expect(src).toContain("const inFlight = useRef(false)");
+    expect(src).toContain('import { useRef, useState, type ReactNode } from "react";');
+  });
+
+  it("checks and sets the latch BEFORE any await", () => {
+    const check = onConfirm.indexOf("if (inFlight.current) return;");
+    const set = onConfirm.indexOf("inFlight.current = true;");
+    const firstAwait = onConfirm.indexOf("await run(");
+    expect(check).toBeGreaterThan(-1);
+    expect(set).toBeGreaterThan(check);
+    expect(firstAwait).toBeGreaterThan(set);
+  });
+
+  it("releases the latch on success AND failure", () => {
+    const finallyBlock = onConfirm.slice(onConfirm.indexOf("} finally {"));
+    expect(finallyBlock).toContain("inFlight.current = false;");
+  });
+
+  it("clears the latch when the dialog closes, so reopening starts clean", () => {
+    const closeBody = src.slice(src.indexOf("function close()"), src.indexOf("const pad ="));
+    expect(closeBody).toContain("inFlight.current = false;");
+  });
+
+  it("keeps the visual loading state and disabled buttons unchanged", () => {
+    expect(src).toContain("disabled={pending || !reasonValid}");
+    expect(src).toContain('{pending ? "Working…" : confirmLabel}');
+    expect(onConfirm).toContain("setPending(true);");
+  });
+});
+
+describe("UniversityForm re-entrancy guard (source-level)", () => {
+  const src = readFileSync(join(__dirname, "../../../components/admin/UniversityControls.tsx"), "utf8");
+  const submit = src.slice(src.indexOf("function submit()"), src.indexOf("return ("));
+
+  it("latches synchronously before the async submit", () => {
+    expect(src).toContain("const inFlight = useRef(false)");
+    expect(submit.indexOf("inFlight.current = true;")).toBeLessThan(submit.indexOf("onSubmit(name, slug"));
+  });
+
+  it("releases the latch in finally", () => {
+    expect(submit).toContain("inFlight.current = false;");
+  });
+});
+
+// Behavioural simulation of the exact defect the guard closes: three
+// synchronous invocations of one handler instance must produce ONE call.
+describe("re-entrancy guard behaviour (simulated handler)", () => {
+  function makeHandler(run: () => Promise<void>) {
+    const inFlight = { current: false };
+    return async function onConfirm() {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      try {
+        await run();
+      } finally {
+        inFlight.current = false;
+      }
+    };
+  }
+
+  it("three synchronous invocations produce exactly one call", async () => {
+    let calls = 0;
+    const h = makeHandler(async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await Promise.all([h(), h(), h()]);
+    expect(calls).toBe(1);
+  });
+
+  it("allows a retry after the first attempt settles", async () => {
+    let calls = 0;
+    const h = makeHandler(async () => {
+      calls++;
+    });
+    await h();
+    await h();
+    expect(calls).toBe(2);
+  });
+
+  it("releases after a throw, so a failed attempt can be retried", async () => {
+    let calls = 0;
+    const h = makeHandler(async () => {
+      calls++;
+      throw new Error("server error");
+    });
+    await expect(h()).rejects.toThrow();
+    await expect(h()).rejects.toThrow();
+    expect(calls).toBe(2);
+  });
+});
