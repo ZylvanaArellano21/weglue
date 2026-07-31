@@ -229,12 +229,15 @@ export function MemberRowActions({
   role,
   officerCount,
   roleTitle,
+  targetLabel,
 }: {
   clubId: string;
   userId: string;
   role: string;
   officerCount: number;
   roleTitle: string | null;
+  /** Human identification of exactly who/what is affected, shown in the dialog. */
+  targetLabel: string;
 }) {
   const isOfficer = role === "officer";
   const lastOfficer = isOfficer && officerCount <= 1;
@@ -252,7 +255,9 @@ export function MemberRowActions({
             tone="danger"
             disabled={lastOfficer}
             disabledReason={lastOfficer ? "Cannot demote the club's only officer." : undefined}
-            run={() => setMembershipRole(clubId, userId, "member")}
+            requireReason
+            targetSummary={targetLabel}
+            run={(reason) => setMembershipRole(clubId, userId, "member", undefined, reason)}
           />
           <ConfirmAction
             label="Remove"
@@ -260,7 +265,7 @@ export function MemberRowActions({
             body="Officers must be demoted before removal."
             disabled
             disabledReason="Demote this officer to member first."
-            run={() => removeMembership(clubId, userId)}
+            run={(reason) => removeMembership(clubId, userId, reason)}
           />
         </>
       ) : (
@@ -272,7 +277,9 @@ export function MemberRowActions({
             body="This removes their membership and Members-chat access. They can be re-added later."
             confirmLabel="Remove"
             tone="danger"
-            run={() => removeMembership(clubId, userId)}
+            requireReason
+            targetSummary={targetLabel}
+            run={(reason) => removeMembership(clubId, userId, reason)}
           />
         </>
       )}

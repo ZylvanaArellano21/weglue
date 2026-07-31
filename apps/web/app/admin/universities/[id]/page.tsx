@@ -32,7 +32,7 @@ export default async function UniversityDetailPage({ params }: { params: { id: s
           </div>
           <div className="flex items-center gap-2">
             <EditUniversityDialog id={uni.id} name={uni.name} slug={uni.slug} />
-            <UniversityActiveToggle id={uni.id} isActive={uni.is_active} />
+            <UniversityActiveToggle id={uni.id} isActive={uni.is_active} name={uni.name} />
           </div>
         </div>
 

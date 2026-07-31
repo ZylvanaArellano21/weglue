@@ -65,7 +65,7 @@ export default async function MembershipDetailPage({ params }: { params: { id: s
             Role and membership changes write the canonical <code className="rounded bg-gray-100 px-1 text-xs">club_members</code> row
             (officer authority) and keep the <code className="rounded bg-gray-100 px-1 text-xs">club_officers</code> display roster in sync.
           </p>
-          <MemberRowActions clubId={m.club_id} userId={m.user_id} role={m.role} officerCount={officerCount} roleTitle={m.officer_title} />
+          <MemberRowActions clubId={m.club_id} userId={m.user_id} role={m.role} officerCount={officerCount} roleTitle={m.officer_title} targetLabel={`${m.full_name ?? m.username ?? m.user_id} — ${m.club_name ?? "club"}`} />
         </div>
       </SectionCard>
     </div>

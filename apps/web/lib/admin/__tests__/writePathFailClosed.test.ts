@@ -74,33 +74,33 @@ const NOW = () => Math.floor(Date.now() / 1000);
 const MUTATIONS: Array<[string, () => Promise<unknown>]> = [
   // Memberships + officers (actions.ts)
   ["membership.add", () => addMembership(ID(1), ID(2))],
-  ["membership.remove", () => removeMembership(ID(1), ID(2))],
+  ["membership.remove", () => removeMembership(ID(1), ID(2), "Test reason for the audit trail.")],
   ["officer.promote", () => setMembershipRole(ID(1), ID(2), "officer", "President")],
-  ["officer.demote", () => setMembershipRole(ID(1), ID(2), "member")],
+  ["officer.demote", () => setMembershipRole(ID(1), ID(2), "member", undefined, "Test reason for the audit trail.")],
   ["officer.add", () => addOfficer(ID(1), ID(2), "President")],
   ["officer.editTitle", () => editOfficerTitle(ID(1), ID(2), "Treasurer")],
   // Gluemates
-  ["gluemate.remove", () => removeGluemate(ID(1), ID(2))],
+  ["gluemate.remove", () => removeGluemate(ID(1), ID(2), "Test reason for the audit trail.")],
   // Universities
-  ["university.add", () => addUniversity("Test University", "test-university")],
+  ["university.add", () => addUniversity("Test University", "test-university", "Test reason for the audit trail.")],
   ["university.edit", () => editUniversity(ID(1), { name: "Renamed" })],
-  ["university.setActive", () => setUniversityActive(ID(1), false)],
+  ["university.setActive", () => setUniversityActive(ID(1), false, "Test reason for the audit trail.")],
   // Content (contentActions.ts)
   ["post.editCaption", () => editPostCaption(ID(1), "caption")],
-  ["post.removeFromClub", () => removePostFromClub(ID(1), ID(2))],
+  ["post.removeFromClub", () => removePostFromClub(ID(1), ID(2), "Test reason for the audit trail.")],
   ["comment.edit", () => editCommentContent(ID(1), "content")],
   ["event.edit", () => editEvent(ID(1), { title: "Renamed event" })],
   ["rsvp.upsert", () => upsertRsvp(ID(1), ID(2), "going")],
-  ["rsvp.remove", () => removeRsvp(ID(1), ID(2))],
+  ["rsvp.remove", () => removeRsvp(ID(1), ID(2), "Test reason for the audit trail.")],
   // Messaging (messagingActions.ts)
   ["channel.create", () => createChannel(ID(1), "general")],
   ["channel.rename", () => renameChannel(ID(1), "renamed")],
   ["channel.setPermission", () => setChannelPermission(ID(1), "everyone")],
-  ["channel.deleteEmpty", () => deleteEmptyChannel(ID(1))],
+  ["channel.deleteEmpty", () => deleteEmptyChannel(ID(1), "Test reason for the audit trail.")],
   ["notification.setRead", () => setNotificationRead(ID(1), true)],
   // Reports + deleted content
   ["report.setStatus", () => setReportStatus(ID(1), "resolved")],
-  ["club.reactivate", () => reactivateClub(ID(1))],
+  ["club.reactivate", () => reactivateClub(ID(1), "Test reason for the audit trail.")],
 ];
 
 // Sensitive reads — message bodies. Not writes; still fully gated + recent MFA.

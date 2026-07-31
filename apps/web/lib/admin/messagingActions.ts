@@ -38,6 +38,7 @@
 import { createAdminClient } from "../supabase/admin";
 import { requireSecureAdmin, requireRecentMfa } from "./secureAdmin";
 import { adminAudit } from "./audit";
+import { runAtomicMutation } from "./atomicMutation";
 import type { ActionResult } from "./actions";
 import type { User } from "@supabase/supabase-js";
 
@@ -45,8 +46,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function isUuid(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
 }
-function fail(action: string, actor: User, error: string, target: Record<string, unknown>): { ok: false; error: string } {
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
+async function fail(action: string, actor: User, error: string, target: Record<string, unknown>): Promise<{ ok: false; error: string }> {
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
   return { ok: false, error };
 }
 
@@ -91,7 +92,7 @@ export async function revealMessageBody(messageId: string): Promise<ActionResult
 
   // Retained-evidence protection: deleted rows never reveal original content.
   if (m.deleted_at) {
-    adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { messageId, deleted: true }, ok: false, error: "deleted_denied" });
+    await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { messageId, deleted: true }, ok: false, error: "deleted_denied" });
     return { ok: false, error: "This message is deleted. Retained deleted-message evidence is unavailable until the approved privacy backend is deployed." };
   }
 
@@ -102,7 +103,7 @@ export async function revealMessageBody(messageId: string): Promise<ActionResult
   }
 
   // Audit records the reveal happened + content byte length — NEVER the content.
-  adminAudit({
+  await adminAudit({
     action,
     actorId: actor.id,
     actorEmail: actor.email,
@@ -170,7 +171,7 @@ export async function searchMessageContent(query: string): Promise<ActionResult<
   }
 
   // Audit records the search happened + result count — NEVER the term/content.
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { len: term.length, results: rows.length }, ok: true });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { len: term.length, results: rows.length }, ok: true });
 
   const hits: MessageContentHit[] = rows.map((r) => {
     const t = (r.content ?? "").trim();
@@ -189,6 +190,9 @@ export async function searchMessageContent(query: string): Promise<ActionResult<
 // ── Channel management (safe canonical lifecycle) ────────────────────────────
 
 const CHANNEL_NAME_MAX = 60;
+// `certain` is deliberately absent: that mode is driven by channel_posters
+// rows, managed in-app, and must never be set from the dashboard.
+const CHANNEL_PERMISSIONS = ["everyone", "officers"] as const;
 
 /** Normalize a channel name exactly like the canonical create/rename RPCs (041). */
 function cleanChannelName(raw: string): string {
@@ -209,148 +213,89 @@ async function loadConversationForChannelOp(admin: ReturnType<typeof createAdmin
  */
 export async function createChannel(conversationId: string, name: string): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
-  const action = "channel.create";
-  const target = { conversationId, name };
-  if (!isUuid(conversationId)) return fail(action, actor, "Invalid conversation id.", target);
+  const target = { conversationId };
+  if (!isUuid(conversationId)) return fail("channel.create", actor, "Invalid conversation id.", target);
   const clean = cleanChannelName(name ?? "");
-  if (clean.length < 1) return fail(action, actor, "Channel name must contain letters or numbers.", target);
-  if (clean.length > CHANNEL_NAME_MAX) return fail(action, actor, `Channel name must be ${CHANNEL_NAME_MAX} characters or fewer.`, target);
+  if (clean.length < 1) return fail("channel.create", actor, "Channel name must contain letters or numbers.", target);
+  if (clean.length > CHANNEL_NAME_MAX) {
+    return fail("channel.create", actor, `Channel name must be ${CHANNEL_NAME_MAX} characters or fewer.`, target);
+  }
 
+  // Conversation-shape rules are a product concern, checked before the
+  // transaction: channels exist only on club and custom-group conversations.
   const admin = createAdminClient();
-  const conv = await loadConversationForChannelOp(admin, conversationId);
-  if (!conv) return fail(action, actor, "Conversation not found.", target);
-  if (conv.deleted_at) return fail(action, actor, "Cannot add a channel to an archived conversation.", target);
-  if (!["club_group", "officer_chat", "group"].includes(conv.type)) {
-    return fail(action, actor, "Channels are only supported on club and custom-group conversations.", target);
-  }
-  if ((conv.type === "club_group" || conv.type === "officer_chat") && !conv.club_id) {
-    return fail(action, actor, "Club conversation is missing its club relationship.", target);
-  }
-
-  const { data: maxRow } = await admin
-    .from("conversation_channels")
-    .select("display_order")
-    .eq("conversation_id", conversationId)
-    .order("display_order", { ascending: false })
-    .limit(1)
+  const { data: conv } = await admin
+    .from("conversations")
+    .select("id, type, club_id, deleted_at")
+    .eq("id", conversationId)
     .maybeSingle();
-  const nextOrder = ((maxRow as any)?.display_order ?? 0) + 1;
+  if (!conv) return fail("channel.create", actor, "Conversation not found.", target);
+  if ((conv as any).deleted_at) {
+    return fail("channel.create", actor, "Cannot add a channel to an archived conversation.", target);
+  }
+  if (!["club_group", "officer_chat", "group"].includes((conv as any).type)) {
+    return fail("channel.create", actor, "Channels are only supported on club and custom-group conversations.", target);
+  }
+  if (["club_group", "officer_chat"].includes((conv as any).type) && !(conv as any).club_id) {
+    return fail("channel.create", actor, "Club conversation is missing its club relationship.", target);
+  }
 
-  const { data: row, error } = await admin
-    .from("conversation_channels")
-    .insert({
-      conversation_id: conversationId,
-      name: clean,
-      display_order: nextOrder,
-      is_default: false,
-      is_restricted: false,
-      kind: "channel",
-      post_permission: "everyone",
-      created_by: actor.id,
-    })
-    .select("id, name, kind, conversation_id")
-    .maybeSingle();
-  if (error || !row) return fail(action, actor, "Could not create the channel.", target);
-
-  const { data: readBack } = await admin.from("conversation_channels").select("id, name").eq("id", (row as any).id).maybeSingle();
-  if (!readBack) return fail(action, actor, "Channel creation did not take effect.", target);
-
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { conversationId, name: clean }, ok: true, after: row });
-  return { ok: true, data: row };
+  return runAtomicMutation({
+    action: "channel.create",
+    actor,
+    rpc: "admin_tx_channel_create",
+    args: { p_conversation_id: conversationId, p_name: clean },
+    target: { conversationId },
+  });
 }
 
-/** Rename a hashtag channel (never the Main chat). Read-back + audit. */
+/** Rename a channel. The Main chat cannot be renamed. */
 export async function renameChannel(channelId: string, name: string): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
-  const action = "channel.rename";
-  const target = { channelId, name };
-  if (!isUuid(channelId)) return fail(action, actor, "Invalid channel id.", target);
-  const clean = cleanChannelName(name ?? "");
-  if (clean.length < 1) return fail(action, actor, "Channel name must contain letters or numbers.", target);
-  if (clean.length > CHANNEL_NAME_MAX) return fail(action, actor, `Channel name must be ${CHANNEL_NAME_MAX} characters or fewer.`, target);
-
-  const admin = createAdminClient();
-  const { data: before } = await admin.from("conversation_channels").select("id, name, kind").eq("id", channelId).maybeSingle();
-  if (!before) return fail(action, actor, "Channel not found.", target);
-  if ((before as any).kind === "main") return fail(action, actor, "The Main chat cannot be renamed.", target);
-
-  const { data: row, error } = await admin
-    .from("conversation_channels")
-    .update({ name: clean })
-    .eq("id", channelId)
-    .neq("kind", "main")
-    .select("id, name")
-    .maybeSingle();
-  if (error || !row) return fail(action, actor, "Could not rename the channel.", target);
-  if ((row as any).name !== clean) return fail(action, actor, "Rename did not take effect.", target);
-
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { channelId, name: clean }, ok: true, before, after: row });
-  return { ok: true, data: row };
+  if (!isUuid(channelId)) return fail("channel.rename", actor, "Invalid channel id.", { channelId });
+  return runAtomicMutation({
+    action: "channel.rename",
+    actor,
+    rpc: "admin_tx_channel_rename",
+    args: { p_channel_id: channelId, p_name: cleanChannelName(name ?? "") },
+    target: { channelId },
+  });
 }
 
-const CHANNEL_PERMISSIONS = ["everyone", "officers"] as const;
-
-/**
- * Set a channel's posting permission to `everyone` or `officers`. The 'certain'
- * allow-list mode is intentionally NOT settable here (managing a per-channel
- * poster list is an officer-side flow); Main chat always stays `everyone`.
- */
+/** Change who may post in a channel. */
 export async function setChannelPermission(channelId: string, permission: string): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
-  const action = "channel.setPermission";
   const target = { channelId, permission };
-  if (!isUuid(channelId)) return fail(action, actor, "Invalid channel id.", target);
+  if (!isUuid(channelId)) return fail("channel.setPermission", actor, "Invalid channel id.", target);
+  // `certain` is managed in-app through channel_posters, never set from here.
   if (!CHANNEL_PERMISSIONS.includes(permission as (typeof CHANNEL_PERMISSIONS)[number])) {
-    return fail(action, actor, "Permission must be 'everyone' or 'officers'.", target);
+    return fail("channel.setPermission", actor, "Permission must be 'everyone' or 'officers'.", target);
   }
-
-  const admin = createAdminClient();
-  const { data: before } = await admin.from("conversation_channels").select("id, kind, post_permission, is_restricted").eq("id", channelId).maybeSingle();
-  if (!before) return fail(action, actor, "Channel not found.", target);
-  if ((before as any).kind === "main") return fail(action, actor, "The Main chat always allows everyone to post.", target);
-
-  const { data: row, error } = await admin
-    .from("conversation_channels")
-    .update({ post_permission: permission, is_restricted: permission === "officers" })
-    .eq("id", channelId)
-    .neq("kind", "main")
-    .select("id, post_permission, is_restricted")
-    .maybeSingle();
-  if (error || !row) return fail(action, actor, "Could not update the channel permission.", target);
-  if ((row as any).post_permission !== permission) return fail(action, actor, "Permission change did not take effect.", target);
-
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
-  return { ok: true, data: row };
+  return runAtomicMutation({
+    action: "channel.setPermission",
+    actor,
+    rpc: "admin_tx_channel_set_permission",
+    args: { p_channel_id: channelId, p_permission: permission },
+    target: { channelId, permission },
+  });
 }
 
 /**
- * Remove an EMPTY hashtag channel through the approved lifecycle. Refused if the
- * channel is the Main chat OR if it holds any message row (active or soft-deleted)
- * — so this never cascades a message delete and never touches message history.
+ * Delete a channel that holds NO messages. Destructive, so a reason is required.
+ * The emptiness check happens inside the transaction, so a message arriving
+ * concurrently cannot slip past a check made moments earlier.
  */
-export async function deleteEmptyChannel(channelId: string): Promise<ActionResult> {
+export async function deleteEmptyChannel(channelId: string, reason: string): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
-  const action = "channel.deleteEmpty";
-  const target = { channelId };
-  if (!isUuid(channelId)) return fail(action, actor, "Invalid channel id.", target);
-
-  const admin = createAdminClient();
-  const { data: before } = await admin.from("conversation_channels").select("id, name, kind, conversation_id").eq("id", channelId).maybeSingle();
-  if (!before) return fail(action, actor, "Channel not found.", target);
-  if ((before as any).kind === "main") return fail(action, actor, "The Main chat cannot be removed.", target);
-
-  const { count } = await admin.from("messages").select("id", { count: "exact", head: true }).eq("channel_id", channelId);
-  if ((count ?? 0) > 0) {
-    return fail(action, actor, "This channel still holds messages. Removing a non-empty channel is disabled until the approved deleted-message lifecycle is deployed.", target);
-  }
-
-  const { error } = await admin.from("conversation_channels").delete().eq("id", channelId).neq("kind", "main");
-  if (error) return fail(action, actor, "Could not remove the channel.", target);
-
-  const { data: check } = await admin.from("conversation_channels").select("id").eq("id", channelId).maybeSingle();
-  const removed = !check;
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: removed, before, after: null });
-  return removed ? { ok: true, data: { removed: true } } : { ok: false, error: "Removal did not take effect." };
+  if (!isUuid(channelId)) return fail("channel.deleteEmpty", actor, "Invalid channel id.", { channelId });
+  return runAtomicMutation({
+    action: "channel.deleteEmpty",
+    actor,
+    reason,
+    rpc: "admin_tx_channel_delete_empty",
+    args: { p_channel_id: channelId },
+    target: { channelId },
+  });
 }
 
 // ── Notification read-state (canonical, safe) ────────────────────────────────
@@ -358,28 +303,14 @@ export async function deleteEmptyChannel(channelId: string): Promise<ActionResul
 /** Mark a single notification read/unread (notifications.read + read_at). */
 export async function setNotificationRead(notificationId: string, read: boolean): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
-  const action = "notification.setRead";
-  const target = { notificationId, read };
-  if (!isUuid(notificationId)) return fail(action, actor, "Invalid notification id.", target);
-  if (typeof read !== "boolean") return fail(action, actor, "read must be a boolean.", target);
-
-  const admin = createAdminClient();
-  const { data: before } = await admin.from("notifications").select("id, read").eq("id", notificationId).maybeSingle();
-  if (!before) return fail(action, actor, "Notification not found.", target);
-
-  const update: Record<string, unknown> = { read };
-  if (read) update.read_at = new Date().toISOString();
-  else update.read_at = null;
-
-  const { data: row, error } = await admin
-    .from("notifications")
-    .update(update)
-    .eq("id", notificationId)
-    .select("id, read")
-    .maybeSingle();
-  if (error || !row) return fail(action, actor, "Could not update the notification.", target);
-  if ((row as any).read !== read) return fail(action, actor, "Update did not take effect.", target);
-
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
-  return { ok: true, data: row };
+  if (!isUuid(notificationId)) {
+    return fail("notification.setRead", actor, "Invalid notification id.", { notificationId, read });
+  }
+  return runAtomicMutation({
+    action: "notification.setRead",
+    actor,
+    rpc: "admin_tx_notification_set_read",
+    args: { p_notification_id: notificationId, p_read: !!read },
+    target: { notificationId, read },
+  });
 }

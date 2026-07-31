@@ -93,6 +93,7 @@ export default async function AdminOfficersPage({
                       role="officer"
                       officerCount={officerCounts.get(o.club_id) ?? 1}
                       roleTitle={o.officer_title}
+                      targetLabel={`${o.full_name ?? o.username ?? o.user_id} — ${o.club_name}`}
                     />
                   </Td>
                 </tr>

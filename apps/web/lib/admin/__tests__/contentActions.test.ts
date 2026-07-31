@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { makeAdminTxRpcs } from "./fakeAdminTx";
 
 // Same harness shape as actions.test.ts: mock the SSR client (getUser + MFA aal)
 // and inject an in-memory PostgREST-style fake for the service-role client.
@@ -112,7 +113,25 @@ function makeDb(initial: Record<string, any[]>) {
     }
     return b;
   }
-  return { from, tables };
+  // migration-056 atomic RPCs, in-memory. Real atomicity is proven against
+  // Postgres in supabase/scripts/test_056_atomic_admin_mutations.sql.
+  let txSeq = 9000;
+  const auditRows: any[] = [];
+  const txRpcs = makeAdminTxRpcs({ tables, auditRows, newId: () => `tx-${txSeq++}` });
+  const rpcCalls: { fn: string; args: any }[] = [];
+  const rpc = async (fn: string, args: any) => {
+    rpcCalls.push({ fn, args });
+    const handler = txRpcs[fn];
+    if (!handler) return { data: `audit-${rpcCalls.length}`, error: null };
+    try {
+      return { data: handler(args), error: null };
+    } catch (e) {
+      // Mirrors Postgres: the audit insert raised, rolling the mutation back.
+      return { data: null, error: { message: e instanceof Error ? e.message : "tx failed" } };
+    }
+  };
+
+  return { from, tables, rpc, rpcCalls, auditRows };
 }
 
 function seed() {
@@ -227,7 +246,7 @@ describe("editPostCaption", () => {
 describe("removePostFromClub (canonical unglue, not a delete)", () => {
   it("untags the primary club and cleans tags + photos, keeping the post row", async () => {
     asFounder();
-    const res = await removePostFromClub(P(1), C(1));
+    const res = await removePostFromClub(P(1), C(1), "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     const post = h.holder.db.tables.posts.find((p: any) => p.id === P(1));
     expect(post).toBeTruthy(); // NOT deleted
@@ -236,7 +255,7 @@ describe("removePostFromClub (canonical unglue, not a delete)", () => {
   });
   it("removes an extra (non-primary) club tag", async () => {
     asFounder();
-    const res = await removePostFromClub(P(1), C(2)); // C(2) is a post_club_tags entry
+    const res = await removePostFromClub(P(1), C(2), "Test reason for the audit trail."); // C(2) is a post_club_tags entry
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.post_club_tags.some((t: any) => t.post_id === P(1) && t.club_id === C(2))).toBe(false);
     // Primary tag untouched.
@@ -244,7 +263,7 @@ describe("removePostFromClub (canonical unglue, not a delete)", () => {
   });
   it("rejects removing a club the post is not tagged to", async () => {
     asFounder();
-    const res = await removePostFromClub(P(2), C(1)); // P(2) has no club
+    const res = await removePostFromClub(P(2), C(1), "Test reason for the audit trail."); // P(2) has no club
     expect(res).toMatchObject({ ok: false });
   });
 });
@@ -329,20 +348,20 @@ describe("RSVPs", () => {
   });
   it("removes an existing RSVP", async () => {
     asFounder();
-    const res = await removeRsvp(EV(1), US(1));
+    const res = await removeRsvp(EV(1), US(1), "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.event_rsvps.some((r: any) => r.event_id === EV(1) && r.user_id === US(1))).toBe(false);
   });
   it("rejects removing an RSVP that does not exist", async () => {
     asFounder();
-    const res = await removeRsvp(EV(1), US(2));
+    const res = await removeRsvp(EV(1), US(2), "Test reason for the audit trail.");
     expect(res).toMatchObject({ ok: false });
   });
   it("denies RSVP writes when the write kill switch is off", async () => {
     asFounder();
     process.env.ADMIN_WRITES_ENABLED = "false";
     await expect(upsertRsvp(EV(1), US(2), "going")).rejects.toMatchObject({ reason: "writes_disabled" });
-    await expect(removeRsvp(EV(1), US(1))).rejects.toMatchObject({ reason: "writes_disabled" });
+    await expect(removeRsvp(EV(1), US(1), "Test reason for the audit trail.")).rejects.toMatchObject({ reason: "writes_disabled" });
   });
 });
 

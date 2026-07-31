@@ -136,6 +136,7 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
                   role={m.role}
                   officerCount={club.officerCount}
                   roleTitle={m.officer_title}
+                  targetLabel={`${m.full_name ?? m.username ?? m.user_id} — ${club.name}`}
                 />
               </Td>
             </tr>

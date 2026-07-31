@@ -1,13 +1,20 @@
 // ============================================================================
-// Day 8 — action-layer contract for the migration-054 officer RPCs
+// Day 8 / Day 10A — action-layer contract for officer changes
 // ============================================================================
 //
-// The atomicity and concurrency guarantees are proven against real Postgres in
-// `supabase/scripts/test_054_last_officer.sql` (advisory lock, re-count,
-// cascade exemptions, 2-way and 4-way races). THIS suite covers the other half:
-// that the Server Actions route officer changes through the RPCs at all, map
-// every status to safe founder-facing wording, and never fall back to the old
-// check-then-write path.
+// The atomicity and concurrency guarantees are proven against real Postgres:
+// the officer floor in `supabase/scripts/test_054_last_officer.sql` (advisory
+// lock, re-count, cascade exemptions, 2-way and 4-way races), and mutation +
+// audit atomicity in `supabase/scripts/test_056_atomic_admin_mutations.sql`.
+//
+// THIS suite covers the other half: that the Server Actions route officer
+// changes through the DATABASE at all — never a check-then-write in JavaScript —
+// and map every status to safe founder-facing wording.
+//
+// DAY 10A: the actions now call the migration-056 `admin_tx_*` wrappers, which
+// call the 054 RPCs internally and write the audit row in the SAME transaction.
+// The assertions below therefore target the admin_tx_* boundary; the 054 call
+// still happens, one layer deeper, inside Postgres.
 // ============================================================================
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -76,32 +83,39 @@ describe("officer changes go through the migration-054 RPCs", () => {
   it("demote calls admin_set_club_member_role rather than writing the table", async () => {
     asFounder();
     h.holder.db = stubDb({ club_members: { id: "m1", role: "officer" } });
-    h.rpc.mockResolvedValue({ data: "ok", error: null });
+    h.rpc.mockResolvedValue({ data: { status: "ok" }, error: null });
 
-    const res = await setMembershipRole(CLUB, USER, "member");
+    const res = await setMembershipRole(CLUB, USER, "member", undefined, "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
-    expect(h.rpc).toHaveBeenCalledWith("admin_set_club_member_role", {
-      p_club_id: CLUB,
-      p_user_id: USER,
-      p_role: "member",
-      p_role_title: "Officer",
-    });
+    expect(h.rpc).toHaveBeenCalledWith(
+      "admin_tx_member_role_set",
+      expect.objectContaining({
+        p_actor_id: FOUNDER.id,
+        p_actor_email: FOUNDER.email,
+        p_club_id: CLUB,
+        p_user_id: USER,
+        p_role: "member",
+        p_reason: "Test reason for the audit trail.",
+      })
+    );
   });
 
   it("add-officer asks the RPC to create the membership atomically", async () => {
     asFounder();
     h.holder.db = stubDb({ club_members: { id: "m9", role: "officer" } });
-    h.rpc.mockResolvedValue({ data: "ok", error: null });
+    h.rpc.mockResolvedValue({ data: { status: "ok" }, error: null });
 
     const res = await addOfficer(CLUB, USER, "President");
     expect(res.ok).toBe(true);
-    expect(h.rpc).toHaveBeenCalledWith("admin_set_club_member_role", {
-      p_club_id: CLUB,
-      p_user_id: USER,
-      p_role: "officer",
-      p_role_title: "President",
-      p_add_if_missing: true,
-    });
+    expect(h.rpc).toHaveBeenCalledWith(
+      "admin_tx_officer_add",
+      expect.objectContaining({
+        p_actor_id: FOUNDER.id,
+        p_club_id: CLUB,
+        p_user_id: USER,
+        p_role_title: "President",
+      })
+    );
   });
 
   it("member removal goes through admin_remove_club_member", async () => {
@@ -117,14 +131,19 @@ describe("officer changes go through the migration-054 RPCs", () => {
       };
       return t;
     };
-    h.rpc.mockResolvedValue({ data: "ok", error: null });
+    h.rpc.mockResolvedValue({ data: { status: "ok" }, error: null });
 
-    const res = await removeMembership(CLUB, USER);
+    const res = await removeMembership(CLUB, USER, "Test reason for the audit trail.");
     expect(res.ok).toBe(true);
-    expect(h.rpc).toHaveBeenCalledWith("admin_remove_club_member", {
-      p_club_id: CLUB,
-      p_user_id: USER,
-    });
+    expect(h.rpc).toHaveBeenCalledWith(
+      "admin_tx_membership_remove",
+      expect.objectContaining({
+        p_actor_id: FOUNDER.id,
+        p_club_id: CLUB,
+        p_user_id: USER,
+        p_reason: "Test reason for the audit trail.",
+      })
+    );
   });
 });
 
@@ -142,9 +161,9 @@ describe("RPC statuses map to safe founder-facing wording", () => {
   it.each(cases)("status %s produces a clear message", async (status, expected) => {
     asFounder();
     h.holder.db = stubDb({ club_members: { id: "m1", role: "officer" } });
-    h.rpc.mockResolvedValue({ data: status, error: null });
+    h.rpc.mockResolvedValue({ data: { status }, error: null });
 
-    const res = await setMembershipRole(CLUB, USER, "member");
+    const res = await setMembershipRole(CLUB, USER, "member", undefined, "Test reason for the audit trail.");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(expected);
   });
@@ -154,7 +173,7 @@ describe("RPC statuses map to safe founder-facing wording", () => {
     h.holder.db = stubDb({ club_members: { id: "m1", role: "officer" } });
     h.rpc.mockResolvedValue({ data: "something_new", error: null });
 
-    const res = await setMembershipRole(CLUB, USER, "member");
+    const res = await setMembershipRole(CLUB, USER, "member", undefined, "Test reason for the audit trail.");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe("Could not complete this change.");
   });
@@ -167,10 +186,10 @@ describe("RPC statuses map to safe founder-facing wording", () => {
       error: { message: 'club_last_officer', code: "23514", details: "admin_set_club_member_role" },
     });
 
-    const res = await setMembershipRole(CLUB, USER, "member");
+    const res = await setMembershipRole(CLUB, USER, "member", undefined, "Test reason for the audit trail.");
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error).toBe("Could not demote officer.");
+      expect(res.error).toBe("Could not complete this change.");
       expect(res.error).not.toMatch(/23514|admin_set_club_member_role|club_last_officer/);
     }
   });
@@ -182,7 +201,7 @@ describe("the gate still comes first", () => {
     delete process.env.ADMIN_WRITES_ENABLED; // production posture during Day 8
     h.holder.db = stubDb({});
 
-    await expect(setMembershipRole(CLUB, USER, "member")).rejects.toMatchObject({
+    await expect(setMembershipRole(CLUB, USER, "member", undefined, "Test reason for the audit trail.")).rejects.toMatchObject({
       reason: "writes_disabled",
     });
     expect(h.rpc).not.toHaveBeenCalled();
@@ -202,7 +221,7 @@ describe("the gate still comes first", () => {
     });
     h.holder.db = stubDb({});
 
-    await expect(setMembershipRole(CLUB, USER, "member")).rejects.toMatchObject({
+    await expect(setMembershipRole(CLUB, USER, "member", undefined, "Test reason for the audit trail.")).rejects.toMatchObject({
       reason: "session_expired",
     });
     expect(h.rpc).not.toHaveBeenCalled();

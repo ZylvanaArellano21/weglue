@@ -16,12 +16,12 @@
 //
 // AUDIT HISTORY
 // -------------
-// There is NO canonical append-only audit table in production (audit.ts emits
-// structured single-line JSON to the server log; see docs). We do NOT add a
-// migration here because the separate migration 051 is unsequenced/undeployed.
-// getAuditStatus() reports this honestly: which action namespaces currently emit
-// structured audit events, that persisted historical queries are unavailable,
-// and that the append-only table is deferred to the Day-6/final backlog.
+// Moved out of this module in Day 10A. The append-only `admin_audit_events`
+// table (migration 055) is now the audit trail, and it is read through
+// lib/admin/auditData.ts. This module retains ONLY edit history, which remains
+// a derived, best-effort view and is a different thing entirely: edit history
+// says "something changed at this time", audit history says "this administrator
+// did this, for this reason".
 // ============================================================================
 
 if (typeof window !== "undefined") {
@@ -210,41 +210,9 @@ export async function listEditHistory(params: ListEditHistoryParams = {}): Promi
   return { rows: rows.slice(from, from + PAGE_SIZE), total, page, pageSize: PAGE_SIZE };
 }
 
-// ── Audit History status (honest — no canonical audit table exists) ──────────
-
-export interface AuditActionCoverage {
-  namespace: string;
-  description: string;
-}
-
-export interface AuditStatus {
-  hasCanonicalTable: false;
-  /** Structured audit events are emitted to the server log (greppable). */
-  structuredLoggingActive: true;
-  logTag: string;
-  coverage: AuditActionCoverage[];
-  persistedQueriesAvailable: false;
-  deferredRequirement: string;
-}
-
-export async function getAuditStatus(): Promise<AuditStatus> {
-  await requireSecureAdmin();
-  return {
-    hasCanonicalTable: false,
-    structuredLoggingActive: true,
-    logTag: "admin_audit",
-    coverage: [
-      { namespace: "membership.*", description: "Add / remove / promote / demote club memberships" },
-      { namespace: "club.*", description: "Club edits and university activate/deactivate" },
-      { namespace: "post.* / comment.*", description: "Caption/comment edits and remove-from-club" },
-      { namespace: "event.* / rsvp.*", description: "Event field edits and RSVP add/update/remove" },
-      { namespace: "channel.* / notification.*", description: "Channel lifecycle and notification read-state" },
-      { namespace: "message.revealBody", description: "Recent-MFA message-body reveal (id + byte length only)" },
-      { namespace: "report.setStatus", description: "Report moderation transitions (Day 5)" },
-      { namespace: "deletedContent.reactivateClub", description: "Deactivated-club restore (Day 5)" },
-    ],
-    persistedQueriesAvailable: false,
-    deferredRequirement:
-      "An append-only admin_audit table (actor, action, entity, result, request id, timestamp) must be added AFTER migration sequencing is reconciled with the separate, undeployed migration 051. Until then, the durable trail lives in the server logs under the admin_audit tag; browser events are never treated as permanent audit history.",
-  };
-}
+// ── Audit History ────────────────────────────────────────────────────────────
+// Audit History now reads the DURABLE table (migration 055) through
+// lib/admin/auditData.ts. The former getAuditStatus() helper — which reported
+// "no canonical audit table exists" — was removed rather than left in place,
+// because that statement stopped being true and a helper that misdescribes the
+// system is worse than no helper at all.

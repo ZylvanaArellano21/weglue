@@ -28,7 +28,9 @@ export function RemoveGluemateButton({
       confirmLabel="Remove"
       tone="danger"
       size="xs"
-      run={() => removeGluemate(userAId, userBId)}
+      requireReason
+      targetSummary={`${nameA} ↔ ${nameB}`}
+      run={(reason) => removeGluemate(userAId, userBId, reason)}
     />
   );
 }

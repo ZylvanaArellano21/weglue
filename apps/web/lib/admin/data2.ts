@@ -19,6 +19,58 @@ function fmtIds(ids: string[]): string {
   return `(${ids.join(",")})`;
 }
 
+// ── Campus mode ──────────────────────────────────────────────────────────────
+
+export interface CampusMode {
+  singleCampusMode: boolean;
+  launchUniversityId: string | null;
+  launchUniversityName: string | null;
+}
+
+/**
+ * Read the canonical single-campus configuration (`app_config`).
+ *
+ * We Glue runs on exactly one campus (Lone Star College). While
+ * `single_campus_mode` is true, creating a second university is not a
+ * supported operation: nothing in signup, discovery, recommendations or the
+ * student apps is built to route across campuses yet, so an extra row would be
+ * inert at best and misleading at worst. The Universities screen uses this to
+ * gate the Add control, and `addUniversity()` refuses on the same signal so the
+ * rule holds even if the UI is bypassed.
+ *
+ * Fails CLOSED: if app_config cannot be read, single-campus is assumed.
+ */
+export async function getCampusMode(): Promise<CampusMode> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("app_config")
+    .select("single_campus_mode, launch_university_id")
+    .maybeSingle();
+
+  if (error || !data) {
+    return { singleCampusMode: true, launchUniversityId: null, launchUniversityName: null };
+  }
+
+  const cfg = data as { single_campus_mode: boolean | null; launch_university_id: string | null };
+  let name: string | null = null;
+  if (cfg.launch_university_id) {
+    const { data: uni } = await admin
+      .from("universities")
+      .select("name")
+      .eq("id", cfg.launch_university_id)
+      .maybeSingle();
+    name = (uni as any)?.name ?? null;
+  }
+
+  return {
+    singleCampusMode: cfg.single_campus_mode !== false,
+    launchUniversityId: cfg.launch_university_id ?? null,
+    launchUniversityName: name,
+  };
+}
+
 /** Club options for filter dropdowns (capped; a searchable picker is the scale answer). */
 export async function listClubOptions(): Promise<{ id: string; name: string }[]> {
   await requireSecureAdmin();

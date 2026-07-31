@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { makeAdminTxRpcs } from "./fakeAdminTx";
 
 // Same harness shape as contentActions.test.ts: mock the SSR client (getUser +
 // MFA aal) and inject an in-memory PostgREST-style fake for the service-role
@@ -128,7 +129,25 @@ function makeDb(initial: Record<string, any[]>) {
     }
     return b;
   }
-  return { from, tables };
+  // migration-056 atomic RPCs, in-memory. Real atomicity is proven against
+  // Postgres in supabase/scripts/test_056_atomic_admin_mutations.sql.
+  let txSeq = 9000;
+  const auditRows: any[] = [];
+  const txRpcs = makeAdminTxRpcs({ tables, auditRows, newId: () => `tx-${txSeq++}` });
+  const rpcCalls: { fn: string; args: any }[] = [];
+  const rpc = async (fn: string, args: any) => {
+    rpcCalls.push({ fn, args });
+    const handler = txRpcs[fn];
+    if (!handler) return { data: `audit-${rpcCalls.length}`, error: null };
+    try {
+      return { data: handler(args), error: null };
+    } catch (e) {
+      // Mirrors Postgres: the audit insert raised, rolling the mutation back.
+      return { data: null, error: { message: e instanceof Error ? e.message : "tx failed" } };
+    }
+  };
+
+  return { from, tables, rpc, rpcCalls, auditRows };
 }
 
 function seed() {
@@ -182,7 +201,7 @@ describe("authorization", () => {
     await expect(createChannel(CONV(1), "events")).rejects.toMatchObject({ reason: "writes_disabled" });
     await expect(renameChannel(CH(2), "news")).rejects.toMatchObject({ reason: "writes_disabled" });
     await expect(setChannelPermission(CH(2), "everyone")).rejects.toMatchObject({ reason: "writes_disabled" });
-    await expect(deleteEmptyChannel(CH(3))).rejects.toMatchObject({ reason: "writes_disabled" });
+    await expect(deleteEmptyChannel(CH(3), "Test reason for the audit trail.")).rejects.toMatchObject({ reason: "writes_disabled" });
     await expect(setNotificationRead(NOTIF(1), true)).rejects.toMatchObject({ reason: "writes_disabled" });
     expect(h.createAdminClient).not.toHaveBeenCalled();
   });
@@ -289,19 +308,19 @@ describe("channel management", () => {
   it("removes an EMPTY channel but refuses a non-empty one and the Main chat", async () => {
     asFounder();
     // CH(3) empty-chan has no messages → removable.
-    const del = await deleteEmptyChannel(CH(3));
+    const del = await deleteEmptyChannel(CH(3), "Test reason for the audit trail.");
     expect(del.ok).toBe(true);
     expect(h.holder.db.tables.conversation_channels.some((c: any) => c.id === CH(3))).toBe(false);
 
     // CH(2) announcements holds a message → refused (no cascade).
-    const nonEmpty = await deleteEmptyChannel(CH(2));
+    const nonEmpty = await deleteEmptyChannel(CH(2), "Test reason for the audit trail.");
     expect(nonEmpty.ok).toBe(false);
     expect(h.holder.db.tables.conversation_channels.some((c: any) => c.id === CH(2))).toBe(true);
     // The messages are untouched.
     expect(h.holder.db.tables.messages.some((m: any) => m.channel_id === CH(2))).toBe(true);
 
     // Main chat is never removable.
-    const main = await deleteEmptyChannel(CH(1));
+    const main = await deleteEmptyChannel(CH(1), "Test reason for the audit trail.");
     expect(main.ok).toBe(false);
   });
 });

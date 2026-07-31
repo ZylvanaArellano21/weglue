@@ -22,7 +22,10 @@ vi.mock("../../supabase/server", () => ({
     auth: { getUser: h.getUser, signOut: h.signOut, mfa: { getAuthenticatorAssuranceLevel: vi.fn() } },
   }),
 }));
-vi.mock("../../supabase/admin", () => ({ createAdminClient: vi.fn() }));
+// lockAdminPortal now records an attempt→outcome pair through the audit RPC.
+vi.mock("../../supabase/admin", () => ({
+  createAdminClient: () => ({ rpc: async () => ({ data: "audit-1", error: null }) }),
+}));
 vi.mock("next/headers", () => ({
   cookies: () => ({ set: h.cookieSet, get: h.cookieGet }),
 }));
