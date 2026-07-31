@@ -261,3 +261,134 @@ psql "$PROD_URL" -c "select count(*) from pg_policies where tablename='admin_aud
 ## 14. Not started, as instructed
 
 Restrictions · user blocking · content soft-delete · report enforcement · Realtime parity · deleted-message retention (051). All remain in the Phase 1 audit's proposed order.
+
+
+---
+---
+
+# Day 10A — HARDENING PASS (addendum)
+
+**Status:** implemented, tested, **NOT merged · NOT deployed · migrations 055/056 NOT applied to Production · writes still disabled · 051 still absent · Lone Star still the sole university**
+
+## H1. New commits
+
+| | |
+|---|---|
+| `a9a3dc7f` | migration 056 — atomic mutation + audit in one transaction (055 amended for `event_type`) |
+| `00846efd` | route mutations through the atomic RPCs; add cross-service flow |
+| `73b80997` | collect a required reason before destructive actions |
+| `6efbd0b2` | reason enforcement, cross-service flow, atomic-RPC contract tests |
+
+**Files changed:** `supabase/migrations/{055,056}` · `supabase/scripts/test_055_*`, `test_056_*`, `test_056_fixture_schema.sql` · `lib/admin/{atomicMutation,crossService,audit,actions,contentActions,messagingActions,reportsActions,deletedContentActions}.ts` · `components/admin/{ConfirmAction,MembershipControls,GluemateControls,PostActions,RsvpActions,ChannelActions,UniversityControls,DeletedContentActions}.tsx` · `app/admin/{universities/[id],clubs/[id],officers,memberships/[id]}/page.tsx` · 8 test files + `fakeAdminTx.ts`. **No mobile or shared files.**
+
+## H2. The exact nine reason-required actions
+
+| # | Action | Target | Sensitivity |
+|---|---|---|---|
+| 1 | `membership.remove` | club_member | destructive |
+| 2 | `officer.demote` | club_officer | destructive |
+| 3 | `gluemate.remove` | gluemate | destructive |
+| 4 | `post.removeFromClub` | post | destructive |
+| 5 | `rsvp.remove` | rsvp | destructive |
+| 6 | `channel.deleteEmpty` | channel | destructive |
+| 7 | `university.add` | university | sensitive |
+| 8 | `university.setActive` | university | sensitive |
+| 9 | `deletedContent.reactivateClub` | club | sensitive |
+
+Enforced in **three independent places**: the dialog disables confirm without a valid reason; `runAtomicMutation()` rejects before the RPC; the 055 trigger raises inside the transaction, rolling the mutation back. Calling a server action directly — no dialog in the loop — is a tested bypass attempt and fails.
+
+`message.revealBody` / `message.contentSearch` remain `requires_reason = false`: they are the only *live* (non-write-gated) sensitive actions, and turning it on before the reveal UI collects a reason would break a working MFA-gated feature. One-line catalog flip, planned with Phase 5.
+
+## H3. Operation classification matrix
+
+| Class | Count | Operations | Audit guarantee |
+|---|---|---|---|
+| **Database-only, transactionally auditable** | **22** | membership add/remove · member role set (promote/demote) · officer add/title · gluemate remove · university add/edit/setActive · post caption/removeFromClub · comment edit · event edit · rsvp upsert/remove · channel create/rename/setPermission/deleteEmpty · notification setRead · report setStatus · club reactivate | **Atomic** — mutation + audit in one transaction |
+| **Auth API** | 1 | `portal.lock` (signOut) | attempt → outcome, correlated |
+| **Storage** | 0 | — | pattern ready, unused |
+| **Multi-service** | 0 | — | pattern ready, unused |
+| **Read-only** | 3 | `message.revealBody`, `message.contentSearch` (step-up MFA), `testSupabaseConnection` | audited as sensitive reads |
+
+## H4. Atomic database mutation architecture
+
+```
+requireSecureAdmin({write:true})        server: authorization
+        ↓
+assertAuditReason(action, reason)       server: BEFORE the DB — no reason, no round trip
+        ↓
+admin_tx_*(actor, email, reason, corr, …)   ── ONE TRANSACTION ──
+        ├─ validate → business rejection: commit FAILURE audit, RETURN status (no mutation)
+        ├─ snapshot before_state (allowlisted columns)
+        ├─ mutate canonical table(s)   [054 RPCs called here for officer changes]
+        ├─ snapshot after_state
+        └─ admin_audit_log(...)  ── raises ⇒ EVERYTHING rolls back
+```
+
+`audit row present ⇔ mutation committed`, both directions. Business rejections **return** rather than raise, precisely so the failure record survives.
+
+## H5. Cross-service audit architecture
+
+1. durable **attempt** row → 2. **refuse to act** if it cannot be written → 3. external call → 4. **separate** success/failure row, same `correlation_id` → 5. attempt row never updated (append-only makes it impossible) → 6. **reconciliation_required** row if the outcome cannot be persisted.
+
+**No cross-service atomicity is claimed.** What it buys: no external side-effect without a trace; "started" is always distinguishable from "completed" from "unknown". What it does not: it cannot guarantee the external effect matches the record — nothing short of a distributed transaction could.
+
+## H6. Migration 055 changes
+
+Amended in place (never applied anywhere, so this keeps deployment single-step):
+- `event_type` column: `attempt | success | failure | reconciliation_required`, default `success`.
+- `success` now nullable — only for `attempt` / `reconciliation_required`, where the outcome genuinely is not known. Recording those as `false` would assert a failure that has not happened.
+- `admin_audit_events_outcome_chk` ties `(event_type, success, error_code)` together.
+- `admin_audit_log` takes `p_event_type` and **validates rather than normalizes**: a caller asserting both "succeeded" and "here is the error" is refused, not silently half-discarded.
+- Reason requirement now fires on `success` **and** `attempt`.
+- Three new partial indexes (failures, reconciliation, unresolved attempts).
+- Append-only enforcement unchanged and re-proven.
+
+## H7. Test results
+
+```
+migration 055 harness   70/70   (fresh apply + idempotent re-apply, exit 0)
+migration 056 harness   75/75   (real 054 applied over a schema fixture)
+web vitest              750/750 (30 files; 49 new in reasonEnforcement.test.ts)
+type-check              exit 0
+next build              exit 0 — 53 pages
+secret scan             CLEAN
+mobile/shared           0 files changed
+```
+
+056 harness groups: privileges (5) · mutation+audit commit together for all 22 (24) · **forced audit failure rolls the mutation back (8)** · business rejection leaves no mutation and a durable failure record, including 054's floor still firing (10) · event model incl. attempt/outcome correlation and attempt rows being unmodifiable (12) · existing protections intact (16).
+
+**Three real defects found and fixed by these tests:** the fixture's exception handler silently rolled back the whole seed (making assertions vacuous — caught by a control assertion); 056 blocked reopening resolved/dismissed reports, contradicting `REPORT_TRANSITIONS`; 056 was missing the Main-chat guard on permission changes.
+
+## H8. Remaining blockers
+
+1. **`message.revealBody` / `message.contentSearch` still have `requires_reason = false`** (H2). Deliberate; flip with the Phase 5 reveal-reason UI.
+2. **Cross-service atomicity is impossible** and is not claimed. Reconciliation rows need a founder-facing queue when a cross-service action other than `portal.lock` ships.
+3. **Browser QA has not been run** on the reason dialogs — they are asserted at source level, not through a DOM runner. Server and database enforcement do not depend on it.
+
+## H9. Exact Production deployment sequence
+
+Nothing below has been run.
+
+```bash
+# 0. PRE-FLIGHT — expect ...052, 053, 054 and NO 055, 056, 051
+psql "$PROD_URL" -c "select version from supabase_migrations.schema_migrations order by version desc limit 5;"
+
+# 1. APPLY, IN ORDER (055 first — 056 depends on admin_audit_log)
+psql "$PROD_URL" -f supabase/migrations/055_durable_admin_audit.sql
+psql "$PROD_URL" -f supabase/migrations/056_atomic_admin_mutations.sql
+
+# 2. VERIFY (all five)
+psql "$PROD_URL" -c "select count(*) from admin_audit_actions;"                                    -- 26
+psql "$PROD_URL" -c "select count(*) from admin_audit_events;"                                     -- 0, nothing backfilled
+psql "$PROD_URL" -c "select relrowsecurity, relforcerowsecurity from pg_class where relname='admin_audit_events';"  -- t|t
+psql "$PROD_URL" -c "select count(*) from pg_policies where tablename='admin_audit_events';"       -- 0
+psql "$PROD_URL" -c "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'admin\_tx\_%';"  -- 22
+```
+
+3. **Deploy the web branch to Vercel.** No env-var changes. `ADMIN_WRITES_ENABLED` stays unset.
+4. **Post-deploy:** `/admin/audit-history` shows the live table with **0 events** — an empty trail is the correct starting state.
+5. **Before ever enabling writes:** confirm H8.1 is resolved and run browser QA on the reason dialogs.
+
+**No OTA. No native build.** Zero mobile or shared files changed.
+
+**Rollback:** both migrations end with ordered DROP sequences. Dropping 056 reverts to the non-atomic 055 path without touching recorded history; dropping 055 destroys the trail — export first.
