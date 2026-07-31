@@ -124,7 +124,12 @@ adminAudit({ action, actorId, actorEmail, target, before, after, ok, reason?, co
 
 ## 7. Success/failure transaction semantics — stated honestly
 
-**The audit insert is NOT atomic with the mutation.** It is a separate PostgREST call in a separate transaction. This is documented in the migration and in `audit.ts` rather than glossed over:
+> **SUPERSEDED for database-only mutations by the hardening pass (see §H4).**
+> All 22 database-only mutations are now atomic with their audit record via
+> migration 056. The description below still applies to the ONE cross-service
+> operation (`portal.lock`), where a shared transaction is impossible.
+
+**As originally shipped, the audit insert was NOT atomic with the mutation.** It is a separate PostgREST call in a separate transaction. This is documented in the migration and in `audit.ts` rather than glossed over:
 
 - A `success` row means the mutation had already committed. **audit row present ⇒ mutation happened.**
 - The converse does **not** hold. If the audit insert fails, the mutation has already committed and cannot be rolled back. The gap is **always detectable** — `admin_audit_persist_failed` is logged and `persisted:false` returned. Never silent.
