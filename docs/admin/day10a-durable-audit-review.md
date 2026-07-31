@@ -397,3 +397,137 @@ psql "$PROD_URL" -c "select count(*) from pg_proc p join pg_namespace n on n.oid
 **No OTA. No native build.** Zero mobile or shared files changed.
 
 **Rollback:** both migrations end with ordered DROP sequences. Dropping 056 reverts to the non-atomic 055 path without touching recorded history; dropping 055 destroys the trail — export first.
+
+---
+---
+
+# Day 10A — FINAL PRE-DEPLOYMENT VALIDATION (2026-07-31)
+
+**Branch HEAD:** `aff0c0c34a68564c2b9af69e706064d7b614bca8`
+**Recommendation: GO** — conditional on the merge-scope decision in §V2. Writes stay disabled.
+
+## V1. Independent diff review
+
+Reviewed `main..HEAD` from source, not from prior notes.
+
+| Check | Result |
+|---|---|
+| Student-facing functionality changed | **No** — every web change is under `app/admin`, `components/admin`, `lib/admin` |
+| Mobile / shared / packages changed | **No** — 0 files |
+| Signup / onboarding / auth-flow changed | **No** — 0 files |
+| Messaging content behaviour changed | **No** — `revealMessageBody` and `searchMessageContent` are byte-identical after normalizing one added `await`; both still gated by `requireRecentMfa()` → `requireSecureAdmin()` |
+| Migration 051 work included | **No** — only documentation references |
+| Migration 054 unchanged | **Yes** — untouched by every Day-10A commit; byte-identical to `0781ab5d` |
+| 055 / 056 ordered correctly | **Yes** — 056 calls `admin_audit_log`, `admin_audit_actions` (055) and `admin_set_club_member_role`, `admin_remove_club_member` (054, already live in prod) |
+| Destructive backfill / unintended data mutation | **None** — 056 contains **zero** DML outside function bodies; 055's only top-level DML is the 26-row catalog seed into its own new table |
+| Secrets / credentials / allowlists / private paths committed | **None** — real founder UUID and email allowlist values verified absent from the diff; the 2 JWT-shaped strings are test fixtures (`.abc.def`, `.payload`) with no signature |
+
+## V2. Merge-scope finding — needs a founder decision
+
+`admin/durable-audit` was branched from `security/admin-session-and-officer-floor`, which is **still unmerged**. Merging to main therefore also lands three earlier commits:
+
+- `762ff94f` server-enforced absolute admin session max age
+- `0781ab5d` migration 054 (atomic last-officer protection)
+- `6a748236` fail-closed matrix over every privileged mutation
+
+**Migration 054 is already applied in Production**, so re-running it is a no-op (`supabase_migrations` records 054). The *web code* for session max-age would newly deploy. This is real, reviewed work — but it rides along, and that should be a conscious choice rather than a surprise.
+
+## V3. Browser QA — reason dialogs (all nine)
+
+Method: temporary local Next route mounting the **real** `ConfirmAction` with the exact props of each real call site and a stubbed action recording invocations. No Supabase client, no database — Production could not be touched. Route deleted afterwards; tree clean, absent from the build, never committed.
+
+All nine configurations passed every check:
+
+| Check | Result |
+|---|---|
+| Dialog identifies correct action + target | ✅ 9/9 — distinct title and `TARGET` box per action |
+| Reason field visible, marked required | ✅ 9/9 |
+| Confirm disabled at 0 and 2 chars | ✅ 9/9 |
+| Confirm enabled at 3 chars | ✅ 9/9 |
+| Whitespace-only stays invalid | ✅ 9/9 |
+| >500 rejected | ✅ 9/9 — exact boundary: 500 enabled, 501 disabled, 600 disabled; `maxLength=500` also caps typing |
+| Cancel closes dialog | ✅ |
+| Cancel clears the reason | ✅ — reopen showed empty field |
+| Cancel invokes no server mutation | ✅ — 0 recorded calls |
+| Reopen starts empty + confirm disabled | ✅ |
+| Target stable while dialog open | ✅ |
+| Native double-click cannot submit twice | ✅ — **exactly 1 call** |
+| Loading state prevents duplicates | ✅ — "Working…", confirm **and** cancel disabled, mid-flight clicks produced no extra calls |
+| Server error → clear error, no false success | ✅ — dialog stays open, error shown, reason preserved, confirm re-enabled, 1 call |
+| Success closes / updates UI | ✅ |
+| Correct action identifier + reason reach the action | ✅ 9/9 verified from recorded invocations |
+| Long (500-char) reason layout | ✅ — dialog 440×388, no viewport overflow, no horizontal body scroll, textarea scrolls internally |
+
+## V4. Writes-disabled behaviour
+
+- 248/248 assertions in `writePathFailClosed.test.ts` — every privileged mutation rejected with `ADMIN_WRITES_ENABLED` unset.
+- 26 mutations gated by `requireSecureAdmin({ write: true })`. The only three exports without it are intentional and verified: `lockAdminPortal` (session control — must always work), and the two message reads (gated by `requireRecentMfa()`, which chains `requireSecureAdmin()`).
+- Reason dialogs cannot bypass the gate: the write check runs **before** the reason check, so a perfect reason still throws.
+- Read-only loaders (`auditData`, `data`, `data2`) call `requireSecureAdmin()` without `write`.
+- Loading a detail page or opening a dialog performs no mutation (browser QA: 0 calls until confirm).
+
+## V5. Audit History UI
+
+Validated at data + safety level: 20/20 `auditData.test.ts` (authorization, filters, detail, correlation siblings, summary, honest degradation when 055 is absent, read-only export surface). Structural safety: **no raw JSON dump** — the list page contains no `JSON.stringify`; the detail view renders typed key/value rows and only serializes a *nested* value. No message content, token, secret, password or MFA field is referenced by either page.
+
+**Residual gap (nonblocking):** populated-state browser QA (pagination, date/action/target/outcome filters against real rows) could not be run — it needs a Supabase instance with 055 applied **and** a founder aal2 session, neither of which exists pre-deployment. Recommended as the first post-deploy check, where the expected state is 0 events.
+
+## V6. Single-campus protection
+
+- 14/14 `singleCampus.test.ts`.
+- UI: Add University replaced by a disabled affordance; banner states single-campus mode and names Lone Star College.
+- Server: `addUniversity()` refuses **before** name/slug validation and before any insert (`getCampusMode()` at the first statement).
+- Fails closed if `app_config` is unreadable.
+- Gate is config-driven: flipping `single_campus_mode=false` in an isolated test restores the capability with no code change (tested).
+- Live Production setting untouched.
+
+## V7. Atomicity regression — verbatim results
+
+| Requirement | Assertion |
+|---|---|
+| Forced audit failure rolls back the mutation | `3.1b` membership still exists · `3.2b` RSVP still exists · `3.3b` club still inactive · `3.4b` event title unchanged (+ `3.4c` control proving non-vacuity) |
+| Forced mutation failure creates no success event | `4.1c` no success record exists |
+| Missing reason creates no mutation | `3.1a` raises · `3.1b` row intact |
+| service_role arbitrary direct insert denied | `4.1` permission denied |
+| UPDATE / DELETE / TRUNCATE denied | `5.1`–`5.4` (owner, trigger) · `5.6`/`5.7` (service_role) · `5.5` catalog permanent |
+| History survives actor/target deletion | `11.2` actor · `11.3` target · `11.4` historical email preserved |
+| Migration 054 last-officer protection active | `4.2a` fires through the atomic layer · `4.2b` last officer kept role |
+| Correlation IDs correct | `10.1` shared across a transfer · `10.3` distinct for unrelated ops · `5.7` attempt+outcome share one |
+
+## V8. Final test pass
+
+```
+055 harness            70/70    (fresh apply + idempotent re-apply, exit 0)
+056 harness            75/75    (real 054 applied over schema fixture, exit 0)
+web vitest             750/750  (30 files, exit 0)
+type-check             exit 0
+next build             exit 0 — 53 pages; QA harness absent from output
+static secret scan     CLEAN
+git status             clean (3 pre-existing untracked files, none from Day 10A)
+```
+
+## V9. Blockers and findings
+
+**Blockers to applying 055/056 + deploying the web branch: NONE.**
+
+**Nonblocking findings:**
+
+1. **`onConfirm` has no re-entrancy guard.** Protection relies on React committing `pending` between clicks. A native double-click is safe (verified: 1 call), but three *synchronous programmatic* invocations in one tick produced 3 calls. Not reachable by a human; impact bounded (the second call would hit `not_member`-style rejection and be audited). Recommend a `useRef` in-flight guard before writes are enabled.
+2. **`maxLength=500` caps typing, not programmatic values.** `reasonValid` and the database CHECK both reject >500, so the rule holds; the attribute is convenience only.
+3. **Audit History populated-state browser QA deferred** — see §V5.
+4. **`message.revealBody` / `message.contentSearch` remain `requires_reason=false`** — deliberate; flip with the Phase 5 reveal-reason UI.
+
+**Before ADMIN_WRITES_ENABLED is ever turned on:** close findings 1 and 3, and decide on 4.
+
+## V10. Confirmations (live-verified 2026-07-31)
+
+- `ADMIN_WRITES_ENABLED` — unset (= false)
+- 055 / 056 — **not applied to Production** (0 audit tables, 0 `admin_tx_*` functions; applied set is 054, 053, 052, 050)
+- 051 — **absent** from the branch and from Production
+- Nothing merged (branch not contained in main) · nothing deployed · no OTA
+- **No Production row modified** — all Production access this session was read-only `SELECT`
+- Lone Star College remains the only university, active, `single_campus_mode=true`, `launch_university_id` unchanged
+
+## V11. Recommendation
+
+**GO** to apply migration 055 then 056 to Production and deploy the web branch, with writes left disabled — conditional on an explicit founder decision about the merge scope in §V2. Deployment sequence and verification queries: §H9.
