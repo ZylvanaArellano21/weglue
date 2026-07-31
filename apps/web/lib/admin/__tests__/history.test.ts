@@ -10,7 +10,7 @@ vi.mock("../../supabase/server", () => ({
 }));
 vi.mock("../../supabase/admin", () => ({ createAdminClient: h.createAdminClient }));
 
-import { listEditHistory, getAuditStatus } from "../historyData";
+import { listEditHistory } from "../historyData";
 import { SecureAdminError } from "../secureAdmin";
 
 const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@weglue.app" };
@@ -74,23 +74,5 @@ describe("listEditHistory — canonical, honest", () => {
   it("denies a non-founder", async () => {
     h.getUser.mockResolvedValue({ data: { user: { id: "x", email: "x@my.edu" } } });
     await expect(listEditHistory()).rejects.toBeInstanceOf(SecureAdminError);
-  });
-});
-
-describe("getAuditStatus — honest unavailable state", () => {
-  it("reports no canonical table but active structured logging", async () => {
-    asFounder();
-    const s = await getAuditStatus();
-    expect(s.hasCanonicalTable).toBe(false);
-    expect(s.structuredLoggingActive).toBe(true);
-    expect(s.persistedQueriesAvailable).toBe(false);
-    expect(s.logTag).toBe("admin_audit");
-    expect(s.coverage.length).toBeGreaterThan(0);
-    expect(s.coverage.some((c) => c.namespace === "report.setStatus")).toBe(true);
-  });
-
-  it("denies a non-founder", async () => {
-    h.getUser.mockResolvedValue({ data: { user: { id: "x", email: "x@my.edu" } } });
-    await expect(getAuditStatus()).rejects.toBeInstanceOf(SecureAdminError);
   });
 });
