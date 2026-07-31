@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getAdminSettings } from "../../../lib/admin/settingsData";
+import { getAdminSettings, type CapabilityProbe } from "../../../lib/admin/settingsData";
 import { SectionCard, Badge, Field } from "../../../components/admin/primitives";
 import { SettingsActions } from "../../../components/admin/SettingsActions";
 
@@ -8,6 +8,21 @@ export const fetchCache = "force-no-store";
 
 function onOff(v: boolean, on = "Enabled", off = "Disabled") {
   return <Badge tone={v ? "green" : "gray"}>{v ? on : off}</Badge>;
+}
+
+/**
+ * Render a live capability probe. `error` is shown in amber and never as a
+ * green "active" — a status we could not verify must not read as working.
+ */
+function capability({ status, detail }: CapabilityProbe, activeLabel: string) {
+  const tone = status === "active" ? "green" : status === "unavailable" ? "gray" : "amber";
+  const label = status === "active" ? activeLabel : status === "unavailable" ? "Unavailable" : "Unverified";
+  return (
+    <>
+      <Badge tone={tone}>{label}</Badge>
+      <p className="mt-1 text-xs text-gray-400">{detail}</p>
+    </>
+  );
 }
 
 export default async function AdminSettingsPage() {
@@ -31,8 +46,9 @@ export default async function AdminSettingsPage() {
     commit: s.commit,
     supabaseConnected: s.supabase.connected,
     mfa: s.mfa,
-    auditPersistenceAvailable: s.auditPersistenceAvailable,
-    privacyBackendDeployed: s.privacyBackendDeployed,
+    auditPersistence: s.auditPersistence.status,
+    privacyBackend: s.privacyBackend.status,
+    commitRef: s.commitRef,
     envPresence: s.env.map((e) => ({ name: e.name, present: e.present })),
   };
 
@@ -80,13 +96,16 @@ export default async function AdminSettingsPage() {
           <dl className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="Environment">{s.environment}</Field>
             <Field label="Vercel env">{s.vercelEnv ?? "—"}</Field>
-            <Field label="Build / commit">{s.commit ? <code className="text-xs">{s.commit}</code> : "—"}</Field>
+            <Field label="Deployed commit (Git)">
+              {s.commit ? <code className="text-xs">{s.commit}</code> : "—"}
+              {s.commitRef ? <span className="ml-2 text-xs text-gray-400">on {s.commitRef}</span> : null}
+            </Field>
             <Field label="Supabase">
               <Badge tone={s.supabase.connected ? "green" : "red"}>{s.supabase.connected ? "Connected" : "Unreachable"}</Badge>
               {s.supabase.url_host ? <span className="ml-2 text-xs text-gray-400">{s.supabase.url_host}</span> : null}
             </Field>
-            <Field label="Audit persistence">{onOff(s.auditPersistenceAvailable, "Available", "Deferred")}</Field>
-            <Field label="Privacy backend">{onOff(s.privacyBackendDeployed, "Deployed", "Not deployed")}</Field>
+            <Field label="Audit persistence">{capability(s.auditPersistence, "Active")}</Field>
+            <Field label="Privacy backend">{capability(s.privacyBackend, "Deployed")}</Field>
           </dl>
         </SectionCard>
 
