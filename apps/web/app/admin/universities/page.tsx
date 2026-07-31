@@ -1,8 +1,9 @@
-import { listUniversitiesFull } from "../../../lib/admin/data2";
+import { listUniversitiesFull, getCampusMode } from "../../../lib/admin/data2";
 import { SectionCard, Badge, EmptyState } from "../../../components/admin/primitives";
 import { ListControls } from "../../../components/admin/ListControls";
 import { Table, Th, Td, RowLink } from "../../../components/admin/Table";
 import { AddUniversityDialog } from "../../../components/admin/UniversityControls";
+import { DisabledAction } from "../../../components/admin/DisabledAction";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export default async function AdminUniversitiesPage({
   searchParams: Record<string, string | string[] | undefined>;
 }) {
   const q = typeof searchParams.q === "string" ? searchParams.q : undefined;
-  const rows = await listUniversitiesFull(q);
+  const [rows, campus] = await Promise.all([listUniversitiesFull(q), getCampusMode()]);
 
   return (
     <div className="space-y-5">
@@ -29,8 +30,36 @@ export default async function AdminUniversitiesPage({
             schema — slug is the identifier.)
           </p>
         </div>
-        <AddUniversityDialog />
+        {/* Single-campus mode gates creation. The server action refuses on the
+            same signal, so this is a matching affordance, not the whole rule. */}
+        {campus.singleCampusMode ? (
+          <DisabledAction
+            label="＋ Add university"
+            reason="We Glue is in single-campus mode (app_config.single_campus_mode = true)."
+          />
+        ) : (
+          <AddUniversityDialog />
+        )}
       </div>
+
+      {campus.singleCampusMode ? (
+        <div className="rounded-xl border border-teal-100 bg-teal-50/60 p-4 text-sm text-teal-800">
+          <p className="font-medium">Single-campus mode is active</p>
+          <p className="mt-1 text-teal-700">
+            We Glue currently operates on one campus only
+            {campus.launchUniversityName ? (
+              <>
+                {" "}
+                — <span className="font-medium">{campus.launchUniversityName}</span>
+              </>
+            ) : null}
+            . Adding a university is disabled in both the interface and the server action while{" "}
+            <code className="rounded bg-white/60 px-1 text-xs">single_campus_mode</code> is true. Editing and
+            activate/deactivate remain available. The capability is gated, not removed: turning single-campus mode off
+            in <code className="rounded bg-white/60 px-1 text-xs">app_config</code> restores it with no code change.
+          </p>
+        </div>
+      ) : null}
 
       <ListControls searchPlaceholder="Search by name or slug…" />
 

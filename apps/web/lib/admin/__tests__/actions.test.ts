@@ -283,6 +283,11 @@ function seed() {
     ],
     club_officers: [{ id: "o1", club_id: C(1), user_id: U(1), role_title: "President" }],
     universities: [{ id: UNI(1), name: "Lone Star", slug: "lone-star", is_active: true }],
+    // Day 10A: addUniversity is gated on app_config.single_campus_mode and
+    // FAILS CLOSED when the config is unreadable. This fixture opts into
+    // multi-campus so the creation paths below still test what they intend;
+    // the gate itself is covered in singleCampus.test.ts.
+    app_config: [{ id: 1, single_campus_mode: false, launch_university_id: UNI(1) }],
     follows: [
       { id: "f1", follower_id: U(1), following_id: U(2), status: "accepted" },
       { id: "f2", follower_id: U(2), following_id: U(1), status: "accepted" },
@@ -459,5 +464,12 @@ describe("universities", () => {
     const res = await setUniversityActive(UNI(1), false);
     expect(res.ok).toBe(true);
     expect(h.holder.db.tables.universities.find((u: any) => u.id === UNI(1)).is_active).toBe(false);
+  });
+  it("refuses to create one while single-campus mode is on", async () => {
+    asFounder();
+    h.holder.db.tables.app_config[0].single_campus_mode = true;
+    const res = await addUniversity("Second Campus", "second-campus");
+    expect(res).toMatchObject({ ok: false });
+    expect(h.holder.db.tables.universities.some((u: any) => u.slug === "second-campus")).toBe(false);
   });
 });
