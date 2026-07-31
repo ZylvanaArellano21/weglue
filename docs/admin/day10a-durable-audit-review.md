@@ -422,7 +422,19 @@ Reviewed `main..HEAD` from source, not from prior notes.
 | Destructive backfill / unintended data mutation | **None** — 056 contains **zero** DML outside function bodies; 055's only top-level DML is the 26-row catalog seed into its own new table |
 | Secrets / credentials / allowlists / private paths committed | **None** — real founder UUID and email allowlist values verified absent from the diff; the 2 JWT-shaped strings are test fixtures (`.abc.def`, `.payload`) with no signature |
 
-## V2. Merge-scope finding — needs a founder decision
+## V2. Merge-scope finding — RETRACTED (was wrong)
+
+> **CORRECTION (2026-07-31).** This finding was WRONG. It was based on a stale
+> local `main` at `c7e1f74e`. After `git fetch origin`, `origin/main` is at
+> `2583c9f9` — **PR #5 already merged `security/admin-session-and-officer-floor`**.
+> Verified with `git merge-base --is-ancestor`: commits `762ff94f`, `0781ab5d`
+> and `6a748236` are ALL already ancestors of `origin/main`; migration 054 is
+> present there and byte-identical to the branch copy; the fail-closed matrix and
+> the 15-minute session maximum are present too. The merge base is `6a748236`, so
+> this PR contains **only Day 10A work** — there is no scope surprise and no
+> decision to make. The original text is kept below for the record.
+
+### Original (incorrect) finding
 
 `admin/durable-audit` was branched from `security/admin-session-and-officer-floor`, which is **still unmerged**. Merging to main therefore also lands three earlier commits:
 
