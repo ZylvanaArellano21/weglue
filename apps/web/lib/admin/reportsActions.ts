@@ -36,8 +36,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function isUuid(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
 }
-function fail(action: string, actor: User, error: string, target: Record<string, unknown>): { ok: false; error: string } {
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
+async function fail(action: string, actor: User, error: string, target: Record<string, unknown>): Promise<{ ok: false; error: string }> {
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
   return { ok: false, error };
 }
 
@@ -74,7 +74,7 @@ export async function setReportStatus(reportId: string, nextStatus: string): Pro
   if (error || !row) return fail(action, actor, "Could not update the report.", target);
   if (row.status !== nextStatus) return fail(action, actor, "Status change did not take effect.", target);
 
-  adminAudit({
+  await adminAudit({
     action,
     actorId: actor.id,
     actorEmail: actor.email,

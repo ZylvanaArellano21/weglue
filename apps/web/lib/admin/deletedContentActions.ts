@@ -31,8 +31,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function isUuid(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
 }
-function fail(action: string, actor: User, error: string, target: Record<string, unknown>): { ok: false; error: string } {
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
+async function fail(action: string, actor: User, error: string, target: Record<string, unknown>): Promise<{ ok: false; error: string }> {
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
   return { ok: false, error };
 }
 
@@ -60,6 +60,6 @@ export async function reactivateClub(clubId: string): Promise<ActionResult> {
   if (error || !row) return fail(action, actor, "Could not reactivate the club.", target);
   if (row.is_active !== true) return fail(action, actor, "Reactivation did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
   return { ok: true, data: row };
 }

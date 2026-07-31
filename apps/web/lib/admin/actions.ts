@@ -46,6 +46,7 @@ import { createAdminClient } from "../supabase/admin";
 import { createClient as createServerClient } from "../supabase/server";
 import { requireSecureAdmin } from "./secureAdmin";
 import { adminAudit } from "./audit";
+import { getCampusMode } from "./data2";
 import { clearEntryTicketCookie } from "./entryTicketCookie";
 import type { User } from "@supabase/supabase-js";
 
@@ -60,8 +61,8 @@ function isUuid(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
 }
 
-function fail(action: string, actor: User, error: string, target: Record<string, unknown>): { ok: false; error: string } {
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
+async function fail(action: string, actor: User, error: string, target: Record<string, unknown>): Promise<{ ok: false; error: string }> {
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
   return { ok: false, error };
 }
 
@@ -129,7 +130,7 @@ export async function addMembership(clubId: string, userId: string): Promise<Act
     .eq("user_id", userId)
     .maybeSingle();
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
   return { ok: true, data: row };
 }
 
@@ -170,7 +171,7 @@ export async function removeMembership(clubId: string, userId: string): Promise<
     .maybeSingle();
   const removed = !check;
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: removed, before: member, after: null });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: removed, before: member, after: null });
   return removed ? { ok: true, data: { removed: true } } : { ok: false, error: "Removal did not take effect." };
 }
 
@@ -265,7 +266,7 @@ export async function setMembershipRole(
     admin.from("club_officers").select("role_title").eq("club_id", clubId).eq("user_id", userId).maybeSingle(),
   ]);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before: member, after: { role: after?.role, roster } });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before: member, after: { role: after?.role, roster } });
   return { ok: true, data: { role: after?.role, roleTitle: roster?.role_title ?? null } };
 }
 
@@ -303,7 +304,7 @@ export async function addOfficer(clubId: string, userId: string, roleTitle: stri
     .eq("club_id", clubId)
     .eq("user_id", userId)
     .maybeSingle();
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after });
   return { ok: true, data: { role: after?.role, roleTitle: title } };
 }
 
@@ -333,7 +334,7 @@ export async function editOfficerTitle(clubId: string, userId: string, roleTitle
     .eq("user_id", userId)
     .maybeSingle();
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: roster });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: roster });
   return { ok: true, data: { roleTitle: roster?.role_title ?? title } };
 }
 
@@ -365,19 +366,42 @@ export async function removeGluemate(userAId: string, userBId: string): Promise<
     );
   const cleared = (remaining ?? []).length === 0;
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: cleared, after: { remaining: remaining?.length ?? 0 } });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: cleared, after: { remaining: remaining?.length ?? 0 } });
   return cleared ? { ok: true, data: { removed: true } } : { ok: false, error: "Relationship not fully removed." };
 }
 
 // ── Universities ─────────────────────────────────────────────────────────────
 
-/** Create a new university (canonical: universities). */
+/**
+ * Create a new university (canonical: universities).
+ *
+ * SINGLE-CAMPUS GUARD (Day 10A): while `app_config.single_campus_mode` is true,
+ * this refuses. We Glue runs on exactly one campus, and nothing downstream —
+ * signup, discovery, recommendations, the iOS/Android apps — routes across
+ * campuses yet, so a second row would be inert at best and misleading at worst.
+ *
+ * The capability is GATED, not removed: flipping single_campus_mode off in
+ * app_config restores it with no code change. The Universities screen hides the
+ * Add control on the same signal, so the UI and the server agree rather than the
+ * rule living only in the interface.
+ */
 export async function addUniversity(name: string, slug: string): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
   const action = "university.add";
   const cleanName = (name ?? "").trim();
   const cleanSlug = (slug ?? "").trim().toLowerCase();
   const target = { name: cleanName, slug: cleanSlug };
+
+  const campus = await getCampusMode();
+  if (campus.singleCampusMode) {
+    return fail(
+      action,
+      actor,
+      "We Glue is in single-campus mode. Adding a university is disabled until single_campus_mode is turned off.",
+      target
+    );
+  }
+
   if (cleanName.length < 2 || cleanName.length > 100) return fail(action, actor, "Name must be 2–100 characters.", target);
   if (!SLUG_RE.test(cleanSlug) || cleanSlug.length > 60) return fail(action, actor, "Slug must be lowercase words separated by hyphens.", target);
 
@@ -396,7 +420,7 @@ export async function addUniversity(name: string, slug: string): Promise<ActionR
     .maybeSingle();
   if (error || !row) return fail(action, actor, "Could not create university.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
   return { ok: true, data: row };
 }
 
@@ -429,7 +453,7 @@ export async function editUniversity(id: string, fields: { name?: string; slug?:
     .maybeSingle();
   if (error || !row) return fail(action, actor, "Could not update university (name/slug may be taken).", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
   return { ok: true, data: row };
 }
 
@@ -450,7 +474,7 @@ export async function setUniversityActive(id: string, isActive: boolean): Promis
     .maybeSingle();
   if (error || !row) return fail(action, actor, "Could not update status.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, after: row });
   return { ok: true, data: row };
 }
 
@@ -483,7 +507,7 @@ export async function lockAdminPortal(): Promise<ActionResult> {
   // concealment must never outlive an explicit lock.
   clearEntryTicketCookie();
   if (user) {
-    adminAudit({ action: "portal.lock", actorId: user.id, actorEmail: user.email, target: {}, ok: true });
+    await adminAudit({ action: "portal.lock", actorId: user.id, actorEmail: user.email, target: {}, ok: true });
   }
   return { ok: true, data: { locked: true } };
 }

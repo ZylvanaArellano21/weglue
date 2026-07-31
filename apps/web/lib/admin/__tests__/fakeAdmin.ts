@@ -69,7 +69,20 @@ export function makeDb(initial: Record<string, any[]>, authUsers: FakeAuthUser[]
       ilike() {
         return b;
       },
-      or() {
+      // PostgREST `or=(a.eq.x,b.eq.y)`. Only the all-`eq` form is modelled —
+      // that is what the uniqueness checks (addUniversity, addOfficer) rely on,
+      // and modelling it faithfully is what lets those tests be meaningful.
+      // Any term using another operator (the `ilike` search filters) falls back
+      // to a permissive no-op, exactly as before.
+      or(expr?: string) {
+        if (typeof expr !== "string") return b;
+        const terms = expr.split(",").map((t) => t.trim()).filter(Boolean);
+        const parsed = terms.map((t) => {
+          const i = t.indexOf(".eq.");
+          return i > 0 ? { col: t.slice(0, i), val: t.slice(i + 4) } : null;
+        });
+        if (parsed.length === 0 || parsed.some((p) => p === null)) return b;
+        st.filters.push({ type: "or_eq", terms: parsed as { col: string; val: string }[] });
         return b;
       },
       order() {
@@ -100,6 +113,9 @@ export function makeDb(initial: Record<string, any[]>, authUsers: FakeAuthUser[]
         if (f.type === "is") return f.val === null ? row[f.col] == null : row[f.col] === f.val;
         if (f.type === "gte") return row[f.col] >= f.val;
         if (f.type === "lte") return row[f.col] <= f.val;
+        if (f.type === "or_eq") {
+          return f.terms.some((t: any) => String(row[t.col]) === t.val);
+        }
         return true;
       });
     }
@@ -140,5 +156,19 @@ export function makeDb(initial: Record<string, any[]>, authUsers: FakeAuthUser[]
     },
   };
 
-  return { from, tables, auth };
+  // Minimal `.rpc()` stand-in. `rpcCalls` records every invocation so a test can
+  // assert exactly what the server sent to admin_audit_log(), and `rpcImpl` lets
+  // a test simulate a database-side rejection (a forbidden payload, a missing
+  // reason) without needing a real Postgres.
+  const rpcCalls: { fn: string; args: any }[] = [];
+  const state = {
+    rpcImpl: null as null | ((fn: string, args: any) => { data: any; error: any }),
+  };
+  const rpc = vi.fn(async (fn: string, args: any) => {
+    rpcCalls.push({ fn, args });
+    if (state.rpcImpl) return state.rpcImpl(fn, args);
+    return { data: `audit-${rpcCalls.length}`, error: null };
+  });
+
+  return { from, tables, auth, rpc, rpcCalls, state };
 }

@@ -40,8 +40,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function isUuid(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
 }
-function fail(action: string, actor: User, error: string, target: Record<string, unknown>): { ok: false; error: string } {
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
+async function fail(action: string, actor: User, error: string, target: Record<string, unknown>): Promise<{ ok: false; error: string }> {
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
   return { ok: false, error };
 }
 
@@ -73,7 +73,7 @@ export async function editPostCaption(postId: string, caption: string): Promise<
   if (error || !row) return fail(action, actor, "Could not update caption.", target);
   if ((row.caption ?? null) !== expected) return fail(action, actor, "Update did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
   return { ok: true, data: row };
 }
 
@@ -119,7 +119,7 @@ export async function removePostFromClub(postId: string, clubId: string): Promis
     admin.from("post_club_tags").select("id").eq("post_id", postId).eq("club_id", clubId).maybeSingle(),
   ]);
   const cleared = after?.club_id !== clubId && !stillTagged;
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: cleared, before: post, after });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: cleared, before: post, after });
   return cleared
     ? { ok: true, data: { removed: true } }
     : { ok: false, error: "Removal did not take effect." };
@@ -150,7 +150,7 @@ export async function editCommentContent(commentId: string, content: string): Pr
   if (error || !row) return fail(action, actor, "Could not update comment.", target);
   if ((row.content ?? "") !== clean) return fail(action, actor, "Update did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
   return { ok: true, data: row };
 }
 
@@ -258,7 +258,7 @@ export async function editEvent(eventId: string, fields: EditEventFields): Promi
     .maybeSingle();
   if (error || !row) return fail(action, actor, "Could not update the event.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
   return { ok: true, data: row };
 }
 
@@ -314,7 +314,7 @@ export async function upsertRsvp(eventId: string, userId: string, status: string
     .maybeSingle();
   if (!after || after.status !== status) return fail(action, actor, "RSVP did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before: existing ?? null, after });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before: existing ?? null, after });
   return { ok: true, data: after };
 }
 
@@ -344,6 +344,6 @@ export async function removeRsvp(eventId: string, userId: string): Promise<Actio
     .eq("user_id", userId)
     .maybeSingle();
   const removed = !check;
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: removed, before: existing, after: null });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: removed, before: existing, after: null });
   return removed ? { ok: true, data: { removed: true } } : { ok: false, error: "Removal did not take effect." };
 }

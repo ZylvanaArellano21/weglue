@@ -45,8 +45,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function isUuid(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
 }
-function fail(action: string, actor: User, error: string, target: Record<string, unknown>): { ok: false; error: string } {
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
+async function fail(action: string, actor: User, error: string, target: Record<string, unknown>): Promise<{ ok: false; error: string }> {
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: false, error });
   return { ok: false, error };
 }
 
@@ -91,7 +91,7 @@ export async function revealMessageBody(messageId: string): Promise<ActionResult
 
   // Retained-evidence protection: deleted rows never reveal original content.
   if (m.deleted_at) {
-    adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { messageId, deleted: true }, ok: false, error: "deleted_denied" });
+    await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { messageId, deleted: true }, ok: false, error: "deleted_denied" });
     return { ok: false, error: "This message is deleted. Retained deleted-message evidence is unavailable until the approved privacy backend is deployed." };
   }
 
@@ -102,7 +102,7 @@ export async function revealMessageBody(messageId: string): Promise<ActionResult
   }
 
   // Audit records the reveal happened + content byte length — NEVER the content.
-  adminAudit({
+  await adminAudit({
     action,
     actorId: actor.id,
     actorEmail: actor.email,
@@ -170,7 +170,7 @@ export async function searchMessageContent(query: string): Promise<ActionResult<
   }
 
   // Audit records the search happened + result count — NEVER the term/content.
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { len: term.length, results: rows.length }, ok: true });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { len: term.length, results: rows.length }, ok: true });
 
   const hits: MessageContentHit[] = rows.map((r) => {
     const t = (r.content ?? "").trim();
@@ -255,7 +255,7 @@ export async function createChannel(conversationId: string, name: string): Promi
   const { data: readBack } = await admin.from("conversation_channels").select("id, name").eq("id", (row as any).id).maybeSingle();
   if (!readBack) return fail(action, actor, "Channel creation did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { conversationId, name: clean }, ok: true, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { conversationId, name: clean }, ok: true, after: row });
   return { ok: true, data: row };
 }
 
@@ -284,7 +284,7 @@ export async function renameChannel(channelId: string, name: string): Promise<Ac
   if (error || !row) return fail(action, actor, "Could not rename the channel.", target);
   if ((row as any).name !== clean) return fail(action, actor, "Rename did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { channelId, name: clean }, ok: true, before, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { channelId, name: clean }, ok: true, before, after: row });
   return { ok: true, data: row };
 }
 
@@ -319,7 +319,7 @@ export async function setChannelPermission(channelId: string, permission: string
   if (error || !row) return fail(action, actor, "Could not update the channel permission.", target);
   if ((row as any).post_permission !== permission) return fail(action, actor, "Permission change did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
   return { ok: true, data: row };
 }
 
@@ -349,7 +349,7 @@ export async function deleteEmptyChannel(channelId: string): Promise<ActionResul
 
   const { data: check } = await admin.from("conversation_channels").select("id").eq("id", channelId).maybeSingle();
   const removed = !check;
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: removed, before, after: null });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: removed, before, after: null });
   return removed ? { ok: true, data: { removed: true } } : { ok: false, error: "Removal did not take effect." };
 }
 
@@ -380,6 +380,6 @@ export async function setNotificationRead(notificationId: string, read: boolean)
   if (error || !row) return fail(action, actor, "Could not update the notification.", target);
   if ((row as any).read !== read) return fail(action, actor, "Update did not take effect.", target);
 
-  adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true, before, after: row });
   return { ok: true, data: row };
 }
