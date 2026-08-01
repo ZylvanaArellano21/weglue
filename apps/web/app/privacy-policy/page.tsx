@@ -179,6 +179,84 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
 
         <section>
           <h2 className="text-lg font-semibold text-black mb-2">
+            Account Restrictions and Enforcement Records
+          </h2>
+          <p className="text-sm text-[#5F5D5D] leading-relaxed">
+            If an account breaks our Terms or Community Guidelines, We Glue may
+            restrict its access — either temporarily (a suspension, which may
+            have an end date) or until we lift it. We keep a record of that
+            decision.
+          </p>
+          <ul className="mt-3 space-y-1 text-sm text-[#5F5D5D] leading-relaxed list-disc pl-5">
+            <li>
+              An enforcement record contains the affected{" "}
+              <strong>account ID</strong>, the <strong>type of restriction</strong>,{" "}
+              <strong>timestamps</strong>, the <strong>administrator and audit
+              identifiers</strong> for accountability, and an{" "}
+              <strong>internal reason</strong> written by our team.
+            </li>
+            <li>
+              The <strong>internal reason is never shown publicly</strong> and is
+              never shown to the affected person. If you want to understand a
+              decision, contact us.
+            </li>
+            <li>
+              We use these records for <strong>safety, policy enforcement,
+              security and compliance</strong> — not for advertising, and not to
+              build a profile of you.
+            </li>
+            <li>
+              <strong>A restriction does not delete your content.</strong> Your
+              posts, messages, clubs, events and media stay as they are unless
+              they are removed separately for breaking the rules.
+            </li>
+            <li>
+              <strong>You can still delete your account while restricted.</strong>{" "}
+              The in-app deletion option remains available, and the{" "}
+              <a href="/delete-account" className="text-[#0FA6A6] hover:underline">
+                deletion request form
+              </a>{" "}
+              remains available if you cannot sign in.
+            </li>
+            <li>
+              A restriction is applied inside We Glue&apos;s own systems. We do{" "}
+              <strong>not</strong> use our authentication provider&apos;s account-ban
+              mechanism for it, which is precisely what keeps you able to sign in
+              far enough to read this notice and to delete your account.
+            </li>
+          </ul>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            One thing we want to be precise about, because it is an exception to
+            what we say above about deletion:{" "}
+            <strong>
+              enforcement and administrator audit records may be kept after an
+              account is deleted
+            </strong>
+            , where we need them for security, abuse prevention and
+            accountability. When that happens the record is reduced to identifiers
+            and timestamps — it is no longer connected to a profile, a name or an
+            email address, because those are gone. We would rather tell you this
+            than promise that every trace disappears when it does not.
+          </p>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            We keep such a record only for as long as it is reasonably needed for
+            safety, fraud prevention, legal compliance, handling a dispute, or
+            accountability — not indefinitely as a matter of course, and we do not
+            claim every one of them is required by law.
+          </p>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            What a retained record never contains:{" "}
+            <strong>
+              passwords, multi-factor authentication codes, access tokens, private
+              administrative access details, or the contents of private messages
+            </strong>
+            . Enforcement records hold identifiers, timestamps, the category of
+            action, and our internal note about it.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold text-black mb-2">
             Children&apos;s Privacy (COPPA)
           </h2>
           <p className="text-sm text-[#5F5D5D] leading-relaxed">
