@@ -23,6 +23,20 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+-- ── Reproduce Supabase's DEFAULT PRIVILEGES ────────────────────────────────
+--
+-- Supabase configures ALTER DEFAULT PRIVILEGES so every new function in
+-- `public` receives an EXPLICIT EXECUTE grant for anon, authenticated and
+-- service_role. A plain postgres database does not, which made a real Day 10B2
+-- defect invisible here: `REVOKE ... FROM PUBLIC` looked sufficient in the
+-- shadow database while leaving an explicit `authenticated` grant intact in
+-- production, so students could enumerate any account's restriction state.
+--
+-- Reproducing it means a migration that forgets to name `authenticated` now
+-- fails the SECDEF coverage test locally, before it can reach production.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
+
 -- ── auth schema (Supabase shape) ────────────────────────────────────────────
 CREATE SCHEMA IF NOT EXISTS auth;
 

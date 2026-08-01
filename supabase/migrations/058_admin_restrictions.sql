@@ -275,9 +275,22 @@ AS $$
   );
 $$;
 
-REVOKE ALL ON FUNCTION public.get_account_access_state(uuid)        FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.is_account_restricted(uuid)           FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.can_student_access_app(uuid)          FROM PUBLIC, anon;
+-- REVOKE FROM `authenticated` EXPLICITLY, not just PUBLIC.
+--
+-- Supabase's ALTER DEFAULT PRIVILEGES grants EXECUTE on every new function in
+-- `public` to anon, authenticated AND service_role as an EXPLICIT grant — not
+-- an inherited PUBLIC one. `REVOKE ... FROM PUBLIC` therefore does NOT remove
+-- it, and the three PER-USER probes below stayed callable by any student,
+-- letting them enumerate any account's restriction state by uuid.
+--
+-- This was invisible on a plain postgres shadow database, which has no such
+-- default privileges, and was caught only by checking the grants on production
+-- after applying. Naming `authenticated` is what actually closes it.
+REVOKE ALL ON FUNCTION public.get_account_access_state(uuid)        FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.is_account_restricted(uuid)           FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.can_student_access_app(uuid)          FROM PUBLIC, anon, authenticated;
+-- These two are argument-free self-checks and ARE needed by `authenticated`:
+-- RLS policy expressions evaluate as the caller.
 REVOKE ALL ON FUNCTION public.current_student_can_access_app()      FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.my_access_state()                     FROM PUBLIC, anon;
 
