@@ -15,8 +15,8 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
 import { openChat } from '../../../lib/chatNavigation';
 import { navigateToDiscover } from '../../../lib/discoverNavigation';
-import { useMyChats, useChatSearch } from '../../../hooks/useChats';
-import { ChatListItem } from '../../../components/chat/ChatListItem';
+import { useMyChats, useChatSearch, useSuggestedPeople } from '../../../hooks/useChats';
+import { ChatListItem, SuggestedPersonRow } from '../../../components/chat/ChatListItem';
 import { ChatSearchBar } from '../../../components/chat/ChatSearchBar';
 import { FilterPills, type ChatFilter } from '../../../components/chat/FilterPills';
 import { GroupEmptyState } from '../../../components/chat/GroupEmptyState';
@@ -63,6 +63,10 @@ export default function MessagesIndex() {
   );
 
   const filteredChats = filter === 'single' ? directChats : groupChats;
+  const { data: suggestedPeople = [], isLoading: suggestedLoading } = useSuggestedPeople(
+    userId,
+    filter === 'single' && directChats.length === 0 && !searching,
+  );
 
   const handlePressChat = useCallback(
     (
@@ -182,9 +186,23 @@ export default function MessagesIndex() {
     return (
       <View style={styles.suggestedWrap}>
         <Text style={styles.suggestedHeader}>Suggested</Text>
-        <Text style={styles.suggestedHint}>
-          Search above to find people, or browse clubs to meet members.
-        </Text>
+        {suggestedLoading ? (
+          <ActivityIndicator style={styles.suggestedLoading} color={chatColors.teal} />
+        ) : suggestedPeople.length > 0 ? (
+          suggestedPeople.slice(0, 6).map((person) => (
+            <SuggestedPersonRow
+              key={person.user_id}
+              username={person.username}
+              fullName={person.full_name}
+              avatarUrl={person.avatar_url}
+              onPress={() => handlePressUser(person)}
+            />
+          ))
+        ) : (
+          <Text style={styles.suggestedHint}>
+            Search above to find people, or browse clubs to meet members.
+          </Text>
+        )}
       </View>
     );
   }
@@ -351,6 +369,9 @@ const styles = StyleSheet.create({
     color: chatColors.textMuted,
     paddingHorizontal: 23,
     lineHeight: 18,
+  },
+  suggestedLoading: {
+    marginTop: 16,
   },
   emptyBody: {
     fontFamily: chatFonts.regular,

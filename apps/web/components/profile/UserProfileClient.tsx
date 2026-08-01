@@ -14,6 +14,7 @@ import {
   useUnfollow,
 } from "../../lib/hooks/useUserProfile";
 import { useDidIBlock, useBlockUser, useUnblockUser } from "../../lib/hooks/useBlocking";
+import { personMessageHref } from "../../lib/messages/routes";
 import {
   UNAVAILABLE_TITLE,
   UNAVAILABLE_BODY,
@@ -192,6 +193,14 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
             }
           >
             {label}
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push(personMessageHref(targetUserId))}
+            disabled={!!iBlockedThem}
+            className="rounded-full border-[1.5px] border-teal px-4 py-2.5 text-center text-[15px] font-semibold text-teal hover:bg-teal/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Message
           </button>
 
           {/* Safety menu. Mirrors the mobile profile overflow menu so a student

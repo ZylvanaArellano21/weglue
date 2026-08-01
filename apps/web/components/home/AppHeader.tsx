@@ -32,6 +32,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const notifications = summary?.unread_notifications ?? 0;
   const threads = summary?.unread_threads ?? 0;
   const isClubs = pathname === "/clubs" || pathname.startsWith("/club/");
+  const isMessages = pathname === "/messages";
 
   // Off-Home expand/collapse state for the global search.
   const [expanded, setExpanded] = useState(false);
@@ -108,8 +109,8 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           <NavIcon href="/clubs" label="Clubs" active={isClubs}>
             <PeopleIcon size={27} filled={isClubs} />
           </NavIcon>
-          <NavIcon href="/messages" label="Messages" badge={threads} badgeLabel="unread conversations">
-            <ChatIcon size={26} />
+          <NavIcon href="/messages" label="Messages" active={isMessages} badge={threads} badgeLabel="unread conversations">
+            <ChatIcon size={26} filled={isMessages} />
           </NavIcon>
 
           <Link href="/profile" aria-label="Your profile" className="ml-1 shrink-0">

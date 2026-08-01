@@ -92,11 +92,11 @@ export function useChatSearch(userId: string | undefined, query: string) {
   });
 }
 
-export function useSuggestedPeople(userId: string | undefined) {
+export function useSuggestedPeople(userId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: ['suggestedPeople', userId],
     queryFn: () => getSuggestedPeople(userId!),
-    enabled: !!userId,
+    enabled: !!userId && enabled,
     staleTime: 5 * 60 * 1000,
   });
 }

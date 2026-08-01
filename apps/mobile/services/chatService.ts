@@ -567,13 +567,8 @@ export async function searchChats(
   const q = query.trim();
   if (!q) return { people: [], chats: [] };
 
-  const [{ data: people }, { data: chats }] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('id, username, full_name, avatar_url')
-      .or(`username.ilike.%${q}%,full_name.ilike.%${q}%`)
-      .neq('id', userId)
-      .limit(20),
+  const [{ data: people, error: peopleError }, { data: chats }] = await Promise.all([
+    supabase.rpc('search_message_people', { p_query: q, p_limit: 20 }),
 
     supabase
       .from('conversation_participants')
@@ -586,8 +581,10 @@ export async function searchChats(
       .limit(20),
   ]);
 
+  if (peopleError) throw peopleError;
+
   const peopleResults: PeopleResult[] = ((people ?? []) as any[]).map((p) => ({
-    user_id: p.id,
+    user_id: p.user_id,
     username: p.username,
     full_name: p.full_name,
     avatar_url: p.avatar_url,
@@ -608,50 +605,18 @@ export async function searchChats(
   return { people: peopleResults, chats: chatResults };
 }
 
-/** Returns up to 20 suggested people from clubs the user shares with others. */
-export async function getSuggestedPeople(userId: string): Promise<PeopleResult[]> {
-  const { data: memberships } = await supabase
-    .from('club_members')
-    .select('club_id')
-    .eq('user_id', userId);
-
-  if (!memberships || memberships.length === 0) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, username, full_name, avatar_url')
-      .neq('id', userId)
-      .limit(10);
-    return ((data ?? []) as any[]).map((p) => ({
-      user_id: p.id,
-      username: p.username,
-      full_name: p.full_name,
-      avatar_url: p.avatar_url,
-    }));
-  }
-
-  const clubIds = (memberships as any[]).map((m) => m.club_id);
-
-  const { data } = await supabase
-    .from('club_members')
-    .select('user_id, profiles!user_id(id, username, full_name, avatar_url)')
-    .in('club_id', clubIds)
-    .neq('user_id', userId)
-    .limit(40);
-
-  const seen = new Set<string>();
-  const result: PeopleResult[] = [];
-  for (const row of (data ?? []) as any[]) {
-    if (!seen.has(row.user_id)) {
-      seen.add(row.user_id);
-      result.push({
-        user_id: row.user_id,
-        username: row.profiles?.username ?? '',
-        full_name: row.profiles?.full_name ?? null,
-        avatar_url: row.profiles?.avatar_url ?? null,
-      });
-    }
-  }
-  return result.slice(0, 20);
+/** Six bounded, cross-campus suggestions from the shared secure RPC. The
+ * database excludes blocked, restricted, and deleted accounts before any
+ * profile data reaches the device. */
+export async function getSuggestedPeople(_userId: string): Promise<PeopleResult[]> {
+  const { data, error } = await supabase.rpc('get_message_suggestions', { p_limit: 6 });
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((p) => ({
+    user_id: p.user_id,
+    username: p.username,
+    full_name: p.full_name ?? null,
+    avatar_url: p.avatar_url ?? null,
+  }));
 }
 
 // ─── Internal sharing (people + groups + club chats) ────────────────────────

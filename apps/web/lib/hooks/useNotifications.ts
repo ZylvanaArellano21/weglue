@@ -141,7 +141,7 @@ export type NotificationTarget =
   | { kind: "user"; id: string }
   | { kind: "post"; id: string }
   | { kind: "club"; id: string }
-  | { kind: "chat"; id: string }
+  | { kind: "chat"; id: string; channelId?: string }
   | { kind: "notifications" };
 
 /** Resolves where a notification opens — server route first, then legacy fallback. */
@@ -157,7 +157,10 @@ export function resolveNotificationTarget(item: AppNotification): NotificationTa
     if (screen === "profile" && idFor("userId")) return { kind: "user", id: idFor("userId")! };
     if (screen === "post" && idFor("postId")) return { kind: "post", id: idFor("postId")! };
     if (screen === "club" && idFor("clubId")) return { kind: "club", id: idFor("clubId")! };
-    if (screen === "chat" && idFor("chatId")) return { kind: "chat", id: idFor("chatId")! };
+    if (screen === "chat" && idFor("chatId")) {
+      const channelId = idFor("channelId");
+      return channelId ? { kind: "chat", id: idFor("chatId")!, channelId } : { kind: "chat", id: idFor("chatId")! };
+    }
     if (screen === "notifications") return { kind: "notifications" };
   }
   const ref = item.reference_id;

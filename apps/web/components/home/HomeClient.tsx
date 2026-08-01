@@ -17,6 +17,7 @@ import { ComposeEventModal } from "./ComposeEventModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications, type NotificationTarget } from "../../lib/hooks/useNotifications";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
+import { messagesHref } from "../../lib/messages/routes";
 
 // Root of the authenticated web Home experience. Mounts the live unread-summary
 // + notifications subscriptions and lays out the three desktop columns. Every
@@ -97,7 +98,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
         case "post": return openPost(target.id);
         case "user": return router.push(`/u/${target.id}`);
         case "club": return router.push(`/club/${target.id}`);
-        case "chat": return router.push(`/messages`);
+        case "chat": return router.push(messagesHref({ conversationId: target.id, channelId: target.channelId }));
         case "notifications": return; // already here
       }
     },
