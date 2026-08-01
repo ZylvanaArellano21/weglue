@@ -153,7 +153,7 @@ CREATE TABLE clubs (
   meeting_building   text,
   meeting_room       text,
   created_at      timestamptz NOT NULL DEFAULT now(),
-  -- Used only by check_club_inactivity() (migration 006, grants fixed in 059).
+  -- Used only by check_club_inactivity() (migration 006, grants fixed in 060).
   last_activity_at     timestamptz,
   inactivity_warned_at timestamptz
 );
@@ -467,11 +467,11 @@ $$;
 -- create_poll() — reproduced VERBATIM from production (pg_proc.prosrc), with
 -- production's exact 8-parameter signature, DEFAULTs and grant posture.
 --
--- This is deliberately the DEFECTIVE pre-059 state: migration 058 tried to wrap
+-- This is deliberately the DEFECTIVE pre-060 state: migration 058 tried to wrap
 -- `create_poll(uuid,uuid,text,text[],boolean)` — five parameters — which never
 -- resolved against this eight-parameter reality, and 058's
 -- `EXCEPTION WHEN undefined_function ... CONTINUE` swallowed the miss. The
--- fixture must reproduce that miss, or the 059 negative control proves nothing.
+-- fixture must reproduce that miss, or the 060 negative control proves nothing.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_poll(
   p_conversation_id uuid,

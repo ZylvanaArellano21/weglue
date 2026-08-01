@@ -1,9 +1,14 @@
-# Day 10B — Restriction-Enforcement Hotfix (migration 059) — Review Package
+# Day 10B — Restriction-Enforcement Hotfix (migration 060) — Review Package
+
+> **Renumbered 059 → 060.** While this hotfix was in review, PR #11 merged and applied
+> `059_messages_web_security_and_suggestions` to production, consuming version 059 in the
+> ledger. Supabase keys applied migrations by version, so a file still numbered 059 would be
+> treated as already applied and silently skipped. The two migrations do not overlap.
 
 **Status:** implementation complete, **NOT merged, NOT applied**.
 **Branch:** `safety/admin-restrictions-hotfix` · HEAD `3d5efc3f` · 1 commit ahead of `origin/main` (`cf3d2107`).
 
-Controlled Production validation remains **NO-GO** until 059 is applied. Day 10C not started.
+Controlled Production validation remains **NO-GO** until 060 is applied. Day 10C not started.
 
 ---
 
@@ -17,8 +22,8 @@ Controlled Production validation remains **NO-GO** until 059 is applied. Day 10C
 | Files | 4 (2 new, 2 modified) |
 
 ```
-supabase/migrations/059_restriction_enforcement_hotfix.sql   NEW
-supabase/scripts/test_059_restriction_hotfix.sql             NEW
+supabase/migrations/060_restriction_enforcement_hotfix.sql   NEW
+supabase/scripts/test_060_restriction_hotfix.sql             NEW
 supabase/scripts/test_057_fixture_schema.sql                 +159
 supabase/scripts/test_058_secdef_coverage.sql                +120
 ```
@@ -52,7 +57,7 @@ pronargs=8 · pronargdefaults=4
 
 ## 3. Before/after grant matrix
 
-Verified in a shadow database built from the real 055 → 056 → 057 → 058 → 059 sequence.
+Verified in a shadow database built from the real 055 → 056 → 057 → 058 → 060 sequence.
 
 | Function | | PUBLIC | anon | authenticated | service_role |
 |---|---|---|---|---|---|
@@ -99,7 +104,7 @@ Revoking client access therefore removes attack surface without removing behavio
 
 ---
 
-## 5. Migration 059 — what it does
+## 5. Migration 060 — what it does
 
 Three sections, all inside one transaction.
 
@@ -134,9 +139,9 @@ Authentication is checked **first**: an unauthenticated caller still receives th
 
 The defect was not the wrong signature — it was that **being wrong was survivable**. Four changes make it unsurvivable:
 
-1. **059 contains no handwritten signature.** Every one is read from `pg_proc` at run time.
+1. **060 contains no handwritten signature.** Every one is read from `pg_proc` at run time.
 2. **Targets resolve by name**, and an unresolvable target `RAISE`s. `EXCEPTION WHEN undefined_function … CONTINUE` appears nowhere in 059.
-3. **059 verifies its own outcome** (§5.3) and rolls back rather than reporting a success it did not achieve.
+3. **060 verifies its own outcome** (§5.3) and rolls back rather than reporting a success it did not achieve.
 4. **A migration-time coverage invariant**: any SECURITY DEFINER function that writes and is student-reachable must invoke the guard, delegate to a `__inner` twin, or appear in a justified exception list. Anything else aborts the migration.
 
 The permanent version lives in `test_058_secdef_coverage.sql`, now extended with **four independent discovery mechanisms** — explicit `authenticated`, explicit `anon`, **explicit PUBLIC (`=X/`)**, and `proacl IS NULL` (which in PostgreSQL *means* EXECUTE-to-PUBLIC). Mechanism three is the one that was missing. New assertions:
@@ -150,15 +155,15 @@ The permanent version lives in `test_058_secdef_coverage.sql`, now extended with
 
 Trigger functions are excluded by return type (`pg_catalog.trigger`) rather than by name, since they cannot be invoked through PostgREST whatever their grants say.
 
-**Root cause of the test's own blind spot, stated plainly:** the coverage test inventories the live catalog, but the catalog it saw came from `test_057_fixture_schema.sql` — and that fixture never contained `create_poll` at all. A test that can only see what the fixture creates cannot find what the fixture omits. The fixture now reproduces both functions verbatim from production, including their **defective pre-059 grants**, so the negative control is genuine rather than staged.
+**Root cause of the test's own blind spot, stated plainly:** the coverage test inventories the live catalog, but the catalog it saw came from `test_057_fixture_schema.sql` — and that fixture never contained `create_poll` at all. A test that can only see what the fixture creates cannot find what the fixture omits. The fixture now reproduces both functions verbatim from production, including their **defective pre-fix grants**, so the negative control is genuine rather than staged.
 
 ---
 
 ## 7. Negative-control results
 
-Both suites were run against a **pre-059** database (fixture + 057 + 055 + 056 + 058) and then against post-059.
+Both suites were run against a **pre-fix** database (fixture + 057 + 055 + 056 + 058) and then against post-fix.
 
-**Coverage test — pre-059: 5 failures, both defects named**
+**Coverage test — pre-fix: 5 failures, both defects named**
 
 ```
 S1  *FAIL* every student-reachable SECDEF function is classified
@@ -171,7 +176,7 @@ S7d *FAIL* create_poll is wrapped … → create_poll__inner ABSENT
 S7e *FAIL* check_club_inactivity … → still reachable: explicit PUBLIC anon authenticated
 ```
 
-**059 harness — pre-059: 15 failures, including proof of live exploitation**
+**060 harness — pre-fix: 15 failures, including proof of live exploitation**
 
 ```
 C1/C2 *FAIL* SUSPENDED participant cannot create a poll
@@ -186,7 +191,7 @@ The restricted student **actually created three polls**, and the student call to
 
 **The findings disappear for the right reason, not because discovery stopped:**
 
-| | pre-059 | post-059 |
+| | pre-fix | post-fix |
 |---|---|---|
 | student-reachable SECDEF inventoried | 32 | 31 |
 | …of which writers | 3 | **1** (`delete_own_account_atomic`, justified) |
@@ -203,11 +208,11 @@ The restricted student **actually created three polls**, and the student call to
 
 | Suite | Result | Notes |
 |---|---|---|
-| `test_059_restriction_hotfix.sql` | **49 / 49** | new |
+| `test_060_restriction_hotfix.sql` | **49 / 49** | new |
 | `test_058_secdef_coverage.sql` | **19 / 19** | extended (was 15) |
-| `test_058_admin_restrictions.sql` | **87 / 87** | against post-059, incl. expired-suspension lifecycle L1–L13 |
-| `test_057_student_blocking.sql` | **95 / 95** | against post-059 |
-| `test_057_concurrency.sh` | **17 / 17** | against post-059 |
+| `test_058_admin_restrictions.sql` | **87 / 87** | against post-fix, incl. expired-suspension lifecycle L1–L13 |
+| `test_057_student_blocking.sql` | **95 / 95** | against post-fix |
+| `test_057_concurrency.sh` | **17 / 17** | against post-fix |
 | Web (vitest) | **838 / 838** | 34 files |
 | Mobile (vitest) | **63 / 63** | 6 files |
 | Type-checks | **4 / 4** | shared, database, mobile, web |
@@ -217,21 +222,21 @@ The restricted student **actually created three polls**, and the student call to
 | Migration idempotency | **pass** | 059 run 3× — one wrapper, one inner, no drift |
 | Static secret scan | **clean** | no tokens/keys/JWTs; all emails synthetic |
 
-The 059 harness covers every path the founder listed: message/poll/option creation, notification behaviour, channel vs direct/group conversations, scheduled start/end, multiple-choice, **all five short call forms (4–8 args)**, named-argument calls, `client_tag` idempotency, every original error string (`not_authenticated`, `not_a_participant`, `question_required`, `need_two_options`, `end_before_start`, `channel_mismatch`), suspended and blocked denial, non-participant denial, zero partial rows after a refused call, wrapper student-callable, and inner **not** student-callable — including a direct call to `create_poll__inner` being denied.
+The 060 harness covers every path the founder listed: message/poll/option creation, notification behaviour, channel vs direct/group conversations, scheduled start/end, multiple-choice, **all five short call forms (4–8 args)**, named-argument calls, `client_tag` idempotency, every original error string (`not_authenticated`, `not_a_participant`, `question_required`, `need_two_options`, `end_before_start`, `channel_mismatch`), suspended and blocked denial, non-participant denial, zero partial rows after a refused call, wrapper student-callable, and inner **not** student-callable — including a direct call to `create_poll__inner` being denied.
 
 **Two honest notes on the run:**
 - The web type-check initially failed on a **stale `.next/types` artifact** referencing `app/messages/page.js`, a directory that has never existed in git. Removing `.next/types` cleared it; no source change was involved.
-- The concurrency harness first reported 9/17 — **my own setup error**. Its documented run order requires `test_057_student_blocking.sql` (which seeds users A/B/C) before the script. With the correct order it is 17/17. I verified this was not a 059 regression by reproducing the same 9/17 against pre-059 *and* against the unmodified fixture from `origin/main`.
+- The concurrency harness first reported 9/17 — **my own setup error**. Its documented run order requires `test_057_student_blocking.sql` (which seeds users A/B/C) before the script. With the correct order it is 17/17. I verified this was not a 059 regression by reproducing the same 9/17 against pre-fix *and* against the unmodified fixture from `origin/main`.
 
 ---
 
 ## 9. True blockers
 
-**None for merging and applying migration 059.**
+**None for merging and applying migration 060.**
 
 Two items are flagged for your decision, neither blocking:
 
-1. **`check_club_inactivity` has no scheduler.** 006's `cron.schedule` silently failed, so club inactivity processing has never run. 059 deliberately does not switch it on — that would begin warning and soft-deleting real clubs, which is a product decision. Say the word and it becomes its own small migration.
+1. **`check_club_inactivity` has no scheduler.** 006's `cron.schedule` silently failed, so club inactivity processing has never run. 060 deliberately does not switch it on — that would begin warning and soft-deleting real clubs, which is a product decision. Say the word and it becomes its own small migration.
 2. **The `EXCEPTION WHEN OTHERS THEN NULL` pattern in migration 006** is the same silent-failure class as defect 1. It is not touched here (006 is long applied), but it is worth a sweep of older migrations for the same shape.
 
 ---
@@ -240,11 +245,11 @@ Two items are flagged for your decision, neither blocking:
 
 1. Merge the reviewed hotfix PR.
 2. Verify the Production ledger ends at **058**.
-3. Confirm **059 is the only pending migration**.
+3. Confirm **060 is the only pending migration**.
 4. Confirm migration **051 is absent**.
 5. Confirm `ADMIN_WRITES_ENABLED=false`.
 6. Capture read-only baselines: `account_restrictions`=0, `admin_audit_events`=2, `user_blocks`=0, `banned_until`=0, `profiles`=65, clubs warned=0, clubs inactive=0.
-7. Apply migration 059 **exactly once**.
+7. Apply migration 060 **exactly once**.
 8. Verify corrected grants through Production catalogs (the §3 matrix).
 9. Confirm `account_restrictions` remains empty.
 10. Confirm ordinary application row counts unchanged.
@@ -253,14 +258,14 @@ Two items are flagged for your decision, neither blocking:
 13. Re-run the controlled-validation preparation.
 14. **Stop for founder approval** before enabling administrator writes.
 
-The controlled restriction validation is **not** part of the 059 release.
+The controlled restriction validation is **not** part of the 060 release.
 
 ---
 
 ## 11. Recommendation
 
-# GO — merge and apply migration 059
+# GO — merge and apply migration 060
 
-The two defects are reproduced, fixed, and proven fixed by tests that **demonstrably fail without the fix and pass with it**, with the pre-059 run showing real polls created by a restricted student and a real club mutation by an unauthenticated-tier caller. The client contract for `create_poll` is unchanged down to parameter names and default arguments. No application code changed, so no OTA or native build is involved. 058 remains byte-unchanged, and a fresh environment reaches the same corrected state through the normal 055 → 056 → 057 → 058 → 059 sequence.
+The two defects are reproduced, fixed, and proven fixed by tests that **demonstrably fail without the fix and pass with it**, with the pre-fix run showing real polls created by a restricted student and a real club mutation by an unauthenticated-tier caller. The client contract for `create_poll` is unchanged down to parameter names and default arguments. No application code changed, so no OTA or native build is involved. 058 remains byte-unchanged, and a fresh environment reaches the same corrected state through the normal 055 → 056 → 057 → 058 → 060 sequence.
 
-Controlled Production validation stays **NO-GO until 059 is applied** — after which the Day 10B validation package can be re-run against enforcement that is actually complete.
+Controlled Production validation stays **NO-GO until 060 is applied** — after which the Day 10B validation package can be re-run against enforcement that is actually complete.

@@ -1,13 +1,13 @@
 -- ============================================================================
--- 059 — Restriction-enforcement hotfix
+-- 060 — Restriction-enforcement hotfix
 -- ============================================================================
 --
 -- Migration 058 shipped the account-restriction guard across 49 student RPCs
 -- and 54 RLS policies. Two holes survived it. Both are closed here. 058 itself
 -- is NOT edited — it is already applied to production, and rewriting an applied
--- migration would make the file disagree with the database it produced. 059
+-- migration would make the file disagree with the database it produced. 060
 -- corrects the live database and, run in the normal 055 -> 056 -> 057 -> 058 ->
--- 059 order, brings a fresh environment to the same corrected state.
+-- 060 order, brings a fresh environment to the same corrected state.
 --
 -- DEFECT 1 — create_poll was never wrapped
 -- ---------------------------------------
@@ -39,6 +39,17 @@
 -- Where a target cannot be resolved, it RAISES — silence is never an outcome.
 -- ============================================================================
 
+-- WHY 060 AND NOT 059
+-- -------------------
+-- This hotfix was authored as 059. While it was in review, PR #11 merged and
+-- applied `059_messages_web_security_and_suggestions` to production, consuming
+-- version 059 in the ledger. Supabase keys applied migrations by VERSION, so a
+-- file still numbered 059 would be treated as already applied and SILENTLY
+-- SKIPPED — the same class of quiet failure this migration exists to eliminate.
+-- Renumbered to 060. The two migrations do not overlap: 059 adds read-only,
+-- already-guarded message search/suggestion functions and touches neither
+-- create_poll nor check_club_inactivity.
+
 BEGIN;
 
 -- ---------------------------------------------------------------------------
@@ -65,25 +76,25 @@ BEGIN
        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public' AND p.proname = 'create_poll__inner') THEN
     RAISE EXCEPTION
-      '059: public.create_poll not found. Expected from migration 040/041. '
+      '060: public.create_poll not found. Expected from migration 040/041. '
       'Refusing to continue: a security wrapper that cannot find its target '
       'must fail loudly, never skip.';
   END IF;
 
   IF v_count > 1 THEN
     RAISE EXCEPTION
-      '059: % overloads of public.create_poll exist. The intended target is '
+      '060: % overloads of public.create_poll exist. The intended target is '
       'ambiguous; refusing to guess which one to wrap.', v_count;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
               WHERE n.nspname = 'public' AND p.proname = 'create_poll__inner') THEN
-    -- Already wrapped by a previous 059 run. Re-derive from the inner function
+    -- Already wrapped by a previous 060 run. Re-derive from the inner function
     -- and fall through, so grants and the wrapper body are re-asserted.
     SELECT p.oid INTO v_oid
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public' AND p.proname = 'create_poll__inner';
-    RAISE NOTICE '059: create_poll already wrapped; re-asserting wrapper and grants.';
+    RAISE NOTICE '060: create_poll already wrapped; re-asserting wrapper and grants.';
   ELSE
     SELECT p.oid INTO v_oid
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -110,7 +121,7 @@ BEGIN
   -- otherwise silently produce a wrapper that calls the inner with wrong args.
   IF v_names <> v_nargs THEN
     RAISE EXCEPTION
-      '059: derived % parameter names from identity arguments but pg_proc '
+      '060: derived % parameter names from identity arguments but pg_proc '
       'reports % parameters for create_poll. Refusing to build a wrapper from '
       'an argument list this migration cannot parse reliably.', v_names, v_nargs;
   END IF;
@@ -150,7 +161,7 @@ BEGIN
   EXECUTE format('REVOKE ALL ON FUNCTION public.create_poll(%s) FROM PUBLIC, anon;', v_ident);
   EXECUTE format('GRANT EXECUTE ON FUNCTION public.create_poll(%s) TO authenticated;', v_ident);
 
-  RAISE NOTICE '059: create_poll wrapped (% params, returns %).', v_nargs, v_ret;
+  RAISE NOTICE '060: create_poll wrapped (% params, returns %).', v_nargs, v_ret;
 END
 $poll$;
 
@@ -178,7 +189,7 @@ BEGIN
      WHERE n.nspname = 'public' AND p.proname = 'check_club_inactivity' AND p.pronargs = 0)
   THEN
     RAISE EXCEPTION
-      '059: public.check_club_inactivity() not found. Expected from migration '
+      '060: public.check_club_inactivity() not found. Expected from migration '
       '006. Refusing to continue rather than silently skipping a grant fix.';
   END IF;
 END
@@ -198,7 +209,7 @@ GRANT EXECUTE ON FUNCTION public.check_club_inactivity() TO service_role;
 -- 3. Fail-closed post-conditions
 -- ---------------------------------------------------------------------------
 -- 058 could report success while having silently protected nothing. This block
--- makes that impossible for 059: the migration verifies its own outcome from the
+-- makes that impossible for 060: the migration verifies its own outcome from the
 -- catalog and aborts the transaction if any invariant does not hold.
 --
 -- proacl IS NULL is treated as PUBLIC-EXECUTABLE, because that is what
@@ -224,33 +235,33 @@ BEGIN
    WHERE n.nspname = 'public' AND p.proname = 'create_poll';
 
   IF v_oid IS NULL THEN
-    RAISE EXCEPTION '059 VERIFY: public.create_poll is missing after wrapping.';
+    RAISE EXCEPTION '060 VERIFY: public.create_poll is missing after wrapping.';
   END IF;
   IF v_nargs <> 8 OR v_ndefs <> 4 THEN
     RAISE EXCEPTION
-      '059 VERIFY: create_poll wrapper has %/% params/defaults, expected 8/4. '
+      '060 VERIFY: create_poll wrapper has %/% params/defaults, expected 8/4. '
       'Clients calling the short form would break.', v_nargs, v_ndefs;
   END IF;
   IF v_ret <> 'json' THEN
-    RAISE EXCEPTION '059 VERIFY: create_poll returns %, expected json.', v_ret;
+    RAISE EXCEPTION '060 VERIFY: create_poll returns %, expected json.', v_ret;
   END IF;
   IF v_prosrc NOT LIKE '%current_student_can_access_app%' THEN
-    RAISE EXCEPTION '059 VERIFY: create_poll wrapper does not invoke the restriction guard.';
+    RAISE EXCEPTION '060 VERIFY: create_poll wrapper does not invoke the restriction guard.';
   END IF;
   IF v_prosrc NOT LIKE '%create_poll__inner%' THEN
-    RAISE EXCEPTION '059 VERIFY: create_poll wrapper does not delegate to its inner implementation.';
+    RAISE EXCEPTION '060 VERIFY: create_poll wrapper does not delegate to its inner implementation.';
   END IF;
 
   -- 3b. create_poll wrapper reachable by students, not by anon or PUBLIC
   v_public := v_acl IS NULL OR EXISTS (SELECT 1 FROM unnest(v_acl) a WHERE a::text LIKE '=%');
   IF v_public THEN
-    RAISE EXCEPTION '059 VERIFY: create_poll is still executable by PUBLIC.';
+    RAISE EXCEPTION '060 VERIFY: create_poll is still executable by PUBLIC.';
   END IF;
   IF has_function_privilege('anon', v_oid, 'EXECUTE') THEN
-    RAISE EXCEPTION '059 VERIFY: create_poll is still executable by anon.';
+    RAISE EXCEPTION '060 VERIFY: create_poll is still executable by anon.';
   END IF;
   IF NOT has_function_privilege('authenticated', v_oid, 'EXECUTE') THEN
-    RAISE EXCEPTION '059 VERIFY: create_poll is NOT executable by authenticated — students could no longer create polls.';
+    RAISE EXCEPTION '060 VERIFY: create_poll is NOT executable by authenticated — students could no longer create polls.';
   END IF;
 
   -- 3c. inner implementation unreachable by every client role
@@ -258,14 +269,14 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public' AND p.proname = 'create_poll__inner';
   IF v_oid IS NULL THEN
-    RAISE EXCEPTION '059 VERIFY: create_poll__inner is missing.';
+    RAISE EXCEPTION '060 VERIFY: create_poll__inner is missing.';
   END IF;
   v_public := v_acl IS NULL OR EXISTS (SELECT 1 FROM unnest(v_acl) a WHERE a::text LIKE '=%');
   IF v_public
      OR has_function_privilege('anon', v_oid, 'EXECUTE')
      OR has_function_privilege('authenticated', v_oid, 'EXECUTE') THEN
     RAISE EXCEPTION
-      '059 VERIFY: create_poll__inner is still reachable by a client role. The '
+      '060 VERIFY: create_poll__inner is still reachable by a client role. The '
       'guard would be bypassable by calling the inner function directly.';
   END IF;
 
@@ -275,19 +286,19 @@ BEGIN
    WHERE n.nspname = 'public' AND p.proname = 'check_club_inactivity';
   v_public := v_acl IS NULL OR EXISTS (SELECT 1 FROM unnest(v_acl) a WHERE a::text LIKE '=%');
   IF v_public THEN
-    RAISE EXCEPTION '059 VERIFY: check_club_inactivity is still executable by PUBLIC.';
+    RAISE EXCEPTION '060 VERIFY: check_club_inactivity is still executable by PUBLIC.';
   END IF;
   IF has_function_privilege('anon', v_oid, 'EXECUTE') THEN
-    RAISE EXCEPTION '059 VERIFY: check_club_inactivity is still executable by anon.';
+    RAISE EXCEPTION '060 VERIFY: check_club_inactivity is still executable by anon.';
   END IF;
   IF has_function_privilege('authenticated', v_oid, 'EXECUTE') THEN
-    RAISE EXCEPTION '059 VERIFY: check_club_inactivity is still executable by authenticated.';
+    RAISE EXCEPTION '060 VERIFY: check_club_inactivity is still executable by authenticated.';
   END IF;
   IF NOT has_function_privilege('service_role', v_oid, 'EXECUTE') THEN
-    RAISE EXCEPTION '059 VERIFY: check_club_inactivity lost service_role EXECUTE — internal processing could not run.';
+    RAISE EXCEPTION '060 VERIFY: check_club_inactivity lost service_role EXECUTE — internal processing could not run.';
   END IF;
 
-  RAISE NOTICE '059: all post-conditions verified.';
+  RAISE NOTICE '060: all post-conditions verified.';
 END
 $verify$;
 
@@ -336,7 +347,7 @@ BEGIN
      --   handle_new_user is a trigger function, never called by a client.
      -- check_club_inactivity is deliberately ABSENT from this list: after
      -- section 2 it is no longer student-reachable, so it cannot match. Listing
-     -- it would mask a future re-grant, which is the whole failure mode 059 exists
+     -- it would mask a future re-grant, which is the whole failure mode 060 exists
      -- to prevent.
      AND p.proname NOT IN (
        'auth_signup_status', 'ensure_profile', 'replace_pending_signup',
@@ -347,12 +358,12 @@ BEGIN
 
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION
-      E'059 COVERAGE: unguarded student-callable SECURITY DEFINER writer(s):\n  %\n'
+      E'060 COVERAGE: unguarded student-callable SECURITY DEFINER writer(s):\n  %\n'
       'Each must be wrapped with the restriction guard or added to the '
       'recognised-exception list with a written justification.', v_bad;
   END IF;
 
-  RAISE NOTICE '059: guard-coverage invariant holds.';
+  RAISE NOTICE '060: guard-coverage invariant holds.';
 END
 $coverage$;
 
