@@ -152,7 +152,10 @@ CREATE TABLE clubs (
   meeting_time_end   time,
   meeting_building   text,
   meeting_room       text,
-  created_at      timestamptz NOT NULL DEFAULT now()
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  -- Used only by check_club_inactivity() (migration 006, grants fixed in 059).
+  last_activity_at     timestamptz,
+  inactivity_warned_at timestamptz
 );
 
 CREATE TABLE club_categories (
@@ -312,6 +315,26 @@ CREATE INDEX idx_messages_sender_id    ON messages (sender_id);
 CREATE UNIQUE INDEX uq_messages_sender_client_tag
   ON messages (sender_id, client_tag) WHERE client_tag IS NOT NULL;
 
+-- Poll tables, column-for-column as production defines them. create_poll()
+-- writes to messages + polls + poll_options in one transaction, so the harness
+-- needs all three to prove the write is atomic under a guard failure.
+CREATE TABLE polls (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id     uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  question       text NOT NULL,
+  allow_multiple boolean NOT NULL DEFAULT false,
+  start_at       timestamptz,
+  end_at         timestamptz,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE poll_options (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  poll_id       uuid NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  option_text   text NOT NULL,
+  display_order integer NOT NULL
+);
+
 CREATE TABLE chat_invitations (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   token           text NOT NULL UNIQUE,
@@ -439,6 +462,140 @@ CREATE OR REPLACE FUNCTION public.can_post_in_channel(p_channel_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = 'public' AS $$
   SELECT TRUE;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- create_poll() — reproduced VERBATIM from production (pg_proc.prosrc), with
+-- production's exact 8-parameter signature, DEFAULTs and grant posture.
+--
+-- This is deliberately the DEFECTIVE pre-059 state: migration 058 tried to wrap
+-- `create_poll(uuid,uuid,text,text[],boolean)` — five parameters — which never
+-- resolved against this eight-parameter reality, and 058's
+-- `EXCEPTION WHEN undefined_function ... CONTINUE` swallowed the miss. The
+-- fixture must reproduce that miss, or the 059 negative control proves nothing.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.create_poll(
+  p_conversation_id uuid,
+  p_channel_id      uuid,
+  p_question        text,
+  p_options         text[],
+  p_allow_multiple  boolean DEFAULT false,
+  p_start_at        timestamptz DEFAULT NULL,
+  p_end_at          timestamptz DEFAULT NULL,
+  p_client_tag      uuid DEFAULT NULL
+) RETURNS json LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_message_id UUID;
+  v_poll_id UUID;
+  v_opt TEXT;
+  v_idx INT := 0;
+  v_channel RECORD;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF NOT is_conversation_participant(p_conversation_id) THEN
+    RAISE EXCEPTION 'not_a_participant';
+  END IF;
+  IF btrim(COALESCE(p_question,'')) = '' THEN RAISE EXCEPTION 'question_required'; END IF;
+  IF p_options IS NULL OR array_length(array_remove(ARRAY(SELECT btrim(o) FROM unnest(p_options) o WHERE btrim(o) <> ''), NULL), 1) < 2 THEN
+    RAISE EXCEPTION 'need_two_options';
+  END IF;
+  IF p_start_at IS NOT NULL AND p_end_at IS NOT NULL AND p_end_at <= p_start_at THEN
+    RAISE EXCEPTION 'end_before_start';
+  END IF;
+
+  IF p_channel_id IS NOT NULL THEN
+    SELECT cc.conversation_id INTO v_channel
+    FROM conversation_channels cc WHERE cc.id = p_channel_id;
+    IF NOT FOUND OR v_channel.conversation_id <> p_conversation_id THEN
+      RAISE EXCEPTION 'channel_mismatch';
+    END IF;
+    IF NOT can_post_in_channel(p_channel_id) THEN
+      RAISE EXCEPTION 'channel_restricted';
+    END IF;
+  END IF;
+
+  IF p_client_tag IS NOT NULL THEN
+    SELECT m.id, p.id INTO v_message_id, v_poll_id
+    FROM messages m JOIN polls p ON p.message_id = m.id
+    WHERE m.sender_id = auth.uid() AND m.client_tag = p_client_tag;
+    IF FOUND THEN
+      RETURN json_build_object('message_id', v_message_id, 'poll_id', v_poll_id);
+    END IF;
+  END IF;
+
+  INSERT INTO messages (conversation_id, channel_id, sender_id, content, message_type, client_tag)
+  VALUES (p_conversation_id, p_channel_id, auth.uid(), NULL, 'poll', p_client_tag)
+  RETURNING id INTO v_message_id;
+
+  INSERT INTO polls (message_id, question, allow_multiple, start_at, end_at)
+  VALUES (v_message_id, btrim(p_question), COALESCE(p_allow_multiple,false), p_start_at, p_end_at)
+  RETURNING id INTO v_poll_id;
+
+  FOREACH v_opt IN ARRAY p_options LOOP
+    IF btrim(v_opt) <> '' THEN
+      INSERT INTO poll_options (poll_id, option_text, display_order)
+      VALUES (v_poll_id, btrim(v_opt), v_idx);
+      v_idx := v_idx + 1;
+    END IF;
+  END LOOP;
+
+  RETURN json_build_object('message_id', v_message_id, 'poll_id', v_poll_id);
+END;
+$$;
+
+-- Production ACL, exactly: =X/ (explicit PUBLIC) + authenticated + service_role.
+-- ALTER DEFAULT PRIVILEGES above would also hand this to anon, which production
+-- does NOT have, so the grantee set is stated explicitly rather than inherited.
+REVOKE ALL ON FUNCTION public.create_poll(uuid,uuid,text,text[],boolean,timestamptz,timestamptz,uuid)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.create_poll(uuid,uuid,text,text[],boolean,timestamptz,timestamptz,uuid)
+  TO PUBLIC, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- check_club_inactivity() — reproduced verbatim from production (migration 006).
+-- Pre-059 grant posture: PUBLIC + anon + authenticated + service_role, i.e.
+-- any unauthenticated caller can drive club warning and soft-deletion.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.check_club_inactivity()
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_month INT;
+  v_club  RECORD;
+  v_off   RECORD;
+BEGIN
+  v_month := EXTRACT(MONTH FROM NOW())::INT;
+  IF v_month IN (6, 7, 12) THEN
+    RETURN;
+  END IF;
+
+  FOR v_club IN
+    SELECT id, name
+    FROM clubs
+    WHERE is_active = true
+      AND (last_activity_at IS NULL OR last_activity_at < NOW() - INTERVAL '30 days')
+      AND inactivity_warned_at IS NULL
+  LOOP
+    UPDATE clubs SET inactivity_warned_at = NOW() WHERE id = v_club.id;
+
+    FOR v_off IN
+      SELECT user_id FROM club_members
+      WHERE club_id = v_club.id AND role = 'officer'
+    LOOP
+      INSERT INTO notifications (user_id, type, entity_id, entity_type)
+      VALUES (v_off.user_id, 'club_inactive', v_club.id, 'club');
+    END LOOP;
+  END LOOP;
+
+  UPDATE clubs
+  SET is_active = false
+  WHERE is_active = true
+    AND inactivity_warned_at IS NOT NULL
+    AND inactivity_warned_at < NOW() - INTERVAL '2 days'
+    AND (last_activity_at IS NULL OR last_activity_at < inactivity_warned_at);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.check_club_inactivity() FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.check_club_inactivity() TO PUBLIC, anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.user_wants_push(p_user uuid, p_category text)
 RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = 'public' AS $$
