@@ -165,14 +165,19 @@ const DESTRUCTIVE: Array<{
   },
 ];
 
-describe("the nine reason-required actions are declared as such", () => {
-  it("has exactly nine, and they are the expected ones", () => {
+describe("the reason-required actions are declared as such", () => {
+  // Day 10B2 added six administrator-restriction actions, and EVERY one of them
+  // requires a reason — including the two "lifting" actions. Undoing an
+  // enforcement decision deserves a recorded justification just as much as
+  // making one, so this list is 15, not 9 destructive + 4 optional.
+  it("is exactly this set", () => {
     const required = Object.entries(AUDIT_ACTIONS)
       .filter(([, spec]) => spec.requiresReason)
       .map(([name]) => name)
       .sort();
     expect(required).toEqual(
       [
+        // Day 10A / 10B1
         "channel.deleteEmpty",
         "deletedContent.reactivateClub",
         "gluemate.remove",
@@ -182,9 +187,24 @@ describe("the nine reason-required actions are declared as such", () => {
         "rsvp.remove",
         "university.add",
         "university.setActive",
+        // Day 10B2 — administrator account restrictions
+        "restriction.suspend",
+        "restriction.unsuspend",
+        "restriction.block",
+        "restriction.unblock",
+        "restriction.adjustExpiry",
+        "restriction.revokeSessions",
       ].sort()
     );
-    expect(required).toHaveLength(9);
+    expect(required).toHaveLength(15);
+  });
+
+  it("requires a reason for every restriction action, including the lifts", () => {
+    for (const action of Object.keys(AUDIT_ACTIONS).filter((a) => a.startsWith("restriction."))) {
+      expect(`${action}=${AUDIT_ACTIONS[action as keyof typeof AUDIT_ACTIONS].requiresReason}`).toBe(
+        `${action}=true`
+      );
+    }
   });
 });
 

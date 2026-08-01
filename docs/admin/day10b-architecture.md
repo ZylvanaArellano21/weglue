@@ -18,6 +18,18 @@
 > | 7 | **`ADMIN_WRITES_ENABLED` must remain false.** | No administrator write is enabled by 10B1. Student blocking is entirely student-owned and does not depend on the write switch. |
 > | 8 | **Migration 051 remains absent and out of scope.** | Unchanged. |
 >
+> ### Day 10B2 — final founder decisions (recorded 2026-08-01)
+>
+> | # | Decision | Effect |
+> |---|---|---|
+> | 9 | **Two states only: `suspended` and `platform_blocked`.** An unrestricted student is `active`. | Implemented as `account_restrictions.restriction_type`. No ambiguous shared "blocked" value with `user_blocks`. |
+> | 10 | **Still NO Supabase Auth `banned_until`.** | Enforcement is database-side. A restricted student can sign in far enough to reach the restricted shell and **delete their account** — which is why `delete_own_account_atomic()` is deliberately ungated. |
+> | 11 | **`platform_blocked → suspended` is NOT supported directly.** | The administrator must unblock first, as a separate, independently audited action. A de-escalation is never smuggled inside a "suspend" record. |
+> | 12 | **Changing a suspension's expiry is an explicit, separately audited action**, not a silent edit. | `restriction.adjustExpiry`, with its own reason. |
+> | 13 | **Expiry is a predicate, not a job.** | `get_account_access_state()` evaluates `suspended_until > now()`, so a lapsed suspension stops restricting to the second. An un-lifted expired row is bookkeeping, never an access state. |
+> | 14 | **The student is never told the internal classification.** | `my_access_state()` returns the generic `restricted` rather than `platform_blocked`, plus `suspended_until` and the public support address — never a reason, an administrator identity, history, or a correlation id. |
+> | 15 | **A restriction deletes nothing** and **does not touch Day 10B1 `user_blocks` rows.** | Verified by test: content, memberships, officer roles and existing student blocks all survive both applying and lifting. |
+>
 > ### What this changes in the migration plan
 >
 > §11.1 proposed 057 = restrictions and 058 = blocks. **Decision 1 reverses that order.**
@@ -26,7 +38,7 @@
 > | # | File | Phase | Status |
 > |---|---|---|---|
 > | **057** | `057_student_blocking.sql` | **Day 10B1** | implemented on `safety/student-blocking` |
-> | **058** | *(reserved)* administrator account restrictions | Day 10B2 | not started |
+> | **058** | `058_admin_restrictions.sql` | **Day 10B2** | implemented on `safety/admin-restrictions` |
 >
 > Blocker **B1** (`requireRecentMfa()` bypassing the write kill switch) is fixed in 10B1 as a
 > prerequisite, using a **new `requireRecentMfaWrite()` composition** rather than by changing

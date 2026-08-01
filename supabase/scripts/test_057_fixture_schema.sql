@@ -157,10 +157,16 @@ CREATE TABLE club_members (
 );
 
 CREATE TABLE club_officers (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  club_id    uuid NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
-  user_id    uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  role_title text,
+  -- Full production shape: migration 056's officer snapshot reads
+  -- display_name / avatar_url / display_order, so a trimmed fixture would make
+  -- the real 056 file fail to apply here.
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  club_id       uuid NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  user_id       uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  display_name  text,
+  role_title    text,
+  avatar_url    text,
+  display_order integer,
   UNIQUE (club_id, user_id)
 );
 
@@ -381,6 +387,14 @@ CREATE TABLE push_queue (
 );
 CREATE INDEX idx_push_queue_pending ON push_queue (scheduled_for) WHERE status = 'pending';
 
+CREATE TABLE deletion_requests (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email        text NOT NULL,
+  reason       text,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  processed    boolean NOT NULL DEFAULT false
+);
+
 CREATE TABLE reports (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   reporter_id uuid REFERENCES profiles(id) ON DELETE SET NULL,
@@ -506,6 +520,213 @@ $$;
 CREATE TRIGGER trg_follow_delete_notify AFTER DELETE ON follows
   FOR EACH ROW EXECUTE FUNCTION handle_follow_delete();
 
+-- ── delete_own_account_atomic — the REAL production definition ─────────────
+--
+-- Copied verbatim from the live database (pg_get_functiondef). Migration 058's
+-- harness asserts that this function carries NO access predicate and that
+-- `authenticated` keeps EXECUTE on it, because a restricted student must still
+-- be able to delete their account. Testing a stub would make both assertions
+-- meaningless, so the genuine body is used.
+CREATE OR REPLACE FUNCTION public.delete_own_account_atomic()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'auth', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid    UUID := auth.uid();
+  v_email  TEXT;
+  v_avatars      TEXT[] := ARRAY[]::TEXT[];
+  v_posts        TEXT[] := ARRAY[]::TEXT[];
+  v_club_photos  TEXT[] := ARRAY[]::TEXT[];
+  v_attachments  TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT u.email INTO v_email FROM auth.users u WHERE u.id = v_uid;
+
+  -- ── 1. Collect Storage object keys while the rows still point at them ──────
+  -- Read-only; everything below is computed from rows that are about to be
+  -- destroyed in this same transaction, so the list can neither race a
+  -- concurrent write nor miss a row.
+
+  -- Avatar. avatar_type = 'text' means an initials avatar — no object exists.
+  SELECT COALESCE(
+           array_agg(DISTINCT p) FILTER (WHERE p IS NOT NULL),
+           ARRAY[]::TEXT[]
+         )
+    INTO v_avatars
+    FROM (
+      SELECT public.storage_path_from_public_url(pr.avatar_url, 'avatars') AS p
+      FROM   public.profiles pr
+      WHERE  pr.id = v_uid
+        AND  pr.avatar_url IS NOT NULL
+        AND  COALESCE(pr.avatar_type, '') <> 'text'
+    ) s;
+
+  -- Post images (posts cascade from the profile).
+  SELECT COALESCE(
+           array_agg(DISTINCT p) FILTER (WHERE p IS NOT NULL),
+           ARRAY[]::TEXT[]
+         )
+    INTO v_posts
+    FROM (
+      SELECT public.storage_path_from_public_url(po.image_url, 'posts') AS p
+      FROM   public.posts po
+      WHERE  po.author_id = v_uid
+        AND  po.image_url IS NOT NULL
+    ) s;
+
+  -- Club-gallery photos the user uploaded. The bucket filter is what separates
+  -- the two kinds: a gallery upload lives in `club-photos`, while a photo
+  -- materialized from a post still points at the `posts` object and therefore
+  -- returns NULL here — its key is already in v_posts, so it is never listed
+  -- twice or swept from the wrong bucket.
+  SELECT COALESCE(
+           array_agg(DISTINCT p) FILTER (WHERE p IS NOT NULL),
+           ARRAY[]::TEXT[]
+         )
+    INTO v_club_photos
+    FROM (
+      SELECT public.storage_path_from_public_url(cp.url, 'club-photos') AS p
+      FROM   public.club_photos cp
+      WHERE  cp.uploaded_by = v_uid
+        AND  cp.url IS NOT NULL
+    ) s;
+
+  -- Attachments on messages that are about to be HARD-deleted (solo threads).
+  -- Attachments on messages that survive anonymized stay, exactly like their
+  -- message text — removing them would punch holes in other people's history.
+  -- attachment_url is already a bucket-relative key, not a public URL.
+  SELECT COALESCE(
+           array_agg(DISTINCT m.attachment_url),
+           ARRAY[]::TEXT[]
+         )
+    INTO v_attachments
+    FROM public.messages m
+    WHERE m.sender_id = v_uid
+      AND m.attachment_url IS NOT NULL
+      AND NOT EXISTS (
+            SELECT 1
+            FROM   public.conversation_participants cp
+            WHERE  cp.conversation_id = m.conversation_id
+              AND  cp.user_id <> v_uid
+          );
+
+  -- ── 2. Residues with no FK: scrub the uuid out of other users' rows ───────
+  UPDATE public.events
+  SET    specific_user_ids = array_remove(specific_user_ids, v_uid)
+  WHERE  specific_user_ids IS NOT NULL
+    AND  v_uid = ANY (specific_user_ids);
+
+  UPDATE public.notifications
+  SET    group_actors = array_remove(group_actors, v_uid),
+         group_count  = GREATEST(
+                          COALESCE(array_length(array_remove(group_actors, v_uid), 1), 0),
+                          0
+                        )
+  WHERE  group_actors IS NOT NULL
+    AND  v_uid = ANY (group_actors);
+
+  -- The deletion request the user may have filed from the public web form.
+  IF v_email IS NOT NULL THEN
+    DELETE FROM public.deletion_requests dr
+    WHERE  lower(dr.email) = lower(v_email);
+  END IF;
+
+  -- ── 3. Moderation evidence: keep the report, drop the reporter's identity ─
+  -- reporter_id is nulled here rather than left to the FK's SET NULL, for the
+  -- ordering reason documented at step 6.
+  UPDATE public.reports r
+  SET    reporter_id       = NULL,
+         reporter_email    = NULL,
+         reporter_username = NULL
+  WHERE  r.reporter_id = v_uid;
+
+  -- ── 4. Rows the FK would have left dangling with a NULL owner ─────────────
+  -- An officer grant with no user, a live invite token with no creator, and a
+  -- post-permission grant for a user who no longer exists are not "anonymized
+  -- shared content" — they are orphans. Delete them.
+  DELETE FROM public.club_officers    WHERE user_id    = v_uid;
+  DELETE FROM public.chat_invitations WHERE created_by = v_uid;
+  DELETE FROM public.channel_posters  WHERE user_id    = v_uid;
+
+  -- Every club-gallery photo connected to this user: the ones they uploaded
+  -- straight into the gallery AND the ones materialized from their own posts.
+  DELETE FROM public.club_photos cp
+  WHERE  cp.uploaded_by = v_uid
+     OR  cp.post_id IN (SELECT p.id FROM public.posts p WHERE p.author_id = v_uid);
+
+  -- ── 5. Solo-thread messages (044, unchanged) ──────────────────────────────
+  -- Nobody else is in the thread, so hard-delete rather than leave anonymized
+  -- orphans. Must run BEFORE the SET NULL sweep below, while sender_id still
+  -- points at this user.
+  DELETE FROM public.messages m
+  WHERE  m.sender_id = v_uid
+    AND  NOT EXISTS (
+           SELECT 1
+           FROM   public.conversation_participants cp
+           WHERE  cp.conversation_id = m.conversation_id
+             AND  cp.user_id <> v_uid
+         );
+
+  -- ── 6. Pre-empt EVERY ON DELETE SET NULL back-reference ───────────────────
+  --
+  -- THIS IS A BUG FIX, not tidiness. Deleting the profile fires two kinds of
+  -- referential action at once: CASCADE deletes (posts, events, …) and SET NULL
+  -- updates (club_photos.uploaded_by, messages.sender_id, …). Postgres does not
+  -- order them relative to each other, and a SET NULL update re-validates the
+  -- OTHER foreign keys on the row it rewrites. When the row it rewrites also
+  -- points at something the cascade has already removed, that re-validation
+  -- fails and the whole deletion aborts.
+  --
+  -- Reproduced on the live schema: a user with a single club post could not be
+  -- deleted at all —
+  --   ERROR 23503: insert or update on table "club_photos" violates foreign key
+  --   constraint "club_photos_post_id_fkey" … CONTEXT: DELETE FROM auth.users
+  -- because club_photos.uploaded_by SET NULL rewrote a row whose post_id had
+  -- just been cascade-deleted. messages carries the same shape via
+  -- shared_post_id / shared_event_id.
+  --
+  -- 044's transaction was doing its job perfectly here: it rolled the failure
+  -- back and left the account intact. The user simply saw "Could not delete
+  -- your account" every single time — which is exactly the App Store 5.1.1(v)
+  -- symptom, an in-app deletion option that does not actually delete.
+  --
+  -- Performing every SET NULL explicitly, first, means no referential UPDATE is
+  -- still in flight when the cascade runs, so nothing can be re-validated
+  -- against a half-removed graph. The end state is identical to what the FKs
+  -- would have produced; only the ordering is now deterministic.
+  UPDATE public.messages SET sender_id  = NULL WHERE sender_id  = v_uid;
+  UPDATE public.messages SET deleted_by = NULL WHERE deleted_by = v_uid;
+  UPDATE public.messages m SET shared_post_id = NULL
+   WHERE m.shared_post_id IN (SELECT p.id FROM public.posts p WHERE p.author_id = v_uid);
+  UPDATE public.messages m SET shared_event_id = NULL
+   WHERE m.shared_event_id IN (SELECT e.id FROM public.events e WHERE e.created_by = v_uid);
+  UPDATE public.conversations         SET created_by = NULL WHERE created_by = v_uid;
+  UPDATE public.conversation_channels SET created_by = NULL WHERE created_by = v_uid;
+  UPDATE public.channel_posters       SET added_by   = NULL WHERE added_by   = v_uid;
+
+  -- ── 7. The whole account, in one statement, in this transaction ───────────
+  -- Cascades to profiles and every user-owned table. Every SET NULL it would
+  -- have performed has already been applied above, so this is now pure deletes.
+  DELETE FROM auth.users WHERE id = v_uid;
+
+  RETURN jsonb_build_object(
+    'avatars',          to_jsonb(v_avatars),
+    'posts',            to_jsonb(v_posts),
+    'club-photos',      to_jsonb(v_club_photos),
+    'chat-attachments', to_jsonb(v_attachments)
+  );
+END;
+$function$
+;
+
+REVOKE ALL ON FUNCTION public.delete_own_account_atomic() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_own_account_atomic() TO authenticated;
+
 -- ===========================================================================
 -- PRODUCTION RLS POLICIES — verbatim from pg_policies, so migration 057's
 -- DROP POLICY / CREATE POLICY statements operate on the real prior state.
@@ -595,6 +816,10 @@ CREATE POLICY "user_privacy: read all authenticated"
 CREATE POLICY "event_rsvps: users manage own"
   ON event_rsvps FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 
+ALTER TABLE deletion_requests ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "deletion_requests: anyone can insert"
+  ON deletion_requests FOR INSERT TO authenticated WITH CHECK (true);
+
 -- Reporting must survive a block. This policy is NOT modified by 057.
 CREATE POLICY "reports: users insert own"
   ON reports FOR INSERT TO authenticated WITH CHECK (reporter_id = auth.uid());
@@ -605,6 +830,17 @@ CREATE POLICY "reports: users read own"
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO service_role;
 REVOKE ALL ON push_queue FROM authenticated;
+
+-- Production grants: these SECURITY DEFINER internals are service_role ONLY in
+-- the live database (verified against pg_proc.proacl). A fixture that leaves
+-- them on PUBLIC would make the Day 10B2 SECDEF coverage test fail here while
+-- passing in production, which is the wrong way round — the fixture must be at
+-- least as locked down as production, never looser.
+REVOKE ALL ON FUNCTION public.user_wants_push(uuid, text)      FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.insert_notification_once(uuid, uuid, text, uuid, text)
+                                                               FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.user_wants_push(uuid, text)   TO service_role;
+GRANT EXECUTE ON FUNCTION public.insert_notification_once(uuid, uuid, text, uuid, text) TO service_role;
 
 -- ── Seed the notification type registry exactly as production has it ────────
 INSERT INTO notification_types (type, category, enabled, in_app, push) VALUES

@@ -18,7 +18,7 @@ import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persi
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { AppState, Platform, Text, TouchableOpacity, View } from "react-native";
 import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
@@ -35,6 +35,9 @@ import {
   writeCachedProfile,
 } from "../lib/profileCache";
 import { PlatformAdminBlock } from "../components/auth/PlatformAdminBlock";
+import { RestrictedAccountShell } from "../components/auth/RestrictedAccountShell";
+import { getMyAccessState } from "../services/accessService";
+import { resolveAccessRoute, isRestrictedRoute, type AccessStatePayload } from "../lib/accessState";
 import {
   resolveMobileSessionRoute,
   shouldSyncStudentProfile,
@@ -144,6 +147,50 @@ export default function RootLayout() {
   // mounts and no student query ever runs.
   const sessionRoute = resolveMobileSessionRoute(session);
   const isPlatformAdmin = sessionRoute === "platform-admin-blocked";
+
+  // ── Administrator restriction (Day 10B2) ────────────────────────────────
+  //
+  // Unlike the platform-admin check above, a restriction lives in the DATABASE,
+  // so it must be fetched. It is resolved BEFORE the navigator renders, and
+  // re-resolved whenever the app returns to the foreground, so a student who is
+  // restricted mid-session lands on the shell without needing to relaunch.
+  //
+  // `access === undefined` means "not yet known". The navigator is held back
+  // only while a session exists and the first check is still in flight — a
+  // signed-out user is never delayed by it.
+  const [access, setAccess] = useState<AccessStatePayload | null | undefined>(undefined);
+
+  const refreshAccess = useCallback(async () => {
+    if (!session || !shouldSyncStudentProfile(session)) {
+      setAccess(null);
+      return;
+    }
+    try {
+      setAccess(await getMyAccessState());
+    } catch {
+      // Fail OPEN: a network blip must not lock a healthy student out. This is
+      // safe because the server is the real control — migration 058 denies a
+      // restricted account regardless of what this client believes.
+      setAccess(null);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    void refreshAccess();
+  }, [refreshAccess]);
+
+  // Fresh check on every foreground, so a restriction applied while the app was
+  // backgrounded takes effect on the next resume rather than the next launch.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (status) => {
+      if (status === "active") void refreshAccess();
+    });
+    return () => sub.remove();
+  }, [refreshAccess]);
+
+  const accessRoute = resolveAccessRoute(access ?? null);
+  const isRestricted = !!session && !isPlatformAdmin && isRestrictedRoute(accessRoute);
+  const accessPending = !!session && !isPlatformAdmin && access === undefined;
 
   useAuthDeepLink();
   useInviteDeepLink();
@@ -279,6 +326,20 @@ export default function RootLayout() {
   // tab/Home/onboarding screen mounts, no recommendation or feed query fires,
   // and the push/realtime hosts below are never created. The only affordance
   // is Sign out; there is no dashboard link of any kind.
+  // Restricted accounts stop here, for exactly the reason platform admins do:
+  // returning the shell INSTEAD of the navigator means no student route ever
+  // mounts, no cached student screen is reachable, and no feed, recommendation
+  // or realtime query fires.
+  if (isRestricted) {
+    return (
+      <RestrictedAccountShell
+        payload={access ?? null}
+        onSignOut={() => tearDownAuthenticatedSession(queryClient, session?.user?.id)}
+        onDeleted={() => tearDownAuthenticatedSession(queryClient, session?.user?.id)}
+      />
+    );
+  }
+
   if (isPlatformAdmin) {
     return (
       <PlatformAdminBlock

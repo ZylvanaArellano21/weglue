@@ -84,9 +84,19 @@ const STATUS_MESSAGE: Record<string, string> = {
   invalid_permission: "Invalid posting permission.",
   // reports
   no_change: "The report is already in that state.",
-  invalid_transition: "That status change is not allowed from the report's current state.",
+  // Shared by report status changes (056) and restriction transitions (058).
+  invalid_transition:
+    "That change is not allowed from the record's current state. A blocked account must be unblocked first, as a separate action.",
   // clubs
   already_active: "This club is already active.",
+  // account restrictions (migration 058)
+  already_suspended: "This account is already suspended.",
+  already_blocked: "This account is already blocked from We Glue.",
+  not_restricted: "This account is not currently restricted.",
+  platform_admin_target: "Administrator accounts cannot be restricted.",
+  self_target: "You cannot restrict your own account.",
+  invalid_expiry: "The suspension expiration must be a valid date in the future.",
+  invalid_target: "Invalid target account.",
 };
 
 function messageFor(status: string): string {
