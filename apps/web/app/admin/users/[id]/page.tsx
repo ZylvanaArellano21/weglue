@@ -7,6 +7,9 @@ import { Badge, Field, SectionCard, EmptyState } from "../../../../components/ad
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { Table, Th, Td, RowLink } from "../../../../components/admin/Table";
 import { DisabledAction } from "../../../../components/admin/DisabledAction";
+import { RestrictionControls } from "../../../../components/admin/RestrictionControls";
+import { restrictionSummary } from "../../../../lib/admin/restrictionData";
+import { isWritesEnabled } from "../../../../lib/admin/secureAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +21,21 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
   const user = await getUserDetail(params.id);
   if (!user) notFound();
   const gluemates = await getUserGluemates(params.id);
+  const restriction = await restrictionSummary(params.id);
+  const writesEnabled = isWritesEnabled();
+
+  const stateLabel =
+    restriction.accessState === "active"
+      ? "Active"
+      : restriction.accessState === "suspended"
+      ? "Suspended"
+      : "Blocked from We Glue";
+  const stateTone =
+    restriction.accessState === "active"
+      ? "green"
+      : restriction.accessState === "suspended"
+      ? "amber"
+      : "red";
 
   const profileTab = (
     <div className="grid gap-6 md:grid-cols-3">
@@ -178,21 +196,117 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
   );
 
   const actionsTab = (
-    <SectionCard title="Account actions">
-      <div className="space-y-3 p-4">
-        <p className="text-sm text-gray-500">
-          Destructive and account-mutating actions are intentionally disabled on Day 1. They will be
-          implemented with full audit logging and canonical platform-admin authorization in later phases.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <DisabledAction label="Change authenticated email" reason="Scheduled for Day 7 (needs audit log)" />
-          <DisabledAction label="Suspend account" reason="Scheduled for Day 3 (needs restrictions table)" />
-          <DisabledAction label="Reset account" reason="Scheduled for Day 7 (destructive — needs safeguards)" tone="danger" />
-          <DisabledAction label="Delete account" reason="Scheduled for Day 7 (destructive — needs safeguards)" tone="danger" />
-          <DisabledAction label="View deleted content" reason="Scheduled for Day 5 (privacy-gated)" />
+    <div className="space-y-5">
+      {/* Access (Day 10B2) */}
+      <SectionCard title="Access">
+        <div className="space-y-4 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge tone={stateTone as never}>{stateLabel}</Badge>
+            {restriction.active?.suspended_until ? (
+              <span className="text-sm text-gray-500">
+                Expires {new Date(restriction.active.suspended_until).toLocaleString()}
+              </span>
+            ) : restriction.active ? (
+              <span className="text-sm text-gray-500">No expiry &mdash; until lifted</span>
+            ) : null}
+          </div>
+
+          {restriction.active && (
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg bg-gray-50 p-3 text-sm">
+              <Field label="Applied">{new Date(restriction.active.created_at).toLocaleString()}</Field>
+              <Field label="By">
+                <span className="font-mono text-xs">{restriction.active.created_by}</span>
+              </Field>
+              <div className="col-span-2">
+                <dt className="text-xs uppercase tracking-wide text-gray-400">
+                  Internal reason &mdash; administrators only, never shown to the student
+                </dt>
+                <dd className="mt-1 text-sm text-gray-900">{restriction.active.internal_reason}</dd>
+              </div>
+              <Field label="Correlation ID">
+                <span className="font-mono text-xs">{restriction.active.correlation_id}</span>
+              </Field>
+              <Field label="Session revocation">
+                {restriction.sessionRevocation.reconciliationRequired
+                  ? "Reconciliation required"
+                  : restriction.sessionRevocation.succeeded
+                  ? "Revoked"
+                  : restriction.sessionRevocation.failed
+                  ? "FAILED \u2014 access still denied by the database"
+                  : restriction.sessionRevocation.attempted
+                  ? "Attempted, outcome unknown"
+                  : "Not recorded"}
+              </Field>
+            </dl>
+          )}
+
+          <RestrictionControls
+            userId={params.id}
+            targetSummary={`${user.full_name ?? user.username} (@${user.username})`}
+            accessState={restriction.accessState}
+            writesEnabled={writesEnabled}
+          />
+
+          <p className="text-xs text-gray-400">
+            A restriction never deletes content, and never blocks the student&apos;s own account
+            deletion. Blocking is not deletion.{" "}
+            <Link href={`/admin/audit-history?target=${params.id}`} className="text-teal-600 hover:underline">
+              View audit history &rarr;
+            </Link>
+          </p>
         </div>
-      </div>
-    </SectionCard>
+      </SectionCard>
+
+      <SectionCard title="Restriction history">
+        {restriction.history.length === 0 ? (
+          <EmptyState title="No restrictions" message="This account has never been suspended or blocked." />
+        ) : (
+          <Table
+            head={
+              <>
+                <Th>When</Th>
+                <Th>Type</Th>
+                <Th>Status</Th>
+                <Th>Expiry</Th>
+                <Th>Internal reason</Th>
+                <Th>Lifted</Th>
+              </>
+            }
+          >
+            {restriction.history.map((r) => (
+              <tr key={r.id} className="border-t border-gray-50">
+                <Td>{new Date(r.created_at).toLocaleString()}</Td>
+                <Td>{r.restriction_type === "suspended" ? "Suspension" : "Platform block"}</Td>
+                <Td>{r.status}</Td>
+                <Td>{r.suspended_until ? new Date(r.suspended_until).toLocaleString() : "\u2014"}</Td>
+                <Td>{r.internal_reason}</Td>
+                <Td>
+                  {r.lifted_at
+                    ? `${new Date(r.lifted_at).toLocaleString()}${r.lift_reason ? ` \u2014 ${r.lift_reason}` : ""}`
+                    : "\u2014"}
+                </Td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Other account actions">
+        <div className="space-y-3 p-4">
+          <p className="text-sm text-gray-500">
+            These remain intentionally disabled. Account <strong>deletion</strong> is deliberately not
+            an administrator control here &mdash; it is not the same thing as a platform block, and the
+            student&apos;s own deletion flow remains the canonical path.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DisabledAction label="Change authenticated email" reason="Not yet reviewed" />
+            <DisabledAction label="Reset account" reason="Destructive &mdash; not yet reviewed" tone="danger" />
+            <DisabledAction label="Delete account" reason="Not an administrator action; students delete their own accounts" tone="danger" />
+            <DisabledAction label="View deleted content" reason="Privacy-gated" />
+          </div>
+        </div>
+      </SectionCard>
+    </div>
   );
 
   return (

@@ -1,0 +1,162 @@
+// ============================================================================
+// Administrator account restrictions — read path  (SERVER-ONLY)
+// ============================================================================
+//
+// Same contract as every other admin loader: requireSecureAdmin() FIRST, then
+// the service-role client. A non-founder / aal1 / portal-off request can never
+// cause the service-role key to be constructed.
+//
+// This is the ONLY place the internal reason is read, and it is read into a
+// server-rendered page behind the private gateway. It is never sent to a
+// student client, and `my_access_state()` (migration 058) is structurally
+// incapable of returning it.
+// ============================================================================
+
+if (typeof window !== "undefined") {
+  throw new Error("lib/admin/restrictionData.ts is server-only.");
+}
+
+import { createAdminClient } from "../supabase/admin";
+import { requireSecureAdmin } from "./secureAdmin";
+
+export type AccessState = "active" | "suspended" | "platform_blocked";
+
+export interface RestrictionRow {
+  id: string;
+  user_id: string;
+  restriction_type: "suspended" | "platform_blocked";
+  status: "active" | "lifted" | "expired";
+  internal_reason: string;
+  created_at: string;
+  created_by: string;
+  suspended_until: string | null;
+  lifted_at: string | null;
+  lifted_by: string | null;
+  lift_reason: string | null;
+  correlation_id: string;
+}
+
+export interface RestrictionSummary {
+  /** Effective state, computed by the database predicate (expiry-aware). */
+  accessState: AccessState;
+  /** The currently active row, if any. */
+  active: RestrictionRow | null;
+  /** Newest first, including lifted and expired rows. */
+  history: RestrictionRow[];
+  /** Audit events sharing this restriction's correlation id. */
+  sessionRevocation: {
+    attempted: boolean;
+    succeeded: boolean;
+    failed: boolean;
+    reconciliationRequired: boolean;
+    correlationId: string | null;
+  };
+}
+
+/**
+ * Effective access state for one account.
+ *
+ * Uses the SAME database predicate the enforcement layer uses, rather than
+ * re-deriving it in TypeScript. Two implementations of "is this account
+ * restricted?" would eventually disagree, and the dashboard would then show
+ * something different from what the database enforces.
+ */
+export async function accessStateFor(userId: string): Promise<AccessState> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("get_account_access_state", { p_user: userId });
+  if (error) throw error;
+  return (data ?? "active") as AccessState;
+}
+
+export async function restrictionSummary(userId: string): Promise<RestrictionSummary> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+
+  const [{ data: state }, { data: rows }] = await Promise.all([
+    admin.rpc("get_account_access_state", { p_user: userId }),
+    admin
+      .from("account_restrictions")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(50),
+  ]);
+
+  const history = (rows ?? []) as RestrictionRow[];
+  const active = history.find((r) => r.status === "active") ?? null;
+
+  // Session-revocation outcome for the ACTIVE restriction, correlated by id.
+  let sessionRevocation: RestrictionSummary["sessionRevocation"] = {
+    attempted: false, succeeded: false, failed: false,
+    reconciliationRequired: false, correlationId: active?.correlation_id ?? null,
+  };
+
+  if (active?.correlation_id) {
+    const { data: events } = await admin
+      .from("admin_audit_events")
+      .select("event_type, action")
+      .eq("correlation_id", active.correlation_id)
+      .eq("action", "restriction.revokeSessions");
+
+    const list = (events ?? []) as { event_type: string }[];
+    sessionRevocation = {
+      attempted: list.some((e) => e.event_type === "attempt"),
+      succeeded: list.some((e) => e.event_type === "success"),
+      failed: list.some((e) => e.event_type === "failure"),
+      reconciliationRequired: list.some((e) => e.event_type === "reconciliation_required"),
+      correlationId: active.correlation_id,
+    };
+  }
+
+  return {
+    accessState: (state ?? "active") as AccessState,
+    active,
+    history,
+    sessionRevocation,
+  };
+}
+
+/**
+ * Restrictions whose suspension has lapsed but whose row is still `active`.
+ *
+ * These are NOT an access problem — the predicate already treats them as
+ * inactive, which is why no cron job is required for correctness. They are a
+ * bookkeeping queue, surfaced so an administrator can tidy them deliberately.
+ */
+export async function unreconciledExpiredCount(): Promise<number> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+  const { count } = await admin
+    .from("account_restrictions")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "active")
+    .eq("restriction_type", "suspended")
+    .lt("suspended_until", new Date().toISOString());
+  return count ?? 0;
+}
+
+/** Platform-wide counts for the Restrictions queue page. */
+export async function restrictionCounts(): Promise<{
+  suspended: number;
+  blocked: number;
+  expiringSoon: number;
+}> {
+  await requireSecureAdmin();
+  const admin = createAdminClient();
+  const nowIso = new Date().toISOString();
+  const weekIso = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+
+  const [s, b, e] = await Promise.all([
+    admin.from("account_restrictions").select("id", { count: "exact", head: true })
+      .eq("status", "active").eq("restriction_type", "suspended")
+      .or(`suspended_until.is.null,suspended_until.gt.${nowIso}`),
+    admin.from("account_restrictions").select("id", { count: "exact", head: true })
+      .eq("status", "active").eq("restriction_type", "platform_blocked"),
+    admin.from("account_restrictions").select("id", { count: "exact", head: true })
+      .eq("status", "active").eq("restriction_type", "suspended")
+      .gt("suspended_until", nowIso).lt("suspended_until", weekIso),
+  ]);
+
+  return { suspended: s.count ?? 0, blocked: b.count ?? 0, expiringSoon: e.count ?? 0 };
+}

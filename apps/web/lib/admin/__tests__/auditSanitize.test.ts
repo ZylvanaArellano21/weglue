@@ -16,10 +16,12 @@ import {
   REDACTED,
 } from "../auditSanitize";
 
-const MIGRATION = readFileSync(
-  join(__dirname, "../../../../../supabase/migrations/055_durable_admin_audit.sql"),
-  "utf8"
-);
+const MIGRATION = [
+  "055_durable_admin_audit.sql",
+  "058_admin_restrictions.sql",
+]
+  .map((f) => readFileSync(join(__dirname, "../../../../../supabase/migrations/", f), "utf8"))
+  .join("\n");
 
 // ── The registry and the migration must never drift ──────────────────────────
 // The database is the enforcer; this file is what the server believes. If they
@@ -39,8 +41,8 @@ describe("registry ↔ migration 055 parity", () => {
 
   const catalog = parseCatalog();
 
-  it("parses all 26 catalog rows from the migration", () => {
-    expect(Object.keys(catalog)).toHaveLength(26);
+  it("parses all 32 catalog rows from migrations 055 + 058", () => {
+    expect(Object.keys(catalog)).toHaveLength(32);
   });
 
   it("registers exactly the same action names as the migration", () => {

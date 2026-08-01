@@ -79,6 +79,18 @@ export const AUDIT_ACTIONS = {
   "notification.setRead": { targetType: "notification", targetIdKey: "notificationId", sensitivity: "ordinary",    requiresReason: false, metadataKeys: ["notificationId", "read"] },
   "report.setStatus":     { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["reportId", "nextStatus", "entity_type", "entity_id"] },
   "deletedContent.reactivateClub": { targetType: "club", targetIdKey: "clubId",        sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["clubId"] },
+
+  // ── Day 10B2: administrator account restrictions (migration 058) ──────────
+  // NOTE what is absent from every metadataKeys list below: there is no key
+  // through which the INTERNAL REASON could travel. The reason belongs in
+  // admin_audit_events.reason, where the 055 length rules apply to it; copying
+  // it into a metadata blob would duplicate the disclosure surface for nothing.
+  "restriction.suspend":        { targetType: "user", targetIdKey: "userId", sensitivity: "destructive", requiresReason: true, metadataKeys: ["userId", "suspendedUntil"] },
+  "restriction.unsuspend":      { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId"] },
+  "restriction.block":          { targetType: "user", targetIdKey: "userId", sensitivity: "destructive", requiresReason: true, metadataKeys: ["userId", "supersededActive"] },
+  "restriction.unblock":        { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId"] },
+  "restriction.adjustExpiry":   { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId", "suspendedUntil"] },
+  "restriction.revokeSessions": { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId", "scope"] },
 } as const satisfies Record<string, AuditActionSpec>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
@@ -119,7 +131,11 @@ export function assertAuditReason(action: AuditAction, reason: string | null | u
 //                auditing a moderator edit. They are not private messages.
 
 const STATE_FIELDS: Record<AuditTargetType, readonly string[]> = {
-  user:         ["id", "created_at"],
+  // Extended for Day 10B2 so a restriction change can record its sanitized
+  // before/after. `internal_reason` and `lift_reason` are DELIBERATELY absent:
+  // they live in admin_audit_events.reason and must not be duplicated here.
+  user:         ["id", "created_at", "user_id", "restriction_type", "status",
+                 "suspended_until", "lifted_at", "access_state"],
   profile:      ["id", "username", "full_name", "major", "year", "university_id", "onboarding_completed", "updated_at"],
   club:         ["id", "name", "handle", "is_active", "university_id", "member_count", "updated_at"],
   club_member:  ["id", "club_id", "user_id", "role", "joined_at"],
