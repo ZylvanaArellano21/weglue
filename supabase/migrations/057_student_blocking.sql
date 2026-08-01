@@ -98,6 +98,14 @@ CREATE POLICY "user_blocks: blocker reads own"
 -- client round trips, which would leave a Gluemate surviving a block.
 REVOKE ALL     ON public.user_blocks FROM anon;
 REVOKE ALL     ON public.user_blocks FROM authenticated;
+-- Supabase's DEFAULT PRIVILEGES grant service_role full DML on every new table
+-- in `public`, so granting SELECT is not enough — the defaults must be revoked
+-- explicitly or service_role keeps INSERT/UPDATE/DELETE/TRUNCATE. This mirrors
+-- what migration 055 established for admin_audit_events: a safety table is
+-- readable by the server and mutable ONLY through SECURITY DEFINER functions.
+-- (Caught during the Day 10B1 production release and corrected there; folded in
+-- here so a fresh environment reproduces the reviewed posture on its own.)
+REVOKE ALL     ON public.user_blocks FROM service_role;
 GRANT  SELECT  ON public.user_blocks TO authenticated;
 GRANT  SELECT  ON public.user_blocks TO service_role;
 
