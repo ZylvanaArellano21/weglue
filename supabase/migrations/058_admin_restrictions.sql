@@ -297,17 +297,17 @@ GRANT EXECUTE ON FUNCTION public.can_student_access_app(uuid)       TO service_r
 -- ===========================================================================
 
 INSERT INTO public.admin_audit_actions (action, target_type, sensitivity, requires_reason, description) VALUES
-  ('restriction.suspend',        'user', 'destructive', true,
+  ('restriction.suspend',        'user', 'destructive', TRUE,
    'Suspend a student account (temporary or indefinite).'),
-  ('restriction.unsuspend',      'user', 'sensitive',   true,
+  ('restriction.unsuspend',      'user', 'sensitive',   TRUE,
    'Lift an active suspension.'),
-  ('restriction.block',          'user', 'destructive', true,
+  ('restriction.block',          'user', 'destructive', TRUE,
    'Block a student account from We Glue indefinitely.'),
-  ('restriction.unblock',        'user', 'sensitive',   true,
+  ('restriction.unblock',        'user', 'sensitive',   TRUE,
    'Lift an active platform block.'),
-  ('restriction.adjustExpiry',   'user', 'sensitive',   true,
+  ('restriction.adjustExpiry',   'user', 'sensitive',   TRUE,
    'Change the expiration of an active suspension (explicit, audited).'),
-  ('restriction.revokeSessions', 'user', 'sensitive',   true,
+  ('restriction.revokeSessions', 'user', 'sensitive',   TRUE,
    'Revoke a restricted student''s Supabase Auth sessions (cross-service).')
 ON CONFLICT (action) DO NOTHING;
 
@@ -459,6 +459,7 @@ REVOKE ALL ON FUNCTION public.restricted_user_ids() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.restricted_user_ids() TO authenticated, service_role;
 
 DROP POLICY IF EXISTS "profiles: authenticated read, block-aware" ON public.profiles;
+DROP POLICY IF EXISTS "profiles: authenticated read, block-and-restriction-aware" ON public.profiles;
 CREATE POLICY "profiles: authenticated read, block-and-restriction-aware"
   ON public.profiles FOR SELECT TO authenticated
   USING (
