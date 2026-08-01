@@ -100,7 +100,7 @@ INSERT INTO secdef_classification (proname, category, justification) VALUES
 ('rank_eligible_clubs',       'internal','Service-role ranking helper.'),
 ('process_event_reminders',   'internal','Scheduled job; service_role only.'),
 ('process_social_proof_events','internal','Scheduled job; service_role only.'),
-('check_club_inactivity',     'internal','Scheduled job.'),
+('check_club_inactivity',     'internal','Club warning/soft-deletion job. Was executable by PUBLIC, anon AND authenticated in production — any unauthenticated caller could drive club deactivation. Migration 059 revokes all three; S7c and S7e enforce it.'),
 ('before_user_created',       'internal','GoTrue auth hook.'),
 ('handle_new_user',           'internal','Trigger on auth.users.'),
 ('ensure_profile',            'internal','Runs during sign-in, before any restriction state can exist; must not be gated or a restricted user could never load their own shell.'),
@@ -164,6 +164,20 @@ ON CONFLICT (proname) DO NOTHING;
 -- ── The inventory ──────────────────────────────────────────────────────────
 -- Every SECURITY DEFINER function in `public` that `authenticated` can execute,
 -- whether through an explicit grant or an inherited PUBLIC grant.
+--
+-- FOUR SEPARATE DISCOVERY MECHANISMS, because relying on one of them is how
+-- both Day 10B defects survived:
+--
+--   a) explicit `authenticated=X/owner` grant
+--   b) explicit `anon=X/owner` grant
+--   c) explicit PUBLIC grant, which appears in proacl as a bare `=X/owner`
+--   d) proacl IS NULL — PostgreSQL's DEFAULT for a function is EXECUTE TO
+--      PUBLIC, so a NULL acl means EVERYONE can execute it. An earlier sweep
+--      read NULL as "no grants" and therefore missed check_club_inactivity.
+--
+-- (c) is the one that was missing. check_club_inactivity carried a bare `=X/`
+-- entry alongside its named grants, and a scan that only looked at named
+-- grantees and NULL acls reported it as internal-only.
 DROP VIEW IF EXISTS student_reachable_secdef;
 CREATE VIEW student_reachable_secdef AS
 SELECT p.oid,
@@ -174,11 +188,25 @@ SELECT p.oid,
        p.provolatile,
        p.proretset,
        (p.proacl IS NULL)                        AS public_by_default,
-       has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_can_execute
+       (p.proacl IS NOT NULL
+        AND EXISTS (SELECT 1 FROM unnest(p.proacl) a WHERE a::text LIKE '=%'))
+                                                 AS explicit_public_grant,
+       has_function_privilege('anon', p.oid, 'EXECUTE')          AS anon_can_execute,
+       has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_can_execute,
+       -- Does it MUTATE? A read-only SECDEF helper that leaks nothing is a very
+       -- different risk from one that writes rows on a restricted student's
+       -- behalf. Only the latter must be guarded.
+       (p.prosrc ~* '\m(insert|update|delete|truncate)\M')       AS writes,
+       -- Is a trigger function? Those are fired by the database and cannot be
+       -- invoked through PostgREST whatever their grants say.
+       (p.prorettype = 'pg_catalog.trigger'::regtype)            AS is_trigger
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
  WHERE n.nspname = 'public'
    AND p.prosecdef
-   AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+   AND (has_function_privilege('authenticated', p.oid, 'EXECUTE')
+     OR has_function_privilege('anon', p.oid, 'EXECUTE')
+     OR p.proacl IS NULL
+     OR EXISTS (SELECT 1 FROM unnest(p.proacl) a WHERE a::text LIKE '=%'))
    -- Exclude the harness's OWN helpers. They are SECURITY DEFINER so they can
    -- record results while impersonating `authenticated`, and they exist only
    -- inside a throwaway test database — they are not part of the product
@@ -260,13 +288,15 @@ SELECT t_ok('S6 no __inner function is executable by authenticated, anon or PUBL
     WHERE n.nspname = 'public' AND p.proname LIKE '%\_\_inner'
       AND (has_function_privilege('authenticated', p.oid, 'EXECUTE')
         OR has_function_privilege('anon', p.oid, 'EXECUTE')
-        OR p.proacl IS NULL)),
+        OR p.proacl IS NULL
+        OR EXISTS (SELECT 1 FROM unnest(p.proacl) a WHERE a::text LIKE '=%'))),
   COALESCE((SELECT string_agg(p.proname, ', ')
               FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
              WHERE n.nspname='public' AND p.proname LIKE '%\_\_inner'
                AND (has_function_privilege('authenticated', p.oid,'EXECUTE')
                  OR has_function_privilege('anon', p.oid,'EXECUTE')
-                 OR p.proacl IS NULL)), ''));
+                 OR p.proacl IS NULL
+                 OR EXISTS (SELECT 1 FROM unnest(p.proacl) a WHERE a::text LIKE '=%'))), ''));
 
 -- ===========================================================================
 -- 4. Service-role-only functions must not be student-reachable
@@ -292,6 +322,86 @@ SELECT t_ok('S7 privileged internals are NOT executable by authenticated or anon
                                  'get_account_access_state','is_account_restricted','can_student_access_app')
                AND (has_function_privilege('authenticated', p.oid,'EXECUTE')
                  OR has_function_privilege('anon', p.oid,'EXECUTE'))), ''));
+
+-- ===========================================================================
+-- 4b. WRITER COVERAGE — the assertion that would have caught BOTH Day 10B
+--     defects, added by migration 059.
+--
+-- A SECURITY DEFINER function that WRITES and is reachable by a student runs as
+-- its owner and is not constrained by RLS. It must therefore either invoke the
+-- restriction guard, or appear below with a written justification. Nothing else
+-- is acceptable — and unlike 058's wrapper loop, an unresolvable name here is a
+-- FAILURE, never a silent skip.
+-- ===========================================================================
+DROP TABLE IF EXISTS writer_exceptions;
+CREATE TABLE writer_exceptions (proname text PRIMARY KEY, justification text NOT NULL);
+INSERT INTO writer_exceptions VALUES
+('auth_signup_status',       'Pre-authentication signup flow; runs before any session or restriction state exists.'),
+('ensure_profile',           'Runs during sign-in. Gating it would stop a restricted student loading their own restriction shell.'),
+('replace_pending_signup',   'Pre-authentication signup flow.'),
+('complete_oauth_onboarding','Onboarding completion; runs before the student tree exists.'),
+('delete_own_account_atomic','Account deletion MUST remain available while restricted (App Store 5.1.1(v)). Deliberately ungated.'),
+('handle_new_user',          'Trigger on auth.users; not client-invocable.'),
+('before_user_created',      'GoTrue auth hook; not client-invocable.'),
+('delete_own_user_data',     'Internal helper on the deletion path, which stays open while restricted.');
+
+SELECT t_ok('S7b every student-reachable SECDEF WRITER is guarded or justified',
+  (SELECT count(*) = 0
+     FROM student_reachable_secdef s
+    WHERE s.writes
+      AND NOT s.is_trigger
+      AND s.proname NOT LIKE '%\_\_inner'
+      AND NOT EXISTS (SELECT 1 FROM secdef_classification c
+                       WHERE c.proname = s.proname AND c.category = 'guarded_wrapper')
+      AND NOT EXISTS (SELECT 1 FROM writer_exceptions w WHERE w.proname = s.proname)
+      AND s.proname NOT LIKE 'admin\_%'),
+  COALESCE((SELECT string_agg(s.proname || '(' || s.identity_args || ')', '; ')
+              FROM student_reachable_secdef s
+             WHERE s.writes
+               AND NOT s.is_trigger
+               AND s.proname NOT LIKE '%\_\_inner'
+               AND NOT EXISTS (SELECT 1 FROM secdef_classification c
+                                WHERE c.proname = s.proname AND c.category='guarded_wrapper')
+               AND NOT EXISTS (SELECT 1 FROM writer_exceptions w WHERE w.proname = s.proname)
+               AND s.proname NOT LIKE 'admin\_%'), ''));
+
+-- Explicit PUBLIC grants on a SECDEF writer are never acceptable: PUBLIC
+-- includes `anon`, i.e. an unauthenticated caller. This is exactly the
+-- check_club_inactivity exposure.
+SELECT t_ok('S7c no SECDEF writer is executable by PUBLIC or anon',
+  (SELECT count(*) = 0
+     FROM student_reachable_secdef s
+    WHERE s.writes
+      AND NOT s.is_trigger
+      AND (s.explicit_public_grant OR s.public_by_default OR s.anon_can_execute)
+      AND NOT EXISTS (SELECT 1 FROM writer_exceptions w WHERE w.proname = s.proname)),
+  COALESCE((SELECT string_agg(s.proname || ' [' ||
+              CASE WHEN s.explicit_public_grant THEN 'explicit PUBLIC ' ELSE '' END ||
+              CASE WHEN s.public_by_default     THEN 'NULL acl=PUBLIC '  ELSE '' END ||
+              CASE WHEN s.anon_can_execute      THEN 'anon '             ELSE '' END || ']', '; ')
+              FROM student_reachable_secdef s
+             WHERE s.writes AND NOT s.is_trigger
+               AND (s.explicit_public_grant OR s.public_by_default OR s.anon_can_execute)
+               AND NOT EXISTS (SELECT 1 FROM writer_exceptions w WHERE w.proname = s.proname)), ''));
+
+-- The two functions migration 059 exists to fix, asserted by name so a
+-- regression is reported in plain language rather than as a generic count.
+SELECT t_ok('S7d create_poll is wrapped, student-callable, and not PUBLIC/anon',
+  to_regprocedure('public.create_poll__inner(uuid,uuid,text,text[],boolean,timestamptz,timestamptz,uuid)') IS NOT NULL
+  AND (SELECT count(*) = 0 FROM student_reachable_secdef s
+        WHERE s.proname = 'create_poll'
+          AND (s.explicit_public_grant OR s.public_by_default OR s.anon_can_execute)),
+  CASE WHEN to_regprocedure('public.create_poll__inner(uuid,uuid,text,text[],boolean,timestamptz,timestamptz,uuid)') IS NULL
+       THEN 'create_poll__inner ABSENT — migration 059 did not wrap create_poll' ELSE '' END);
+
+SELECT t_ok('S7e check_club_inactivity is not reachable by PUBLIC, anon or authenticated',
+  (SELECT count(*) = 0 FROM student_reachable_secdef s WHERE s.proname = 'check_club_inactivity'),
+  COALESCE((SELECT 'still reachable: ' ||
+              CASE WHEN s.explicit_public_grant THEN 'explicit PUBLIC ' ELSE '' END ||
+              CASE WHEN s.public_by_default     THEN 'NULL acl '        ELSE '' END ||
+              CASE WHEN s.anon_can_execute      THEN 'anon '            ELSE '' END ||
+              CASE WHEN s.authenticated_can_execute THEN 'authenticated' ELSE '' END
+              FROM student_reachable_secdef s WHERE s.proname='check_club_inactivity'), ''));
 
 SELECT t_ok('S8 the administrator restriction RPCs are service_role only',
   (SELECT count(*) = 0 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
