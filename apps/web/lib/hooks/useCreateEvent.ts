@@ -63,7 +63,11 @@ export function useMemberSearch(userId: string | undefined, query: string) {
       if (error) throw error;
       return (data ?? []) as { id: string; username: string; full_name: string; avatar_url: string | null }[];
     },
-    enabled: !!userId && query.trim().length > 0,
+    // 3 characters, matching the server-side minimum in search_students().
+    // A trigram index cannot serve a shorter pattern, so 1–2 characters would
+    // seq-scan (72 ms at 200k profiles) AND return nothing. Not firing at all
+    // is both faster and less confusing than firing and getting an empty list.
+    enabled: !!userId && query.trim().length >= 3,
     staleTime: 30 * 1000,
   });
 }

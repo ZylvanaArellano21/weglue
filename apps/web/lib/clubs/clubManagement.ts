@@ -87,7 +87,10 @@ export async function searchUniversityUsers(viewerUserId: string, query: string)
   //
   // Same-campus scoping happens inside the function, so the extra
   // `profiles.university` round trip this replaced is gone.
-  if (q) {
+  // 3-character minimum, matching search_students(). Below that the server
+  // returns nothing by design (a trigram index cannot serve a shorter pattern),
+  // so fall through to the browse listing rather than showing an empty result.
+  if (q.length >= 3) {
     const { data, error } = await supabase.rpc("search_students", { p_query: q, p_limit: 30 });
     if (error) throw error;
     return ((data ?? []) as any[]).map((u) => ({

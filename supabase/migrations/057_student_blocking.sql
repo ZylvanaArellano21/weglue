@@ -468,6 +468,15 @@ BEGIN
     RETURN jsonb_build_object('status', 'ok', 'was_blocked', false);
   END IF;
 
+  -- Same pair lock as block_user and the three guards, so the whole
+  -- block/unblock/follow/message family is TOTALLY serialized per pair.
+  --
+  -- Unblocking without it is already fail-SAFE (a follow racing an uncommitted
+  -- unblock still sees the block and is rejected, which is the conservative
+  -- outcome), but it produces a confusing rejection immediately after the user
+  -- taps Unblock. Serializing removes that surprise without weakening anything.
+  PERFORM pg_advisory_xact_lock(private.user_pair_lock_key(v_me, p_target));
+
   DELETE FROM public.user_blocks ub
    WHERE ub.blocker_id = v_me
      AND ub.blocked_id = p_target;
@@ -574,7 +583,13 @@ AS $$
 DECLARE
   v_me      uuid   := public.assert_self_or_null(p_user_id);
   v_blocked uuid[] := public.blocked_user_ids();
+  -- Same literal-match hardening as search_students. This function already
+  -- existed in production with a raw interpolated pattern; since 057 is
+  -- rewriting it for identity hardening anyway, it gets the fix too.
+  v_q       text   := public.safe_like_fragment(p_query);
 BEGIN
+  IF v_q = '' THEN RETURN; END IF;
+
   RETURN QUERY
   SELECT * FROM (
     SELECT
@@ -588,8 +603,8 @@ BEGIN
     WHERE p.id <> v_me
       AND p.id <> ALL (v_blocked)          -- ← both directions of block
       AND (
-        p.username  ILIKE '%' || p_query || '%'
-        OR p.full_name ILIKE '%' || p_query || '%'
+        p.username  ILIKE '%' || v_q || '%' ESCAPE '\'
+        OR p.full_name ILIKE '%' || v_q || '%' ESCAPE '\'
       )
     LIMIT 20
   ) people
@@ -609,7 +624,7 @@ BEGIN
       ) AS is_member
     FROM public.clubs c
     WHERE c.is_active = true
-      AND c.name ILIKE '%' || p_query || '%'
+      AND c.name ILIKE '%' || v_q || '%' ESCAPE '\'
     LIMIT 20
   ) clubs_res;
 END;
@@ -760,6 +775,41 @@ BEGIN
 END;
 $$;
 
+-- ── Safe LIKE fragment ──────────────────────────────────────────────────────
+--
+-- User search input is interpolated into an ILIKE pattern. It is parameterized,
+-- so SQL injection is not possible — but LIKE METACHARACTERS still are:
+--
+--   '%'   matched every row, returning the whole student directory
+--   '_'   matched every row likewise
+--   a 10,000-character fragment scanned the table with a 10,000-char pattern
+--
+-- Verified against the shadow database BEFORE this helper existed: search_students('%')
+-- returned every other student, up to the limit. That is directory enumeration
+-- through a search box, and a pattern with no trigrams cannot use the index, so
+-- it also forces the exact sequential scan this function exists to avoid.
+--
+-- Escaping makes user input match LITERALLY, and the length cap keeps the
+-- pattern bounded. Both are applied to every people-search entry point.
+CREATE OR REPLACE FUNCTION public.safe_like_fragment(p_input text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SET search_path = ''
+AS $$
+  SELECT replace(replace(replace(
+           left(btrim(COALESCE(p_input, '')), 100),
+           '\', '\\'), '%', '\%'), '_', '\_');
+$$;
+
+COMMENT ON FUNCTION public.safe_like_fragment(text) IS
+  'Trims, caps at 100 chars, and escapes LIKE metacharacters so a search '
+  'fragment is matched literally. Prevents wildcard-only directory enumeration '
+  'and unbounded pattern scans. Use with ESCAPE ''\''.';
+
+REVOKE ALL ON FUNCTION public.safe_like_fragment(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.safe_like_fragment(text) TO authenticated, service_role;
+
 -- ── search_students: the people picker used by student web ──────────────────
 --
 -- WHY THIS RPC EXISTS — a measured performance finding, not a preference.
@@ -793,12 +843,31 @@ DECLARE
   v_me      uuid   := (SELECT auth.uid());
   v_blocked uuid[];
   v_univ    text;
-  v_q       text   := btrim(COALESCE(p_query, ''));
+  v_raw     text   := btrim(COALESCE(p_query, ''));
+  v_q       text   := public.safe_like_fragment(p_query);
 BEGIN
   IF v_me IS NULL THEN
     RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '28000';
   END IF;
-  IF v_q = '' THEN RETURN; END IF;
+
+  -- MINIMUM QUERY LENGTH — a measured bound, not a style preference.
+  --
+  -- A trigram index cannot serve a pattern shorter than 3 characters, so a
+  -- 1–2 character fragment always degrades to a sequential scan. Measured on
+  -- the 200,000-profile shadow database:
+  --
+  --     1 char  -> 20.6 ms   (Seq Scan)
+  --     2 chars -> 72.2 ms   (Seq Scan)
+  --     3 chars ->  0.41 ms  (Bitmap Index Scan)  ← the index engages here
+  --     4 chars ->  0.25 ms
+  --
+  -- Without this bound, every keystroke of a typeahead costs a full table scan,
+  -- which is precisely what this function exists to prevent. It also makes the
+  -- escaped wildcard case moot: '%' is one character and stops here.
+  --
+  -- The length is measured on the RAW trimmed input, not the escaped form —
+  -- escaping '%' produces the 2-character '\%', which must not sneak past.
+  IF length(v_raw) < 3 OR v_q = '' THEN RETURN; END IF;
 
   v_blocked := public.blocked_user_ids();
   SELECT p.university INTO v_univ FROM public.profiles p WHERE p.id = v_me;
@@ -810,8 +879,8 @@ BEGIN
      AND p.id <> ALL (v_blocked)                    -- ← both directions of block
      -- Same-campus scoping, matching the behaviour of the callers this replaces.
      AND (v_univ IS NULL OR p.university IS NOT DISTINCT FROM v_univ)
-     AND (p.username  ILIKE '%' || v_q || '%'
-       OR p.full_name ILIKE '%' || v_q || '%')
+     AND (p.username  ILIKE '%' || v_q || '%' ESCAPE '\'
+       OR p.full_name ILIKE '%' || v_q || '%' ESCAPE '\')
    ORDER BY p.username
    LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 10), 50));
 END;
@@ -986,6 +1055,18 @@ BEGIN
     RAISE EXCEPTION 'user_not_found';
   END IF;
 
+  -- Serialize against a concurrent block BEFORE reading the relationship.
+  --
+  -- REPRODUCED DEFECT (Gate 1): without this lock, a get_or_create_direct_chat
+  -- racing an uncommitted block passed its own check and CREATED the
+  -- conversation plus both participant rows. The block then committed. The
+  -- result was an empty direct thread between a blocked pair, sitting in the
+  -- BLOCKER's inbox — and not hidden, because block_user's hidden_at sweep had
+  -- already run before the conversation existed.
+  --
+  -- Checking under the lock makes the read see committed state.
+  PERFORM pg_advisory_xact_lock(private.user_pair_lock_key(v_me, other_user_id));
+
   -- Symmetric: neither the blocker nor the blocked person may open a DM.
   IF public.users_have_block_relationship(v_me, other_user_id) THEN
     RAISE EXCEPTION 'interaction_unavailable' USING ERRCODE = 'P0001';
@@ -1048,6 +1129,29 @@ BEGIN
     RAISE EXCEPTION 'too_many_participants';
   END IF;
 
+  -- Serialize against a block committing mid-call, for every pair involved.
+  --
+  -- DEADLOCK SAFETY: locks are taken in ascending LOCK-KEY order, which is a
+  -- total order shared by every transaction in the system. Two concurrent group
+  -- creations with overlapping members therefore acquire their common locks in
+  -- the same relative sequence and cannot form a cycle. Ordering by participant
+  -- id would NOT be sufficient — the key is a hash of the unordered pair, so id
+  -- order and key order differ.
+  PERFORM pg_advisory_xact_lock(k)
+     FROM (SELECT DISTINCT private.user_pair_lock_key(v_me, pid) AS k
+             FROM unnest(v_clean_ids) pid
+            ORDER BY 1) locks;
+
+  -- Re-filter under the locks: v_blocked was read before them and may be stale.
+  SELECT ARRAY(
+    SELECT pid FROM unnest(v_clean_ids) pid
+     WHERE NOT public.users_have_block_relationship(v_me, pid)
+  ) INTO v_clean_ids;
+
+  IF array_length(v_clean_ids, 1) IS NULL OR array_length(v_clean_ids, 1) < 1 THEN
+    RAISE EXCEPTION 'need_participants';
+  END IF;
+
   IF p_client_tag IS NOT NULL THEN
     SELECT m.conversation_id INTO v_conv_id
     FROM public.messages m WHERE m.sender_id = v_me AND m.client_tag = p_client_tag;
@@ -1102,6 +1206,15 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'not_authorized';
   END IF;
+
+  -- Lock every pair first, in ascending LOCK-KEY order (see create_group_chat
+  -- for why key order rather than id order), then read the relationship under
+  -- the locks so a block committing mid-call cannot be missed.
+  PERFORM pg_advisory_xact_lock(k)
+     FROM (SELECT DISTINCT private.user_pair_lock_key(v_me, pid) AS k
+             FROM unnest(COALESCE(p_user_ids,'{}')) pid
+            WHERE pid IS NOT NULL AND pid <> v_me
+            ORDER BY 1) locks;
 
   v_blocked := public.blocked_user_ids();
 

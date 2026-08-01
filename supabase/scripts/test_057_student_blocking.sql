@@ -345,6 +345,83 @@ END $$;
 RESET ROLE;
 
 -- ===========================================================================
+-- SEARCH INPUT HARDENING (Gate 1)
+--
+-- User input reaches an ILIKE pattern. Parameterization stops SQL injection,
+-- but NOT LIKE metacharacters. Before safe_like_fragment() existed, a bare '%'
+-- returned the entire student directory up to the limit — enumeration through
+-- the search box — and a pattern with no trigrams also forced the exact
+-- sequential scan search_students() exists to avoid.
+-- ===========================================================================
+SET ROLE authenticated;
+SELECT t_as(:A);
+SELECT unblock_user(:B);
+SELECT unblock_user(:C);
+
+-- POSITIVE CONTROLS FIRST: without these, every "returns 0" below is vacuous.
+SELECT t_ok('T30 positive control: a real fragment still matches',
+  (SELECT count(*) = 1 FROM search_students('bob', 10)));
+SELECT t_ok('T30b search is case-insensitive, as before',
+  (SELECT count(*) = 1 FROM search_students('BOBBY', 10)));
+SELECT t_ok('T30c search_discovery still matches a real fragment',
+  (SELECT count(*) = 1 FROM search_discovery(NULL,'bob') WHERE result_type='person'));
+
+SELECT t_ok('T31 wildcard-only "%" returns NOTHING (no directory enumeration)',
+  (SELECT count(*) = 0 FROM search_students('%', 50)));
+SELECT t_ok('T31b wildcard-only "_" returns NOTHING',
+  (SELECT count(*) = 0 FROM search_students('_', 50)));
+SELECT t_ok('T31c repeated wildcards "%%%" return NOTHING',
+  (SELECT count(*) = 0 FROM search_students('%%%', 50)));
+SELECT t_ok('T31d a lone backslash is handled safely',
+  (SELECT count(*) = 0 FROM search_students('\', 50)));
+SELECT t_ok('T31e search_discovery is hardened identically',
+  (SELECT count(*) = 0 FROM search_discovery(NULL,'%') WHERE result_type='person'));
+
+SELECT t_ok('T32 a 10,000-character fragment is capped, not scanned raw',
+  (SELECT length(safe_like_fragment(repeat('x',10000))) = 100));
+SELECT t_ok('T32b blank and whitespace-only input return nothing',
+  (SELECT count(*) = 0 FROM search_students('', 10))
+   AND (SELECT count(*) = 0 FROM search_students('    ', 10)));
+
+-- MINIMUM QUERY LENGTH. A trigram index cannot serve a pattern under 3 chars,
+-- so a shorter fragment always seq-scans: 20.6 ms at 1 char and 72.2 ms at 2
+-- chars on a 200k-profile database, versus 0.41 ms at 3. The bound is measured
+-- on the RAW trimmed input, because escaping '%' yields the 2-character '\%'.
+SELECT t_ok('T32c a 1-character query returns nothing (below the index threshold)',
+  (SELECT count(*) = 0 FROM search_students('b', 50)));
+SELECT t_ok('T32d a 2-character query returns nothing',
+  (SELECT count(*) = 0 FROM search_students('bo', 50)));
+SELECT t_ok('T32e 3 characters IS enough (the boundary is inclusive)',
+  (SELECT count(*) = 1 FROM search_students('bob', 50)));
+SELECT t_ok('T32f escaped wildcard cannot sneak past the length bound',
+  (SELECT count(*) = 0 FROM search_students('%', 50))
+   AND (SELECT count(*) = 0 FROM search_students('%%', 50)));
+
+SELECT t_ok('T33 limit is bounded above (9999 cannot be requested)',
+  (SELECT count(*) <= 50 FROM search_students('bob', 9999)));
+SELECT t_ok('T33b negative and NULL limits are handled safely',
+  (SELECT count(*) >= 0 FROM search_students('bob', -5))
+   AND (SELECT count(*) >= 0 FROM search_students('bob', NULL)));
+
+SELECT block_user(:B);
+SELECT t_ok('T34 block filtering still applies on top of literal matching',
+  (SELECT count(*) = 0 FROM search_students('bob', 10)));
+RESET ROLE;
+
+SET ROLE authenticated;
+SELECT t_as(:B);
+DO $$ BEGIN
+  BEGIN
+    PERFORM set_config('request.jwt.claims','',false);
+    PERFORM search_students('bob', 10);
+    PERFORM t_ok('T35 unauthenticated search_students is REJECTED', false, 'call succeeded');
+  EXCEPTION WHEN invalid_authorization_specification THEN
+    PERFORM t_ok('T35 unauthenticated search_students is REJECTED', true);
+  END;
+END $$;
+RESET ROLE;
+
+-- ===========================================================================
 -- 15–17. SEARCH / RECOMMENDATION / PROFILE EXCLUSION — BOTH DIRECTIONS
 -- ===========================================================================
 SET ROLE authenticated;

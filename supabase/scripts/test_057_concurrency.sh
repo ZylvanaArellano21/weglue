@@ -113,6 +113,81 @@ wait $P1; wait $P2
 check "both blocks committed, no deadlock" "2" \
   "$(q "SELECT count(*) FROM user_blocks WHERE (blocker_id='$A' AND blocked_id='$C') OR (blocker_id='$C' AND blocked_id='$A');")"
 
+# ── RACE 4: block vs concurrent DIRECT-CONVERSATION CREATION ───────────────
+# Gate-1 regression. Before get_or_create_direct_chat took the pair lock, this
+# CREATED the conversation and both participant rows; the block then committed,
+# leaving an empty direct thread between a blocked pair sitting in the BLOCKER's
+# inbox (unhidden, because block_user's hidden_at sweep had already run).
+echo "RACE 4  block (held open) vs concurrent direct-conversation creation"
+reset_pair "$C"
+qq "DELETE FROM conversation_participants WHERE conversation_id IN (
+      SELECT c.id FROM conversations c WHERE c.type='direct'
+       AND EXISTS (SELECT 1 FROM conversation_participants p WHERE p.conversation_id=c.id AND p.user_id='$C'));" >/dev/null
+hold_block "$C"; sleep 1
+OUT=$(qq "$(as "$C") SELECT get_or_create_direct_chat('$A');")
+settle
+echo "$OUT" | grep -q "interaction_unavailable" \
+  && { echo "  PASS  racing direct-conversation creation was REJECTED"; PASS=$((PASS+1)); } \
+  || { echo "  *** FAIL ***  DM creation not rejected: $OUT"; FAIL=$((FAIL+1)); }
+check "no direct conversation exists between the blocked pair" "0" \
+  "$(q "SELECT count(*) FROM conversations c WHERE c.type='direct'
+        AND EXISTS (SELECT 1 FROM conversation_participants p WHERE p.conversation_id=c.id AND p.user_id='$A')
+        AND EXISTS (SELECT 1 FROM conversation_participants p WHERE p.conversation_id=c.id AND p.user_id='$C');")"
+
+# ── RACE 5: block vs concurrent GROUP CREATION including the blocker ────────
+# The blocked party must be dropped from the participant list even when the
+# block commits mid-call. The group itself still gets created for everyone else.
+echo "RACE 5  block (held open) vs concurrent group creation including that pair"
+reset_pair "$C"
+qq "DELETE FROM conversations WHERE name='raced group';" >/dev/null
+hold_block "$C"; sleep 1
+OUT=$(qq "$(as "$C") SELECT create_group_chat('raced group', ARRAY['$A','$B']::uuid[], NULL, NULL);")
+settle
+check "the blocker was NOT added to the raced group" "0" \
+  "$(q "SELECT count(*) FROM conversation_participants cp
+         JOIN conversations c ON c.id=cp.conversation_id
+        WHERE c.name='raced group' AND cp.user_id='$A';")"
+check "an unrelated participant WAS still added (group not broken)" "1" \
+  "$(q "SELECT count(*) FROM conversation_participants cp
+         JOIN conversations c ON c.id=cp.conversation_id
+        WHERE c.name='raced group' AND cp.user_id='$B';")"
+
+# ── RACE 6: overlapping concurrent group creations must not deadlock ────────
+# Locks are taken in ascending LOCK-KEY order, a total order shared by every
+# transaction, so two group creations with overlapping members cannot cycle.
+echo "RACE 6  overlapping concurrent group creations (deadlock check)"
+# Clear EVERY block first. Earlier races leave A blocking both B and C, which
+# would make g1's participant list filter down to nothing and raise
+# need_participants — a correct result, but not the thing under test here.
+qq "$(as "$A") SELECT unblock_user('$B'); SELECT unblock_user('$C');" >/dev/null
+qq "$(as "$B") SELECT unblock_user('$A'); SELECT unblock_user('$C');" >/dev/null
+qq "$(as "$C") SELECT unblock_user('$A'); SELECT unblock_user('$B');" >/dev/null
+qq "DELETE FROM conversations WHERE name IN ('deadlock g1','deadlock g2');" >/dev/null
+docker exec -i "$CONTAINER" psql -U pgowner -d "$DB" -q -c \
+  "$(as "$A") SELECT create_group_chat('deadlock g1', ARRAY['$B','$C']::uuid[], NULL, NULL);" >/dev/null 2>&1 &
+D1=$!
+docker exec -i "$CONTAINER" psql -U pgowner -d "$DB" -q -c \
+  "$(as "$B") SELECT create_group_chat('deadlock g2', ARRAY['$C','$A']::uuid[], NULL, NULL);" >/dev/null 2>&1 &
+D2=$!
+wait $D1; wait $D2
+check "both overlapping group creations committed, no deadlock" "2" \
+  "$(q "SELECT count(*) FROM conversations WHERE name IN ('deadlock g1','deadlock g2');")"
+
+# ── LOCK-KEY PROPERTIES ────────────────────────────────────────────────────
+echo "PROPS   pair-lock key invariants"
+check "A/B and B/A produce the SAME key" "t" \
+  "$(q "SELECT private.user_pair_lock_key('$A','$C') = private.user_pair_lock_key('$C','$A');")"
+check "different pairs produce DIFFERENT keys" "t" \
+  "$(q "SELECT private.user_pair_lock_key('$A','$C') <> private.user_pair_lock_key('$A','$B');")"
+check "key function is IMMUTABLE (safe to order by)" "t" \
+  "$(q "SELECT provolatile='i' FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+         WHERE n.nspname='private' AND p.proname='user_pair_lock_key';")"
+check "20k unrelated pairs map to 20k distinct keys (no global serialization)" "20000" \
+  "$(q "WITH pairs AS (SELECT gen_random_uuid() a, gen_random_uuid() b FROM generate_series(1,20000))
+        SELECT count(DISTINCT private.user_pair_lock_key(a,b)) FROM pairs;")"
+check "advisory locks are TRANSACTION-scoped (none survive commit)" "0" \
+  "$(q "SELECT count(*) FROM pg_locks WHERE locktype='advisory';")"
+
 echo "==========================================================================="
 echo "  passed=$PASS  failed=$FAIL"
 [ "$FAIL" -eq 0 ] || { echo "  *** CONCURRENCY TESTS FAILED ***"; exit 1; }
