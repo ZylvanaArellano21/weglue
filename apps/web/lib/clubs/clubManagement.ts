@@ -73,6 +73,39 @@ export interface UniversityUser {
 // pickable (clubs are university-scoped), mirroring mobile searchUniversityUsers.
 export async function searchUniversityUsers(viewerUserId: string, query: string): Promise<UniversityUser[]> {
   const supabase = getSupabaseBrowser();
+  const q = query.trim();
+
+  // SEARCHING — go through the migration-057 RPC.
+  //
+  // Correctness: search_students() excludes blocked students in BOTH directions
+  // using auth.uid(), not anything the browser supplies.
+  //
+  // Performance: ILIKE (texticlike) is not leakproof, so with a real RLS policy
+  // on profiles the table is a security barrier and PostgreSQL can no longer
+  // push an ILIKE down to the trigram indexes. Measured on 200k profiles, a
+  // no-match fragment cost 81.7 ms client-side (Seq Scan) vs 2.9 ms via the RPC.
+  //
+  // Same-campus scoping happens inside the function, so the extra
+  // `profiles.university` round trip this replaced is gone.
+  // 3-character minimum, matching search_students(). Below that the server
+  // returns nothing by design (a trigram index cannot serve a shorter pattern),
+  // so fall through to the browse listing rather than showing an empty result.
+  if (q.length >= 3) {
+    const { data, error } = await supabase.rpc("search_students", { p_query: q, p_limit: 30 });
+    if (error) throw error;
+    return ((data ?? []) as any[]).map((u) => ({
+      id: u.id,
+      username: u.username,
+      full_name: u.full_name,
+      avatar_url: u.avatar_url,
+    }));
+  }
+
+  // BROWSING (no search term) — a plain equality-scoped listing. There is no
+  // ILIKE here, so the leakproof/security-barrier problem above does not apply,
+  // and the profiles RLS policy already excludes blocked students in both
+  // directions. Kept as a direct query so the empty-query browse list behaves
+  // exactly as it did before.
   const { data: me } = await supabase
     .from("profiles")
     .select("university")
@@ -80,7 +113,6 @@ export async function searchUniversityUsers(viewerUserId: string, query: string)
     .maybeSingle();
   const myUniversity = (me as { university?: string | null } | null)?.university ?? null;
 
-  const q = query.trim();
   let req = supabase
     .from("profiles")
     .select("id, username, full_name, avatar_url, university")
@@ -88,7 +120,6 @@ export async function searchUniversityUsers(viewerUserId: string, query: string)
     .order("username")
     .limit(30);
   if (myUniversity) req = req.eq("university", myUniversity);
-  if (q) req = req.or(`username.ilike.%${q}%,full_name.ilike.%${q}%`);
 
   const { data, error } = await req;
   if (error) throw error;

@@ -153,6 +153,9 @@ export const TERMS_AND_CONDITIONS_SECTIONS: LegalSection[] = [
     heading: '12. Reporting, Moderation, and Enforcement',
     body: [
       '• Users may report violations.',
+      '• Users may block other users. Blocking and reporting are separate actions: blocking is a personal control you apply to your own experience, and reporting asks We Glue to review someone\'s behavior. You can do either, both, or neither.',
+      '• Blocking is immediate and the blocked person is not notified. It prevents direct discovery and direct communication between the two accounts. It does not remove either person from clubs, events or group conversations you already share, and it does not hide official club or event information.',
+      '• Blocking is a choice you make about your own account. It is NOT a We Glue enforcement action, it is not a penalty applied to the other person, and it does not by itself cause us to review or act on their behavior. If you want us to review someone, report them.',
       '• We Glue may remove content or accounts at any time, with or without notice.',
       '• We Glue is not required to monitor all activity.',
       'If you violate the letter or spirit of these Terms, or otherwise create risk or possible legal exposure for We Glue, we can stop providing all or part of the Service to you. You understand and agree that We Glue cannot and will not be responsible for the Content posted on the Service, and you use the Service at your own risk.',

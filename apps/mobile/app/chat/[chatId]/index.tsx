@@ -24,6 +24,8 @@ import { useRealtimeParticipants } from '../../../hooks/useRealtimeMessages';
 import { useQueryClient } from '@tanstack/react-query';
 import { NonMemberPreview } from '../../../components/chat/NonMemberPreview';
 import { ConversationThread } from '../../../components/chat/ConversationThread';
+import { useInteractionBlocked } from '../../../hooks/useBlocking';
+import { DM_UNAVAILABLE_TEXT } from '../../../lib/blockPrompts';
 import { ConversationHub } from '../../../components/chat/ConversationHub';
 import { Avatar } from '../../../components/shared/Avatar';
 import { useOfficerStore } from '../../../store/officerStore';
@@ -240,6 +242,10 @@ export default function ChatRoom() {
     : undefined;
   const otherUserId = isDraftDm ? params.draftUserId : otherUser?.user_id;
 
+  // Symmetric block state for this direct conversation. Both parties get the
+  // same answer and the same neutral copy, so neither can tell who blocked whom.
+  const { data: dmBlocked } = useInteractionBlocked(userId, isDirect ? otherUserId : undefined);
+
   const openProfile = useCallback(
     (uid: string) => {
       router.push(`/profile/${uid}` as any);
@@ -429,6 +435,17 @@ export default function ChatRoom() {
         conversationId={realChatId ?? materializedRef.current ?? undefined}
         channelId={null}
         currentUserId={userId}
+        // Direct conversations only. A block severs DIRECT contact; shared
+        // group and club rooms are never restricted (founder decision 2), so
+        // `canPost` is left undefined for every non-direct type.
+        //
+        // `dmBlocked === true` is required to disable — an undefined result
+        // (still loading, or the query errored) must not silently lock a
+        // conversation that is perfectly fine. The database is the real
+        // control: the messages INSERT policy refuses a blocked DM regardless
+        // of what this composer renders.
+        canPost={isDirect && dmBlocked === true ? false : undefined}
+        blockedReason={isDirect && dmBlocked === true ? DM_UNAVAILABLE_TEXT : undefined}
         canModerate={isCustomGroup && chatDetails?.created_by === userId}
         allowPolls={isCustomGroup || isDraftGroup}
         ensureConversation={isDraft ? ensureConversation : undefined}

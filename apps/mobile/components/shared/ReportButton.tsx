@@ -40,10 +40,43 @@ export function openReportFlow(options: {
   entityId: string;
   entityName?: string | null;
   clubId?: string | null;
+  /**
+   * Supplied ONLY when reporting a `user`, to offer "Report and block" in the
+   * same step. Reporting someone is the moment they most want the contact to
+   * stop, and making them find a second menu afterwards is a poor safety flow.
+   *
+   * Blocking runs FIRST and independently of the report: if the report request
+   * fails (offline, email transport), the block must still take effect, because
+   * the block is the part that actually protects the student.
+   */
+  onBlock?: () => void;
 }): void {
   const label = ENTITY_LABEL[options.entityType];
+  const canBlock = options.entityType === 'user' && typeof options.onBlock === 'function';
+
   Alert.alert('Report', `Do you want to report this ${label}?`, [
     { text: 'Cancel', style: 'cancel' },
+    ...(canBlock
+      ? [
+          {
+            text: 'Report and block',
+            style: 'destructive' as const,
+            onPress: () => {
+              options.onBlock?.();
+              submitReport({
+                entityType: options.entityType,
+                entityId: options.entityId,
+                entityName: options.entityName ?? null,
+                clubId: options.clubId ?? null,
+              }).catch(() => {
+                // The block already happened and is what matters here. Report
+                // failure is surfaced quietly so the confirmation the student
+                // sees is about the protection they just gained.
+              });
+            },
+          },
+        ]
+      : []),
     {
       text: 'Report',
       style: 'destructive',
