@@ -114,6 +114,71 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
 
         <section>
           <h2 className="text-lg font-semibold text-black mb-2">
+            Blocking Another Student
+          </h2>
+          <p className="text-sm text-[#5F5D5D] leading-relaxed">
+            You can block another student at any time from their profile, from a
+            direct conversation, from the report flow, or from{" "}
+            <strong>Settings → Blocked Accounts</strong>.
+          </p>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            When you block someone, we store exactly three pieces of
+            information: <strong>your account ID</strong>, the{" "}
+            <strong>blocked account&apos;s ID</strong>, and the{" "}
+            <strong>date and time the block was created</strong>. We do not store
+            a reason, and we do not ask you for one. We use this record only to
+            keep the block working — for safety, abuse prevention, and app
+            functionality.
+          </p>
+          <ul className="mt-3 space-y-1 text-sm text-[#5F5D5D] leading-relaxed list-disc pl-5">
+            <li>
+              <strong>The other person is not told.</strong> We do not notify
+              them, and we do not show them that a block exists.
+            </li>
+            <li>
+              Block relationships are <strong>never publicly visible</strong>.
+              There is no public count and no way for anyone to see who has
+              blocked whom.
+            </li>
+            <li>
+              <strong>Only you can see or manage your Blocked Accounts list</strong>,
+              and only you can unblock someone you blocked.
+            </li>
+            <li>
+              Blocking <strong>removes any existing follow relationship in both
+              directions</strong>, which also ends a Gluemate connection.
+            </li>
+            <li>
+              <strong>Unblocking does not restore</strong> those follows or your
+              previous Gluemate connection.
+            </li>
+            <li>
+              Blocking prevents direct discovery and direct communication between
+              you. It does <strong>not</strong> remove official club or event
+              information — if the person you blocked runs a club you are in, you
+              will still see that club&apos;s posts, events and announcements.
+            </li>
+            <li>
+              Active block records are <strong>deleted</strong> when either
+              account is deleted.
+            </li>
+          </ul>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            Blocking introduces no advertising identifier, no access to your
+            contacts, no precise location, and no third-party tracking.
+          </p>
+          <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">
+            One honest limitation: blocking controls what happens{" "}
+            <strong>inside We Glue</strong>. Profile pictures and post images are
+            served from public web addresses, so if someone already saved or
+            shared such a link before you blocked them, we cannot make that copy
+            unreachable. Blocking is not a guarantee of invisibility outside We
+            Glue.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold text-black mb-2">
             Children&apos;s Privacy (COPPA)
           </h2>
           <p className="text-sm text-[#5F5D5D] leading-relaxed">

@@ -86,6 +86,9 @@ function Footer() {
             <Link href="/terms-of-service" className="text-xs text-[#5F5D5D] hover:text-[#0FA6A6]">
               Terms of Service
             </Link>
+            <Link href="/community-guidelines" className="text-xs text-[#5F5D5D] hover:text-[#0FA6A6]">
+              Community Guidelines
+            </Link>
             <Link href="/login" className="text-xs text-[#5F5D5D] hover:text-[#0FA6A6]">
               Contact Us
             </Link>
