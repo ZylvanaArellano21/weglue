@@ -1,27 +1,27 @@
 -- ===========================================================================
--- Test harness — migration 059 (restriction-enforcement hotfix)
+-- Test harness — migration 060 (restriction-enforcement hotfix)
 --
 -- HOW TO RUN (throwaway database, NEVER production):
 --
---   docker run -d --name wg-059 -e POSTGRES_PASSWORD=test -p 55442:5432 postgres:15
---   docker exec -i wg-059 psql -U postgres -d postgres <<'EOF'
+--   docker run -d --name wg-060 -e POSTGRES_PASSWORD=test -p 55452:5432 postgres:15
+--   docker exec -i wg-060 psql -U postgres -d postgres <<'EOF'
 --     CREATE ROLE pgowner LOGIN PASSWORD 'test' NOSUPERUSER BYPASSRLS CREATEROLE;
 --     CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
 --     CREATE ROLE service_role NOLOGIN BYPASSRLS;
 --     GRANT anon, authenticated, service_role TO pgowner;
 --     CREATE DATABASE wg OWNER pgowner;
 --   EOF
---   docker exec -i wg-059 psql -U pgowner -d wg -c \
+--   docker exec -i wg-060 psql -U pgowner -d wg -c \
 --     "GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;"
 --   for f in supabase/scripts/test_057_fixture_schema.sql \
 --            supabase/migrations/057_student_blocking.sql \
 --            supabase/migrations/055_durable_admin_audit.sql \
 --            supabase/migrations/056_atomic_admin_mutations.sql \
 --            supabase/migrations/058_admin_restrictions.sql \
---            supabase/migrations/059_restriction_enforcement_hotfix.sql; do
---     docker exec -i wg-059 psql -U pgowner -d wg -v ON_ERROR_STOP=1 -q < $f
+--            supabase/migrations/060_restriction_enforcement_hotfix.sql; do
+--     docker exec -i wg-060 psql -U pgowner -d wg -v ON_ERROR_STOP=1 -q < $f
 --   done
---   docker exec -i wg-059 psql -U pgowner -d wg -q < supabase/scripts/test_059_restriction_hotfix.sql
+--   docker exec -i wg-060 psql -U pgowner -d wg -q < supabase/scripts/test_060_restriction_hotfix.sql
 --
 -- WHAT THIS PROVES
 --   1. create_poll is now behind the restriction guard, and a suspended or
@@ -490,7 +490,7 @@ SELECT t_ok('F5  no restriction rows left active by this harness',
 -- ── Report ─────────────────────────────────────────────────────────────────
 \o
 \echo ''
-\echo '════════════════ migration 059 — restriction-enforcement hotfix ════════════════'
+\echo '════════════════ migration 060 — restriction-enforcement hotfix ════════════════'
 SELECT lpad(n::text,3) || '  ' || CASE WHEN ok THEN 'PASS  ' ELSE '*FAIL*' END || '  ' ||
        rpad(name,62) || COALESCE(NULLIF(detail,''),'') AS result
 FROM t_results ORDER BY n;

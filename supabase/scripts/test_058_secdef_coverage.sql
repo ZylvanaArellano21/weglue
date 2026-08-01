@@ -100,7 +100,7 @@ INSERT INTO secdef_classification (proname, category, justification) VALUES
 ('rank_eligible_clubs',       'internal','Service-role ranking helper.'),
 ('process_event_reminders',   'internal','Scheduled job; service_role only.'),
 ('process_social_proof_events','internal','Scheduled job; service_role only.'),
-('check_club_inactivity',     'internal','Club warning/soft-deletion job. Was executable by PUBLIC, anon AND authenticated in production — any unauthenticated caller could drive club deactivation. Migration 059 revokes all three; S7c and S7e enforce it.'),
+('check_club_inactivity',     'internal','Club warning/soft-deletion job. Was executable by PUBLIC, anon AND authenticated in production — any unauthenticated caller could drive club deactivation. Migration 060 revokes all three; S7c and S7e enforce it.'),
 ('before_user_created',       'internal','GoTrue auth hook.'),
 ('handle_new_user',           'internal','Trigger on auth.users.'),
 ('ensure_profile',            'internal','Runs during sign-in, before any restriction state can exist; must not be gated or a restricted user could never load their own shell.'),
@@ -325,7 +325,7 @@ SELECT t_ok('S7 privileged internals are NOT executable by authenticated or anon
 
 -- ===========================================================================
 -- 4b. WRITER COVERAGE — the assertion that would have caught BOTH Day 10B
---     defects, added by migration 059.
+--     defects, added by migration 060.
 --
 -- A SECURITY DEFINER function that WRITES and is reachable by a student runs as
 -- its owner and is not constrained by RLS. It must therefore either invoke the
@@ -384,7 +384,7 @@ SELECT t_ok('S7c no SECDEF writer is executable by PUBLIC or anon',
                AND (s.explicit_public_grant OR s.public_by_default OR s.anon_can_execute)
                AND NOT EXISTS (SELECT 1 FROM writer_exceptions w WHERE w.proname = s.proname)), ''));
 
--- The two functions migration 059 exists to fix, asserted by name so a
+-- The two functions migration 060 exists to fix, asserted by name so a
 -- regression is reported in plain language rather than as a generic count.
 SELECT t_ok('S7d create_poll is wrapped, student-callable, and not PUBLIC/anon',
   to_regprocedure('public.create_poll__inner(uuid,uuid,text,text[],boolean,timestamptz,timestamptz,uuid)') IS NOT NULL
@@ -392,7 +392,7 @@ SELECT t_ok('S7d create_poll is wrapped, student-callable, and not PUBLIC/anon',
         WHERE s.proname = 'create_poll'
           AND (s.explicit_public_grant OR s.public_by_default OR s.anon_can_execute)),
   CASE WHEN to_regprocedure('public.create_poll__inner(uuid,uuid,text,text[],boolean,timestamptz,timestamptz,uuid)') IS NULL
-       THEN 'create_poll__inner ABSENT — migration 059 did not wrap create_poll' ELSE '' END);
+       THEN 'create_poll__inner ABSENT — migration 060 did not wrap create_poll' ELSE '' END);
 
 SELECT t_ok('S7e check_club_inactivity is not reachable by PUBLIC, anon or authenticated',
   (SELECT count(*) = 0 FROM student_reachable_secdef s WHERE s.proname = 'check_club_inactivity'),
