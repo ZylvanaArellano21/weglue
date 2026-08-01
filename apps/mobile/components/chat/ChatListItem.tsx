@@ -109,17 +109,23 @@ export function ChatListItem({ chat, currentUserId, onPress, channelTags = [] }:
 /** Simple row for suggested people (Single filter empty state) */
 export function SuggestedPersonRow({
   username,
+  fullName,
   avatarUrl,
   onPress,
 }: {
   username: string;
+  fullName?: string | null;
   avatarUrl: string | null;
   onPress: () => void;
 }) {
+  const name = fullName?.trim() || username;
   return (
     <TouchableOpacity style={styles.suggestedRow} onPress={onPress} activeOpacity={0.7}>
-      <Avatar uri={avatarUrl} size={chatSizes.avatarSuggested} username={username} />
-      <Text style={chatTypography.rowName}>{username}</Text>
+      <Avatar uri={avatarUrl} size={chatSizes.avatarSuggested} username={name} />
+      <View style={styles.suggestedText}>
+        <Text style={chatTypography.rowName}>{name}</Text>
+        <Text style={styles.suggestedUsername}>@{username}</Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -221,5 +227,14 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 23,
     paddingVertical: 10,
+  },
+  suggestedText: {
+    flex: 1,
+  },
+  suggestedUsername: {
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
+    color: chatColors.textMuted,
+    marginTop: 1,
   },
 });

@@ -25,6 +25,8 @@ import { useClubEventsFeed, clubEventsFeedKey } from "../../lib/hooks/useClubEve
 import { useManageClubPhoto } from "../../lib/hooks/useClubManagement";
 import { useRsvpToEvent, useToggleSaveEvent } from "../../lib/hooks/useHomeEventsFeed";
 import type { HomeFeedEvent } from "../../lib/hooks/useHomeEventsFeed";
+import { clubChannelHref, clubHubHref, personMessageHref } from "../../lib/messages/routes";
+import { getMainConversationChannel, reopenClubConversation } from "../../lib/messages/service";
 
 const TABS: ClubTab[] = ["home", "calendar", "officers", "media"];
 
@@ -132,7 +134,21 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
     setOverlay({ kind: "media", index });
   };
 
-  const chatUnavailable = () => show("Messaging is available in the We Glue mobile app.");
+  const openClubChat = async (type: "club_group" | "officer_chat") => {
+    try {
+      const conversationId = await reopenClubConversation(clubId, type);
+      if (type === "club_group") {
+        // The member-chat control represents the whole club chat; preserve the
+        // channel navigator rather than silently choosing a recent thread.
+        router.push(clubHubHref(conversationId));
+        return;
+      }
+      const mainChannelId = await getMainConversationChannel(conversationId);
+      router.push(mainChannelId ? clubChannelHref(conversationId, mainChannelId) : clubHubHref(conversationId));
+    } catch {
+      show("That chat isn’t available right now.", "error");
+    }
+  };
 
   if (isLoading) {
     return (
@@ -166,8 +182,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onToggleMembership={handleToggleMembership}
             membershipPending={membership.isPending}
             onEdit={() => setEditing(true)}
-            onOfficerChat={chatUnavailable}
-            onGroupChat={chatUnavailable}
+            onOfficerChat={() => void openClubChat("officer_chat")}
+            onGroupChat={() => void openClubChat("club_group")}
           />
 
           {activeTab === "home" && (
@@ -197,7 +213,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               canManage={club.is_officer}
               onManage={() => setManaging(true)}
               onOpenProfile={(id) => router.push(`/u/${id}`)}
-              onMessage={chatUnavailable}
+              onMessage={(id) => router.push(personMessageHref(id))}
             />
           )}
           {activeTab === "media" && <ClubMediaTab photos={club.photos} onOpenPhoto={openPhoto} />}
