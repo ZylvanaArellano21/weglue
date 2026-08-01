@@ -8,10 +8,8 @@ import {
   platformBlockUser,
   unblockUser,
   adjustSuspensionExpiry,
-  MIN_REASON,
-  MAX_REASON,
-  type RestrictionResult,
 } from "../../lib/admin/restrictionActions";
+import { MIN_REASON, MAX_REASON, type RestrictionResult } from "../../lib/admin/restrictionTypes";
 
 // ============================================================================
 // Administrator restriction controls (Day 10B2)

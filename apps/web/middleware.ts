@@ -8,6 +8,11 @@ import {
 } from "./lib/admin/adminEnv";
 import { platformAdminRedirectPath } from "./lib/auth/platformAdminGuard";
 import {
+  restrictionRedirectPath,
+  shouldLeaveRestrictedShell,
+  type ServerAccessState,
+} from "./lib/auth/restrictionGuard";
+import {
   ADMIN_ENTRY_COOKIE_NAME,
   ADMIN_ENTRY_INTERNAL_ROUTE,
   ADMIN_NOT_FOUND_ROUTE,
@@ -133,6 +138,38 @@ export async function middleware(request: NextRequest) {
   const adminBlockPath = platformAdminRedirectPath(user, pathname);
   if (adminBlockPath) {
     return NextResponse.redirect(new URL(adminBlockPath, request.url));
+  }
+
+  // ── Administrator restriction containment (Day 10B2) ──────────────────────
+  //
+  // Runs for every signed-in student, on EVERY request — not just the
+  // PROTECTED_PREFIXES set — so a deep link, a client-side navigation, or a
+  // browser refresh all land on the restricted shell. Server actions and route
+  // handlers are additionally denied by the database itself (migration 058),
+  // so this is containment and clarity, never the sole control.
+  //
+  // One RPC per request for signed-in students. It is the SAME predicate the
+  // enforcement layer uses, so the routing decision and the database can never
+  // disagree, and it rides a partial index covering only restricted accounts.
+  if (user) {
+    // `my_access_state()` — NOT `get_account_access_state(uuid)`. The per-user
+    // probe is service_role only so students cannot enumerate other accounts;
+    // this one is scoped to auth.uid() inside the function body and returns the
+    // generic 'restricted' rather than naming the internal classification.
+    const { data: accessPayload } = await supabase.rpc("my_access_state");
+    const state = ((accessPayload as { state?: string } | null)?.state ?? null) as
+      | ServerAccessState
+      | null;
+
+    const restrictedPath = restrictionRedirectPath(state, pathname);
+    if (restrictedPath) {
+      return NextResponse.redirect(new URL(restrictedPath, request.url));
+    }
+    // A lapsed or lifted restriction releases the student on their next
+    // request — no client timer, no manual refresh.
+    if (shouldLeaveRestrictedShell(state, pathname)) {
+      return NextResponse.redirect(new URL("/home", request.url));
+    }
   }
 
   const isProtected = PROTECTED_PREFIXES.some((r) => pathname.startsWith(r));

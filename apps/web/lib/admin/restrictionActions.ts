@@ -38,35 +38,16 @@ import { createAdminClient } from "../supabase/admin";
 import { requireRecentMfaWrite } from "./secureAdmin";
 import { runAtomicMutation, newCorrelationId, type ActionResult } from "./atomicMutation";
 import { runCrossServiceOperation } from "./crossService";
+// Constants and types live outside this file: a "use server" module may only
+// export async functions, so exporting them from here fails the build.
+import {
+  MIN_REASON,
+  MAX_REASON,
+  type RestrictionResult,
+} from "./restrictionTypes";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v: unknown): v is string => typeof v === "string" && UUID_RE.test(v);
-
-export const MIN_REASON = 3;
-export const MAX_REASON = 500;
-
-/**
- * The four outcomes a restriction action can report, kept distinct because the
- * founder must be able to tell them apart:
- *
- *   applied            restriction committed, sessions revoked
- *   sessionsFailed     restriction committed; revocation failed. ACCESS IS
- *                      STILL DENIED by the database — this is degraded, not
- *                      unsafe, and the existing token merely lives out its hour
- *                      against a database that refuses it.
- *   reconcile          restriction committed, revocation performed, but its
- *                      outcome could not be recorded. Flagged for reconciliation.
- *   rejected           nothing changed.
- */
-export type RestrictionOutcome = "applied" | "sessionsFailed" | "reconcile" | "rejected";
-
-export interface RestrictionResult {
-  ok: boolean;
-  outcome: RestrictionOutcome;
-  message: string;
-  correlationId: string;
-  sessionsRevoked: boolean;
-}
 
 function reasonError(): RestrictionResult {
   return {
