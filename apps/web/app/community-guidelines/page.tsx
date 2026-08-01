@@ -65,6 +65,18 @@ const sections = [
     ],
   },
   {
+    heading: "If we restrict an account",
+    body: [
+      "When someone breaks these guidelines, we may restrict their access to We Glue. A restriction can be temporary (with or without an end date) or last until we lift it. It is our decision about the platform, and it is separate from anyone blocking anyone.",
+    ],
+    bullets: [
+      "A restricted account keeps its content. Posts, messages, clubs, events and media are not deleted just because access was restricted — restriction is not deletion.",
+      "The person is shown a plain notice, not our internal reasoning. If you think a decision about your account is wrong, email us and we will look at it.",
+      "You can always delete your account, including while restricted. That option never goes away.",
+      "Restrictions do not change who you or anyone else has blocked. Those are your choices and they stay yours.",
+    ],
+  },
+  {
     heading: "What We Glue does",
     body: [
       "We review reports and may remove content, restrict access to the service, or take other action needed to keep students safe. We act independently of whether you blocked the person — a block is your decision about your experience, and moderation is ours about the platform.",
