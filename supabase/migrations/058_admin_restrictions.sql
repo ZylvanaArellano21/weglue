@@ -1003,3 +1003,67 @@ END
 $wrap$;
 
 COMMIT;
+
+BEGIN;
+
+-- ===========================================================================
+-- 4c. CLOSING A PRE-EXISTING SECURITY DEFINER EXPOSURE
+--
+-- FOUND BY THE STAGE-1 COVERAGE TEST, ON ITS FIRST RUN, IN PRODUCTION.
+--
+-- `insert_notification_once()` is SECURITY DEFINER and inserts directly into
+-- `public.notifications`. Its production ACL was:
+--
+--     =X/postgres | postgres=X/postgres | anon=X/postgres
+--     | authenticated=X/postgres | service_role=X/postgres
+--
+-- The bare `=X/postgres` is a grant to PUBLIC, and `anon` and `authenticated`
+-- were granted explicitly on top. Any signed-in student — or an anonymous
+-- caller — could therefore invoke:
+--
+--     insert_notification_once(p_user_id, p_actor_id, p_type, ...)
+--
+-- and forge a notification to ANY account, attributed to ANY other account.
+-- Because `trg_notifications_push` fires on insert, that also produced a real
+-- PUSH notification. That is notification spoofing and push spam, reachable
+-- from an ordinary session, and it predates Day 10B2 entirely.
+--
+-- WHY THE REVOKE IS SAFE — verified before applying, not assumed:
+--   • no client code calls it (mobile, web, packages, edge functions: zero hits)
+--   • its only callers are handle_follow_insert, handle_follow_accept and
+--     handle_post_like_notify — all three SECURITY DEFINER and owned by
+--     `postgres`, so they keep executing it with the owner's privileges
+--
+-- It is fixed here rather than in a separate migration because this is exactly
+-- the class of exposure Day 10B2 exists to close, and the coverage test added
+-- alongside it now fails permanently if any comparable function reappears.
+-- ===========================================================================
+
+REVOKE ALL ON FUNCTION public.insert_notification_once(uuid, uuid, text, uuid, text)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.insert_notification_once(uuid, uuid, text, uuid, text)
+  TO service_role;
+
+-- The same posture for the rest of the push internals. In production these are
+-- ALREADY service_role only; the statements are here so a FRESH environment
+-- (or any future re-creation) reproduces that without relying on it having been
+-- done by hand. Strict privilege reduction — nothing that works today breaks.
+DO $push_locks$
+DECLARE fn text;
+BEGIN
+  FOREACH fn IN ARRAY ARRAY[
+    'user_wants_push(uuid,text)',
+    'enqueue_push(uuid,uuid,text,text,text,jsonb,text,text,integer)',
+    'claim_push_batch(integer)'
+  ] LOOP
+    BEGIN
+      EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated;', fn);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role;', fn);
+    EXCEPTION WHEN undefined_function THEN
+      CONTINUE;  -- not present in a leaner environment
+    END;
+  END LOOP;
+END
+$push_locks$;
+
+COMMIT;

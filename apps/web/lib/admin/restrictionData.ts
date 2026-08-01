@@ -43,6 +43,13 @@ export interface RestrictionSummary {
   active: RestrictionRow | null;
   /** Newest first, including lifted and expired rows. */
   history: RestrictionRow[];
+  /**
+   * Rows still marked `active` whose suspension has already lapsed. They
+   * restrict nobody — the predicate ignores them — and the next administrator
+   * mutation closes them atomically. Surfaced only so the dashboard can say so
+   * rather than looking inconsistent.
+   */
+  expiredUnreconciled: RestrictionRow[];
   /** Audit events sharing this restriction's correlation id. */
   sessionRevocation: {
     attempted: boolean;
@@ -84,7 +91,34 @@ export async function restrictionSummary(userId: string): Promise<RestrictionSum
   ]);
 
   const history = (rows ?? []) as RestrictionRow[];
-  const active = history.find((r) => r.status === "active") ?? null;
+
+  // "Currently restricting" is NOT the same as `status = 'active'`.
+  //
+  // A suspension whose `suspended_until` has passed stops restricting
+  // immediately (the database predicate evaluates the timestamp), but its row
+  // legitimately stays `status='active'` until the next administrator mutation
+  // reconciles it — that is bookkeeping, not access. Reading the raw status
+  // here would make the dashboard show "Applied / By / Internal reason" for a
+  // restriction that is not restricting anyone, directly contradicting the
+  // Active badge beside it. Mirroring the predicate keeps the two honest.
+  const nowMs = Date.now();
+  const active =
+    history.find(
+      (r) =>
+        r.status === "active" &&
+        (r.restriction_type === "platform_blocked" ||
+          !r.suspended_until ||
+          new Date(r.suspended_until).getTime() > nowMs)
+    ) ?? null;
+
+  /** Rows still marked active whose suspension has already lapsed. */
+  const expiredUnreconciled = history.filter(
+    (r) =>
+      r.status === "active" &&
+      r.restriction_type === "suspended" &&
+      !!r.suspended_until &&
+      new Date(r.suspended_until).getTime() <= nowMs
+  );
 
   // Session-revocation outcome for the ACTIVE restriction, correlated by id.
   let sessionRevocation: RestrictionSummary["sessionRevocation"] = {
@@ -113,6 +147,7 @@ export async function restrictionSummary(userId: string): Promise<RestrictionSum
     accessState: (state ?? "active") as AccessState,
     active,
     history,
+    expiredUnreconciled,
     sessionRevocation,
   };
 }

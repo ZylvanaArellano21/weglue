@@ -292,6 +292,86 @@ SELECT t_ok('T17 the student regains real access after expiry',
 RESET ROLE;
 
 -- ===========================================================================
+-- B2. EXPIRED-SUSPENSION ADMINISTRATIVE LIFECYCLE  (Stage 2)
+--
+-- The predicate already treats a lapsed suspension as inactive. What this
+-- section proves is the ADMINISTRATIVE half: that the historical row does not
+-- get in the way afterwards.
+--
+-- DESIGN CHOSEN (of the two the founder offered): the NEXT administrator
+-- mutation atomically closes the expired row before creating the new
+-- restriction. The alternative — encoding expiry into the partial unique index
+-- — was rejected because it would require now() in the index predicate, which
+-- PostgreSQL forbids (an index predicate must be IMMUTABLE) and which would be
+-- wrong anyway: an index cannot re-evaluate itself as the clock moves.
+--
+-- No cron job exists, and none is needed: access returns from the predicate,
+-- and the bookkeeping is closed by the next action that cares.
+-- ===========================================================================
+SELECT public.admin_tx_restriction_unsuspend(:ADM,'founder@weglue.app','Reset for lifecycle', gen_random_uuid(), :S);
+
+SELECT public.admin_tx_restriction_suspend(:ADM,'founder@weglue.app','Lifecycle temporary',
+  gen_random_uuid(), :S, now() + interval '1 hour');
+SELECT t_ok('L1 a live temporary suspension restricts',
+  (SELECT public.get_account_access_state(:S) = 'suspended'));
+
+-- Age the whole row so it stays internally consistent (ar_expiry_forward).
+UPDATE account_restrictions
+   SET created_at = now() - interval '2 hours', suspended_until = now() - interval '1 minute'
+ WHERE user_id = :S AND status = 'active';
+
+SELECT t_ok('L2 access resumes the moment it lapses, with NO cron job',
+  (SELECT public.get_account_access_state(:S) = 'active'));
+SELECT t_ok('L3 the historical row is still status=active (un-reconciled bookkeeping)',
+  (SELECT count(*) = 1 FROM account_restrictions
+    WHERE user_id = :S AND status = 'active' AND suspended_until < now()));
+
+SET ROLE authenticated;
+SELECT t_as(:S);
+SELECT t_ok('L4 the student really can use the app again',
+  (SELECT count(*) >= 1 FROM profiles WHERE id = :O));
+RESET ROLE;
+
+-- No unsuspend should be needed, and offering one would be misleading: the
+-- account is not restricted, so `unsuspend` correctly reports not_restricted.
+SELECT t_ok('L5 no misleading unsuspend is required — it reports not_restricted',
+  (SELECT public.admin_tx_restriction_unsuspend(:ADM,'founder@weglue.app','Pointless',
+     gen_random_uuid(), :S) ->> 'status' = 'not_restricted'));
+
+-- A NEW suspension must not collide with the stale row's unique index.
+SELECT t_ok('L6 a NEW suspension succeeds despite the expired row',
+  (SELECT public.admin_tx_restriction_suspend(:ADM,'founder@weglue.app','Second suspension',
+     gen_random_uuid(), :S, now() + interval '2 days') ->> 'status' = 'ok'));
+SELECT t_ok('L7 exactly ONE active row remains (the stale one was closed atomically)',
+  (SELECT count(*) = 1 FROM account_restrictions WHERE user_id = :S AND status = 'active'));
+SELECT t_ok('L8 the expired row was reconciled to status=expired, not deleted',
+  (SELECT count(*) >= 1 FROM account_restrictions WHERE user_id = :S AND status = 'expired'));
+SELECT t_ok('L9 the reconciliation is audited under the new action''s correlation id',
+  (SELECT count(*) >= 1 FROM admin_audit_events
+    WHERE action = 'restriction.suspend' AND target_id = :S AND event_type = 'success'));
+
+-- The same must hold for a platform BLOCK arriving after an expired suspension.
+SELECT public.admin_tx_restriction_unsuspend(:ADM,'founder@weglue.app','Clear', gen_random_uuid(), :S);
+SELECT public.admin_tx_restriction_suspend(:ADM,'founder@weglue.app','Third suspension',
+  gen_random_uuid(), :S, now() + interval '1 hour');
+UPDATE account_restrictions
+   SET created_at = now() - interval '2 hours', suspended_until = now() - interval '1 minute'
+ WHERE user_id = :S AND status = 'active';
+SELECT t_ok('L10 a platform BLOCK also succeeds despite an expired row',
+  (SELECT public.admin_tx_restriction_block(:ADM,'founder@weglue.app','Block after expiry',
+     gen_random_uuid(), :S) ->> 'status' = 'ok'));
+SELECT t_ok('L11 and again exactly one active row',
+  (SELECT count(*) = 1 FROM account_restrictions WHERE user_id = :S AND status = 'active'));
+SELECT t_ok('L12 full history is preserved throughout',
+  (SELECT count(*) >= 5 FROM account_restrictions WHERE user_id = :S));
+SELECT public.admin_tx_restriction_unblock(:ADM,'founder@weglue.app','Lifecycle cleanup', gen_random_uuid(), :S);
+
+-- The partial unique index must NOT contain a volatile expression.
+SELECT t_ok('L13 the active-row unique index uses no volatile now() predicate',
+  (SELECT pg_get_indexdef(i.indexrelid) NOT LIKE '%now()%'
+     FROM pg_index i WHERE i.indexrelid = 'uq_account_restrictions_active'::regclass));
+
+-- ===========================================================================
 -- C. PLATFORM BLOCK + TRANSITIONS
 -- ===========================================================================
 SELECT t_ok('T18 platform block succeeds and supersedes the stale suspension',

@@ -240,6 +240,16 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
             </dl>
           )}
 
+          {restriction.expiredUnreconciled.length > 0 && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              This account has {restriction.expiredUnreconciled.length} suspension
+              record{restriction.expiredUnreconciled.length === 1 ? "" : "s"} whose end
+              date has passed. It is <strong>not restricting anyone</strong> — access
+              returned automatically — and the next restriction action closes the record.
+              No &ldquo;unsuspend&rdquo; is needed.
+            </p>
+          )}
+
           <RestrictionControls
             userId={params.id}
             targetSummary={`${user.full_name ?? user.username} (@${user.username})`}

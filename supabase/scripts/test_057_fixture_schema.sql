@@ -831,6 +831,17 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authentic
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO service_role;
 REVOKE ALL ON push_queue FROM authenticated;
 
+-- Production grants: these SECURITY DEFINER internals are service_role ONLY in
+-- the live database (verified against pg_proc.proacl). A fixture that leaves
+-- them on PUBLIC would make the Day 10B2 SECDEF coverage test fail here while
+-- passing in production, which is the wrong way round — the fixture must be at
+-- least as locked down as production, never looser.
+REVOKE ALL ON FUNCTION public.user_wants_push(uuid, text)      FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.insert_notification_once(uuid, uuid, text, uuid, text)
+                                                               FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.user_wants_push(uuid, text)   TO service_role;
+GRANT EXECUTE ON FUNCTION public.insert_notification_once(uuid, uuid, text, uuid, text) TO service_role;
+
 -- ── Seed the notification type registry exactly as production has it ────────
 INSERT INTO notification_types (type, category, enabled, in_app, push) VALUES
   ('follow_request','social',true,true,true),
