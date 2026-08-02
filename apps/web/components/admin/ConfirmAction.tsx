@@ -27,6 +27,14 @@ import type { ActionResult } from "../../lib/admin/actions";
  * Cancelling closes the dialog without invoking `run` at all: no mutation, no
  * audit event of any kind.
  *
+ * TYPED CONFIRMATION (Day 10C). Pass `confirmPhrase` for an IRREVERSIBLE action
+ * — a permanent purge. The operator must type that exact word, case-sensitively,
+ * before confirm enables. It is a second, deliberate act on top of the reason:
+ * a reason can be typed on autopilot, a phrase cannot be clicked by accident.
+ * Like the reason, this is a convenience and not the enforcement — the server
+ * action re-checks the phrase, and the database refuses an illegal transition
+ * regardless of what any dialog did.
+ *
  * DUPLICATE-SUBMISSION GUARD. `pending` drives the visible loading state, but a
  * React state flag cannot stop a SECOND call that happens in the same tick as
  * the first — `setPending(true)` has not committed yet, so the button is not
@@ -49,6 +57,7 @@ export function ConfirmAction({
   size = "sm",
   requireReason = false,
   targetSummary,
+  confirmPhrase,
 }: {
   label: ReactNode;
   title: string;
@@ -63,22 +72,29 @@ export function ConfirmAction({
   requireReason?: boolean;
   /** Exactly what is being changed, e.g. "Ann One — Chess Club". */
   targetSummary?: string;
+  /** Exact word the operator must type for an irreversible action, e.g. "PURGE". */
+  confirmPhrase?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [phrase, setPhrase] = useState("");
   /** Synchronous re-entrancy latch — see the note above. Never rendered. */
   const inFlight = useRef(false);
 
   const trimmedReason = reason.trim();
   const reasonValid =
     !requireReason || (trimmedReason.length >= MIN_REASON && trimmedReason.length <= MAX_REASON);
+  // Case-sensitive and exact: "purge" does not authorize a purge.
+  const phraseValid = !confirmPhrase || phrase === confirmPhrase;
+  const canConfirm = reasonValid && phraseValid;
 
   function close() {
     setOpen(false);
     setReason("");
+    setPhrase("");
     setError(null);
     // Reopening must start clean even if a previous attempt threw before the
     // finally block could run.
@@ -96,6 +112,10 @@ export function ConfirmAction({
     // rely on a disabled button to enforce a rule.
     if (!reasonValid) {
       setError(`Enter a reason of at least ${MIN_REASON} characters.`);
+      return;
+    }
+    if (!phraseValid) {
+      setError(`Type ${confirmPhrase} exactly to confirm this irreversible action.`);
       return;
     }
     // Synchronous latch, BEFORE any await. A second invocation in the same tick
@@ -175,6 +195,28 @@ export function ConfirmAction({
               </div>
             ) : null}
 
+            {confirmPhrase ? (
+              <div className="mt-3">
+                <label htmlFor="admin-action-phrase" className="block text-xs font-medium text-gray-700">
+                  Type <span className="font-mono font-semibold text-red-600">{confirmPhrase}</span> to confirm{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="admin-action-phrase"
+                  value={phrase}
+                  onChange={(e) => setPhrase(e.target.value)}
+                  disabled={pending}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={confirmPhrase}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm text-gray-900 outline-none focus:border-red-400 disabled:opacity-50"
+                />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  This action is permanent and cannot be undone or reversed by anyone.
+                </p>
+              </div>
+            ) : null}
+
             {error ? (
               <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
             ) : null}
@@ -188,7 +230,7 @@ export function ConfirmAction({
               </button>
               <button
                 onClick={onConfirm}
-                disabled={pending || !reasonValid}
+                disabled={pending || !canConfirm}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60 ${
                   tone === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-teal-500 hover:bg-teal-600"
                 }`}

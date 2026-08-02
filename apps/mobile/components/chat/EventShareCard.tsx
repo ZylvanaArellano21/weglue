@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getEventDetail } from '../../services/eventService';
 import { chatColors, chatFonts, chatShadow } from './chatTheme';
+import { CONTENT_UNAVAILABLE } from '../../lib/contentAvailability';
 
 interface Props {
   /** null = the event was deleted (messages.shared_event_id is SET NULL);
@@ -49,7 +50,7 @@ export function EventShareCard({ eventId, viewerUserId }: Props) {
       <View style={styles.card}>
         <View style={styles.unavailableRow}>
           <Ionicons name="calendar-outline" size={18} color={chatColors.textMuted} />
-          <Text style={styles.unavailableText}>This event is no longer available.</Text>
+          <Text style={styles.unavailableText}>{CONTENT_UNAVAILABLE}</Text>
         </View>
       </View>
     );

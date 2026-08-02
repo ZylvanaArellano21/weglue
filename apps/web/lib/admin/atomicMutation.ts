@@ -97,6 +97,22 @@ const STATUS_MESSAGE: Record<string, string> = {
   self_target: "You cannot restrict your own account.",
   invalid_expiry: "The suspension expiration must be a valid date in the future.",
   invalid_target: "Invalid target account.",
+  // ── content lifecycle (migration 061) ──────────────────────────────────────
+  // Each of these is a REAL state the database observed, reported back honestly.
+  // None of them is ever presented as a success.
+  already_removed: "This content has already been removed.",
+  not_removed: "This content is not currently removed, so there is nothing to restore.",
+  purge_in_progress:
+    "A permanent purge has already begun for this content. It can no longer be restored.",
+  already_purged: "This content has already been permanently purged.",
+  owner_missing: "The author's account no longer exists, so this content cannot be restored.",
+  club_missing: "The owning club no longer exists, so this content cannot be restored.",
+  parent_missing: "The post this comment belongs to no longer exists.",
+  parent_unavailable:
+    "The post this comment belongs to is not currently available. Restore the post first.",
+  evidence_required:
+    "This content is attached to an open report and is being kept as evidence. Resolve the report first.",
+  invalid_reason: "The reason must be 3–500 characters of actual text.",
 };
 
 function messageFor(status: string): string {

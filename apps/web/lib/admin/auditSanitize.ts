@@ -91,6 +91,38 @@ export const AUDIT_ACTIONS = {
   "restriction.unblock":        { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId"] },
   "restriction.adjustExpiry":   { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId", "suspendedUntil"] },
   "restriction.revokeSessions": { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId", "scope"] },
+
+  // ── Day 10C: content lifecycle (migration 061) ────────────────────────────
+  // Read the metadataKeys omissions: no `caption`, no `content`, no `title`,
+  // no `description`, no `location`, no media URL travels through any of these.
+  // A lifecycle event records WHICH entity moved and WHERE it moved to. The
+  // payload itself lives in before_state/after_state, which `sanitizeState`
+  // already reduces to dependency counts for these target types.
+  //
+  // The worker outcomes (purgeCompleted, purgeReconciliationRequired) are
+  // `destructive` AND reason-bearing: the database carries forward the reason
+  // the administrator gave when they REQUESTED the purge, so no destructive row
+  // in this system is ever unjustified — see 061 §9 `content_purge_finalize`.
+  "post.remove":             { targetType: "post",    targetIdKey: "postId",    sensitivity: "destructive", requiresReason: true,  metadataKeys: ["postId", "entityType", "entityId"] },
+  "post.restore":            { targetType: "post",    targetIdKey: "postId",    sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["postId", "entityType", "entityId"] },
+  "post.purgeRequested":     { targetType: "post",    targetIdKey: "postId",    sensitivity: "destructive", requiresReason: true,  metadataKeys: ["postId", "entityType", "entityId"] },
+  "post.purgeCompleted":     { targetType: "post",    targetIdKey: "postId",    sensitivity: "destructive", requiresReason: true,  metadataKeys: ["postId", "entityType", "entityId", "purgedComments"] },
+  "post.purgeFailed":        { targetType: "post",    targetIdKey: "postId",    sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["postId", "entityType", "entityId"] },
+  "comment.remove":          { targetType: "comment", targetIdKey: "commentId", sensitivity: "destructive", requiresReason: true,  metadataKeys: ["commentId", "entityType", "entityId"] },
+  "comment.restore":         { targetType: "comment", targetIdKey: "commentId", sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["commentId", "entityType", "entityId"] },
+  "comment.purgeRequested":  { targetType: "comment", targetIdKey: "commentId", sensitivity: "destructive", requiresReason: true,  metadataKeys: ["commentId", "entityType", "entityId"] },
+  "comment.purgeCompleted":  { targetType: "comment", targetIdKey: "commentId", sensitivity: "destructive", requiresReason: true,  metadataKeys: ["commentId", "entityType", "entityId"] },
+  "comment.purgeFailed":     { targetType: "comment", targetIdKey: "commentId", sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["commentId", "entityType", "entityId"] },
+  "event.remove":            { targetType: "event",   targetIdKey: "eventId",   sensitivity: "destructive", requiresReason: true,  metadataKeys: ["eventId", "entityType", "entityId"] },
+  "event.restore":           { targetType: "event",   targetIdKey: "eventId",   sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["eventId", "entityType", "entityId"] },
+  "event.purgeRequested":    { targetType: "event",   targetIdKey: "eventId",   sensitivity: "destructive", requiresReason: true,  metadataKeys: ["eventId", "entityType", "entityId"] },
+  "event.purgeCompleted":    { targetType: "event",   targetIdKey: "eventId",   sensitivity: "destructive", requiresReason: true,  metadataKeys: ["eventId", "entityType", "entityId"] },
+  "event.purgeFailed":       { targetType: "event",   targetIdKey: "eventId",   sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["eventId", "entityType", "entityId"] },
+  "content.purgeRetry":                  { targetType: "system", targetIdKey: "entityId", sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["entityType", "entityId"] },
+  "content.purgeStorageAttempt":         { targetType: "system", targetIdKey: "entityId", sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["entityType", "entityId", "objects"] },
+  "content.purgeStorageSuccess":         { targetType: "system", targetIdKey: "entityId", sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["entityType", "entityId", "objects"] },
+  "content.purgeStorageFailure":         { targetType: "system", targetIdKey: "entityId", sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["entityType", "entityId", "objects"] },
+  "content.purgeReconciliationRequired": { targetType: "system", targetIdKey: "entityId", sensitivity: "destructive", requiresReason: true,  metadataKeys: ["entityType", "entityId"] },
 } as const satisfies Record<string, AuditActionSpec>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;

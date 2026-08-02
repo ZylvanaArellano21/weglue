@@ -55,6 +55,7 @@ import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { DotNavigator } from '../../components/calendar/DotNavigator';
 import { useToast } from '../../components/Toast';
 import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
+import { CONTENT_UNAVAILABLE } from '../../lib/contentAvailability';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -214,7 +215,7 @@ export default function CalendarEventDetailScreen() {
       ) : !event ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: '#6B7280', fontSize: 15, fontFamily: 'Inter_400Regular' }}>
-            This event is no longer available.
+            {CONTENT_UNAVAILABLE}
           </Text>
         </View>
       ) : (

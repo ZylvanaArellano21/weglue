@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCommentDetail } from "../../../../lib/admin/contentData";
+import { ContentLifecycleActions, LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
+import { getLifecycleSummary } from "../../../../lib/admin/lifecycleData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard } from "../../../../components/admin/primitives";
 import { DisabledAction } from "../../../../components/admin/DisabledAction";
@@ -22,6 +24,8 @@ function fmtDateTime(iso: string): string {
 export default async function AdminCommentDetailPage({ params }: { params: { id: string } }) {
   const comment = await getCommentDetail(params.id);
   if (!comment) notFound();
+
+  const lifecycle = await getLifecycleSummary("comment", comment.id);
 
   return (
     <div className="space-y-5">
@@ -74,6 +78,18 @@ export default async function AdminCommentDetailPage({ params }: { params: { id:
 
           <SectionCard title="Actions">
             <div className="space-y-3 p-4">
+              <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Visibility</span>
+                  <LifecycleBadge state={lifecycle.state} />
+                </div>
+                <ContentLifecycleActions
+                  entity="comment"
+                  entityId={comment.id}
+                  state={lifecycle.state}
+                  summary={`Comment ${comment.id.slice(0, 8)} — ${comment.author_name ?? "unknown author"}`}
+                />
+              </div>
               <EditCommentDialog commentId={comment.id} content={comment.content} />
               <p className="text-xs text-gray-400">
                 Editing writes to the canonical <code>post_comments</code> row with a read-back check and an

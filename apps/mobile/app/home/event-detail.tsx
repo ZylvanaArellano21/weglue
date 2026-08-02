@@ -19,6 +19,7 @@ import { useToast } from '../../components/Toast';
 import { requestLeaveClub } from '../../store/leaveClubStore';
 import { openReportFlow } from '../../components/shared/ReportButton';
 import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
+import { CONTENT_UNAVAILABLE } from '../../lib/contentAvailability';
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00');
@@ -114,7 +115,7 @@ export default function EventDetailScreen() {
         </ScrollView>
       ) : !event ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#6B7280', fontSize: 15 }}>This event is no longer available.</Text>
+          <Text style={{ color: '#6B7280', fontSize: 15 }}>{CONTENT_UNAVAILABLE}</Text>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>

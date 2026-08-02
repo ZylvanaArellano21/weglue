@@ -169,7 +169,7 @@ describe("the reason-required actions are declared as such", () => {
   // Day 10B2 added six administrator-restriction actions, and EVERY one of them
   // requires a reason — including the two "lifting" actions. Undoing an
   // enforcement decision deserves a recorded justification just as much as
-  // making one, so this list is 15, not 9 destructive + 4 optional.
+  // making one. Day 10C then added the content lifecycle on the same principle.
   it("is exactly this set", () => {
     const required = Object.entries(AUDIT_ACTIONS)
       .filter(([, spec]) => spec.requiresReason)
@@ -194,9 +194,31 @@ describe("the reason-required actions are declared as such", () => {
         "restriction.unblock",
         "restriction.adjustExpiry",
         "restriction.revokeSessions",
+        // Day 10C — content lifecycle (migration 061). Every transition that
+        // changes what students can see requires a justification, INCLUDING the
+        // restoring ones: undoing a moderation decision deserves a recorded
+        // reason as much as making one. The two worker-written destructive
+        // rows (purgeCompleted, purgeReconciliationRequired) are here because
+        // the database carries the REQUESTING administrator's reason forward
+        // into them rather than letting a machine write an unjustified
+        // destructive record.
+        "post.remove",
+        "post.restore",
+        "post.purgeRequested",
+        "post.purgeCompleted",
+        "comment.remove",
+        "comment.restore",
+        "comment.purgeRequested",
+        "comment.purgeCompleted",
+        "event.remove",
+        "event.restore",
+        "event.purgeRequested",
+        "event.purgeCompleted",
+        "content.purgeRetry",
+        "content.purgeReconciliationRequired",
       ].sort()
     );
-    expect(required).toHaveLength(15);
+    expect(required).toHaveLength(29);
   });
 
   it("requires a reason for every restriction action, including the lifts", () => {
@@ -452,11 +474,22 @@ describe("ConfirmAction dialog contract (source-level)", () => {
     // Closing also clears the typed reason, so a cancelled dialog leaves nothing
     // behind to be submitted accidentally on a later open.
     expect(closeBody).toContain("setReason(\"\")");
+    expect(closeBody).toContain("setPhrase(\"\")");
   });
 
   it("gates the confirm button on a valid reason", () => {
-    expect(src).toContain("disabled={pending || !reasonValid}");
+    // `canConfirm` is reason validity AND (Day 10C) the typed confirmation
+    // phrase. Both terms are asserted so the gate cannot be widened by
+    // redefining what canConfirm means.
+    expect(src).toContain("disabled={pending || !canConfirm}");
+    expect(src).toContain("const canConfirm = reasonValid && phraseValid;");
     expect(src).toContain("trimmedReason.length >= MIN_REASON && trimmedReason.length <= MAX_REASON");
+  });
+
+  it("requires an EXACT, case-sensitive phrase for irreversible actions", () => {
+    expect(src).toContain("const phraseValid = !confirmPhrase || phrase === confirmPhrase;");
+    const onConfirmBody = src.slice(src.indexOf("async function onConfirm"), src.indexOf("if (disabled)"));
+    expect(onConfirmBody).toContain("if (!phraseValid)");
   });
 
   it("re-checks the reason inside the handler, not only via the disabled button", () => {
@@ -514,7 +547,7 @@ describe("ConfirmAction re-entrancy guard (source-level)", () => {
   });
 
   it("keeps the visual loading state and disabled buttons unchanged", () => {
-    expect(src).toContain("disabled={pending || !reasonValid}");
+    expect(src).toContain("disabled={pending || !canConfirm}");
     expect(src).toContain('{pending ? "Working…" : confirmLabel}');
     expect(onConfirm).toContain("setPending(true);");
   });

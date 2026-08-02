@@ -24,6 +24,7 @@ import { useToast } from '../../../../components/Toast';
 import { requestLeaveClub } from '../../../../store/leaveClubStore';
 import { openReportFlow } from '../../../../components/shared/ReportButton';
 import { formatEventLocation, isEventPast } from '../../../../lib/eventDisplay';
+import { CONTENT_UNAVAILABLE } from '../../../../lib/contentAvailability';
 
 export type ClubEventDetailParams = {
   clubId: string;
@@ -166,7 +167,7 @@ export default function ClubEventDetailScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
           <Ionicons name="calendar-outline" size={48} color="#D1D5DB" />
           <Text style={{ color: '#6B7280', fontSize: 15, fontFamily: 'Inter_400Regular' }}>
-            This event is no longer available.
+            {CONTENT_UNAVAILABLE}
           </Text>
           <TouchableOpacity
             onPress={() => router.back()}

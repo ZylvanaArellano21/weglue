@@ -15,6 +15,7 @@ import {
 import { useJoinClubMutation } from "../../lib/hooks/useClubMembership";
 import { useEventRsvpRealtime } from "../../lib/hooks/useClubRealtime";
 import { formatEventTime, formatEventLocation, isEventPast } from "../../lib/datetime";
+import { CONTENT_UNAVAILABLE } from "../../lib/contentAvailability";
 
 function formatLongDate(dateStr: string): string {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", {
@@ -105,7 +106,7 @@ export function EventDetailModal({
         </div>
       ) : !event ? (
         <p className="p-10 text-center text-[15px] text-gray-500">
-          This event is no longer available.
+          {CONTENT_UNAVAILABLE}
         </p>
       ) : (
         <div className="p-5 sm:p-6">

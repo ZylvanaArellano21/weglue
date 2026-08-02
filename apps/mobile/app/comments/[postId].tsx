@@ -27,10 +27,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../components/shared/Avatar';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
-import { usePostComments, useAddComment } from '../../hooks/useHomePostsFeed';
+import { usePostComments, useAddComment, usePostDetail } from '../../hooks/useHomePostsFeed';
 import { timeAgo } from '../../components/home/PostCard';
+import { CONTENT_UNAVAILABLE, isContentUnavailableError } from '../../lib/contentAvailability';
 import type { PostComment } from '../../services/postService';
 
 export default function CommentsScreen() {
@@ -38,12 +40,21 @@ export default function CommentsScreen() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const { session } = useAuthStore();
   const viewerUserId = session?.user.id ?? '';
+  const queryClient = useQueryClient();
 
   // Android: lift the sheet + composer above the keyboard (iOS keeps KAV).
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const [draft, setDraft] = useState('');
   const { data: comments = [], isLoading } = usePostComments(postId);
   const { mutate: submitComment, isPending } = useAddComment();
+
+  // The parent post can stop being available while this sheet is open — the
+  // author deleted it, or an administrator removed it under the Day 10C
+  // lifecycle. Both look identical here on purpose: the post resolves to
+  // nothing, so the thread is replaced by the one neutral unavailable state and
+  // the composer is withdrawn instead of failing at the database.
+  const { data: parentPost, isLoading: isPostLoading } = usePostDetail(postId, viewerUserId);
+  const postUnavailable = !isPostLoading && !parentPost;
 
   // Push the commenter's profile ABOVE this route — no dismiss. Back restores
   // this exact Comments instance (draft + scroll intact).
@@ -58,8 +69,22 @@ export default function CommentsScreen() {
 
   const handleSend = () => {
     const content = draft.trim();
-    if (!content || isPending) return;
-    submitComment({ postId, userId: viewerUserId, content }, { onSuccess: () => setDraft('') });
+    if (!content || isPending || postUnavailable) return;
+    submitComment(
+      { postId, userId: viewerUserId, content },
+      {
+        onSuccess: () => setDraft(''),
+        // Losing the race — the post stopped being available between opening
+        // this sheet and sending — is not an error to explain, it is the
+        // unavailable state arriving late. Re-resolve the post and the sheet
+        // flips to it by itself.
+        onError: (error) => {
+          if (isContentUnavailableError(error)) {
+            queryClient.invalidateQueries({ queryKey: ['postDetail', postId] });
+          }
+        },
+      },
+    );
   };
 
   return (
@@ -102,9 +127,22 @@ export default function CommentsScreen() {
             Comments
           </Text>
 
-          {isLoading ? (
+          {isLoading || isPostLoading ? (
             <View style={{ padding: 24, alignItems: 'center' }}>
               <ActivityIndicator color="#0FA6A6" />
+            </View>
+          ) : postUnavailable ? (
+            <View style={{ paddingHorizontal: 16, paddingVertical: 32 }}>
+              <Text
+                style={{
+                  color: '#9CA3AF',
+                  textAlign: 'center',
+                  fontSize: 14,
+                  fontFamily: 'Inter_400Regular',
+                }}
+              >
+                {CONTENT_UNAVAILABLE}
+              </Text>
             </View>
           ) : (
             <FlatList<PostComment>
@@ -150,6 +188,10 @@ export default function CommentsScreen() {
             />
           )}
 
+          {/* No composer for unavailable content: the database would refuse the
+              insert anyway, and offering the field invites a student to type a
+              comment that can never be posted. */}
+          {postUnavailable ? null : (
           <View
             style={{
               flexDirection: 'row',
@@ -203,6 +245,7 @@ export default function CommentsScreen() {
               )}
             </TouchableOpacity>
           </View>
+          )}
         </SafeAreaView>
       </KeyboardAvoidingView>
     </View>

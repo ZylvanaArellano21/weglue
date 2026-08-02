@@ -39,6 +39,7 @@ import {
 import { deleteEvent } from '../../../services/eventService';
 import { uploadImageToBucket } from '../../../lib/imageUpload';
 import { invalidateClubDataEverywhere } from '../../../lib/clubCache';
+import { CONTENT_UNAVAILABLE } from '../../../lib/contentAvailability';
 import {
   parseMeetingSchedule,
   formatTime12h,
@@ -781,7 +782,7 @@ export default function EditClubScreen() {
   function handleDeleteEvent(event: ClubUpcomingEvent) {
     Alert.alert(
       'Delete this event?',
-      `"${event.title}" will be permanently removed for everyone — club profile, Home, Calendar, Weekly Events, and all RSVPs. Chats where it was shared will show "This event is no longer available."`,
+      `"${event.title}" will be permanently removed for everyone — club profile, Home, Calendar, Weekly Events, and all RSVPs. Chats where it was shared will show "${CONTENT_UNAVAILABLE}"`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -798,7 +799,7 @@ export default function EditClubScreen() {
               queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
               queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
               // Shared-event cards + any open detail screen re-resolve the id
-              // and render "This event is no longer available."
+              // and render the shared CONTENT_UNAVAILABLE state.
               queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
               show('Event deleted.');
             } catch {

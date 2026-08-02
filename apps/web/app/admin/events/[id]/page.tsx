@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getEventDetail } from "../../../../lib/admin/contentData";
+import { ContentLifecycleActions, LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
+import { getLifecycleSummary } from "../../../../lib/admin/lifecycleData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
@@ -38,6 +40,8 @@ const VIS_TONE: Record<string, "green" | "amber" | "blue"> = { everyone: "green"
 export default async function AdminEventDetailPage({ params }: { params: { id: string } }) {
   const event = await getEventDetail(params.id);
   if (!event) notFound();
+
+  const lifecycle = await getLifecycleSummary("event", event.id);
 
   const going = event.attendees.filter((a) => a.status === "going");
   const cant = event.attendees.filter((a) => a.status === "cant");
@@ -215,6 +219,18 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
   const actionsTab = (
     <SectionCard title="Actions">
       <div className="space-y-4 p-4">
+        <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Visibility</span>
+            <LifecycleBadge state={lifecycle.state} />
+          </div>
+          <ContentLifecycleActions
+            entity="event"
+            entityId={event.id}
+            state={lifecycle.state}
+            summary={`${event.title} — ${event.club_name ?? "unknown club"}`}
+          />
+        </div>
         <EditEventDialog
           eventId={event.id}
           initial={{

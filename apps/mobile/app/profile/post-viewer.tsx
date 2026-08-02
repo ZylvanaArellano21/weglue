@@ -31,6 +31,7 @@ import { useToast } from '../../components/Toast';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { profileColors, profileFonts } from '../../components/profile/profileTheme';
 import type { FeedPost } from '../../services/postService';
+import { CONTENT_UNAVAILABLE } from '../../lib/contentAvailability';
 
 // Vertical full-post viewer opened from a profile's Posts grid.
 // Instagram-style: the tapped post is the first visible one, and the
@@ -207,7 +208,7 @@ export default function ProfilePostViewerScreen() {
         </View>
       ) : initialIndex < 0 ? (
         <View style={styles.loading}>
-          <Text style={styles.emptyText}>This post is no longer available.</Text>
+          <Text style={styles.emptyText}>{CONTENT_UNAVAILABLE}</Text>
         </View>
       ) : (
         <FlatList
@@ -242,7 +243,7 @@ export default function ProfilePostViewerScreen() {
           }
           ListEmptyComponent={
             <View style={styles.loading}>
-              <Text style={styles.emptyText}>This post is no longer available.</Text>
+              <Text style={styles.emptyText}>{CONTENT_UNAVAILABLE}</Text>
             </View>
           }
         />

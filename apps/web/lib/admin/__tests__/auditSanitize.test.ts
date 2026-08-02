@@ -19,6 +19,7 @@ import {
 const MIGRATION = [
   "055_durable_admin_audit.sql",
   "058_admin_restrictions.sql",
+  "061_content_lifecycle.sql",
 ]
   .map((f) => readFileSync(join(__dirname, "../../../../../supabase/migrations/", f), "utf8"))
   .join("\n");
@@ -27,7 +28,7 @@ const MIGRATION = [
 // The database is the enforcer; this file is what the server believes. If they
 // disagree, audit writes fail at runtime — so the disagreement is caught here.
 
-describe("registry ↔ migration 055 parity", () => {
+describe("registry ↔ migration catalog parity", () => {
   /** Parse the catalog seed rows out of the migration's INSERT statement. */
   function parseCatalog(): Record<string, { targetType: string; sensitivity: string; requiresReason: boolean }> {
     const out: Record<string, { targetType: string; sensitivity: string; requiresReason: boolean }> = {};
@@ -41,8 +42,8 @@ describe("registry ↔ migration 055 parity", () => {
 
   const catalog = parseCatalog();
 
-  it("parses all 32 catalog rows from migrations 055 + 058", () => {
-    expect(Object.keys(catalog)).toHaveLength(32);
+  it("parses all 52 catalog rows from migrations 055 + 058 + 061", () => {
+    expect(Object.keys(catalog)).toHaveLength(52);
   });
 
   it("registers exactly the same action names as the migration", () => {

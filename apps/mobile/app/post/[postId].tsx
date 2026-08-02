@@ -11,6 +11,7 @@ import { PostCardSkeleton } from '../../components/shared/SkeletonLoader';
 import { ConfirmModal } from '../../components/ConfirmModal';
 import { useToast } from '../../components/Toast';
 import { followUser, unfollowUser } from '../../services/followService';
+import { CONTENT_UNAVAILABLE } from '../../lib/contentAvailability';
 import type { FeedPost } from '../../services/postService';
 
 export default function PostDetailScreen() {
@@ -117,7 +118,7 @@ export default function PostDetailScreen() {
         ) : (
           <View style={{ padding: 40, alignItems: 'center' }}>
             <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Inter_400Regular' }}>
-              This post is no longer available.
+              {CONTENT_UNAVAILABLE}
             </Text>
           </View>
         )}

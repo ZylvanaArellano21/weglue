@@ -6,6 +6,8 @@ import { Badge, Field, SectionCard, EmptyState } from "../../../../components/ad
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { DisabledAction } from "../../../../components/admin/DisabledAction";
 import { EditCaptionDialog, RemoveFromClubButton } from "../../../../components/admin/PostActions";
+import { ContentLifecycleActions, LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
+import { getLifecycleSummary } from "../../../../lib/admin/lifecycleData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -30,6 +32,8 @@ const REPORT_TONE: Record<string, "amber" | "blue" | "green" | "gray"> = {
 export default async function AdminPostDetailPage({ params }: { params: { id: string } }) {
   const post = await getPostDetail(params.id);
   if (!post) notFound();
+
+  const lifecycle = await getLifecycleSummary("post", post.id);
 
   const primaryTag = post.tags.find((t) => t.primary) ?? post.tags[0] ?? null;
 
@@ -212,6 +216,21 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
   const actionsTab = (
     <SectionCard title="Actions">
       <div className="space-y-4 p-4">
+        {/* Day 10C lifecycle. The state pill comes from content_lifecycle, the
+            single source of truth, so what an operator sees here is exactly what
+            students do or do not see. */}
+        <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Visibility</span>
+            <LifecycleBadge state={lifecycle.state} />
+          </div>
+          <ContentLifecycleActions
+            entity="post"
+            entityId={post.id}
+            state={lifecycle.state}
+            summary={`Post ${post.id.slice(0, 8)} — ${post.author_name ?? "unknown author"}`}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <EditCaptionDialog postId={post.id} caption={post.caption} />
           {primaryTag ? (
@@ -225,9 +244,7 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <DisabledAction label="Remove attached media" reason="Storage lifecycle does not safely support in-place media removal yet" />
-          <DisabledAction label="Hide globally" reason="No canonical global-hide state exists on posts" />
           <DisabledAction label="Restore to club" reason="No canonical single-step re-tag inverse exists" />
-          <DisabledAction label="Permanently delete post" reason="Permanent deletion remains disabled" tone="danger" />
         </div>
       </div>
     </SectionCard>

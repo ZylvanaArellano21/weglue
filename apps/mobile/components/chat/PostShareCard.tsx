@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { getPostById } from '../../services/postService';
 import { Avatar } from '../shared/Avatar';
 import { chatColors, chatFonts, chatShadow } from './chatTheme';
+import { CONTENT_UNAVAILABLE } from '../../lib/contentAvailability';
 
 interface Props {
   /** null = the post was deleted (messages.shared_post_id is SET NULL);
@@ -38,7 +39,7 @@ export function PostShareCard({ postId, viewerUserId }: Props) {
       <View style={styles.card}>
         <View style={styles.unavailableRow}>
           <Ionicons name="image-outline" size={18} color={chatColors.textMuted} />
-          <Text style={styles.unavailableText}>This post is no longer available.</Text>
+          <Text style={styles.unavailableText}>{CONTENT_UNAVAILABLE}</Text>
         </View>
       </View>
     );

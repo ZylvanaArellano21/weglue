@@ -4,6 +4,7 @@ import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
+import { CONTENT_UNAVAILABLE } from "../../lib/contentAvailability";
 
 // Minimal post overlay (?post=), the destination for like/comment notifications
 // and the profile posts grid. Real shared post data; like toggles the shared
@@ -33,7 +34,7 @@ export function PostModal({
           <div className="aspect-square w-full animate-pulse rounded-xl bg-black/5" />
         </div>
       ) : !post ? (
-        <p className="p-10 text-center text-[15px] text-gray-500">This post is no longer available.</p>
+        <p className="p-10 text-center text-[15px] text-gray-500">{CONTENT_UNAVAILABLE}</p>
       ) : (
         <div>
           <div className="flex items-center gap-2.5 p-4 pr-10">
