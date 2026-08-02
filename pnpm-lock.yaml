@@ -162,6 +162,9 @@ importers:
       '@babel/core':
         specifier: ^7.24.6
         version: 7.29.7
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
       '@types/react':
         specifier: ^19.1.17
         version: 19.1.17
