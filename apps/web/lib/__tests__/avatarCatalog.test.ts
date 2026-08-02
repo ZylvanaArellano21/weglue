@@ -99,6 +99,33 @@ describe("cross-platform preset avatar integration", () => {
     expect(mobilePicker).toContain("saveInFlight.current");
   });
 
+  it("uses the canonical renderer across posts, comments, conversations, people lists, search, notifications, events, and admin", () => {
+    const displaySurfaces = [
+      "apps/web/components/home/PostsFeed.tsx",
+      "apps/web/components/home/PostModal.tsx",
+      "apps/web/components/messages/MessagesClient.tsx",
+      "apps/web/components/clubs/ManageClubModal.tsx",
+      "apps/web/components/clubs/ClubOfficersTab.tsx",
+      "apps/web/components/home/GluematesModal.tsx",
+      "apps/web/components/admin/GlobalSearch.tsx",
+      "apps/web/components/home/NotificationsModal.tsx",
+      "apps/web/components/home/EventDetailModal.tsx",
+      "apps/web/app/admin/users/[id]/page.tsx",
+      "apps/mobile/components/home/PostCard.tsx",
+      "apps/mobile/components/home/CommentsSheet.tsx",
+      "apps/mobile/components/chat/ChatListItem.tsx",
+      "apps/mobile/app/chat/[chatId]/index.tsx",
+      "apps/mobile/app/chat/new-message.tsx",
+      "apps/mobile/app/club/[clubId]/members.tsx",
+      "apps/mobile/app/club/[clubId]/index.tsx",
+      "apps/mobile/app/home/attendees.tsx",
+    ];
+
+    for (const surface of displaySurfaces) {
+      expect(readFileSync(path.join(root, surface), "utf8")).toContain("shared/Avatar");
+    }
+  });
+
   it("routes every authenticated profile-edit entry point to the canonical picker", () => {
     expect(webProfile).toContain('aria-label="Edit your profile picture"');
     expect(webProfile).toContain('aria-label="Change your profile picture"');
