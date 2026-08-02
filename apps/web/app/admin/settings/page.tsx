@@ -14,9 +14,9 @@ function onOff(v: boolean, on = "Enabled", off = "Disabled") {
  * Render a live capability probe. `error` is shown in amber and never as a
  * green "active" — a status we could not verify must not read as working.
  */
-function capability({ status, detail }: CapabilityProbe, activeLabel: string) {
+function capability({ status, detail }: CapabilityProbe, activeLabel: string, unavailableLabel = "Unavailable") {
   const tone = status === "active" ? "green" : status === "unavailable" ? "gray" : "amber";
-  const label = status === "active" ? activeLabel : status === "unavailable" ? "Unavailable" : "Unverified";
+  const label = status === "active" ? activeLabel : status === "unavailable" ? unavailableLabel : "Unverified";
   return (
     <>
       <Badge tone={tone}>{label}</Badge>
@@ -105,7 +105,7 @@ export default async function AdminSettingsPage() {
               {s.supabase.url_host ? <span className="ml-2 text-xs text-gray-400">{s.supabase.url_host}</span> : null}
             </Field>
             <Field label="Audit persistence">{capability(s.auditPersistence, "Active")}</Field>
-            <Field label="Privacy backend">{capability(s.privacyBackend, "Deployed")}</Field>
+            <Field label="Privacy backend">{capability(s.privacyBackend, "Deployed", "Not deployed")}</Field>
           </dl>
         </SectionCard>
 

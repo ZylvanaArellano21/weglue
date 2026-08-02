@@ -756,7 +756,7 @@ export type MobileSessionRoute =
 Resolution: `app/_layout.tsx` calls `my_access_state()` once at bootstrap and on every `onAuthStateChange`/resume. If it returns `suspended` or `platform_blocked`, **the student tree never mounts** — same containment shape already proven for platform admins. Content:
 
 - generic message: "Your account is currently restricted." / "Your account access has been suspended." (+ "until 14 Aug 2026" when `suspended_until` is present)
-- public support contact — **`info@weglue.app`** (per the verified constraint that `SUPPORT_EMAIL` must stay `info@weglue.app` until the domain is verified)
+- Historical note superseded by Day 10B migration 061: public support and appeal contact is **`zylvana.arellano.campos@gmail.com`**. Transactional mail uses a separately verified technical From address and Reply-To this Gmail address.
 - **no internal reason, ever**
 - Sign out
 - **Delete my account** — see §9.3
@@ -906,7 +906,7 @@ Both new tables were reviewed field by field. Neither introduces an advertising 
 | **Privacy Policy** | **YES — cannot ship without it.** Must state: (a) We Glue records which accounts a user blocks; (b) administrators may restrict or block accounts and record an internal reason; (c) the retention rule from §9.2, including that restriction records **survive account deletion**; (d) the blocked user is not notified. Item (c) is a material disclosure — silently retaining data past deletion after telling users deletion is complete would be a real compliance problem. | New "Safety and enforcement" section. |
 | **Terms of Use** | **YES** | We Glue may suspend or permanently restrict access for violations; suspension may be time-limited; restriction is not account deletion and preserves data; how to contact support. |
 | **Community Guidelines** | **YES** | What leads to suspension vs. permanent block; how to block another student; that blocking is private. |
-| **Support / restriction documentation** | **YES — new** | A public "Why is my account restricted?" page explaining the generic states, the support contact (`info@weglue.app`), and the web deletion route. The restriction screen links here. |
+| **Support / restriction documentation** | **YES — new** | The restricted shell displays a public category/reason, the appeal contact (`zylvana.arellano.campos@gmail.com`), and the self-deletion route. |
 | **App Review notes** | **YES** | Explain that the restriction screen is an enforcement state, not a paywall or a broken build; state that account deletion remains available (in-app for suspension, via the linked web form for a platform block); reviewer account `appreview@myschool.edu` is never restricted. |
 | **Play review notes** | **YES** | Same, plus the Data Safety delta. |
 
@@ -1083,10 +1083,74 @@ The two systems are cleanly separable, and the terminology separation the founde
 - **No-go on enforcing restrictions through client routing alone.** RLS predicates are not optional. During the residual access-token window (up to one hour) they are the *only* control, and any claim that Auth revocation alone is immediate would be false.
 - **No-go on merging either migration without the `EXPLAIN` gate in §4.4 step 4.** `profiles`, `posts` and `messages` are the hottest paths in the product and are currently policy-free (`USING (true)`). A correlated subquery introduced there would be a performance regression measured in the whole app, discovered in production, at exactly the scale the founder is building for.
 
-**Nothing has been implemented. No branch, no migration, no code change, no production write, no OTA, no build.** This document is for founder review.
+> Historical pre-implementation statement. It is superseded by the Day 10B
+> completion addendum below; it must not be used as a release-status source.
 
 ---
 
 ## Appendix — verification method
 
 All schema claims came from live production reads through a helper that refuses any statement containing `INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/`CREATE`/`TRUNCATE`/`GRANT`/`REVOKE`. Sources: `pg_class`, `pg_policies`, `pg_proc` + `pg_get_functiondef`, `pg_constraint` + `pg_get_constraintdef`, `pg_trigger` + `pg_get_triggerdef`, `pg_indexes`, `pg_publication_tables`, `information_schema.columns`, `information_schema.role_table_grants`. Code claims are cited to file and line. No private message body, no report snapshot, and no student's personal data was read.
+
+---
+
+# Day 10B completion addendum — 2026-08-02
+
+This addendum supersedes the historical recommendation above for the focused
+restriction, deletion, email, privacy-copy, and mobile-release work. It does
+not begin Day 10C, Day 10D, Day 10E, or Day 10F.
+
+## Canonical access control
+
+- Migration **061** is additive. It preserves migrations 058 and 060, leaves
+  migration 051 absent, and requires the currently unmerged Day 10C `061` to
+  be renumbered before that branch merges.
+- `my_access_state()` is self-only and returns only a generic access state,
+  human-readable category, public reason, relevant dates, and
+  `zylvana.arellano.campos@gmail.com`. Internal notes, administrators,
+  evidence, audit data, and other users' state are structurally absent.
+- The former unsupported `auth.admin.signOut(targetUserId, "global")` design
+  is replaced with **application-access invalidation**. Database enforcement
+  is authoritative; existing Auth tokens expire naturally and can reach only
+  the limited restricted experience. The dashboard reports this honestly.
+- Web middleware, the web query gate, and the Expo root gate check on startup,
+  authentication refresh, foreground/resume, protected-request denial, and
+  before ordinary navigation or student deep-link handling. Restricted shells
+  clear private caches/channels and replace normal navigation.
+
+## Reasons and deletion
+
+- New restriction fields are separate: stable `violation_category`,
+  student-visible `public_reason` (10–500), and private `internal_reason`
+  (3–500). Legacy active restrictions retain their historical record and use
+  the approved safe fallback.
+- Administrator deletion is a seven-day `deletion_pending` case with a durable
+  claim/lease job, cancellation, optional evidence references, required basis,
+  audit history, and a `DELETE NOW` emergency override. A voluntary deletion
+  atomically supersedes a pending administrator job without exposing its
+  private fields.
+- The outbox is durable and idempotent for scheduled, cancelled, finalized,
+  and voluntary-deletion notices. The scheduler installer runs the worker
+  every minute, but deliberately fails if the Vault worker secret is absent.
+  It must be installed only after the Edge Function and production secrets are
+  configured.
+
+## Required release sequence
+
+1. Apply migration 061 once to Production; do not alter 058, 060, or 051.
+2. Configure a proven verified transactional sender in
+   `RESEND_TRANSACTIONAL_FROM`, set the Edge Function worker secret, store its
+   matching Vault secret as `account_deletion_worker_secret`, deploy
+   `process-account-deletion-jobs`, then call
+   `public.install_account_deletion_worker_schedule(worker_url)`.
+3. Verify the `cron.job` registration and function deployment with read-only
+   queries. Do not send a real email or mutate a real account for this check.
+4. Deploy the web application without changing `ADMIN_WRITES_ENABLED`.
+5. Build and submit new native iOS/Android releases if the EAS fingerprint
+   comparison remains different from builds 1.0.0 (23) / 1.0.0 (27). Do not
+   use an OTA across a fingerprint mismatch. Android `production` submit now
+   targets the closed-testing track.
+
+The public support and appeal address is
+**`zylvana.arellano.campos@gmail.com`**. Transactional mail uses a separately
+verified technical From address and Reply-To this Gmail address.

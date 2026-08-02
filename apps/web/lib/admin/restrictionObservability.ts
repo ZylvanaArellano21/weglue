@@ -20,8 +20,7 @@ export type RestrictionActionStage =
   | "input_validation"
   | "restriction_rpc"
   | "restriction_committed"
-  | "revocation_attempt"
-  | "revocation_outcome"
+  | "access_invalidation"
   | "revalidation"
   | "response_serialization";
 
@@ -40,8 +39,8 @@ export interface RestrictionLogRecord {
   success: boolean;
   diagnostic?: RestrictionDiagnostic | null;
   restrictionCommitted: boolean;
-  sessionRevocationAttempted: boolean;
-  sessionRevocationSucceeded: boolean | null;
+  accessInvalidated: boolean;
+  clientRefreshPending: boolean;
   reconciliationRequired: boolean;
 }
 
@@ -81,8 +80,8 @@ export function logRestrictionAction(record: RestrictionLogRecord): void {
       postgresSqlState: record.diagnostic?.sqlState ?? null,
       errorMessage: sanitizeMessage(record.diagnostic?.message),
       restrictionCommitted: record.restrictionCommitted,
-      sessionRevocationAttempted: record.sessionRevocationAttempted,
-      sessionRevocationSucceeded: record.sessionRevocationSucceeded,
+      accessInvalidated: record.accessInvalidated,
+      clientRefreshPending: record.clientRefreshPending,
       reconciliationRequired: record.reconciliationRequired,
     })
   );

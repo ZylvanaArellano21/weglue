@@ -31,12 +31,11 @@ import { PushNotificationsHost } from "../components/notifications/PushNotificat
 import { timedQuery } from "../lib/timedQuery";
 import {
   clearCachedProfile,
-  readCachedProfile,
   writeCachedProfile,
 } from "../lib/profileCache";
 import { PlatformAdminBlock } from "../components/auth/PlatformAdminBlock";
 import { RestrictedAccountShell } from "../components/auth/RestrictedAccountShell";
-import { getMyAccessState } from "../services/accessService";
+import { getMyAccessState, looksLikeRestriction } from "../services/accessService";
 import { resolveAccessRoute, isRestrictedRoute, type AccessStatePayload } from "../lib/accessState";
 import {
   resolveMobileSessionRoute,
@@ -188,12 +187,41 @@ export default function RootLayout() {
     return () => sub.remove();
   }, [refreshAccess]);
 
+  // A live foreground session checks at a bounded interval as well as on
+  // resume/auth changes. Realtime is intentionally not a security dependency.
+  useEffect(() => {
+    if (!session || !shouldSyncStudentProfile(session)) return;
+    const timer = setInterval(() => void refreshAccess(), 60_000);
+    return () => clearInterval(timer);
+  }, [session, refreshAccess]);
+
+  // A database guard denial while a protected React Query request is in flight
+  // is an immediate convergence signal, not merely an empty-state response.
+  useEffect(() => queryClient.getQueryCache().subscribe((event) => {
+    if (event.type === "updated" && event.action.type === "error" && looksLikeRestriction(event.query.state.error)) {
+      void refreshAccess();
+    }
+  }), [refreshAccess]);
+
   const accessRoute = resolveAccessRoute(access ?? null);
   const isRestricted = !!session && !isPlatformAdmin && isRestrictedRoute(accessRoute);
   const accessPending = !!session && !isPlatformAdmin && access === undefined;
 
-  useAuthDeepLink();
-  useInviteDeepLink();
+  useEffect(() => {
+    if (!isRestricted) return;
+    // Do not destroy auth here: the limited restricted shell still needs it.
+    // Remove every cached protected screen before the navigator is replaced.
+    void queryClient.cancelQueries();
+    void queryClient.clear();
+    void AsyncStorage.removeItem("weglue-query-cache-v1");
+    void supabase.removeAllChannels();
+  }, [isRestricted]);
+
+  // A restricted or not-yet-checked authenticated account must not process a
+  // student deep link before the canonical access decision has selected its
+  // shell. Public auth links still work while signed out.
+  useAuthDeepLink(!accessPending && !isRestricted);
+  useInviteDeepLink(!accessPending && !isRestricted);
 
   useEffect(() => {
     if (fontsLoaded) SplashScreen.hideAsync();
@@ -201,6 +229,12 @@ export default function RootLayout() {
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session && shouldSyncStudentProfile(session)) {
+        // Close the navigator before profile hydration on every authenticated
+        // startup. The access RPC is the only path that reopens it.
+        setAccess(undefined);
+        setLoading(true);
+      }
       setSession(session);
       if (!session) {
         setLoading(false);
@@ -217,18 +251,6 @@ export default function RootLayout() {
         return;
       }
 
-      // Fast path: hydrate the last known profile from disk so navigation can
-      // route to the tabs immediately, then refresh from the network in the
-      // background. First launch (no cache) still waits for the real fetch.
-      const cached = await readCachedProfile(session.user.id);
-      if (cached) {
-        setProfile(cached.profile);
-        setOnboarded(cached.isOnboarded);
-        setLoading(false);
-        void syncProfile(session.user.id);
-      } else {
-        await syncProfile(session.user.id);
-      }
     });
 
     const {
@@ -239,6 +261,12 @@ export default function RootLayout() {
       // state (session set, profile still null). Without this, the guard briefly
       // routes to the profile-pic screen before syncProfile resolves — the flash.
       if (event === "SIGNED_IN") setLoading(true);
+      if (session && shouldSyncStudentProfile(session)) {
+        // TOKEN_REFRESHED is also an access-state checkpoint. Do not reuse a
+        // cached protected navigator until it has completed.
+        setAccess(undefined);
+        setLoading(true);
+      }
       setSession(session);
       if (session && !shouldSyncStudentProfile(session)) {
         // Same guard on the live auth-state path (an admin signing in on a
@@ -249,8 +277,10 @@ export default function RootLayout() {
         void queryClient.clear();
         void AsyncStorage.removeItem("weglue-query-cache-v1");
       } else if (session) {
-        await syncProfile(session.user.id);
+        // Profile hydration is deliberately deferred to the access-gated
+        // effect below.
       } else {
+        setAccess(null);
         setProfile(null);
         setOnboarded(false);
         setLoading(false);
@@ -262,6 +292,14 @@ export default function RootLayout() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Student profile work begins only after the canonical access decision. This
+  // prevents cached Home/Profile data, ordinary profile queries, and any
+  // follow-on routing from starting during a restricted-account startup.
+  useEffect(() => {
+    if (!session || !shouldSyncStudentProfile(session) || access === undefined || isRestricted) return;
+    void syncProfile(session.user.id);
+  }, [session?.user?.id, access?.state, isRestricted]);
 
   async function syncProfile(userId: string) {
     // Defense in depth: even if a future caller forgets the guard above, the
@@ -320,6 +358,13 @@ export default function RootLayout() {
 
   if (!fontsLoaded) return null;
 
+  // Never restore a cached authenticated navigator until the canonical access
+  // state has resolved. A database outage can still fail open after the check,
+  // but a normal restricted startup cannot flash Home, Messages, or Profile.
+  if (accessPending) {
+    return <View style={{ flex: 1, backgroundColor: "#FEFCF0" }} />;
+  }
+
   // Platform-admin identities stop here. Returning the blocking screen INSTEAD
   // of the navigator (not over it) is what guarantees the rest of the
   // requirement: with no <Stack> mounted, index.tsx never runs its routing, no
@@ -335,7 +380,10 @@ export default function RootLayout() {
       <RestrictedAccountShell
         payload={access ?? null}
         onSignOut={() => tearDownAuthenticatedSession(queryClient, session?.user?.id)}
-        onDeleted={() => tearDownAuthenticatedSession(queryClient, session?.user?.id)}
+        onDeleted={async () => {
+          await AsyncStorage.setItem("weglue-account-deletion-success", "1");
+          await tearDownAuthenticatedSession(queryClient, session?.user?.id);
+        }}
       />
     );
   }

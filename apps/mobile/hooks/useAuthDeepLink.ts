@@ -46,7 +46,7 @@ async function handleUrl(url: string) {
   }
 }
 
-export function useAuthDeepLink() {
+export function useAuthDeepLink(accessResolved = true) {
   const session = useAuthStore((s) => s.session);
   // While a platform-admin session is active the root layout renders the
   // blocking screen instead of the navigator, so there is nothing to navigate:
@@ -54,7 +54,7 @@ export function useAuthDeepLink() {
   // CURRENT session is deliberate — during an admin's own sign-in the session
   // is still null here, so the link is processed normally and the block screen
   // appears only once the session lands.
-  const allowDeepLinks = shouldHandleDeepLinkNavigation(session);
+  const allowDeepLinks = accessResolved && shouldHandleDeepLinkNavigation(session);
 
   useEffect(() => {
     if (!allowDeepLinks) return;

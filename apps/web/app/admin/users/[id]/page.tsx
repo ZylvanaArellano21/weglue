@@ -8,6 +8,7 @@ import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { Table, Th, Td, RowLink } from "../../../../components/admin/Table";
 import { DisabledAction } from "../../../../components/admin/DisabledAction";
 import { RestrictionControls } from "../../../../components/admin/RestrictionControls";
+import { DeletionControls } from "../../../../components/admin/DeletionControls";
 import { restrictionSummary } from "../../../../lib/admin/restrictionData";
 import { isWritesEnabled } from "../../../../lib/admin/secureAdmin";
 
@@ -29,6 +30,8 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
       ? "Active"
       : restriction.accessState === "suspended"
       ? "Suspended"
+      : restriction.accessState === "deletion_pending"
+      ? "Deletion pending"
       : "Blocked from We Glue";
   const stateTone =
     restriction.accessState === "active"
@@ -226,17 +229,7 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
               <Field label="Correlation ID">
                 <span className="font-mono text-xs">{restriction.active.correlation_id}</span>
               </Field>
-              <Field label="Session revocation">
-                {restriction.sessionRevocation.reconciliationRequired
-                  ? "Reconciliation required"
-                  : restriction.sessionRevocation.succeeded
-                  ? "Revoked"
-                  : restriction.sessionRevocation.failed
-                  ? "FAILED \u2014 access still denied by the database"
-                  : restriction.sessionRevocation.attempted
-                  ? "Attempted, outcome unknown"
-                  : "Not recorded"}
-              </Field>
+              <Field label="Application access">Database enforcement active; restricted shell available. Existing Auth tokens expire naturally.</Field>
             </dl>
           )}
 
@@ -256,6 +249,20 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
             accessState={restriction.accessState}
             writesEnabled={writesEnabled}
           />
+
+          {restriction.deletionCase && (
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg bg-amber-50 p-3 text-sm">
+              <Field label="Deletion state">{restriction.deletionCase.state}</Field>
+              <Field label="Scheduled deletion">{new Date(restriction.deletionCase.scheduled_deletion_at).toLocaleString()}</Field>
+              <Field label="Violation">{restriction.deletionCase.violation_category}</Field>
+              <Field label="Basis">{restriction.deletionCase.basis}</Field>
+              <div className="col-span-2"><dt className="text-xs uppercase tracking-wide text-gray-400">Public reason</dt><dd>{restriction.deletionCase.public_reason}</dd></div>
+              <div className="col-span-2"><dt className="text-xs uppercase tracking-wide text-gray-400">Internal note</dt><dd>{restriction.deletionCase.internal_reason}</dd></div>
+              <Field label="Evidence attached">{restriction.deletionCase.evidence_attached ? "Yes" : "No"}</Field>
+              <Field label="Correlation ID"><span className="font-mono text-xs">{restriction.deletionCase.correlation_id}</span></Field>
+            </dl>
+          )}
+          <DeletionControls userId={params.id} deletionPending={restriction.accessState === "deletion_pending"} writesEnabled={writesEnabled} />
 
           <p className="text-xs text-gray-400">
             A restriction never deletes content, and never blocks the student&apos;s own account
@@ -303,15 +310,10 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
 
       <SectionCard title="Other account actions">
         <div className="space-y-3 p-4">
-          <p className="text-sm text-gray-500">
-            These remain intentionally disabled. Account <strong>deletion</strong> is deliberately not
-            an administrator control here &mdash; it is not the same thing as a platform block, and the
-            student&apos;s own deletion flow remains the canonical path.
-          </p>
+          <p className="text-sm text-gray-500">Deletion actions above require recent MFA and a typed confirmation. The student&apos;s own deletion remains available while restricted.</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <DisabledAction label="Change authenticated email" reason="Not yet reviewed" />
             <DisabledAction label="Reset account" reason="Destructive &mdash; not yet reviewed" tone="danger" />
-            <DisabledAction label="Delete account" reason="Not an administrator action; students delete their own accounts" tone="danger" />
             <DisabledAction label="View deleted content" reason="Privacy-gated" />
           </div>
         </div>

@@ -80,7 +80,7 @@ export function DeleteAccountClient({ email }: { email: string }): JSX.Element {
       }
 
       // replace(), not push() — Back must not return to an authenticated page.
-      router.replace("/login?deleted=1");
+      router.replace("/?deleted=1");
       router.refresh();
     } catch {
       setError(

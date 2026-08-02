@@ -6,6 +6,41 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
 
+function useApplicationAccessGate(queryClient: QueryClient): void {
+  useEffect(() => {
+    const supabase = getSupabaseBrowser();
+    let checking = false;
+    const check = async () => {
+      if (checking || window.location.pathname === "/restricted") return;
+      checking = true;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { data, error } = await supabase.rpc("my_access_state");
+        const state = (data as { state?: string } | null)?.state;
+        if (!error && state && state !== "active") {
+          await queryClient.cancelQueries();
+          queryClient.clear();
+          await supabase.removeAllChannels();
+          // replace prevents Back from restoring a protected client route.
+          window.location.replace("/restricted");
+        }
+      } finally { checking = false; }
+    };
+    void check();
+    const interval = window.setInterval(() => void check(), 60_000);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") void check();
+    });
+    const queryUnsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || event.action.type !== "error") return;
+      const error = event.query.state.error as { code?: string; message?: string } | null;
+      if (error?.code === "42501" || error?.message?.includes("account_restricted")) void check();
+    });
+    return () => { window.clearInterval(interval); subscription.unsubscribe(); queryUnsubscribe(); };
+  }, [queryClient]);
+}
+
 // Single, centralized auth → Realtime bridge (mounted once at the app root).
 // Private Broadcast channels (event:/post: interaction realtime) are only
 // authorized while the Realtime socket carries the user's current access token,
@@ -59,6 +94,7 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
   );
 
   useRealtimeAuthBridge();
+  useApplicationAccessGate(queryClient);
 
   return (
     <QueryClientProvider client={queryClient}>

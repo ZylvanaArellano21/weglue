@@ -33,7 +33,7 @@ export function RestrictedActions() {
     } catch {
       // Even if GoTrue's clear fails, routing away is the useful outcome.
     }
-    router.replace("/login");
+    router.replace("/login?signed_out=1");
     router.refresh();
   }
 
@@ -45,7 +45,7 @@ export function RestrictedActions() {
       const res = await fetch("/api/account/delete", { method: "POST" });
       if (!res.ok) throw new Error("delete failed");
       await getSupabaseBrowser().auth.signOut();
-      router.replace("/");
+      router.replace("/?deleted=1");
       router.refresh();
     } catch {
       setError("Something went wrong. Please check your connection and try again.");

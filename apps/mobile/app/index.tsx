@@ -12,15 +12,23 @@ import { useRouter } from "expo-router";
 import { useAuthStore } from "@weglue/shared";
 import { getPendingSignupEmail } from "../lib/authFlow";
 import { getPendingInvite } from "../lib/pendingInvite";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function WelcomeScreen() {
   const { session, isLoading, profile } = useAuthStore();
   const router = useRouter();
   // null = still checking AsyncStorage; "" = no pending signup
   const [pendingSignupEmail, setPendingSignupEmail] = useState<string | null>(null);
+  const [deletedNotice, setDeletedNotice] = useState(false);
 
   useEffect(() => {
     getPendingSignupEmail().then((stored) => setPendingSignupEmail(stored ?? ""));
+    AsyncStorage.getItem("weglue-account-deletion-success").then((value) => {
+      if (value === "1") {
+        setDeletedNotice(true);
+        void AsyncStorage.removeItem("weglue-account-deletion-success");
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -87,6 +95,7 @@ export default function WelcomeScreen() {
     <SafeAreaView style={styles.container}>
       {/* Logo + Tagline — upper 45% */}
       <View style={styles.hero}>
+        {deletedNotice && <Text style={styles.deletedNotice}>Your account has been successfully deleted.</Text>}
         <Image
           source={require("../assets/logo.png")}
           style={styles.logo}
@@ -154,6 +163,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
+  deletedNotice: { marginBottom: 12, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: '#DCFCE7', color: '#166534', fontSize: 14, fontWeight: '600', textAlign: 'center' },
   cta: {
     paddingHorizontal: 24,
     paddingBottom: 48,

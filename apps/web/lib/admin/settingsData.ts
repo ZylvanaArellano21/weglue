@@ -203,20 +203,12 @@ async function probeAuditPersistence(
 async function probePrivacyBackend(
   admin: ReturnType<typeof createAdminClient>
 ): Promise<CapabilityProbe> {
-  try {
-    const res = await admin
-      .from("message_deletion_attempts")
-      .select("id", { head: true, count: "exact" })
-      .limit(1);
-    if (res.error) {
-      return MISSING_CODES.has(res.error.code ?? "")
-        ? { status: "unavailable", detail: "Migration 051 is not deployed." }
-        : { status: "error", detail: "Could not verify the privacy backend." };
-    }
-    return { status: "active", detail: "Retained deleted-message backend is deployed." };
-  } catch {
-    return { status: "error", detail: "Privacy backend could not be verified." };
-  }
+  // A partial table/function cannot prove the reviewed Day 10F system exists.
+  // 051 is intentionally absent from Production, so retain this explicit
+  // fail-closed state until the complete reviewed backend ships a dedicated
+  // immutable deployment marker. No message data is queried or mutated.
+  void admin;
+  return { status: "unavailable", detail: "Not deployed — the complete reviewed deleted-message privacy backend (migration 051 and its workers) is absent." };
 }
 
 export async function getAdminSettings(): Promise<AdminSettings> {

@@ -29,7 +29,7 @@ import { getMyAccessState, looksLikeRestriction } from '../../services/accessSer
 const payload = (over: Partial<AccessStatePayload> = {}): AccessStatePayload => ({
   state: 'active',
   suspended_until: null,
-  support_email: 'info@weglue.app',
+  support_email: 'zylvana.arellano.campos@gmail.com',
   ...over,
 });
 
@@ -46,6 +46,11 @@ describe('routing decision', () => {
 
   it('routes a restricted account to the restricted shell', () => {
     expect(resolveAccessRoute(payload({ state: 'restricted' }))).toBe('restricted');
+  });
+
+  it('routes a deletion-pending account to its non-bypassable restricted shell', () => {
+    expect(resolveAccessRoute(payload({ state: 'deletion_pending' }))).toBe('deletion_pending');
+    expect(isRestrictedRoute('deletion_pending')).toBe(true);
   });
 
   it('FAILS OPEN for a missing payload — a blip must not lock anyone out', () => {
@@ -85,6 +90,13 @@ describe('copy can never disclose an internal reason or the severity', () => {
     // would be both wrong and a hint about the underlying classification.
     expect(restrictionCopy(payload({ state: 'restricted', suspended_until: iso })).until).toBeNull();
   });
+
+  it('keeps the scheduled date separate from the public reason for deletion pending', () => {
+    const scheduled = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const copy = restrictionCopy(payload({ state: 'deletion_pending', scheduled_deletion_at: scheduled }));
+    expect(copy.scheduledDeletionAt).toBe(scheduled);
+    expect(`${copy.title} ${copy.body}`).not.toContain('platform_blocked');
+  });
 });
 
 describe('suspension end formatting', () => {
@@ -110,7 +122,7 @@ describe('accessService', () => {
     rpc.mockResolvedValue({ data: null, error: null });
     await expect(getMyAccessState()).resolves.toMatchObject({
       state: 'active',
-      support_email: 'info@weglue.app',
+      support_email: 'zylvana.arellano.campos@gmail.com',
     });
   });
 

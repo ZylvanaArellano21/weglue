@@ -22,8 +22,8 @@ describe("restriction operational telemetry", () => {
         message: `Bearer secret-token for founder@weglue.app failed for ${targetId}`,
       },
       restrictionCommitted: false,
-      sessionRevocationAttempted: false,
-      sessionRevocationSucceeded: null,
+      accessInvalidated: false,
+      clientRefreshPending: false,
       reconciliationRequired: false,
     });
 

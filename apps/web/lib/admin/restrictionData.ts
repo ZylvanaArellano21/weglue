@@ -19,7 +19,7 @@ if (typeof window !== "undefined") {
 import { createAdminClient } from "../supabase/admin";
 import { requireSecureAdmin } from "./secureAdmin";
 
-export type AccessState = "active" | "suspended" | "platform_blocked";
+export type AccessState = "active" | "suspended" | "platform_blocked" | "deletion_pending";
 
 export interface RestrictionRow {
   id: string;
@@ -27,6 +27,8 @@ export interface RestrictionRow {
   restriction_type: "suspended" | "platform_blocked";
   status: "active" | "lifted" | "expired";
   internal_reason: string;
+  violation_category: string | null;
+  public_reason: string | null;
   created_at: string;
   created_by: string;
   suspended_until: string | null;
@@ -50,7 +52,13 @@ export interface RestrictionSummary {
    * rather than looking inconsistent.
    */
   expiredUnreconciled: RestrictionRow[];
-  /** Audit events sharing this restriction's correlation id. */
+  deletionCase: {
+    id: string; state: string; scheduled_deletion_at: string; appeal_deadline: string;
+    violation_category: string; public_reason: string; internal_reason: string; basis: string;
+    evidence_attached: boolean; correlation_id: string; cancellation_reason: string | null;
+    finalized_at: string | null; finalization_error: string | null;
+  } | null;
+  /** Legacy event summary retained solely for historic records. */
   sessionRevocation: {
     attempted: boolean;
     succeeded: boolean;
@@ -80,7 +88,7 @@ export async function restrictionSummary(userId: string): Promise<RestrictionSum
   await requireSecureAdmin();
   const admin = createAdminClient();
 
-  const [{ data: state }, { data: rows }] = await Promise.all([
+  const [{ data: state }, { data: rows }, { data: deletionRows }] = await Promise.all([
     admin.rpc("get_account_access_state", { p_user: userId }),
     admin
       .from("account_restrictions")
@@ -88,6 +96,9 @@ export async function restrictionSummary(userId: string): Promise<RestrictionSum
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(50),
+    admin.from("account_deletion_cases")
+      .select("id,state,scheduled_deletion_at,appeal_deadline,violation_category,public_reason,internal_reason,basis,evidence_references,correlation_id,cancellation_reason,finalized_at,finalization_error")
+      .eq("user_id", userId).order("created_at", { ascending: false }).limit(1),
   ]);
 
   const history = (rows ?? []) as RestrictionRow[];
@@ -143,11 +154,14 @@ export async function restrictionSummary(userId: string): Promise<RestrictionSum
     };
   }
 
+  type DeletionDbRow = NonNullable<RestrictionSummary["deletionCase"]> & { evidence_references?: string | null };
+  const deletion = (deletionRows?.[0] ?? null) as DeletionDbRow | null;
   return {
     accessState: (state ?? "active") as AccessState,
     active,
     history,
     expiredUnreconciled,
+    deletionCase: deletion ? { ...deletion, evidence_attached: !!deletion.evidence_references?.trim() } : null,
     sessionRevocation,
   };
 }

@@ -20,7 +20,7 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
       </h1>
 
       <p className="text-xs text-[#5F5D5D] mb-8 italic">
-        Last updated: June 24, 2026 — Full policy coming soon.
+        Last updated: August 2, 2026
       </p>
 
       <div className="prose prose-sm text-[#333] space-y-6">
@@ -184,8 +184,10 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
           <p className="text-sm text-[#5F5D5D] leading-relaxed">
             If an account breaks our Terms or Community Guidelines, We Glue may
             restrict its access — either temporarily (a suspension, which may
-            have an end date) or until we lift it. We keep a record of that
-            decision.
+            have an end date), until we lift it, or while administrator deletion
+            is pending. We give the affected student a specific category and
+            understandable public reason, while internal administrator notes
+            remain private.
           </p>
           <ul className="mt-3 space-y-1 text-sm text-[#5F5D5D] leading-relaxed list-disc pl-5">
             <li>
@@ -196,9 +198,8 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
               <strong>internal reason</strong> written by our team.
             </li>
             <li>
-              The <strong>internal reason is never shown publicly</strong> and is
-              never shown to the affected person. If you want to understand a
-              decision, contact us.
+              The <strong>internal reason is never shown publicly</strong>. It is
+              not returned to student clients or included in account emails.
             </li>
             <li>
               We use these records for <strong>safety, policy enforcement,
@@ -217,6 +218,17 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
                 deletion request form
               </a>{" "}
               remains available if you cannot sign in.
+            </li>
+            <li>
+              Administrator deletion normally has a seven-day appeal period.
+              Serious safety, legal, fraud, or institutional situations may use
+              immediate deletion. Supporting evidence may be attached but is not
+              required; a written basis is always required.
+            </li>
+            <li>
+              We send account emails for scheduled, cancelled, finalized, and
+              voluntary deletion actions. These messages use the public reason,
+              never internal notes or private evidence.
             </li>
             <li>
               A restriction is applied inside We Glue&apos;s own systems. We do{" "}
@@ -273,19 +285,21 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
             If you have questions about this Privacy Policy, please contact us
             at{" "}
             <a
-              href="mailto:privacy@weglue.app"
+              href="mailto:zylvana.arellano.campos@gmail.com"
               className="text-[#0FA6A6] hover:underline"
             >
-              privacy@weglue.app
+              zylvana.arellano.campos@gmail.com
             </a>
             .
           </p>
         </section>
 
         <p className="text-xs text-[#5F5D5D] border-t border-black/10 pt-6">
-          This is a placeholder privacy policy. A comprehensive policy
-          compliant with GDPR, CCPA, and applicable laws will be published
-          before the public launch of We Glue.
+          We retain only the minimal sanitized safety and audit records needed
+          after an account is deleted. Cached or previously downloaded copies
+          cannot always be remotely erased. Day 10D evidence adjudication and
+          Day 10F deleted-message privacy are not represented here as completed
+          features.
         </p>
       </div>
 
