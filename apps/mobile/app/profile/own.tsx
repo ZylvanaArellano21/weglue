@@ -106,9 +106,26 @@ export default function OwnProfileScreen() {
         <View style={styles.body}>
           {/* Avatar + stats */}
           <View style={styles.profileRow}>
-            <TouchableOpacity onPress={onEditProfilePic} activeOpacity={0.8}>
-              <Avatar uri={profile?.avatar_url} size={72} username={profile?.username} />
-            </TouchableOpacity>
+            <View style={styles.avatarEditWrap}>
+              <TouchableOpacity
+                onPress={onEditProfilePic}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Edit your profile picture"
+              >
+                <Avatar uri={profile?.avatar_url} size={72} username={profile?.username} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={onEditProfilePic}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Change your profile picture"
+                hitSlop={8}
+                style={styles.avatarEditIcon}
+              >
+                <Ionicons name="add" size={16} color={profileColors.teal} />
+              </TouchableOpacity>
+            </View>
             <View style={styles.statsCol}>
               <Text style={styles.name}>{profile?.full_name}</Text>
               <View style={styles.statsRow}>
@@ -383,6 +400,20 @@ const styles = StyleSheet.create({
   },
   body: { paddingHorizontal: 16, paddingBottom: 32 },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 16 },
+  avatarEditWrap: { position: 'relative', width: 72, height: 72 },
+  avatarEditIcon: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: profileColors.bg,
+    borderWidth: 2,
+    borderColor: profileColors.bg,
+  },
   statsCol: { flex: 1 },
   name: {
     fontFamily: profileFonts.bold,

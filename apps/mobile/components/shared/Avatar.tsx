@@ -1,6 +1,13 @@
 import { memo } from 'react';
 import { Image, View, Text } from 'react-native';
 import { getResizedImageUrl } from '../../lib/imageResize';
+import {
+  getPresetAvatar,
+  parseLegacyPresetColor,
+  parsePresetAvatarId,
+  parseTextAvatar as parseTextAvatarValue,
+} from '@weglue/shared';
+import { getPresetAvatarAsset } from '../../lib/presetAvatarAssets';
 
 interface AvatarProps {
   uri: string | null | undefined;
@@ -9,15 +16,11 @@ interface AvatarProps {
 }
 
 export function parsePresetColor(uri: string | null | undefined): string | null {
-  if (!uri) return null;
-  if (uri.startsWith('preset:')) return uri.slice('preset:'.length);
-  return null;
+  return parseLegacyPresetColor(uri);
 }
 
 export function parseTextAvatar(uri: string | null | undefined): string | null {
-  if (!uri) return null;
-  if (uri.startsWith('text:')) return uri.slice('text:'.length);
-  return null;
+  return parseTextAvatarValue(uri);
 }
 
 export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarProps) {
@@ -25,9 +28,29 @@ export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarP
     ? username.slice(0, 2).toUpperCase()
     : '?';
 
+  const presetAvatarId = parsePresetAvatarId(uri);
   const presetColor = parsePresetColor(uri);
   const textContent = parseTextAvatar(uri);
   const resizedUri = getResizedImageUrl(uri, size * 2);
+
+  if (presetAvatarId) {
+    const avatar = getPresetAvatar(presetAvatarId);
+    return (
+      <Image
+        source={getPresetAvatarAsset(presetAvatarId)}
+        accessibilityRole="image"
+        accessibilityLabel={avatar?.label ?? 'We Glue avatar'}
+        resizeMode="cover"
+        fadeDuration={0}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#E5E7EB',
+        }}
+      />
+    );
+  }
 
   if (textContent) {
     return (

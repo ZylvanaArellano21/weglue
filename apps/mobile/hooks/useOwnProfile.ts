@@ -143,7 +143,7 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
       avatarType,
     }: {
       avatarUrl: string | null;
-      avatarType: 'photo' | 'camera' | 'text' | null;
+      avatarType: 'photo' | 'camera' | 'text' | 'preset' | null;
     }) => updateProfileAvatar(userId!, avatarUrl, avatarType),
     onSuccess: (_data, { avatarUrl }) => {
       // Home header + sidebar read the auth store, not React Query — update it

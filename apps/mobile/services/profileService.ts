@@ -347,7 +347,7 @@ export async function updateUserActivities(
 export async function updateProfileAvatar(
   userId: string,
   avatarUrl: string | null,
-  avatarType: 'photo' | 'camera' | 'text' | null,
+  avatarType: 'photo' | 'camera' | 'text' | 'preset' | null,
 ): Promise<void> {
   const { error } = await supabase
     .from('profiles')
@@ -405,7 +405,7 @@ export async function removeEventRsvp(userId: string, eventId: string): Promise<
 //   currentAvatarUrl:  string | null
 //   currentAvatarType: string | null
 //   textMaxLength:     4  — task spec: cap at ~4 chars
-//   onSave: (avatarUrl: string | null, avatarType: 'photo'|'camera'|'text'|null) => Promise<void>
+//   onSave: (avatarUrl: string | null, avatarType: 'photo'|'camera'|'text'|'preset'|null) => Promise<void>
 //   onCancel: () => void
 //
 // RemoveEventConfirmationCallbackShape:

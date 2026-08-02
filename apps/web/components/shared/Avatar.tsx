@@ -1,17 +1,22 @@
+import {
+  getPresetAvatar,
+  parseLegacyPresetColor,
+  parsePresetAvatarId,
+  parseTextAvatar as parseTextAvatarValue,
+} from "@weglue/shared";
+import { getPresetAvatarSrc } from "../../lib/presetAvatarAssets";
+
 // Web port of apps/mobile/components/shared/Avatar.tsx. Avatar URLs in the
-// shared backend can be a real image URL, a `preset:<color>` solid circle, or
-// a `text:<content>` monogram — all three must render identically to mobile.
+// shared backend can be an uploaded image, `preset:<stable-id>`, legacy
+// `preset:<color>`, or a `text:<content>` monogram. The resolver deliberately
+// keeps legacy values intact so old profiles never become blank or change art.
 
 export function parsePresetColor(uri: string | null | undefined): string | null {
-  if (!uri) return null;
-  if (uri.startsWith("preset:")) return uri.slice("preset:".length);
-  return null;
+  return parseLegacyPresetColor(uri);
 }
 
 export function parseTextAvatar(uri: string | null | undefined): string | null {
-  if (!uri) return null;
-  if (uri.startsWith("text:")) return uri.slice("text:".length);
-  return null;
+  return parseTextAvatarValue(uri);
 }
 
 interface AvatarProps {
@@ -24,9 +29,10 @@ interface AvatarProps {
 
 export function Avatar({ uri, size = 40, name, className }: AvatarProps): JSX.Element {
   const initials = name ? name.slice(0, 2).toUpperCase() : "?";
+  const presetAvatarId = parsePresetAvatarId(uri);
   const presetColor = parsePresetColor(uri);
   const textContent = parseTextAvatar(uri);
-  const isImage = !!uri && !presetColor && !textContent;
+  const isImage = !!uri && !presetAvatarId && !presetColor && !textContent;
 
   const base: React.CSSProperties = {
     width: size,
@@ -34,6 +40,19 @@ export function Avatar({ uri, size = 40, name, className }: AvatarProps): JSX.El
     borderRadius: "9999px",
     flexShrink: 0,
   };
+
+  if (presetAvatarId) {
+    const avatar = getPresetAvatar(presetAvatarId);
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={getPresetAvatarSrc(presetAvatarId)}
+        alt={avatar?.label ?? name ?? "We Glue avatar"}
+        className={className}
+        style={{ ...base, objectFit: "cover", background: "#E5E7EB" }}
+      />
+    );
+  }
 
   if (textContent) {
     return (

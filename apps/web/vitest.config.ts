@@ -16,6 +16,9 @@ export default defineConfig({
       "@weglue/shared/auth/platformAdmin": fileURLToPath(
         new URL("../../packages/shared/src/auth/platformAdmin.ts", import.meta.url)
       ),
+      "@weglue/shared/avatarCatalog": fileURLToPath(
+        new URL("../../packages/shared/src/avatarCatalog.ts", import.meta.url)
+      ),
       "@weglue/shared": fileURLToPath(
         new URL("../../packages/shared/src/index.ts", import.meta.url)
       ),
