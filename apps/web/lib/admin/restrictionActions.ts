@@ -1,277 +1,455 @@
 "use server";
 
 // ============================================================================
-// Administrator account restrictions — privileged write actions  (SERVER-ONLY)
+// Administrator account restrictions — privileged write actions (SERVER-ONLY)
 // ============================================================================
 //
-// Day 10B2. Each action follows the contract established by Day 10A/10B1:
+// Each action uses the same fixed path:
+//   secure founder + aal2 + write switch + recent MFA → strict input validation
+//   → one migration-058 RPC (restriction + primary audit atomically) → optional
+//   Auth session revocation under an attempt/outcome audit pattern → revalidate.
 //
-//   1. requireRecentMfaWrite()  — portal + immutable founder allowlist +
-//      absolute session max age + aal2 + ADMIN_WRITES_ENABLED + recent MFA,
-//      in that order. This is the WRITE-specific composition added in Day 10B1
-//      precisely so a step-up cannot bypass the kill switch.
-//   2. strict input validation on a FIXED shape — no generic mutation endpoint.
-//   3. runAtomicMutation() -> a migration-058 admin_tx_restriction_* function,
-//      which commits the restriction row AND its durable audit event in ONE
-//      transaction, or neither.
-//   4. runCrossServiceOperation() -> Supabase Auth session revocation, under
-//      the attempt -> outcome pattern with the SAME correlation id, because
-//      Postgres and Auth cannot share a transaction.
+// The browser supplies only a target, reason, and optional expiry. It never
+// supplies an administrator identity, correlation id, or RPC name.
 //
-// THE ACTOR IS NEVER SUPPLIED BY THE BROWSER. It is the server-validated
-// `User` returned by the gate. A form field cannot impersonate an administrator.
-//
-// WITH ADMIN_WRITES_ENABLED UNSET, EVERY FUNCTION HERE THROWS BEFORE TOUCHING
-// DATA. That is the production posture today.
-//
-// NO `banned_until`. Founder decision: a restricted student must still be able
-// to sign in far enough to reach account deletion. Enforcement is database-side
-// (migration 058); revocation only ends existing sessions.
+// NO `banned_until`: a restricted student must still reach account deletion.
 // ============================================================================
 
 if (typeof window !== "undefined") {
   throw new Error("lib/admin/restrictionActions.ts is server-only.");
 }
 
+import { revalidatePath } from "next/cache";
 import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "../supabase/admin";
-import { requireRecentMfaWrite } from "./secureAdmin";
-import { runAtomicMutation, newCorrelationId, type ActionResult } from "./atomicMutation";
+import { requireRecentMfaWrite, SecureAdminError } from "./secureAdmin";
+import { runAtomicMutation, newCorrelationId, type AtomicFailureDiagnostic } from "./atomicMutation";
 import { runCrossServiceOperation } from "./crossService";
-// Constants and types live outside this file: a "use server" module may only
-// export async functions, so exporting them from here fails the build.
 import {
-  MIN_REASON,
-  MAX_REASON,
-  type RestrictionResult,
-} from "./restrictionTypes";
+  diagnosticFromUnknown,
+  logRestrictionAction,
+  type RestrictionActionName,
+  type RestrictionActionStage,
+  type RestrictionDiagnostic,
+} from "./restrictionObservability";
+import { MIN_REASON, MAX_REASON, type RestrictionResult, type RestrictionStatus } from "./restrictionTypes";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const isUuid = (v: unknown): v is string => typeof v === "string" && UUID_RE.test(v);
+const isUuid = (value: unknown): value is string => typeof value === "string" && UUID_RE.test(value);
 
-function reasonError(): RestrictionResult {
+interface ActionContext {
+  action: RestrictionActionName;
+  correlationId: string;
+  targetId: string | null;
+  actor: User;
+}
+
+type PrepareResult = { context: ActionContext } | { result: RestrictionResult };
+
+function result(
+  correlationId: string,
+  status: RestrictionStatus,
+  message: string,
+  overrides: Partial<Pick<RestrictionResult, "restrictionCommitted" | "sessionRevocationAttempted" | "sessionsRevoked" | "reconciliationRequired">> = {}
+): RestrictionResult {
+  const restrictionCommitted = overrides.restrictionCommitted ?? false;
   return {
-    ok: false,
-    outcome: "rejected",
-    message: `A reason of ${MIN_REASON}–${MAX_REASON} characters is required.`,
-    correlationId: "",
-    sessionsRevoked: false,
+    ok: restrictionCommitted,
+    status,
+    message,
+    correlationId,
+    restrictionCommitted,
+    sessionRevocationAttempted: overrides.sessionRevocationAttempted ?? false,
+    sessionsRevoked: overrides.sessionsRevoked ?? false,
+    reconciliationRequired: overrides.reconciliationRequired ?? false,
   };
 }
 
-function validReason(reason: string): boolean {
-  const t = (reason ?? "").trim();
-  return t.length >= MIN_REASON && t.length <= MAX_REASON;
+function log(
+  context: Pick<ActionContext, "action" | "correlationId" | "targetId"> & { actor?: User | null },
+  stage: RestrictionActionStage,
+  success: boolean,
+  state: Pick<RestrictionResult, "restrictionCommitted" | "sessionRevocationAttempted" | "sessionsRevoked" | "reconciliationRequired">,
+  diagnostic?: RestrictionDiagnostic | null
+): void {
+  logRestrictionAction({
+    correlationId: context.correlationId,
+    action: context.action,
+    stage,
+    targetId: context.targetId,
+    administratorId: context.actor?.id ?? null,
+    success,
+    diagnostic,
+    restrictionCommitted: state.restrictionCommitted,
+    sessionRevocationAttempted: state.sessionRevocationAttempted,
+    sessionRevocationSucceeded: state.sessionRevocationAttempted ? state.sessionsRevoked : null,
+    reconciliationRequired: state.reconciliationRequired,
+  });
 }
 
-/**
- * Revoke the target's Supabase Auth sessions under the attempt→outcome pattern.
- *
- * ORDER MATTERS AND IS FIXED: the database restriction has ALREADY committed
- * before this runs. If Auth succeeded first and the database write then failed,
- * the student would be signed out with no record of why — the worst outcome.
- * This ordering degrades instead to "restriction in force, old token dies of
- * old age", which is safe and honestly reportable.
- */
-async function revokeSessions(
-  actor: User,
-  userId: string,
-  reason: string,
-  correlationId: string
-): Promise<{ revoked: boolean; reconcile: boolean }> {
-  const admin = createAdminClient();
-  const res = await runCrossServiceOperation({
+function respond(
+  context: Pick<ActionContext, "action" | "correlationId" | "targetId"> & { actor?: User | null },
+  actionResult: RestrictionResult,
+  diagnostic?: RestrictionDiagnostic | null
+): RestrictionResult {
+  log(context, "response_serialization", actionResult.ok, actionResult, diagnostic);
+  return actionResult;
+}
+
+function secureFailure(
+  action: RestrictionActionName,
+  correlationId: string,
+  targetId: string | null,
+  error: unknown
+): RestrictionResult {
+  const diagnostic = diagnosticFromUnknown(error);
+  const reason = error instanceof SecureAdminError ? error.reason : null;
+  const status: RestrictionStatus =
+    reason === "writes_disabled"
+      ? "writesDisabled"
+      : reason === "stepup_required" || reason === "mfa_required"
+      ? "stepupRequired"
+      : "notApplied";
+  const message =
+    status === "writesDisabled"
+      ? "Admin writes are currently disabled."
+      : status === "stepupRequired"
+      ? "Your recent MFA verification expired. Verify again and retry."
+      : "The action was not applied.";
+  const failure = result(correlationId, status, message);
+  const stage: RestrictionActionStage =
+    reason === "writes_disabled" ? "write_switch" : reason === "stepup_required" ? "recent_mfa" : "admin_authorization";
+  const context = { action, correlationId, targetId, actor: null };
+  log(context, stage, false, failure, diagnostic);
+  return respond(context, failure, diagnostic);
+}
+
+async function prepareAction(action: RestrictionActionName, targetId: unknown): Promise<PrepareResult> {
+  const correlationId = newCorrelationId();
+  const target = typeof targetId === "string" ? targetId : null;
+
+  try {
+    const actor = await requireRecentMfaWrite();
+    const context = { action, correlationId, targetId: target, actor };
+    const baseline = result(correlationId, "notApplied", "The action has not been applied.");
+    // The guard is deliberately the authority for all three checks. These
+    // success records make the enforced path observable without exposing MFA
+    // material or credentials.
+    log(context, "admin_authorization", true, baseline);
+    log(context, "write_switch", true, baseline);
+    log(context, "recent_mfa", true, baseline);
+    return { context };
+  } catch (error) {
+    return { result: secureFailure(action, correlationId, target, error) };
+  }
+}
+
+function normalizeReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length >= MIN_REASON && trimmed.length <= MAX_REASON ? trimmed : null;
+}
+
+function invalidInput(
+  context: ActionContext,
+  status: RestrictionStatus,
+  message: string
+): RestrictionResult {
+  const failed = result(context.correlationId, status, message);
+  log(context, "input_validation", false, failed);
+  return respond(context, failed);
+}
+
+function validateTargetAndReason(context: ActionContext, userId: unknown, reason: unknown): { reason: string } | RestrictionResult {
+  if (!isUuid(userId)) return invalidInput(context, "invalidTarget", "This account ID is invalid.");
+  const normalizedReason = normalizeReason(reason);
+  if (!normalizedReason) {
+    return invalidInput(context, "notApplied", `A reason of ${MIN_REASON}–${MAX_REASON} characters is required.`);
+  }
+  return { reason: normalizedReason };
+}
+
+function parseSuspensionExpiry(
+  context: ActionContext,
+  rawValue: unknown
+): { until: string | null } | RestrictionResult {
+  if (rawValue === null || rawValue === undefined || rawValue === "") return { until: null };
+  if (typeof rawValue !== "string") return invalidInput(context, "notApplied", "Invalid expiration date.");
+  const date = new Date(rawValue);
+  if (Number.isNaN(date.getTime())) return invalidInput(context, "notApplied", "Invalid expiration date.");
+  if (date.getTime() <= Date.now()) {
+    return invalidInput(context, "notApplied", "The expiration must be in the future.");
+  }
+  return { until: date.toISOString() };
+}
+
+function restrictionStatusForFailure(
+  failure: "validation" | "business" | "database" | "audit",
+  rpcStatus?: string
+): RestrictionStatus {
+  if (failure === "audit") return "auditFailure";
+  if (failure === "database") return "databaseFailure";
+  if (
+    rpcStatus === "invalid_target" ||
+    rpcStatus === "user_not_found" ||
+    rpcStatus === "platform_admin_target" ||
+    rpcStatus === "self_target"
+  ) {
+    return "invalidTarget";
+  }
+  if (
+    rpcStatus === "invalid_transition" ||
+    rpcStatus === "already_suspended" ||
+    rpcStatus === "already_blocked" ||
+    rpcStatus === "not_restricted"
+  ) {
+    return "invalidTransition";
+  }
+  return "notApplied";
+}
+
+function toDiagnostic(diagnostic: AtomicFailureDiagnostic | undefined): RestrictionDiagnostic | undefined {
+  if (!diagnostic) return undefined;
+  return {
+    code: diagnostic.code,
+    sqlState: diagnostic.sqlState,
+    message: diagnostic.message,
+  };
+}
+
+async function revalidateRestrictionViews(context: ActionContext, actionResult: RestrictionResult): Promise<void> {
+  try {
+    revalidatePath(`/admin/users/${context.targetId}`);
+    revalidatePath("/admin/restrictions");
+    log(context, "revalidation", true, actionResult);
+  } catch (error) {
+    // The transition has already committed. Never transform a cache failure into
+    // a false "not applied" result; client-side router.refresh() remains a
+    // second convergence path.
+    log(context, "revalidation", false, actionResult, diagnosticFromUnknown(error));
+  }
+}
+
+async function revokeSessions(context: ActionContext, reason: string) {
+  const before = result(context.correlationId, "notApplied", "", {
+    restrictionCommitted: true,
+    sessionRevocationAttempted: true,
+  });
+  log(context, "revocation_attempt", true, before);
+
+  const outcome = await runCrossServiceOperation({
     action: "restriction.revokeSessions",
-    actor,
+    actor: context.actor,
     reason,
-    target: { userId, scope: "global" },
+    target: { userId: context.targetId, scope: "global" },
+    correlationId: context.correlationId,
     perform: async () => {
-      // `global` ends every session on every device. It does NOT prevent a new
-      // sign-in — deliberately, so the restricted shell and account deletion
-      // remain reachable.
-      const { error } = await admin.auth.admin.signOut(userId, "global");
-      if (error) throw new Error(error.message);
+      const admin = createAdminClient();
+      const { error } = await admin.auth.admin.signOut(context.targetId!, "global");
+      if (error) {
+        const wrapped = new Error(error.message);
+        Object.assign(wrapped, { code: error.code });
+        throw wrapped;
+      }
       return true;
     },
   });
-  return { revoked: res.ok, reconcile: !res.ok && res.reconciliationRequired };
+
+  const state = {
+    restrictionCommitted: true,
+    sessionRevocationAttempted: outcome.attempted,
+    sessionsRevoked: outcome.succeeded === true,
+    reconciliationRequired: !outcome.ok && outcome.reconciliationRequired,
+  };
+  log(context, "revocation_outcome", outcome.ok, state, outcome.ok ? undefined : outcome.diagnostic);
+  return { outcome, ...state };
 }
 
-/** Shared tail: run the DB mutation atomically, then revoke sessions. */
+/** Shared tail: atomic database transition, optional session revocation, cache convergence. */
 async function applyRestriction(opts: {
-  actor: User;
+  context: ActionContext;
   rpc: string;
   action: Parameters<typeof runAtomicMutation>[0]["action"];
-  userId: string;
   reason: string;
-  args?: Record<string, unknown>;
-  /** Lifting a restriction must NOT revoke sessions — see below. */
+  rpcArgs?: Record<string, unknown>;
+  targetMetadata?: Record<string, unknown>;
+  /** Lifting a restriction must neither create nor revoke a session. */
   revoke: boolean;
 }): Promise<RestrictionResult> {
-  const correlationId = newCorrelationId();
+  const { context } = opts;
+  const baseline = result(context.correlationId, "notApplied", "");
+  log(context, "restriction_rpc", true, baseline);
 
   const db = await runAtomicMutation({
     action: opts.action,
-    actor: opts.actor,
-    reason: opts.reason.trim(),
+    actor: context.actor,
+    reason: opts.reason,
     rpc: opts.rpc,
-    args: { p_user_id: opts.userId, ...(opts.args ?? {}) },
-    target: { userId: opts.userId, ...(opts.args ?? {}) },
-    correlationId,
+    // Keep transport arguments separate from audit metadata. PostgREST matches
+    // RPCs by these exact names: `suspendedUntil` is metadata, never an RPC arg.
+    args: { p_user_id: context.targetId!, ...(opts.rpcArgs ?? {}) },
+    target: { userId: context.targetId, ...(opts.targetMetadata ?? {}) },
+    correlationId: context.correlationId,
   });
 
   if (!db.ok) {
-    return { ok: false, outcome: "rejected", message: db.error, correlationId, sessionsRevoked: false };
+    const failed = result(
+      context.correlationId,
+      restrictionStatusForFailure(db.failure, db.rpcStatus),
+      db.failure === "database" || db.failure === "audit" ? "The action was not applied." : db.error
+    );
+    const diagnostic = toDiagnostic(db.diagnostic);
+    log(context, "restriction_rpc", false, failed, diagnostic);
+    return respond(context, failed, diagnostic);
   }
+
+  const committed = result(context.correlationId, "applied", "", { restrictionCommitted: true });
+  log(context, "restriction_committed", true, committed);
 
   if (!opts.revoke) {
-    // Unsuspending / unblocking must NOT create a session, and must not destroy
-    // one either: the student simply signs in normally again.
-    return {
-      ok: true,
-      outcome: "applied",
-      message: "Restriction lifted. The student can sign in normally again.",
-      correlationId,
-      sessionsRevoked: false,
-    };
+    const applied = result(
+      context.correlationId,
+      "applied",
+      "Restriction lifted. The student can sign in normally again.",
+      { restrictionCommitted: true }
+    );
+    await revalidateRestrictionViews(context, applied);
+    return respond(context, applied);
   }
 
-  const { revoked, reconcile } = await revokeSessions(
-    opts.actor,
-    opts.userId,
-    opts.reason.trim(),
-    correlationId
-  );
+  const revocation = await revokeSessions(context, opts.reason);
+  let applied: RestrictionResult;
+  if (revocation.outcome.ok) {
+    applied = result(
+      context.correlationId,
+      "appliedSessionsRevoked",
+      "Restriction applied and existing sessions revoked.",
+      revocation
+    );
+  } else if (revocation.reconciliationRequired) {
+    applied = result(
+      context.correlationId,
+      "reconciliationRequired",
+      "The restriction was applied, but session revocation needs reconciliation.",
+      revocation
+    );
+  } else if (revocation.outcome.failure === "audit") {
+    applied = result(
+      context.correlationId,
+      "auditFailure",
+      "The restriction was applied, but session revocation needs attention.",
+      revocation
+    );
+  } else {
+    applied = result(
+      context.correlationId,
+      "appliedSessionsFailed",
+      "The restriction was applied, but session revocation needs attention.",
+      revocation
+    );
+  }
 
-  if (revoked) {
-    return {
-      ok: true,
-      outcome: "applied",
-      message: "Restriction applied and existing sessions revoked.",
-      correlationId,
-      sessionsRevoked: true,
-    };
-  }
-  if (reconcile) {
-    return {
-      ok: true,
-      outcome: "reconcile",
-      message:
-        "Restriction applied. Sessions were revoked, but the outcome could not be recorded — flagged for reconciliation.",
-      correlationId,
-      sessionsRevoked: true,
-    };
-  }
-  return {
-    ok: true,
-    outcome: "sessionsFailed",
-    message:
-      "Restriction applied, but session revocation FAILED. Access is still denied by the database; the existing token cannot be used and expires on its own.",
-    correlationId,
-    sessionsRevoked: false,
-  };
+  await revalidateRestrictionViews(context, applied);
+  return respond(context, applied, revocation.outcome.ok ? undefined : revocation.outcome.diagnostic);
 }
 
-// ── The four controls ────────────────────────────────────────────────────────
+// ── The four restriction controls ───────────────────────────────────────────
 
 export async function suspendUser(
   userId: string,
   reason: string,
   suspendedUntilIso: string | null
 ): Promise<RestrictionResult> {
-  const actor = await requireRecentMfaWrite();
-  if (!isUuid(userId)) {
-    return { ok: false, outcome: "rejected", message: "Invalid user id.", correlationId: "", sessionsRevoked: false };
-  }
-  if (!validReason(reason)) return reasonError();
+  const prepared = await prepareAction("suspend", userId);
+  if ("result" in prepared) return prepared.result;
+  const { context } = prepared;
 
-  let until: string | null = null;
-  if (suspendedUntilIso) {
-    const d = new Date(suspendedUntilIso);
-    if (Number.isNaN(d.getTime())) {
-      return { ok: false, outcome: "rejected", message: "Invalid expiration date.", correlationId: "", sessionsRevoked: false };
-    }
-    if (d.getTime() <= Date.now()) {
-      return { ok: false, outcome: "rejected", message: "The expiration must be in the future.", correlationId: "", sessionsRevoked: false };
-    }
-    until = d.toISOString();
-  }
+  const validated = validateTargetAndReason(context, userId, reason);
+  if ("status" in validated) return validated;
+  const expiry = parseSuspensionExpiry(context, suspendedUntilIso);
+  if ("status" in expiry) return expiry;
+  log(context, "input_validation", true, result(context.correlationId, "notApplied", ""));
 
   return applyRestriction({
-    actor, rpc: "admin_tx_restriction_suspend", action: "restriction.suspend",
-    userId, reason, args: { p_suspended_until: until, suspendedUntil: until }, revoke: true,
+    context,
+    rpc: "admin_tx_restriction_suspend",
+    action: "restriction.suspend",
+    reason: validated.reason,
+    rpcArgs: { p_suspended_until: expiry.until },
+    targetMetadata: { suspendedUntil: expiry.until },
+    revoke: true,
   });
 }
 
 export async function unsuspendUser(userId: string, reason: string): Promise<RestrictionResult> {
-  const actor = await requireRecentMfaWrite();
-  if (!isUuid(userId)) {
-    return { ok: false, outcome: "rejected", message: "Invalid user id.", correlationId: "", sessionsRevoked: false };
-  }
-  if (!validReason(reason)) return reasonError();
+  const prepared = await prepareAction("unsuspend", userId);
+  if ("result" in prepared) return prepared.result;
+  const { context } = prepared;
+  const validated = validateTargetAndReason(context, userId, reason);
+  if ("status" in validated) return validated;
+  log(context, "input_validation", true, result(context.correlationId, "notApplied", ""));
   return applyRestriction({
-    actor, rpc: "admin_tx_restriction_unsuspend", action: "restriction.unsuspend",
-    userId, reason, revoke: false,
+    context,
+    rpc: "admin_tx_restriction_unsuspend",
+    action: "restriction.unsuspend",
+    reason: validated.reason,
+    revoke: false,
   });
 }
 
 export async function platformBlockUser(userId: string, reason: string): Promise<RestrictionResult> {
-  const actor = await requireRecentMfaWrite();
-  if (!isUuid(userId)) {
-    return { ok: false, outcome: "rejected", message: "Invalid user id.", correlationId: "", sessionsRevoked: false };
-  }
-  if (!validReason(reason)) return reasonError();
+  const prepared = await prepareAction("block", userId);
+  if ("result" in prepared) return prepared.result;
+  const { context } = prepared;
+  const validated = validateTargetAndReason(context, userId, reason);
+  if ("status" in validated) return validated;
+  log(context, "input_validation", true, result(context.correlationId, "notApplied", ""));
   return applyRestriction({
-    actor, rpc: "admin_tx_restriction_block", action: "restriction.block",
-    userId, reason, revoke: true,
+    context,
+    rpc: "admin_tx_restriction_block",
+    action: "restriction.block",
+    reason: validated.reason,
+    revoke: true,
   });
 }
 
 export async function unblockUser(userId: string, reason: string): Promise<RestrictionResult> {
-  const actor = await requireRecentMfaWrite();
-  if (!isUuid(userId)) {
-    return { ok: false, outcome: "rejected", message: "Invalid user id.", correlationId: "", sessionsRevoked: false };
-  }
-  if (!validReason(reason)) return reasonError();
+  const prepared = await prepareAction("unblock", userId);
+  if ("result" in prepared) return prepared.result;
+  const { context } = prepared;
+  const validated = validateTargetAndReason(context, userId, reason);
+  if ("status" in validated) return validated;
+  log(context, "input_validation", true, result(context.correlationId, "notApplied", ""));
   return applyRestriction({
-    actor, rpc: "admin_tx_restriction_unblock", action: "restriction.unblock",
-    userId, reason, revoke: false,
+    context,
+    rpc: "admin_tx_restriction_unblock",
+    action: "restriction.unblock",
+    reason: validated.reason,
+    revoke: false,
   });
 }
 
-/**
- * Change an active suspension's expiry.
- *
- * A SEPARATE, SEPARATELY AUDITED action rather than a silent edit of the
- * existing row: changing how long someone is locked out is a decision that
- * deserves its own record and its own reason. Sessions are NOT re-revoked —
- * they were already revoked when the suspension was applied.
- */
+/** Explicitly audited suspension-expiry adjustment; it never re-revokes sessions. */
 export async function adjustSuspensionExpiry(
   userId: string,
   reason: string,
   suspendedUntilIso: string | null
 ): Promise<RestrictionResult> {
-  const actor = await requireRecentMfaWrite();
-  if (!isUuid(userId)) {
-    return { ok: false, outcome: "rejected", message: "Invalid user id.", correlationId: "", sessionsRevoked: false };
-  }
-  if (!validReason(reason)) return reasonError();
-
-  let until: string | null = null;
-  if (suspendedUntilIso) {
-    const d = new Date(suspendedUntilIso);
-    if (Number.isNaN(d.getTime())) {
-      return { ok: false, outcome: "rejected", message: "Invalid expiration date.", correlationId: "", sessionsRevoked: false };
-    }
-    if (d.getTime() <= Date.now()) {
-      return { ok: false, outcome: "rejected", message: "The expiration must be in the future.", correlationId: "", sessionsRevoked: false };
-    }
-    until = d.toISOString();
-  }
-
+  const prepared = await prepareAction("adjustExpiry", userId);
+  if ("result" in prepared) return prepared.result;
+  const { context } = prepared;
+  const validated = validateTargetAndReason(context, userId, reason);
+  if ("status" in validated) return validated;
+  const expiry = parseSuspensionExpiry(context, suspendedUntilIso);
+  if ("status" in expiry) return expiry;
+  log(context, "input_validation", true, result(context.correlationId, "notApplied", ""));
   return applyRestriction({
-    actor, rpc: "admin_tx_restriction_adjust_expiry", action: "restriction.adjustExpiry",
-    userId, reason, args: { p_suspended_until: until, suspendedUntil: until }, revoke: false,
+    context,
+    rpc: "admin_tx_restriction_adjust_expiry",
+    action: "restriction.adjustExpiry",
+    reason: validated.reason,
+    rpcArgs: { p_suspended_until: expiry.until },
+    targetMetadata: { suspendedUntil: expiry.until },
+    revoke: false,
   });
 }

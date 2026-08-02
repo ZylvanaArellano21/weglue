@@ -111,6 +111,23 @@ export function newCorrelationId(): string {
   return randomUUID();
 }
 
+const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+
+function maskOperationalId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value.length <= 8 ? value : `${value.slice(0, 8)}…`;
+}
+
+function sanitizeOperationalMessage(value: unknown): string {
+  const message = value instanceof Error ? value.message : typeof value === "string" ? value : "unknown";
+  return message
+    .replace(UUID_PATTERN, (id) => `${id.slice(0, 8)}…`)
+    .replace(EMAIL_PATTERN, "[redacted-email]")
+    .replace(/\b(Bearer\s+)[^\s]+/gi, "$1[redacted]")
+    .slice(0, 240);
+}
+
 function logOperational(record: Record<string, unknown>): void {
   // Secondary operational telemetry: a single structured line, greppable in
   // Vercel logs. This is NOT the audit trail any more — the table is — but it
@@ -138,7 +155,7 @@ export async function adminAudit(entry: AdminAuditEntry): Promise<AdminAuditResu
       tag: "admin_audit_unknown_action",
       ts,
       action: entry.action,
-      actorId: entry.actorId,
+      actorId: maskOperationalId(entry.actorId),
       correlationId,
     });
     return { persisted: false, correlationId };
@@ -165,13 +182,11 @@ export async function adminAudit(entry: AdminAuditEntry): Promise<AdminAuditResu
     tag: "admin_audit",
     ts,
     action,
-    actorId: entry.actorId,
-    actorEmail: entry.actorEmail ?? null,
+    // Operational logs are intentionally less detailed than the durable,
+    // founder-only audit record. They must remain safe to search and share.
+    actorId: maskOperationalId(entry.actorId),
     targetType: spec.targetType,
-    targetId,
-    metadata,
-    before: beforeState,
-    after: afterState,
+    targetId: maskOperationalId(targetId),
     eventType,
     ok: entry.ok,
     errorCode,
@@ -202,7 +217,7 @@ export async function adminAudit(entry: AdminAuditEntry): Promise<AdminAuditResu
       logOperational({
         ...operational,
         tag: "admin_audit_persist_failed",
-        persistError: error.message,
+        persistError: sanitizeOperationalMessage(error.message),
       });
       return { persisted: false, correlationId };
     }
@@ -213,7 +228,7 @@ export async function adminAudit(entry: AdminAuditEntry): Promise<AdminAuditResu
     logOperational({
       ...operational,
       tag: "admin_audit_persist_failed",
-      persistError: e instanceof Error ? e.message : "unknown",
+      persistError: sanitizeOperationalMessage(e),
     });
     return { persisted: false, correlationId };
   }

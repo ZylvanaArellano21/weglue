@@ -32,12 +32,31 @@ vi.mock("../../supabase/admin", () => ({
 }));
 
 const auditCalls: Array<Record<string, unknown>> = [];
+let failedAuditEventType: string | null = null;
+let correlationSequence = 0;
 vi.mock("../audit", () => ({
   adminAudit: async (o: Record<string, unknown>) => {
     auditCalls.push(o);
-    return { persisted: true };
+    return { persisted: o.eventType !== failedAuditEventType };
   },
-  newCorrelationId: () => "00000000-0000-4000-8000-00000000c0de",
+  newCorrelationId: () => {
+    const suffix = ["c0de", "c0df", "c0e0"][correlationSequence++] ?? "c0ff";
+    return `00000000-0000-4000-8000-00000000${suffix}`;
+  },
+}));
+
+const restrictionLogs: Array<Record<string, unknown>> = [];
+vi.mock("../restrictionObservability", () => ({
+  diagnosticFromUnknown: (error: unknown) => {
+    const candidate = error as { code?: unknown; message?: unknown } | null;
+    const code = typeof candidate?.code === "string" ? candidate.code : null;
+    return {
+      code,
+      sqlState: code && /^[0-9A-Z]{5}$/i.test(code) ? code : null,
+      message: typeof candidate?.message === "string" ? candidate.message : null,
+    };
+  },
+  logRestrictionAction: (entry: Record<string, unknown>) => restrictionLogs.push(entry),
 }));
 
 import {
@@ -47,7 +66,6 @@ import {
   unblockUser,
   adjustSuspensionExpiry,
 } from "../restrictionActions";
-import { SecureAdminError } from "../secureAdmin";
 
 const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@weglue.app" };
 const TARGET = "55550000-0000-4000-8000-000000000001";
@@ -82,6 +100,9 @@ beforeEach(() => {
   signOut.mockReset();
   rpc.mockReset();
   auditCalls.length = 0;
+  restrictionLogs.length = 0;
+  failedAuditEventType = null;
+  correlationSequence = 0;
   delete process.env.ADMIN_PORTAL_ENABLED;
   delete process.env.ADMIN_WRITES_ENABLED;
   delete process.env.ADMIN_FOUNDER_USER_IDS;
@@ -93,7 +114,7 @@ beforeEach(() => {
 // ── The production posture ───────────────────────────────────────────────────
 
 describe("every restriction action fails closed with writes disabled", () => {
-  it("throws writes_disabled for all five, and never reaches the database", async () => {
+  it("returns writesDisabled for all five, and never reaches the database", async () => {
     portalOn(); // ADMIN_WRITES_ENABLED deliberately unset
     goodSession();
     const calls: Array<Promise<unknown>> = [
@@ -103,21 +124,19 @@ describe("every restriction action fails closed with writes disabled", () => {
       unblockUser(TARGET, "a valid reason"),
       adjustSuspensionExpiry(TARGET, "a valid reason", future()),
     ];
-    for (const c of calls) {
-      await expect(c).rejects.toMatchObject({ reason: "writes_disabled" });
-    }
+    for (const c of calls) await expect(c).resolves.toMatchObject({ ok: false, status: "writesDisabled" });
     expect(rpc).not.toHaveBeenCalled();
     expect(signOut).not.toHaveBeenCalled();
   });
 });
 
 describe("authorization is enforced before anything else", () => {
-  it("rejects a non-allowlisted administrator", async () => {
+  it("returns a safe non-applied result for a non-allowlisted administrator", async () => {
     portalOn();
     writesOn();
     getUser.mockResolvedValue({ data: { user: { id: "someone-else", email: "x@y.z" } } });
     getAAL.mockResolvedValue({ data: { currentLevel: "aal2", currentAuthenticationMethods: [] } });
-    await expect(suspendUser(TARGET, "a valid reason", null)).rejects.toBeInstanceOf(SecureAdminError);
+    await expect(suspendUser(TARGET, "a valid reason", null)).resolves.toMatchObject({ ok: false, status: "notApplied" });
     expect(rpc).not.toHaveBeenCalled();
   });
 
@@ -134,8 +153,9 @@ describe("authorization is enforced before anything else", () => {
         ],
       },
     });
-    await expect(platformBlockUser(TARGET, "a valid reason")).rejects.toMatchObject({
-      reason: "stepup_required",
+    await expect(platformBlockUser(TARGET, "a valid reason")).resolves.toMatchObject({
+      ok: false,
+      status: "stepupRequired",
     });
     expect(rpc).not.toHaveBeenCalled();
   });
@@ -154,7 +174,7 @@ describe("reason and expiry are validated before any mutation", () => {
     for (const bad of ["", "   ", "ab", "x".repeat(501)]) {
       const res = await suspendUser(TARGET, bad, null);
       expect(res.ok).toBe(false);
-      expect(res.outcome).toBe("rejected");
+      expect(res.status).toBe("notApplied");
     }
     expect(rpc).not.toHaveBeenCalled();
   });
@@ -196,7 +216,7 @@ describe("session revocation happens for restrictions, NOT for lifts", () => {
 
   it("suspend revokes sessions globally", async () => {
     const res = await suspendUser(TARGET, "a valid reason", null);
-    expect(res).toMatchObject({ ok: true, outcome: "applied", sessionsRevoked: true });
+    expect(res).toMatchObject({ ok: true, status: "appliedSessionsRevoked", sessionsRevoked: true });
     expect(signOut).toHaveBeenCalledWith(TARGET, "global");
   });
 
@@ -232,20 +252,20 @@ describe("a failed revocation is reported honestly, not as a clean success", () 
     goodSession();
   });
 
-  it("reports sessionsFailed AND states that access is still denied", async () => {
+  it("reports a committed restriction with a session-revocation failure", async () => {
     signOut.mockResolvedValue({ error: { message: "auth unreachable" } });
     const res = await platformBlockUser(TARGET, "a valid reason");
     // The restriction still committed — this is degraded, not unsafe.
     expect(res.ok).toBe(true);
-    expect(res.outcome).toBe("sessionsFailed");
+    expect(res.status).toBe("appliedSessionsFailed");
     expect(res.sessionsRevoked).toBe(false);
-    expect(res.message).toMatch(/still denied by the database/i);
+    expect(res.message).toMatch(/session revocation needs attention/i);
   });
 
-  it("a database rejection is reported as rejected, and no revocation is attempted", async () => {
+  it("a database rejection is categorized, and no revocation is attempted", async () => {
     rpc.mockResolvedValue({ data: { status: "already_blocked" }, error: null });
     const res = await platformBlockUser(TARGET, "a valid reason");
-    expect(res).toMatchObject({ ok: false, outcome: "rejected" });
+    expect(res).toMatchObject({ ok: false, status: "invalidTransition" });
     expect(signOut).not.toHaveBeenCalled();
   });
 });
@@ -267,6 +287,24 @@ describe("the actor and correlation id come from the server", () => {
     expect(args.p_user_id).toBe(TARGET);
   });
 
+  it("sends only the deployed named parameters for all four restriction RPCs", async () => {
+    await suspendUser(TARGET, "a valid reason", future());
+    await unsuspendUser(TARGET, "a valid reason");
+    await platformBlockUser(TARGET, "a valid reason");
+    await unblockUser(TARGET, "a valid reason");
+
+    const calls = rpc.mock.calls.map(([name, args]) => [name, Object.keys(args as Record<string, unknown>).sort()]);
+    expect(calls).toEqual([
+      ["admin_tx_restriction_suspend", ["p_actor_email", "p_actor_id", "p_correlation_id", "p_reason", "p_suspended_until", "p_user_id"]],
+      ["admin_tx_restriction_unsuspend", ["p_actor_email", "p_actor_id", "p_correlation_id", "p_reason", "p_user_id"]],
+      ["admin_tx_restriction_block", ["p_actor_email", "p_actor_id", "p_correlation_id", "p_reason", "p_user_id"]],
+      ["admin_tx_restriction_unblock", ["p_actor_email", "p_actor_id", "p_correlation_id", "p_reason", "p_user_id"]],
+    ]);
+    const suspendArgs = rpc.mock.calls[0]![1] as Record<string, unknown>;
+    expect(suspendArgs.p_suspended_until).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(suspendArgs).not.toHaveProperty("suspendedUntil");
+  });
+
   it("uses ONE correlation id across the database and Auth legs", async () => {
     const res = await platformBlockUser(TARGET, "a valid reason");
     const dbArgs = rpc.mock.calls[0]![1] as Record<string, unknown>;
@@ -283,5 +321,60 @@ describe("the actor and correlation id come from the server", () => {
       .map((c) => c.eventType ?? "success");
     expect(types[0]).toBe("attempt");
     expect(types).toContain("success");
+  });
+});
+
+describe("handled failure and reconciliation contracts", () => {
+  beforeEach(() => {
+    portalOn();
+    writesOn();
+    goodSession();
+  });
+
+  it("categorizes the production-shaped PostgREST named-argument failure and logs its correlation id", async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: "PGRST202", message: "Could not find function with supplied parameters including suspendedUntil" },
+    });
+    const res = await suspendUser(TARGET, "a valid reason", null);
+    expect(res).toMatchObject({ ok: false, status: "databaseFailure", restrictionCommitted: false });
+    const failure = restrictionLogs.find((entry) => entry.stage === "restriction_rpc" && entry.success === false);
+    expect(failure).toMatchObject({ correlationId: res.correlationId, diagnostic: { code: "PGRST202" } });
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("returns auditFailure when revocation cannot record its attempt after a committed restriction", async () => {
+    failedAuditEventType = "attempt";
+    const res = await platformBlockUser(TARGET, "a valid reason");
+    expect(res).toMatchObject({ ok: true, status: "auditFailure", restrictionCommitted: true, sessionRevocationAttempted: false });
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("returns reconciliationRequired when Auth succeeds but its outcome cannot persist", async () => {
+    failedAuditEventType = "success";
+    const res = await platformBlockUser(TARGET, "a valid reason");
+    expect(res).toMatchObject({
+      ok: true,
+      status: "reconciliationRequired",
+      restrictionCommitted: true,
+      sessionsRevoked: true,
+      reconciliationRequired: true,
+    });
+    expect(signOut).toHaveBeenCalledWith(TARGET, "global");
+  });
+
+  it("creates reconciliation when Auth fails and its failure outcome cannot persist", async () => {
+    failedAuditEventType = "failure";
+    signOut.mockResolvedValue({ error: { message: "auth response lost" } });
+    const res = await platformBlockUser(TARGET, "a valid reason");
+    expect(res).toMatchObject({
+      ok: true,
+      status: "reconciliationRequired",
+      restrictionCommitted: true,
+      sessionRevocationAttempted: true,
+      sessionsRevoked: false,
+      reconciliationRequired: true,
+    });
+    expect(auditCalls.some((c) => c.eventType === "reconciliation_required")).toBe(true);
   });
 });

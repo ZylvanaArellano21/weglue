@@ -154,26 +154,39 @@ export function RestrictionControls({ userId, targetSummary, accessState, writes
     setPending(true);
     setResult(null);
     try {
-      const iso = until ? new Date(until).toISOString() : null;
+      // `datetime-local` deliberately has no timezone. Convert it in the
+      // browser, where the founder selected it, so the instant is preserved;
+      // the Server Action independently validates and normalizes this value
+      // before the RPC is ever reached. Leave malformed text for the server's
+      // safe validation contract instead of throwing in the client.
+      const localExpiry = until ? new Date(until) : null;
+      const expiryInput =
+        localExpiry && !Number.isNaN(localExpiry.getTime()) ? localExpiry.toISOString() : until || null;
       const res =
         kind === "suspend"
-          ? await suspendUser(userId, trimmed, iso)
+          ? await suspendUser(userId, trimmed, expiryInput)
           : kind === "unsuspend"
           ? await unsuspendUser(userId, trimmed)
           : kind === "block"
           ? await platformBlockUser(userId, trimmed)
           : kind === "unblock"
           ? await unblockUser(userId, trimmed)
-          : await adjustSuspensionExpiry(userId, trimmed, iso);
+          : await adjustSuspensionExpiry(userId, trimmed, expiryInput);
       setResult(res);
       if (res.ok) router.refresh();
-    } catch (e) {
+    } catch {
+      // Server Actions return their own correlation id and safe category. This
+      // is only a transport/serialization fallback, so never surface an error
+      // object's raw message to the browser.
       setResult({
         ok: false,
-        outcome: "rejected",
-        message: e instanceof Error ? e.message : "Could not complete this action.",
+        status: "notApplied",
+        message: "The action was not applied. Please retry.",
         correlationId: "",
+        restrictionCommitted: false,
+        sessionRevocationAttempted: false,
         sessionsRevoked: false,
+        reconciliationRequired: false,
       });
     } finally {
       setPending(false);
@@ -258,7 +271,7 @@ export function RestrictionControls({ userId, targetSummary, accessState, writes
                 className={`mt-3 rounded-lg px-3 py-2 text-sm ${
                   !result.ok
                     ? "bg-red-50 text-red-700"
-                    : result.outcome === "applied"
+                    : result.status === "applied" || result.status === "appliedSessionsRevoked"
                     ? "bg-green-50 text-green-800"
                     : "bg-amber-50 text-amber-800"
                 }`}
@@ -266,9 +279,9 @@ export function RestrictionControls({ userId, targetSummary, accessState, writes
                 <p className="font-medium">
                   {!result.ok
                     ? "Not applied"
-                    : result.outcome === "applied"
+                    : result.status === "applied" || result.status === "appliedSessionsRevoked"
                     ? "Applied"
-                    : result.outcome === "sessionsFailed"
+                    : result.status === "appliedSessionsFailed"
                     ? "Applied — session revocation failed"
                     : "Applied — reconciliation required"}
                 </p>
