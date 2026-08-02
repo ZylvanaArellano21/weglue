@@ -26,7 +26,7 @@ async function handleUrl(url: string, isOnboarded: boolean, hasSession: boolean)
   // Else: onboarding/login flow runs; index.tsx picks the token up at the end.
 }
 
-export function useInviteDeepLink() {
+export function useInviteDeepLink(accessResolved = true) {
   const session = useAuthStore((s) => s.session);
   // A verified email is the only thing that makes an account usable now — a
   // missing profile picture no longer means "still onboarding".
@@ -36,7 +36,7 @@ export function useInviteDeepLink() {
   // incoming URL — not even a persisted one. Without this, an invite link would
   // push /invite/<token> for an admin session (it has a confirmed email, so it
   // satisfies hasSession) and drag it into the chat surface.
-  const allowDeepLinks = shouldHandleDeepLinkNavigation(session);
+  const allowDeepLinks = accessResolved && shouldHandleDeepLinkNavigation(session);
 
   useEffect(() => {
     if (!allowDeepLinks) return;

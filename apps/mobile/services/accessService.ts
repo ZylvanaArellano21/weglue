@@ -27,7 +27,11 @@ export async function getMyAccessState(): Promise<AccessStatePayload> {
   return {
     state: (row.state ?? 'active') as AccessStatePayload['state'],
     suspended_until: row.suspended_until ?? null,
-    support_email: row.support_email ?? 'info@weglue.app',
+    violation_category: row.violation_category ?? null,
+    public_reason: row.public_reason ?? null,
+    scheduled_deletion_at: row.scheduled_deletion_at ?? null,
+    appeal_deadline: row.appeal_deadline ?? null,
+    support_email: row.support_email ?? 'zylvana.arellano.campos@gmail.com',
   };
 }
 

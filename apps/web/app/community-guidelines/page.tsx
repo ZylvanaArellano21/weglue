@@ -67,11 +67,12 @@ const sections = [
   {
     heading: "If we restrict an account",
     body: [
-      "When someone breaks these guidelines, we may restrict their access to We Glue. A restriction can be temporary (with or without an end date) or last until we lift it. It is our decision about the platform, and it is separate from anyone blocking anyone.",
+      "When someone breaks these guidelines, we may restrict their access to We Glue. A restriction can be temporary (with or without an end date), last until we lift it, or accompany a scheduled account deletion. It is our decision about the platform, and it is separate from anyone blocking anyone.",
     ],
     bullets: [
       "A restricted account keeps its content. Posts, messages, clubs, events and media are not deleted just because access was restricted — restriction is not deletion.",
-      "The person is shown a plain notice, not our internal reasoning. If you think a decision about your account is wrong, email us and we will look at it.",
+      "The affected person is shown a violation category and a specific plain-language reason. Internal notes, reporter identities and private evidence stay private. If you think a decision about your account is wrong, email zylvana.arellano.campos@gmail.com with your We Glue username and we will look at it.",
+      "Administrator deletion normally allows seven days to appeal. We may use immediate deletion for urgent safety, legal, fraud, or institutional situations.",
       "You can always delete your account, including while restricted. That option never goes away.",
       "Restrictions do not change who you or anyone else has blocked. Those are your choices and they stay yours.",
     ],

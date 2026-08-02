@@ -19,6 +19,7 @@ import {
   DELETE_CONFIRMATION_WORD,
 } from '../../lib/deletionConfirmation';
 import { resetToWelcome } from '../../lib/sessionCleanup';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
@@ -82,6 +83,7 @@ export default function DeleteAccountScreen() {
       // teardown (session, caches, push token, sidebar state) has already run
       // inside it.
       await executeDeletion(confirmText);
+      await AsyncStorage.setItem('weglue-account-deletion-success', '1');
       // Welcome becomes the only screen in the stack — no Back path, no iOS
       // swipe-back and no Android Back into anything authenticated.
       resetToWelcome(router);

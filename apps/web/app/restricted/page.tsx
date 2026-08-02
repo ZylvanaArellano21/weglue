@@ -32,8 +32,12 @@ export default async function RestrictedPage(): Promise<JSX.Element> {
 
   const { data } = await supabase.rpc("my_access_state");
   const payload = (data ?? {}) as {
-    state?: "active" | "suspended" | "restricted";
+    state?: "active" | "suspended" | "restricted" | "deletion_pending";
     suspended_until?: string | null;
+    violation_category?: string | null;
+    public_reason?: string | null;
+    scheduled_deletion_at?: string | null;
+    appeal_deadline?: string | null;
     support_email?: string | null;
   };
 
@@ -41,9 +45,12 @@ export default async function RestrictedPage(): Promise<JSX.Element> {
   // too; the duplicate check makes a direct visit behave correctly as well.
   if (!payload.state || payload.state === "active") redirect("/home");
 
-  const support = payload.support_email || "info@weglue.app";
+  const support = payload.support_email || "zylvana.arellano.campos@gmail.com";
   const until = payload.suspended_until ? new Date(payload.suspended_until) : null;
   const suspended = payload.state === "suspended";
+  const deletionPending = payload.state === "deletion_pending";
+  const deletionDate = payload.scheduled_deletion_at ? new Date(payload.scheduled_deletion_at) : null;
+  const appealDate = payload.appeal_deadline ? new Date(payload.appeal_deadline) : null;
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#FEFCF0] px-4 py-12">
@@ -53,7 +60,9 @@ export default async function RestrictedPage(): Promise<JSX.Element> {
         </div>
 
         <h1 className="mt-5 text-lg font-semibold text-gray-900">
-          {suspended
+          {deletionPending
+            ? `Your We Glue account is scheduled for permanent deletion on ${deletionDate && !Number.isNaN(deletionDate.getTime()) ? deletionDate.toLocaleDateString() : "the scheduled date"}.`
+            : suspended
             ? "Your We Glue access is temporarily suspended."
             : "Your access to We Glue has been restricted."}
         </h1>
@@ -63,6 +72,13 @@ export default async function RestrictedPage(): Promise<JSX.Element> {
           posts, messages, clubs and events — are still here and have not been
           deleted.
         </p>
+
+        <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left">
+          <p className="text-[11px] uppercase tracking-wide text-gray-400">Violation</p>
+          <p className="mt-0.5 text-sm font-semibold text-gray-900">{payload.violation_category || "Community Guidelines violation"}</p>
+          <p className="mt-3 text-[11px] uppercase tracking-wide text-gray-400">Reason</p>
+          <p className="mt-0.5 text-sm leading-6 text-gray-700">{payload.public_reason || "Your account was suspended because activity associated with it violated the We Glue Community Guidelines. Contact support for more information."}</p>
+        </div>
 
         {until && !Number.isNaN(until.getTime()) && (
           <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
@@ -74,13 +90,16 @@ export default async function RestrictedPage(): Promise<JSX.Element> {
             </p>
           </div>
         )}
+        {deletionPending && appealDate && !Number.isNaN(appealDate.getTime()) && (
+          <p className="mt-3 text-sm text-gray-600">Appeal deadline: <strong>{appealDate.toLocaleString()}</strong></p>
+        )}
 
         <p className="mt-5 text-sm text-gray-600">
-          If you think this is a mistake, contact us at{" "}
+          If you believe this action was made in error, contact{" "}
           <a href={`mailto:${support}`} className="font-medium text-[#0FA6A6] hover:underline">
             {support}
           </a>
-          .
+          {" "}and include your We Glue username.
         </p>
 
         <div className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs">

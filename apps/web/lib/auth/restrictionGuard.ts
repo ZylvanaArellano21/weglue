@@ -64,7 +64,7 @@ export function isRestrictionExemptPath(pathname: string): boolean {
  * accepted here so the same pure function serves middleware and any
  * server-side caller that has the privileged value.
  */
-export type ServerAccessState = "active" | "suspended" | "restricted" | "platform_blocked";
+export type ServerAccessState = "active" | "suspended" | "restricted" | "platform_blocked" | "deletion_pending";
 
 /**
  * The student-web decision for one request.

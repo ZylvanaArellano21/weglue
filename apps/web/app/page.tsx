@@ -133,13 +133,18 @@ const FEATURES = [
   },
 ];
 
-export default function LandingPage(): JSX.Element | null {
+export default function LandingPage({ searchParams }: { searchParams?: { deleted?: string } }): JSX.Element | null {
   return (
     <div className="min-h-screen bg-[#FEFCF0]">
       <NavBar />
 
       {/* Hero */}
       <section className="max-w-5xl mx-auto px-6 pt-16 pb-8 text-center">
+        {searchParams?.deleted === "1" && (
+          <p role="status" className="mx-auto mb-5 max-w-md rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+            Your account has been successfully deleted.
+          </p>
+        )}
         <h1
           className="text-4xl md:text-5xl font-bold text-black leading-tight mb-2"
           style={{ fontFamily: "var(--font-zain)" }}

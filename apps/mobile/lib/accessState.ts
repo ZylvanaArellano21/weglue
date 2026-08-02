@@ -24,13 +24,17 @@ export interface AccessStatePayload {
    * that the internal classification was `platform_blocked`, so the UI cannot
    * leak how severe the enforcement was.
    */
-  state: 'active' | 'suspended' | 'restricted';
+  state: 'active' | 'suspended' | 'restricted' | 'deletion_pending';
   /** Present only for a time-limited suspension. */
   suspended_until: string | null;
+  violation_category?: string | null;
+  public_reason?: string | null;
+  scheduled_deletion_at?: string | null;
+  appeal_deadline?: string | null;
   support_email: string;
 }
 
-export type AccessRoute = 'student' | 'suspended' | 'restricted';
+export type AccessRoute = 'student' | 'suspended' | 'restricted' | 'deletion_pending';
 
 /**
  * What the root layout should render for a resolved access state.
@@ -47,11 +51,12 @@ export function resolveAccessRoute(
   if (!payload) return 'student';
   if (payload.state === 'suspended') return 'suspended';
   if (payload.state === 'restricted') return 'restricted';
+  if (payload.state === 'deletion_pending') return 'deletion_pending';
   return 'student';
 }
 
 export function isRestrictedRoute(route: AccessRoute): boolean {
-  return route === 'suspended' || route === 'restricted';
+  return route === 'suspended' || route === 'restricted' || route === 'deletion_pending';
 }
 
 /**
@@ -65,6 +70,7 @@ export function restrictionCopy(payload: AccessStatePayload | null): {
   title: string;
   body: string;
   until: string | null;
+  scheduledDeletionAt: string | null;
 } {
   const until = payload?.suspended_until ?? null;
   if (payload?.state === 'suspended') {
@@ -73,15 +79,21 @@ export function restrictionCopy(payload: AccessStatePayload | null): {
       body:
         'You can’t use We Glue right now. Your account and everything in it — your posts, ' +
         'messages, clubs and events — are still here and have not been deleted.',
-      until,
+      until, scheduledDeletionAt: null,
     };
   }
+  if (payload?.state === 'deletion_pending') return {
+    title: 'Your We Glue account is scheduled for permanent deletion.',
+    body: 'Your account is blocked from normal We Glue use while this deletion is pending.',
+    until: null,
+    scheduledDeletionAt: payload.scheduled_deletion_at ?? null,
+  };
   return {
     title: 'Your access to We Glue has been restricted.',
     body:
       'You can’t use We Glue right now. Your account and everything in it — your posts, ' +
       'messages, clubs and events — are still here and have not been deleted.',
-    until: null,
+    until: null, scheduledDeletionAt: null,
   };
 }
 

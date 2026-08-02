@@ -45,7 +45,7 @@ import { deleteOwnAccount } from '../../services/accountService';
 //
 // There is no Platform.OS branch here. iOS and Android run the same code.
 
-const SUPPORT_FALLBACK = 'info@weglue.app';
+const SUPPORT_FALLBACK = 'zylvana.arellano.campos@gmail.com';
 const LEGAL = {
   privacy: 'https://weglue.app/privacy-policy',
   terms: 'https://weglue.app/terms',
@@ -68,6 +68,8 @@ export function RestrictedAccountShell({
   const [deleting, setDeleting] = useState(false);
   const copy = restrictionCopy(payload);
   const until = formatSuspensionEnd(copy.until);
+  const deletionDate = formatSuspensionEnd(copy.scheduledDeletionAt);
+  const appealDate = formatSuspensionEnd(payload?.appeal_deadline ?? null);
   const support = payload?.support_email || SUPPORT_FALLBACK;
 
   async function handleSignOut() {
@@ -114,19 +116,33 @@ export function RestrictedAccountShell({
         <Text style={styles.title}>{copy.title}</Text>
         <Text style={styles.body}>{copy.body}</Text>
 
+        <View style={styles.reasonBox}>
+          <Text style={styles.reasonLabel}>Violation</Text>
+          <Text style={styles.reasonValue}>{payload?.violation_category ?? 'Community Guidelines violation'}</Text>
+          <Text style={[styles.reasonLabel, styles.reasonTop]}>Reason</Text>
+          <Text style={styles.reasonValue}>{payload?.public_reason ?? 'Your account was suspended because activity associated with it violated the We Glue Community Guidelines. Contact support for more information.'}</Text>
+        </View>
+
         {until && (
           <View style={styles.untilBox}>
             <Text style={styles.untilLabel}>Access returns on</Text>
             <Text style={styles.untilValue}>{until}</Text>
           </View>
         )}
+        {deletionDate && (
+          <View style={styles.untilBox}>
+            <Text style={styles.untilLabel}>Permanent deletion date</Text>
+            <Text style={styles.untilValue}>{deletionDate}</Text>
+            {appealDate && <Text style={styles.appeal}>Appeal deadline: {appealDate}</Text>}
+          </View>
+        )}
 
         <Text style={styles.contact}>
-          If you think this is a mistake, contact us at{' '}
+          If you believe this action was made in error, contact{' '}
           <Text style={styles.link} onPress={() => Linking.openURL(`mailto:${support}`)}>
             {support}
           </Text>
-          .
+          {' '}and include your We Glue username.
         </Text>
 
         <View style={styles.links}>
@@ -252,6 +268,11 @@ const styles = StyleSheet.create({
   },
   untilLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9CA3AF' },
   untilValue: { marginTop: 4, fontSize: 15, fontWeight: '600', color: '#111827' },
+  reasonBox: { marginTop: 18, padding: 14, borderRadius: 12, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D1D5DB' },
+  reasonLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: '#6B7280', fontWeight: '700' },
+  reasonTop: { marginTop: 10 },
+  reasonValue: { marginTop: 3, fontSize: 14, lineHeight: 20, color: '#111827' },
+  appeal: { marginTop: 8, fontSize: 12, color: '#6B7280' },
   contact: {
     marginTop: 20,
     fontSize: 13,

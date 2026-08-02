@@ -34,6 +34,7 @@ function LoginContent(): JSX.Element {
   const showVerifiedBanner = searchParams.get("verified") === "1";
   // Landing here after a completed permanent deletion.
   const showDeletedBanner = searchParams.get("deleted") === "1";
+  const showSignedOutBanner = searchParams.get("signed_out") === "1";
 
   const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");
@@ -153,6 +154,7 @@ function LoginContent(): JSX.Element {
         <p className="text-[19px] text-[#5F5D5D] mt-1 mb-6">
           Sign in to your We Glue account
         </p>
+        {showSignedOutBanner && <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">You have been signed out.</p>}
 
         <div className="bg-[#FFFEF7] shadow-[0px_18px_60px_rgba(0,0,0,0.25)] px-6 py-7">
           <form onSubmit={handleLogin} className="flex flex-col" noValidate>
