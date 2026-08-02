@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { todayInAppTz } from "../datetime";
+import { addDaysToDateString, todayInAppTz } from "../datetime";
 import { followUser, unfollowUser } from "./useNotifications";
 import type { GridPost } from "./useOwnProfile";
 
@@ -133,6 +133,8 @@ export interface UserWeeklyEvent {
   start_time: string;
   end_time: string;
   location: string | null;
+  building: string | null;
+  room: string | null;
   club: { id: string; name: string };
 }
 
@@ -141,7 +143,12 @@ export function useUserWeeklyEvents(targetUserId: string | undefined, enabled: b
     queryKey: ["userWeeklyEvents", targetUserId],
     queryFn: async (): Promise<UserWeeklyEvent[]> => {
       const supabase = getSupabaseBrowser();
+      // "This week" is the SAME window mobile uses (getOwnThisWeekEvents):
+      // today through today+7 in America/Chicago, `status = 'going'` only.
+      // Without the upper bound this list showed every future RSVP forever,
+      // which is not what "Weekly Events" means on either platform.
       const today = todayInAppTz();
+      const sevenOut = addDaysToDateString(today, 7);
       const { data: rsvps } = await supabase
         .from("event_rsvps")
         .select("event_id")
@@ -151,10 +158,12 @@ export function useUserWeeklyEvents(targetUserId: string | undefined, enabled: b
       const ids = (rsvps as any[]).map((r) => r.event_id);
       const { data } = await supabase
         .from("events")
-        .select("id, title, emoji, cover_image_url, event_date, start_time, end_time, location, clubs!inner(id, name)")
+        .select("id, title, emoji, cover_image_url, event_date, start_time, end_time, location, building, room, clubs!inner(id, name)")
         .in("id", ids)
         .gte("event_date", today)
+        .lte("event_date", sevenOut)
         .order("event_date", { ascending: true })
+        .order("start_time", { ascending: true })
         .limit(20);
       return ((data ?? []) as any[]).map((e) => ({
         id: e.id,
@@ -165,6 +174,8 @@ export function useUserWeeklyEvents(targetUserId: string | undefined, enabled: b
         start_time: e.start_time,
         end_time: e.end_time,
         location: e.location,
+        building: e.building ?? null,
+        room: e.room ?? null,
         club: { id: e.clubs.id, name: e.clubs.name },
       }));
     },

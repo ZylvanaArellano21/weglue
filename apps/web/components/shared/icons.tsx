@@ -134,6 +134,53 @@ export function ChatBubbleOutlineIcon(p: IconProps): JSX.Element {
   );
 }
 
+// Ionicons `settings-outline` — the Account Center row in the mobile sidebar.
+export function SettingsIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
+  );
+}
+
+// Ionicons `shield-outline` — the Privacy Center row in the mobile sidebar.
+export function ShieldIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.4-7.5 9.5-4.3-1.1-7.5-4.9-7.5-9.5V6L12 3Z" />
+    </svg>
+  );
+}
+
+// Ionicons `camera-outline` — the Camera option in the profile-picture editor.
+export function CameraIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M4 8h3l1.5-2.2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
+      <circle cx="12" cy="13.2" r="3.4" />
+    </svg>
+  );
+}
+
+export function ChevronRightIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+/** Circled ✕ — clears / removes the current profile picture in the editor. */
+export function CloseCircleIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9 9l6 6M15 9l-6 6" />
+    </svg>
+  );
+}
+
 // Ionicons `star-outline` equivalent — mobile marks the officer/admin chat with a
 // star; the web Officer Chat pill overlays this on the chat bubble.
 export function StarOutlineIcon(p: IconProps): JSX.Element {
