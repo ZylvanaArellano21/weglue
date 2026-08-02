@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { todayInAppTz, addDaysToDateString } from "../datetime";
 import { bucketCalendarEvents, type CalendarEvent, type CalendarSection } from "./useCalendar";
+import { invalidateEventState } from "./eventSync";
 import { uploadAvatar } from "../imageUpload";
 
 // Web port of apps/mobile/services/profileService.ts::getOwnProfile +
@@ -262,6 +263,36 @@ export function useOwnPosts(userId: string | undefined) {
   });
 }
 
+// ─── Weekly Events — remove the going RSVP ───────────────────────────────────
+//
+// Port of apps/mobile/services/profileService.ts::removeEventRsvp + the
+// useRemoveEventRsvp hook. Mobile reaches it by swiping a weekly-event row and
+// confirming ("If you delete this, your attendance will be removed as well.");
+// web uses an explicit Remove button with the same confirmation, because there
+// is no swipe gesture on a desktop pointer.
+//
+// It deletes the RSVP row itself — the same row an RSVP made anywhere else in
+// the app writes — so the event leaves Weekly Events, the calendar and the
+// home feed's "going" state together, with no separate profile-only bookkeeping.
+
+export function useRemoveEventRsvp(userId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (eventId: string) => {
+      const { error } = await getSupabaseBrowser()
+        .from("event_rsvps")
+        .delete()
+        .eq("user_id", userId!)
+        .eq("event_id", eventId);
+      if (error) throw error;
+    },
+    // The SAME cross-surface refresh every other RSVP path uses, so removing an
+    // event here updates Home, the calendar, Saved Events and any open event
+    // overlay exactly as un-RSVPing from those screens does.
+    onSuccess: () => invalidateEventState(queryClient, userId),
+  });
+}
+
 // ─── Edit Profile mutations ──────────────────────────────────────────────────
 
 export function useUpdateDisplayName(userId: string | undefined) {
@@ -287,7 +318,9 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
       avatarType,
     }: {
       avatarUrl: string | null;
-      avatarType: "photo" | "text" | null;
+      // Same union as apps/mobile/services/profileService.ts::updateProfileAvatar,
+      // so `avatar_type` written from the web is a value mobile already reads.
+      avatarType: "photo" | "camera" | "text" | null;
     }) => {
       const supabase = getSupabaseBrowser();
       const { error } = await supabase
@@ -303,13 +336,24 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
   });
 }
 
-/** Uploads a chosen photo to Storage then persists it as the avatar. */
+/**
+ * Uploads a chosen photo (file pick or camera capture) to Storage, then
+ * persists it as the avatar. Same bucket, same path and same fixed-path
+ * replacement as mobile — the previous object is overwritten, so nothing is
+ * orphaned and no separate cleanup pass is needed.
+ */
 export function useUploadAvatar(userId: string | undefined) {
   const updateAvatar = useUpdateProfileAvatar(userId);
   return useMutation({
-    mutationFn: async (file: File) => {
-      const url = await uploadAvatar(userId!, file);
-      await updateAvatar.mutateAsync({ avatarUrl: url, avatarType: "photo" });
+    mutationFn: async ({
+      blob,
+      source,
+    }: {
+      blob: Blob;
+      source: "photo" | "camera";
+    }) => {
+      const url = await uploadAvatar(userId!, blob);
+      await updateAvatar.mutateAsync({ avatarUrl: url, avatarType: source });
       return url;
     },
   });

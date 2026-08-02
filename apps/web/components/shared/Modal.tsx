@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CloseIcon } from "./icons";
 
 // Accessible dialog: dims + locks the background, closes on Escape, backdrop
@@ -25,24 +26,58 @@ export function Modal({
 }): JSX.Element {
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
+  // Rendered into <body> rather than in place. An ancestor with `filter`,
+  // `backdrop-filter` or `transform` becomes the containing block for fixed
+  // descendants — the sticky app header uses backdrop-blur, so a modal opened
+  // from the header dropdown would otherwise be sized to the 64px header
+  // instead of the viewport. `mounted` keeps SSR and the first client render
+  // identical (no hydration mismatch).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
+  // Latest-callback ref so the key handler registers once but always calls the
+  // current callbacks.
+  const latest = useRef({ onClose, onPrev, onNext });
+  latest.current = { onClose, onPrev, onNext };
+
+  // ── Focus + scroll-lock ownership: mount and unmount ONLY ──────────────────
+  // Empty dep list on purpose. Callers pass inline arrows for onClose/onPrev/
+  // onNext, so depending on them re-ran this effect on every render, and its
+  // cleanup restores focus to the opener — which pulled focus straight back out
+  // of the dialog after it had been moved in. The dialog then looked open but
+  // held no focus, so Tab walked the page behind it.
   useEffect(() => {
     openerRef.current = document.activeElement;
     const { overflow } = document.body.style;
     document.body.style.overflow = "hidden";
 
+    // Synchronous, not requestAnimationFrame: rAF is paused entirely in a
+    // background or unfocused window, which left the dialog holding no focus.
+    const focusFirst = () =>
+      panelRef.current?.querySelector<HTMLElement>("button,[href],input,[tabindex]")?.focus();
+    focusFirst();
+    const t = window.setTimeout(focusFirst, 0);
+
+    return () => {
+      window.clearTimeout(t);
+      document.body.style.overflow = overflow;
+      (openerRef.current as HTMLElement | null)?.focus?.();
+    };
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        latest.current.onClose();
         return;
       }
-      if (e.key === "ArrowLeft" && onPrev) {
-        onPrev();
+      if (e.key === "ArrowLeft" && latest.current.onPrev) {
+        latest.current.onPrev();
         return;
       }
-      if (e.key === "ArrowRight" && onNext) {
-        onNext();
+      if (e.key === "ArrowRight" && latest.current.onNext) {
+        latest.current.onNext();
         return;
       }
       if (e.key === "Tab" && panelRef.current) {
@@ -62,20 +97,12 @@ export function Modal({
       }
     };
     document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, []);
 
-    // Move focus into the dialog.
-    requestAnimationFrame(() => {
-      panelRef.current?.querySelector<HTMLElement>("button,[href],input,[tabindex]")?.focus();
-    });
+  if (!mounted) return <></>;
 
-    return () => {
-      document.body.style.overflow = overflow;
-      document.removeEventListener("keydown", onKey, true);
-      (openerRef.current as HTMLElement | null)?.focus?.();
-    };
-  }, [onClose, onPrev, onNext]);
-
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8"
       onMouseDown={(e) => {
@@ -133,7 +160,8 @@ export function Modal({
           <ChevronGlyph dir="right" />
         </button>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
 

@@ -37,7 +37,21 @@ const AUTH_FLOW_ROUTES = [
 ];
 
 // Routes that require a signed-in session.
-const PROTECTED_PREFIXES = ["/dashboard", "/home", "/onboarding/explore-clubs"];
+//
+// The profile surfaces are here as defense in depth: each page already calls
+// getUser() and redirects, but bouncing at the edge means a signed-out request
+// (including a restored history entry after logout) never renders an
+// authenticated shell at all, even for a frame.
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/home",
+  "/onboarding/explore-clubs",
+  "/profile",
+  "/u/",
+  // Trailing slash on purpose: "/account-restricted" must NOT match.
+  "/account/",
+  "/settings/",
+];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

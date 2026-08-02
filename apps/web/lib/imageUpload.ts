@@ -7,7 +7,9 @@ import { getSupabaseBrowser } from "./supabase-browser";
 // Storage bucket + path convention mobile uses, and cache-busts the fixed-path
 // URL so the new avatar shows immediately everywhere (React Query keys by URL).
 
-export async function resizeToJpeg(file: File, maxDimension: number): Promise<Blob> {
+// Accepts a Blob, not just a File, so a camera capture (canvas.toBlob) goes
+// through the exact same downscale + upload path as a picked file.
+export async function resizeToJpeg(file: Blob, maxDimension: number): Promise<Blob> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -42,8 +44,15 @@ export async function resizeToJpeg(file: File, maxDimension: number): Promise<Bl
   });
 }
 
-/** Uploads to bucket `avatars` at `${userId}/avatar.jpg` (same as mobile). */
-export async function uploadAvatar(userId: string, file: File): Promise<string> {
+/**
+ * Uploads to bucket `avatars` at `${userId}/avatar.jpg` (same as mobile).
+ *
+ * The fixed path + `upsert` is what makes replacement self-cleaning: a new
+ * picture overwrites the old object rather than accumulating orphans, so there
+ * is no separate deletion step to get wrong. The `?v=` cache-buster is what
+ * makes the change visible immediately behind the CDN.
+ */
+export async function uploadAvatar(userId: string, file: Blob): Promise<string> {
   const supabase = getSupabaseBrowser();
   const blob = await resizeToJpeg(file, 800);
   const path = `${userId}/avatar.jpg`;

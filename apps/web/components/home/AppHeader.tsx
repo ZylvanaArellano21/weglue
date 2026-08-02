@@ -4,17 +4,22 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Avatar } from "../shared/Avatar";
 import { CountBadge } from "../shared/CountBadge";
 import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon } from "../shared/icons";
+import { ProfileMenu } from "../profile/ProfileMenu";
 import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
-import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 
 // Fixed top navigation (matches the web Home + Club screenshots): logo, the
 // global search, then Home / Clubs / Messages icons + the user's avatar. Badges
 // use the SAME shared counts as mobile — Home = unread notifications,
 // Messages = unread threads. Mobile has no club-activity badge, so the Clubs
 // icon shows none.
+//
+// The avatar is NOT a link to the profile: clicking it toggles the profile
+// dropdown (ProfileMenu), which is the desktop stand-in for the mobile sidebar
+// drawer. The profile page is reached from inside the dropdown. This is the
+// only avatar with that behaviour — the large one on the profile page opens the
+// picture editor instead.
 //
 // GLOBAL SEARCH BEHAVIOR (spec §3):
 //  • On Home the search is ALWAYS expanded (a full field, even empty/unfocused).
@@ -26,7 +31,6 @@ import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const pathname = usePathname();
   const { data: summary } = useUnreadSummaryValue(userId);
-  const { data: profile } = useOwnProfile(userId);
 
   const isHome = pathname === "/home" || pathname === "/dashboard";
   const notifications = summary?.unread_notifications ?? 0;
@@ -113,9 +117,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
             <ChatIcon size={26} filled={isMessages} />
           </NavIcon>
 
-          <Link href="/profile" aria-label="Your profile" className="ml-1 shrink-0">
-            <Avatar uri={profile?.avatar_url} size={38} name={profile?.full_name ?? profile?.username} />
-          </Link>
+          <ProfileMenu userId={userId} />
         </nav>
       </div>
     </header>

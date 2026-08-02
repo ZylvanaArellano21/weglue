@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
-import { ProfileLayout } from "./ProfileLayout";
+import { ProfileLayout, type ProfileTab } from "./ProfileLayout";
 import { PageOverlays } from "../shared/PageOverlays";
 import { ToastProvider, useToast } from "../shared/Toast";
 import {
@@ -37,8 +37,10 @@ export function UserProfileClient({
     <ToastProvider>
       <div className="min-h-screen bg-cream">
         <AppHeader userId={viewerUserId} />
-        <Body targetUserId={targetUserId} viewerUserId={viewerUserId} />
+        {/* One boundary for the whole body: it reads useSearchParams for the
+            selected tab, and PageOverlays reads it for the post/event params. */}
         <Suspense fallback={null}>
+          <Body targetUserId={targetUserId} viewerUserId={viewerUserId} />
           <PageOverlays userId={viewerUserId} />
         </Suspense>
       </div>
@@ -48,6 +50,7 @@ export function UserProfileClient({
 
 function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUserId: string }): JSX.Element {
   const router = useRouter();
+  const params = useSearchParams();
   const show = useToast();
   const { data: profile, isLoading } = useUserProfile(targetUserId, viewerUserId);
   const { data: iBlockedThem } = useDidIBlock(viewerUserId, targetUserId);
@@ -71,9 +74,25 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
       event_date: e.event_date,
       start_time: e.start_time,
       end_time: e.end_time,
+      location: e.location,
+      building: e.building,
+      room: e.room,
       club: e.club,
     })),
     [weekly]
+  );
+
+  const tab: ProfileTab = params.get("tab") === "weekly_events" ? "weekly_events" : "posts";
+
+  // Keep every existing param when navigating, so opening a post from the
+  // Weekly Events tab and pressing Back returns to Weekly Events.
+  const withParam = useCallback(
+    (key: string, value: string) => {
+      const sp = new URLSearchParams(params.toString());
+      sp.set(key, value);
+      return `/u/${targetUserId}?${sp.toString()}`;
+    },
+    [params, targetUserId]
   );
 
   if (isLoading) {
@@ -159,9 +178,6 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
     });
   };
 
-  const setParam = (key: string, val: string) =>
-    router.push(`/u/${targetUserId}?${key}=${val}`, { scroll: false });
-
   return (
     <ProfileLayout
       avatarUrl={profile.avatar_url}
@@ -177,8 +193,16 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
       hideInterests={profile.hide_interests}
       hideEvents={profile.hide_events}
       locked={locked}
-      onOpenPost={(id) => setParam("post", id)}
-      onOpenEvent={(id) => setParam("event", id)}
+      tab={tab}
+      onTabChange={(next) =>
+        router.replace(withParam("tab", next), { scroll: false })
+      }
+      // Gluemates and Clubs lists are the OWNER's own lists on mobile — there is
+      // no equivalent sheet on someone else's profile, so the counts stay
+      // non-interactive here rather than inventing a destination.
+      onOpenClub={(clubId) => router.push(`/club/${clubId}`)}
+      onOpenPost={(id) => router.push(withParam("post", id), { scroll: false })}
+      onOpenEvent={(id) => router.push(withParam("event", id), { scroll: false })}
       action={
         <div className="flex w-full items-center gap-2">
           <button
