@@ -43,16 +43,37 @@ import { adminAudit, newCorrelationId } from "./audit";
 import { assertAuditReason, type AuditAction } from "./auditSanitize";
 
 export type CrossServiceOutcome<T> =
-  | { ok: true; data: T; correlationId: string }
-  | { ok: false; error: string; correlationId: string; reconciliationRequired: boolean };
+  | { ok: true; data: T; correlationId: string; attempted: true; succeeded: true }
+  | {
+      ok: false;
+      error: string;
+      correlationId: string;
+      reconciliationRequired: boolean;
+      attempted: boolean;
+      succeeded: boolean | null;
+      failure: "audit" | "external";
+      diagnostic?: { code: string | null; sqlState: string | null; message: string | null };
+    };
 
 export interface CrossServiceOptions<T> {
   action: AuditAction;
   actor: User;
   reason?: string | null;
   target: Record<string, unknown>;
+  /** Reuse the parent mutation correlation id for every cross-service leg. */
+  correlationId?: string;
   /** The external side-effect. Anything it throws is treated as a failure. */
   perform: () => Promise<T>;
+}
+
+function diagnosticFromError(error: unknown) {
+  const candidate = error as { code?: unknown; message?: unknown } | null;
+  const code = typeof candidate?.code === "string" ? candidate.code : null;
+  return {
+    code,
+    sqlState: code && /^[0-9A-Z]{5}$/i.test(code) ? code : null,
+    message: typeof candidate?.message === "string" ? candidate.message : null,
+  };
 }
 
 /**
@@ -62,7 +83,7 @@ export interface CrossServiceOptions<T> {
 export async function runCrossServiceOperation<T>(
   opts: CrossServiceOptions<T>
 ): Promise<CrossServiceOutcome<T>> {
-  const correlationId = newCorrelationId();
+  const correlationId = opts.correlationId ?? newCorrelationId();
   const reason = opts.reason ?? null;
 
   // Reason first: a destructive cross-service action must not even record an
@@ -84,6 +105,9 @@ export async function runCrossServiceOperation<T>(
       error: "A reason is required for this action.",
       correlationId,
       reconciliationRequired: false,
+      attempted: false,
+      succeeded: null,
+      failure: "audit",
     };
   }
 
@@ -106,6 +130,9 @@ export async function runCrossServiceOperation<T>(
       error: "Could not record this action for audit, so it was not performed.",
       correlationId,
       reconciliationRequired: false,
+      attempted: false,
+      succeeded: null,
+      failure: "audit",
     };
   }
 
@@ -114,7 +141,7 @@ export async function runCrossServiceOperation<T>(
   try {
     result = await opts.perform();
   } catch (e) {
-    await adminAudit({
+    const failureOutcome = await adminAudit({
       action: opts.action,
       actorId: opts.actor.id,
       actorEmail: opts.actor.email,
@@ -124,11 +151,41 @@ export async function runCrossServiceOperation<T>(
       correlationId,
       eventType: "failure",
     });
+    // The external effect may be ambiguous when its client throws. Preserve the
+    // attempt row and create the same durable reconciliation signal used for a
+    // missing success outcome; never describe this as a fully recorded failure.
+    if (!failureOutcome.persisted) {
+      await adminAudit({
+        action: opts.action,
+        actorId: opts.actor.id,
+        actorEmail: opts.actor.email,
+        target: opts.target,
+        ok: false,
+        error: "outcome_not_recorded",
+        correlationId,
+        eventType: "reconciliation_required",
+      });
+      return {
+        ok: false,
+        error:
+          "This action may have been performed, but its failure outcome could not be recorded. It has been flagged for reconciliation.",
+        correlationId,
+        reconciliationRequired: true,
+        attempted: true,
+        succeeded: null,
+        failure: "audit",
+        diagnostic: diagnosticFromError(e),
+      };
+    }
     return {
       ok: false,
       error: "Could not complete this action.",
       correlationId,
       reconciliationRequired: false,
+      attempted: true,
+      succeeded: false,
+      failure: "external",
+      diagnostic: diagnosticFromError(e),
     };
   }
 
@@ -163,8 +220,11 @@ export async function runCrossServiceOperation<T>(
         "This action was performed, but its outcome could not be recorded. It has been flagged for reconciliation.",
       correlationId,
       reconciliationRequired: true,
+      attempted: true,
+      succeeded: true,
+      failure: "audit",
     };
   }
 
-  return { ok: true, data: result, correlationId };
+  return { ok: true, data: result, correlationId, attempted: true, succeeded: true };
 }

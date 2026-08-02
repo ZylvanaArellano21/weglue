@@ -156,6 +156,23 @@ describe("adminAudit — success/failure semantics", () => {
     expect(line.action).toBe("portal.lock");
     expect(line.persisted).toBe(true);
   });
+
+  it("masks operational identifiers and never emits the administrator email", async () => {
+    await adminAudit({
+      action: "membership.add",
+      actorId: FOUNDER_ID,
+      actorEmail: "founder@weglue.app",
+      target: { userId: TARGET_ID },
+      ok: true,
+    });
+    const line = logged().find((l) => l.tag === "admin_audit");
+    const serialized = JSON.stringify(line);
+    expect(line.actorId).toBe("94387196…");
+    expect(line.targetId).toBe("11111111…");
+    expect(serialized).not.toContain(FOUNDER_ID);
+    expect(serialized).not.toContain(TARGET_ID);
+    expect(serialized).not.toContain("founder@weglue.app");
+  });
 });
 
 describe("adminAudit — correlation ids", () => {

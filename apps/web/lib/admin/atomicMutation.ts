@@ -39,7 +39,31 @@ import { createAdminClient } from "../supabase/admin";
 import { adminAudit, newCorrelationId } from "./audit";
 import { assertAuditReason, type AuditAction } from "./auditSanitize";
 
-export type ActionResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
+export interface AtomicFailureDiagnostic {
+  code: string | null;
+  sqlState: string | null;
+  message: string | null;
+}
+
+export type ActionResult<T = unknown> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      error: string;
+      failure: "validation" | "business" | "database" | "audit";
+      rpcStatus?: string;
+      diagnostic?: AtomicFailureDiagnostic;
+    };
+
+function diagnosticFromError(error: unknown): AtomicFailureDiagnostic {
+  const candidate = error as { code?: unknown; message?: unknown } | null;
+  const code = typeof candidate?.code === "string" ? candidate.code : null;
+  return {
+    code,
+    sqlState: code && /^[0-9A-Z]{5}$/i.test(code) ? code : null,
+    message: typeof candidate?.message === "string" ? candidate.message : null,
+  };
+}
 
 /**
  * Founder-facing wording for every status the 056 functions can return.
@@ -133,7 +157,7 @@ export async function runAtomicMutation<T = unknown>(
   try {
     assertAuditReason(opts.action, reason);
   } catch {
-    await adminAudit({
+    const audit = await adminAudit({
       action: opts.action,
       actorId: opts.actor.id,
       actorEmail: opts.actor.email,
@@ -142,23 +166,35 @@ export async function runAtomicMutation<T = unknown>(
       error: "reason_required",
       correlationId,
     });
-    return { ok: false, error: "A reason is required for this action." };
+    return {
+      ok: false,
+      error: "A reason is required for this action.",
+      failure: audit.persisted ? "validation" : "audit",
+    };
   }
 
-  const admin = createAdminClient();
-  const { data, error } = await admin.rpc(opts.rpc, {
-    p_actor_id: opts.actor.id,
-    p_actor_email: opts.actor.email ?? null,
-    p_reason: reason,
-    p_correlation_id: correlationId,
-    ...opts.args,
-  });
+  let data: unknown;
+  let error: unknown;
+  try {
+    const admin = createAdminClient();
+    const response = await admin.rpc(opts.rpc, {
+      p_actor_id: opts.actor.id,
+      p_actor_email: opts.actor.email ?? null,
+      p_reason: reason,
+      p_correlation_id: correlationId,
+      ...opts.args,
+    });
+    data = response.data;
+    error = response.error;
+  } catch (caught) {
+    error = caught;
+  }
 
   if (error) {
     // The transaction rolled back: nothing mutated, nothing audited. Recording
     // the failure here is safe — there is no committed change for this record
     // to contradict.
-    await adminAudit({
+    const audit = await adminAudit({
       action: opts.action,
       actorId: opts.actor.id,
       actorEmail: opts.actor.email,
@@ -167,14 +203,24 @@ export async function runAtomicMutation<T = unknown>(
       error: "transaction_failed",
       correlationId,
     });
-    return { ok: false, error: "Could not complete this change." };
+    return {
+      ok: false,
+      error: "Could not complete this change.",
+      failure: audit.persisted ? "database" : "audit",
+      diagnostic: diagnosticFromError(error),
+    };
   }
 
-  const result = (data ?? {}) as { status?: string; after?: unknown };
+  const result = (Array.isArray(data) ? data[0] : data ?? {}) as { status?: string; after?: unknown };
   if (result.status !== "ok") {
     // The RPC already committed a durable failure record inside its own
     // transaction — do NOT write a second one here.
-    return { ok: false, error: messageFor(result.status ?? "unknown") };
+    return {
+      ok: false,
+      error: messageFor(result.status ?? "unknown"),
+      failure: "business",
+      rpcStatus: result.status ?? "unknown",
+    };
   }
 
   return { ok: true, data: (result.after ?? result) as T };

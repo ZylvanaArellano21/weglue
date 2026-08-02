@@ -18,23 +18,32 @@ export const MIN_REASON = 3;
 export const MAX_REASON = 500;
 
 /**
- * The four outcomes a restriction action can report, kept distinct because the
- * founder must be able to tell them apart:
+ * The result is deliberately structured. The browser receives an honest safe
+ * category, while operational details remain only in the correlated server log.
  *
- *   applied         restriction committed, sessions revoked
- *   sessionsFailed  committed, revocation FAILED. Access is still denied by the
- *                   database — degraded, not unsafe. The old access token
- *                   simply expires on its own against a database refusing it.
- *   reconcile       committed and revoked, but the outcome could not be
- *                   recorded; flagged for reconciliation.
- *   rejected        nothing changed.
+ * `ok` means the restriction transition committed. It can therefore be true
+ * for a post-commit session-revocation or audit-reconciliation warning.
  */
-export type RestrictionOutcome = "applied" | "sessionsFailed" | "reconcile" | "rejected";
+export type RestrictionStatus =
+  | "applied"
+  | "appliedSessionsRevoked"
+  | "appliedSessionsFailed"
+  | "stepupRequired"
+  | "writesDisabled"
+  | "invalidTarget"
+  | "invalidTransition"
+  | "databaseFailure"
+  | "auditFailure"
+  | "reconciliationRequired"
+  | "notApplied";
 
 export interface RestrictionResult {
   ok: boolean;
-  outcome: RestrictionOutcome;
+  status: RestrictionStatus;
   message: string;
   correlationId: string;
+  restrictionCommitted: boolean;
+  sessionRevocationAttempted: boolean;
   sessionsRevoked: boolean;
+  reconciliationRequired: boolean;
 }
