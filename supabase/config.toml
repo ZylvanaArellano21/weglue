@@ -461,3 +461,9 @@ enabled = true
 # gateway's JWT check must be off.
 [functions.send-push]
 verify_jwt = false
+
+# The account-deletion worker is invoked only by pg_cron/pg_net with a
+# per-project Vault-backed secret header. It has no user JWT to present, and
+# verifies ACCOUNT_DELETION_WORKER_SECRET before it can claim any work.
+[functions.process-account-deletion-jobs]
+verify_jwt = false
