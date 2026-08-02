@@ -148,10 +148,24 @@ invisible to. Test 7 asserts **zero** `event_updated` notifications across an ev
 | Blocked when | lifecycle ≠ active, **or an open report exists** | never (removal is always available from active) |
 | Audit | none (it is the student's own content) | durable, append-only, correlated |
 
-## 12. Comment tombstone — flagged deviation from the brief
+## 12. Comment rendering — APPROVED FOUNDER DECISION (2026-08-02)
 
-The brief asked for a neutral in-place tombstone, *"This comment was removed."* **This build hides
-the row instead**, and the architecture doc §6.3 records the full reasoning. Short version:
+**Resolved.** The founder has approved hiding removed comments from student lists instead of
+displaying a tombstone, on the ground that Production comments are currently flat and no child-thread
+structure depends on the removed row. This is no longer an open deviation.
+
+The full approved-behaviour table — each required behaviour mapped to the exact enforcement point and
+the test that proves it — is in `day10c-architecture.md` §6.3. All ten student-facing reads of
+`post_comments` are direct PostgREST queries through the one RLS policy, so list, count and direct
+lookup are all covered by a single enforcement point. Comment **search** and **profile comment
+activity** are covered vacuously — those surfaces do not exist in either client — and the
+architecture doc records the standing requirement that if either is ever built it must read through
+RLS and not through a `SECURITY DEFINER` function.
+
+**Reconsideration trigger recorded:** if threaded/nested comments ship, this decision must be
+revisited; the tombstone then becomes correct and is a rendering change only.
+
+The reasoning that supported the approval:
 
 1. `post_comments` is **flat** — no `parent_comment_id` exists in production. A hidden comment is
    indistinguishable from one the author deleted a moment earlier, which is what students already
@@ -163,8 +177,7 @@ the row instead**, and the architecture doc §6.3 records the full reasoning. Sh
    moving comment reads onto an RPC — a hot-path rewrite affecting counts in five call sites — to
    buy a placeholder.
 
-The tombstone remains the committed design for the day threading ships; the state model already
-carries everything it needs. **This needs your decision, and is listed as non-blocking finding N1.**
+**Founder decision recorded 2026-08-02: approved.** Finding N1 is closed.
 
 ## 13. Report / evidence boundary (no Day 10D was built)
 
@@ -320,8 +333,9 @@ approve, the mobile changes need one `eas update --branch production` to reach i
 
 ## 23. NON-BLOCKING FINDINGS
 
-**N1 — Comment tombstone deviation** (§12). Needs your decision. Current behaviour is the more
-private one and matches what students already see.
+**N1 — Comment rendering — CLOSED.** Approved by the founder 2026-08-02 (§12). Recorded in
+`day10c-architecture.md` §6.3 as a settled decision with an explicit reconsideration trigger for
+threaded comments. No further action.
 
 **N2 — One-bit enumeration residual, accepted deliberately.** `content_is_student_visible(type, id)`
 is callable by any authenticated student for any id they can guess. It returns one boolean for one

@@ -423,10 +423,13 @@ allowing replies "to" a removed comment invites students to answer content they 
 Today this is inert (`post_comments` is flat, §1.1), so Option B costs nothing now and is already
 decided later.
 
-**Rendering: the row is hidden, not tombstoned — a deliberate deviation from the brief.**
-The Day 10C brief asked for a neutral in-place tombstone (*"This comment was removed."*). That is
-the right rendering for a **threaded** comment system, where a silent hole breaks the conversation.
-It is the wrong one here, for three reasons:
+**Rendering: the row is hidden, not tombstoned — APPROVED BY THE FOUNDER 2026-08-02.**
+The Day 10C brief originally asked for a neutral in-place tombstone (*"This comment was removed."*).
+That is the right rendering for a **threaded** comment system, where a silent hole breaks the
+conversation. The founder has reviewed the analysis below and **approved hiding removed comments
+from student lists instead**, on the stated ground that Production comments are currently flat and
+no child-thread structure depends on the removed row. This is a settled decision, not an open
+deviation. It was approved for these reasons:
 
 1. `post_comments` is **flat** (§1.1). A hidden comment is indistinguishable from one the author
    deleted a second earlier — which is exactly what students already see today. A tombstone would
@@ -441,8 +444,34 @@ It is the wrong one here, for three reasons:
 
 So removal is expressed exactly as it is for posts and events: the row stops being returned, and
 the comment count (a `count(*)` through the same RLS) stays consistent with it automatically.
-The tombstone stays the committed design for the day threading ships; the state model already
-carries everything it needs. **This is a flagged, founder-visible deviation, not a silent one.**
+
+**The approved behaviour, and where each part is enforced.** All ten student-facing reads of
+`post_comments` across both clients are direct PostgREST table queries, so every one of them passes
+through the single RLS SELECT policy that carries the lifecycle predicate:
+
+| Required behaviour | Enforced by | Status |
+|---|---|---|
+| Removed body inaccessible to students | RLS SELECT predicate on `post_comments` | ✅ test 2.6 |
+| Gone from comment lists | `postService.ts:128`, `usePostActions.ts:20` — same policy | ✅ |
+| Gone from comment counts | `postService.ts:210/294/395`, `useHomePostsFeed.ts:102/193` — RLS-filtered `count(*)`, so counts self-consistently exclude it | ✅ |
+| Gone from search | **no comment search surface exists** in either client | ✅ vacuously |
+| Gone from profile activity | **no comment activity surface exists** in either client | ✅ vacuously |
+| Gone from direct student lookup | `postService.ts:479/500` — same policy | ✅ test 2.6 |
+| Notifications + direct links resolve to the generic unavailable state | notification rows are kept; the comments route resolves its parent and renders `CONTENT_UNAVAILABLE` | ✅ |
+| Administrators retain access until purge | `content_lifecycle` + admin detail pages; nothing is deleted on remove | ✅ |
+| Restore returns the original body, timestamp and ordering | the entity row is never touched, so `created_at` and ORDER BY position are unchanged by construction | ✅ tests 4.11–4.12 |
+| Restore replays no notification | no INSERT occurs, so no AFTER INSERT trigger can fire; measured against a baseline | ✅ test 4.10 |
+| Purge irreversibly removes the payload | `content_purge_finalize` clears `content` then deletes the row | ✅ test 6 |
+
+The two "vacuously" rows are stated as such deliberately: those surfaces do not exist today, so
+nothing enforces the rule there beyond their absence. **If a comment search or a profile comment
+activity feed is ever built, it must read `post_comments` through RLS and not through a
+`SECURITY DEFINER` function, or it will reintroduce exactly the bypass this design closes.**
+
+**Reconsideration trigger.** If threaded or nested comments are introduced, this decision must be
+revisited: a hidden row in a thread leaves a hole where a reply's parent used to be, and the
+tombstone becomes the correct rendering. The state model already carries everything a tombstone
+would need, so that change is a rendering change, not a re-architecture.
 
 Restore requires the parent post to exist **and be `active`** — restore fails when the parent is
 removed, purge-pending, purged or gone.
