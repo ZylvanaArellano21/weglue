@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
   Image,
   TextInput,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   ActivityIndicator,
   Linking,
   StyleSheet,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,17 +21,23 @@ import { useAuthStore } from '@weglue/shared';
 import { useOwnProfile, useUpdateProfileAvatar } from '../../hooks/useOwnProfile';
 import { uploadImageToBucket } from '../../lib/imageUpload';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
-import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
+import { Avatar, parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
 import { useToast } from '../../components/Toast';
+import {
+  PRESET_AVATARS,
+  parsePresetAvatarId,
+  presetAvatarValue,
+  type PresetAvatarId,
+} from '@weglue/shared';
 
-const PRESET_COLORS = ['#0FA6A6', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
 const TEXT_MAX = 4;
 
 export default function EditProfilePicScreen() {
   const { session } = useAuthStore();
   const userId = session?.user.id;
   const router = useRouter();
+  const { height: windowHeight } = useWindowDimensions();
 
   const { data: profile } = useOwnProfile(userId);
   const updateAvatar = useUpdateProfileAvatar(userId);
@@ -38,13 +45,15 @@ export default function EditProfilePicScreen() {
 
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [pendingUriType, setPendingUriType] = useState<'photo' | 'camera' | null>(null);
-  const [previewPreset, setPreviewPreset] = useState<string | null>(null);
+  const [previewPreset, setPreviewPreset] = useState<PresetAvatarId | null>(null);
   const [textInput, setTextInput] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
   const [photoDenied, setPhotoDenied] = useState(false);
   const [saved, setSaved] = useState(false);
+  const saveInFlight = useRef(false);
 
+  const existingPresetId = parsePresetAvatarId(profile?.avatar_url);
   const existingPreset = parsePresetColor(profile?.avatar_url);
   const existingText = parseTextAvatar(profile?.avatar_url);
 
@@ -126,8 +135,8 @@ export default function EditProfilePicScreen() {
     }
   };
 
-  const onSelectPreset = (colorHex: string) => {
-    setPreviewPreset(colorHex);
+  const onSelectPreset = (id: PresetAvatarId) => {
+    setPreviewPreset(id);
     setPreviewUri(null);
     setPendingUriType(null);
     setTextInput('');
@@ -145,13 +154,14 @@ export default function EditProfilePicScreen() {
   };
 
   const onSave = async () => {
-    if (!userId || !hasPendingChange) return;
+    if (!userId || !hasPendingChange || updateAvatar.isPending || saveInFlight.current) return;
+    saveInFlight.current = true;
     try {
       if (previewUri && pendingUriType) {
         const publicUrl = await uploadImageToBucket('avatars', `${userId}/avatar.jpg`, previewUri, 800);
         await updateAvatar.mutateAsync({ avatarUrl: publicUrl, avatarType: pendingUriType });
       } else if (previewPreset) {
-        await updateAvatar.mutateAsync({ avatarUrl: `preset:${previewPreset}`, avatarType: 'text' });
+        await updateAvatar.mutateAsync({ avatarUrl: presetAvatarValue(previewPreset), avatarType: 'preset' });
       } else if (showTextInput && textInput.trim()) {
         await updateAvatar.mutateAsync({ avatarUrl: `text:${textInput.trim()}`, avatarType: 'text' });
       }
@@ -159,41 +169,55 @@ export default function EditProfilePicScreen() {
       show('Profile picture updated!', 'success');
     } catch {
       Alert.alert('Save failed', 'Could not save your profile picture. Please try again.');
+    } finally {
+      saveInFlight.current = false;
     }
   };
 
-  const displayPreset = previewPreset ?? existingPreset;
   const displayText = showTextInput || textInput ? textInput : existingText;
+  const displayAvatarValue = previewPreset
+    ? presetAvatarValue(previewPreset)
+    : existingPresetId
+      ? presetAvatarValue(existingPresetId)
+      : displayText
+        ? `text:${displayText}`
+        : existingPreset
+          ? `preset:${existingPreset}`
+          : null;
   const displayUri = previewUri ?? (
-    profile?.avatar_url && !displayPreset && !displayText ? profile.avatar_url : null
+    profile?.avatar_url && !displayAvatarValue ? profile.avatar_url : null
   );
+  // Three 52px rows on normal phones. The grid is the only vertically
+  // scrollable region and shrinks before the fixed preview/controls/save button
+  // can be pushed behind a small device's safe area or keyboard.
+  const presetGridHeight = Math.max(112, Math.min(204, windowHeight - 520));
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {ToastComponent}
       <ProfileScreenHeader title="Profile Picture" onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <View style={styles.content}>
         <Text style={styles.heading}>Update your photo</Text>
         <Text style={styles.subheading}>
-          Choose a photo, initials, or a preset color for your avatar.
+          Choose a photo, initials, or a We Glue avatar.
         </Text>
 
         <View style={styles.avatarWrap}>
           <View
             style={[
               styles.avatarCircle,
-              (displayText || displayPreset) && {
-                backgroundColor: displayPreset ?? profileColors.teal,
+              displayAvatarValue && {
+                backgroundColor: displayText || existingPreset ? existingPreset ?? profileColors.teal : undefined,
                 borderStyle: 'solid',
-                borderColor: displayPreset ?? profileColors.teal,
+                borderColor: profileColors.teal,
               },
             ]}
           >
             {displayUri ? (
               <Image source={{ uri: displayUri }} style={styles.avatarImage} />
-            ) : displayText ? (
-              <Text style={styles.textPreview}>{displayText}</Text>
+            ) : displayAvatarValue ? (
+              <Avatar uri={displayAvatarValue} size={120} username={profile?.username} />
             ) : null}
           </View>
         </View>
@@ -247,17 +271,38 @@ export default function EditProfilePicScreen() {
           </View>
         )}
 
-        <Text style={styles.presetLabel}>Or choose a preset color</Text>
-        <View style={styles.presetGrid}>
-          {PRESET_COLORS.map((color) => (
-            <TouchableOpacity
-              key={color}
-              onPress={() => onSelectPreset(color)}
-              style={[styles.presetSwatch, { backgroundColor: color }]}
-              activeOpacity={0.8}
-            />
-          ))}
-        </View>
+        <Text style={styles.presetLabel}>Or choose a <Text style={styles.presetLabelStrong}>We Glue</Text> avatar</Text>
+        <FlatList
+          data={PRESET_AVATARS}
+          keyExtractor={(avatar) => avatar.id}
+          numColumns={4}
+          style={[styles.presetList, { height: presetGridHeight }]}
+          contentContainerStyle={styles.presetListContent}
+          columnWrapperStyle={styles.presetRow}
+          showsVerticalScrollIndicator
+          persistentScrollbar
+          nestedScrollEnabled
+          renderItem={({ item }) => {
+            const selected = displayAvatarValue === presetAvatarValue(item.id);
+            return (
+              <TouchableOpacity
+                onPress={() => onSelectPreset(item.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Select ${item.label}`}
+                accessibilityState={{ selected }}
+                style={[styles.presetOption, selected && styles.presetOptionSelected]}
+                activeOpacity={0.8}
+              >
+                <Avatar uri={presetAvatarValue(item.id)} size={52} username={profile?.username} />
+                {selected && (
+                  <View pointerEvents="none" style={styles.presetCheck}>
+                    <Ionicons name="checkmark" size={14} color={profileColors.white} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          }}
+        />
 
         {hasPendingChange && (
           <TouchableOpacity
@@ -281,15 +326,14 @@ export default function EditProfilePicScreen() {
           </View>
         )}
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: profileColors.bg },
-  scroll: { paddingHorizontal: 24, paddingTop: 8, alignItems: 'center' },
+  content: { flex: 1, paddingHorizontal: 24, paddingTop: 8, alignItems: 'center' },
   heading: {
     fontFamily: profileFonts.displayBold,
     fontSize: 22,
@@ -397,17 +441,45 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 14,
   },
-  presetGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-    justifyContent: 'center',
-    maxWidth: 280,
+  presetLabelStrong: { fontFamily: profileFonts.bold, fontStyle: 'italic' },
+  presetList: {
+    width: 276,
+    maxWidth: '100%',
+    marginBottom: 16,
+    flexGrow: 0,
+    borderRadius: 12,
+    backgroundColor: 'rgba(15,166,166,0.04)',
   },
-  presetSwatch: {
+  presetListContent: { paddingVertical: 6, paddingHorizontal: 8 },
+  presetRow: { justifyContent: 'space-between', marginBottom: 12 },
+  presetOption: {
+    position: 'relative',
     width: 52,
     height: 52,
     borderRadius: 26,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  presetOptionSelected: {
+    borderColor: profileColors.teal,
+    shadowColor: profileColors.teal,
+    shadowOpacity: 0.32,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  presetCheck: {
+    position: 'absolute',
+    right: -3,
+    bottom: -3,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: profileColors.teal,
+    borderWidth: 2,
+    borderColor: profileColors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   savingRow: {
     flexDirection: 'row',

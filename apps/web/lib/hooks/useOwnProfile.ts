@@ -320,7 +320,7 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
       avatarUrl: string | null;
       // Same union as apps/mobile/services/profileService.ts::updateProfileAvatar,
       // so `avatar_type` written from the web is a value mobile already reads.
-      avatarType: "photo" | "camera" | "text" | null;
+      avatarType: "photo" | "camera" | "text" | "preset" | null;
     }) => {
       const supabase = getSupabaseBrowser();
       const { error } = await supabase

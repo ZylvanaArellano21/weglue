@@ -124,8 +124,16 @@ export function ProfileLayout({
             <button
               type="button"
               onClick={onEditPicture}
+              aria-label="Edit your profile picture"
+              className="absolute inset-0 z-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
+            />
+          )}
+          {onEditPicture && (
+            <button
+              type="button"
+              onClick={onEditPicture}
               aria-label="Change your profile picture"
-              className="absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-cream bg-cream text-teal shadow-sm transition-colors hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
+              className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 border-cream bg-cream text-teal shadow-sm transition-colors hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
             >
               <PlusIcon size={18} strokeWidth={2.4} />
             </button>

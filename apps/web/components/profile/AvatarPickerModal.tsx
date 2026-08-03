@@ -7,6 +7,12 @@ import { Avatar, parsePresetColor, parseTextAvatar } from "../shared/Avatar";
 import { CameraIcon, CloseCircleIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { useUpdateProfileAvatar, useUploadAvatar } from "../../lib/hooks/useOwnProfile";
+import {
+  PRESET_AVATARS,
+  parsePresetAvatarId,
+  presetAvatarValue,
+  type PresetAvatarId,
+} from "@weglue/shared";
 
 // ─── Profile-picture editor (web) ────────────────────────────────────────────
 //
@@ -17,18 +23,11 @@ import { useUpdateProfileAvatar, useUploadAvatar } from "../../lib/hooks/useOwnP
 //   Camera → an image captured now      → uploaded, avatar_type 'camera'
 //   Photo  → an image file from disk    → uploaded, avatar_type 'photo'
 //   Text   → up to 4 uppercase initials → `text:ZA`,          avatar_type 'text'
-//   We Glue avatar → one of the six canonical preset colors → `preset:#0FA6A6`
-//
-// The illustrated character avatars in the web reference do NOT exist in the
-// product or the backend — mobile's "We Glue avatar" set IS these six colors,
-// and Avatar.tsx on both platforms only knows how to render `preset:<color>`.
-// A second illustrated asset system would render as a broken avatar on every
-// phone, so the canonical presets are used.
+//   We Glue avatar → bundled stable preset       → `preset:avatar_01`
 //
 // Nothing is written until Save. Camera permission is requested ONLY when the
 // student actually chooses Camera.
 
-const PRESET_COLORS = ["#0FA6A6", "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7"];
 const TEXT_MAX = 4;
 
 /** Formats the browser accepts and the canvas downscaler can decode. */
@@ -49,7 +48,7 @@ const MIN_DIMENSION = 64;
 type Pending =
   | { kind: "none" }
   | { kind: "image"; blob: Blob; previewUrl: string; source: "photo" | "camera" }
-  | { kind: "preset"; color: string }
+  | { kind: "preset"; id: PresetAvatarId }
   | { kind: "text"; value: string }
   | { kind: "remove" };
 
@@ -100,10 +99,11 @@ export function AvatarPickerModal({
     []
   );
 
+  const existingPresetId = parsePresetAvatarId(currentAvatarUrl);
   const existingPreset = parsePresetColor(currentAvatarUrl);
   const existingText = parseTextAvatar(currentAvatarUrl);
   const existingImage =
-    currentAvatarUrl && !existingPreset && !existingText ? currentAvatarUrl : null;
+    currentAvatarUrl && !existingPresetId && !existingPreset && !existingText ? currentAvatarUrl : null;
   const hasExistingAvatar = !!currentAvatarUrl;
 
   const onFile = async (file: File | undefined) => {
@@ -145,8 +145,8 @@ export function AvatarPickerModal({
         await upload.mutateAsync({ blob: pending.blob, source: pending.source });
       } else if (pending.kind === "preset") {
         await updateAvatar.mutateAsync({
-          avatarUrl: `preset:${pending.color}`,
-          avatarType: "text",
+          avatarUrl: presetAvatarValue(pending.id),
+          avatarType: "preset",
         });
       } else if (pending.kind === "text") {
         await updateAvatar.mutateAsync({
@@ -171,7 +171,7 @@ export function AvatarPickerModal({
   /** What the preview circle shows right now: the pending choice, else current. */
   const preview: { image?: string; avatarUri?: string } = (() => {
     if (pending.kind === "image") return { image: pending.previewUrl };
-    if (pending.kind === "preset") return { avatarUri: `preset:${pending.color}` };
+    if (pending.kind === "preset") return { avatarUri: presetAvatarValue(pending.id) };
     if (pending.kind === "text") return { avatarUri: `text:${pending.value}` };
     if (pending.kind === "remove") return {};
     if (textOpen && textDraft) return { avatarUri: `text:${textDraft}` };
@@ -201,7 +201,7 @@ export function AvatarPickerModal({
 
   return (
     <Modal onClose={onClose} labelledBy="avatar-picker-title" maxWidth={440}>
-      <div className="p-5 sm:p-6">
+      <div className="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-5 sm:p-6">
         <h2 id="avatar-picker-title" className="mb-5 text-center text-[17px] font-bold text-gray-900">
           {username}, you can personalize your picture
         </h2>
@@ -314,31 +314,45 @@ export function AvatarPickerModal({
         <p className="mb-3 text-center text-sm font-medium text-gray-700">
           Or choose a <span className="font-bold italic">We Glue</span> avatar
         </p>
-        <div className="mb-5 flex flex-wrap justify-center gap-3">
-          {PRESET_COLORS.map((color) => {
-            const selected = pending.kind === "preset" && pending.color === color;
+        <div
+          className="mb-5 h-[clamp(112px,calc(100vh-480px),204px)] min-h-[112px] overflow-y-auto pr-1 [scrollbar-color:rgba(15,166,166,0.45)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-teal/45 [&::-webkit-scrollbar]:w-1.5"
+          aria-label="We Glue avatar choices"
+        >
+          <div className="grid grid-cols-5 justify-items-center gap-3">
+          {PRESET_AVATARS.map((avatar) => {
+            const selected = pending.kind === "preset" && pending.id === avatar.id;
             return (
               <button
-                key={color}
+                key={avatar.id}
                 type="button"
                 disabled={busy}
-                aria-label={`We Glue avatar, color ${color}`}
+                aria-label={`Select ${avatar.label}`}
                 aria-pressed={selected}
                 onClick={() => {
-                  setPending({ kind: "preset", color });
+                  setPending({ kind: "preset", id: avatar.id });
                   setTextOpen(false);
                   setTextDraft("");
                   setError(null);
                 }}
-                className="h-12 w-12 rounded-full transition-transform disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+                className="relative h-12 w-12 rounded-full transition-transform hover:scale-105 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
                 style={{
-                  background: color,
-                  outline: selected ? "3px solid rgba(15,166,166,0.55)" : undefined,
+                  outline: selected ? "3px solid rgba(15,166,166,0.75)" : undefined,
                   outlineOffset: selected ? 2 : undefined,
                 }}
-              />
+              >
+                <Avatar uri={presetAvatarValue(avatar.id)} size={48} name={username} />
+                {selected && (
+                  <span
+                    aria-hidden
+                    className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-cream bg-teal text-xs font-bold leading-none text-white"
+                  >
+                    ✓
+                  </span>
+                )}
+              </button>
             );
           })}
+          </div>
         </div>
 
         {error && (
