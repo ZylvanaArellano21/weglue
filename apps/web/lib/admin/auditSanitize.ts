@@ -91,6 +91,18 @@ export const AUDIT_ACTIONS = {
   "restriction.unblock":        { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId"] },
   "restriction.adjustExpiry":   { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId", "suspendedUntil"] },
   "restriction.revokeSessions": { targetType: "user", targetIdKey: "userId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["userId", "scope"] },
+
+  // Day 10C lifecycle mutations. Metadata deliberately stays structural: no
+  // post caption, comment body, event title, description, location, or media.
+  "post.creatorDelete":    { targetType: "post",    targetIdKey: "postId",    sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["postId", "entityType", "entityId"] },
+  "comment.creatorDelete": { targetType: "comment", targetIdKey: "commentId", sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["commentId", "entityType", "entityId"] },
+  "event.creatorDelete":   { targetType: "event",   targetIdKey: "eventId",   sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["eventId", "entityType", "entityId"] },
+  "post.remove":    { targetType: "post",    targetIdKey: "postId",    sensitivity: "destructive", requiresReason: true, metadataKeys: ["postId", "entityType", "entityId"] },
+  "post.restore":   { targetType: "post",    targetIdKey: "postId",    sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["postId", "entityType", "entityId"] },
+  "comment.remove": { targetType: "comment", targetIdKey: "commentId", sensitivity: "destructive", requiresReason: true, metadataKeys: ["commentId", "entityType", "entityId"] },
+  "comment.restore":{ targetType: "comment", targetIdKey: "commentId", sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["commentId", "entityType", "entityId"] },
+  "event.remove":   { targetType: "event",   targetIdKey: "eventId",   sensitivity: "destructive", requiresReason: true, metadataKeys: ["eventId", "entityType", "entityId"] },
+  "event.restore":  { targetType: "event",   targetIdKey: "eventId",   sensitivity: "sensitive",   requiresReason: true, metadataKeys: ["eventId", "entityType", "entityId"] },
 } as const satisfies Record<string, AuditActionSpec>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;

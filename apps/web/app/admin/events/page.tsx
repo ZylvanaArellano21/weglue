@@ -6,6 +6,8 @@ import { SectionCard, Badge, EmptyState } from "../../../components/admin/primit
 import { ListControls } from "../../../components/admin/ListControls";
 import { Pagination } from "../../../components/admin/Pagination";
 import { Table, Th, Td, RowLink } from "../../../components/admin/Table";
+import { LifecycleBadge } from "../../../components/admin/ContentLifecycleActions";
+import { getLifecycleRecordsForEntities } from "../../../lib/admin/lifecycleData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -51,6 +53,7 @@ export default async function AdminEventsPage({
     listUniversities(),
     listClubOptions(),
   ]);
+  const lifecycle = await getLifecycleRecordsForEntities("event", result.rows.map((event) => event.id));
 
   return (
     <div className="space-y-5">
@@ -101,6 +104,7 @@ export default async function AdminEventsPage({
               head={
                 <>
                   <Th>Event</Th>
+                  <Th>Lifecycle</Th>
                   <Th>Club</Th>
                   <Th>Creator</Th>
                   <Th>University</Th>
@@ -122,6 +126,13 @@ export default async function AdminEventsPage({
                         <p className="text-xs text-gray-400">{e.is_past ? "Past" : "Upcoming"}</p>
                       </div>
                     </div>
+                  </Td>
+                  <Td>
+                    {lifecycle.available ? (
+                      <LifecycleBadge status={lifecycle.records.get(e.id)?.displayStatus ?? "active"} />
+                    ) : (
+                      <Badge tone="amber">Lifecycle unavailable</Badge>
+                    )}
                   </Td>
                   <Td className="text-gray-600">{e.club_name ?? <span className="text-gray-300">—</span>}</Td>
                   <Td className="text-gray-600">{e.creator_name || `@${e.creator_username}`}</Td>

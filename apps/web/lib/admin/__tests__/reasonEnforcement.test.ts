@@ -166,10 +166,9 @@ const DESTRUCTIVE: Array<{
 ];
 
 describe("the reason-required actions are declared as such", () => {
-  // Day 10B2 added six administrator-restriction actions, and EVERY one of them
-  // requires a reason — including the two "lifting" actions. Undoing an
-  // enforcement decision deserves a recorded justification just as much as
-  // making one, so this list is 15, not 9 destructive + 4 optional.
+  // Day 10C adds six founder lifecycle actions. The three creator-deletion
+  // audit records are system-originated evidence, not founder mutations, so
+  // they intentionally do not request a founder reason.
   it("is exactly this set", () => {
     const required = Object.entries(AUDIT_ACTIONS)
       .filter(([, spec]) => spec.requiresReason)
@@ -194,9 +193,16 @@ describe("the reason-required actions are declared as such", () => {
         "restriction.unblock",
         "restriction.adjustExpiry",
         "restriction.revokeSessions",
+        // Day 10C — content lifecycle
+        "post.remove",
+        "post.restore",
+        "comment.remove",
+        "comment.restore",
+        "event.remove",
+        "event.restore",
       ].sort()
     );
-    expect(required).toHaveLength(15);
+    expect(required).toHaveLength(21);
   });
 
   it("requires a reason for every restriction action, including the lifts", () => {

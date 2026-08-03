@@ -49,6 +49,7 @@ export function ConfirmAction({
   size = "sm",
   requireReason = false,
   targetSummary,
+  reasonLabel = "Reason",
 }: {
   label: ReactNode;
   title: string;
@@ -63,6 +64,8 @@ export function ConfirmAction({
   requireReason?: boolean;
   /** Exactly what is being changed, e.g. "Ann One — Chess Club". */
   targetSummary?: string;
+  /** Use "Internal reason" where the justification must never reach students. */
+  reasonLabel?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -155,7 +158,7 @@ export function ConfirmAction({
             {requireReason ? (
               <div className="mt-3">
                 <label htmlFor="admin-action-reason" className="block text-xs font-medium text-gray-700">
-                  Reason <span className="text-red-500">*</span>
+                  {reasonLabel} <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   id="admin-action-reason"

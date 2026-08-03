@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ADMIN_NAV, findNavItem } from "../nav";
 
 describe("admin navigation", () => {
-  it("marks Day-1 through Day-5 sections as ready (all sections live)", () => {
+  it("marks every shipped section through Day 10C as ready", () => {
     const ready = ADMIN_NAV.filter((i) => i.ready).map((i) => i.href).sort();
     expect(ready).toEqual([
       "/admin",
@@ -10,6 +10,7 @@ describe("admin navigation", () => {
       "/admin/channels",
       "/admin/clubs",
       "/admin/comments",
+      "/admin/content-lifecycle",
       "/admin/conversations",
       "/admin/data-health",
       "/admin/deleted-content",
@@ -30,10 +31,10 @@ describe("admin navigation", () => {
     ]);
   });
 
-  it("every section is ready by the end of Day 5", () => {
+  it("every section is ready by the end of Day 10C", () => {
     for (const item of ADMIN_NAV) {
       expect(item.ready).toBe(true);
-      expect(item.day).toBeLessThanOrEqual(5);
+      expect(item.day).toBeLessThanOrEqual(10);
     }
   });
 
