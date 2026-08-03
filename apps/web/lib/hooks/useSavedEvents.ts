@@ -82,6 +82,26 @@ export interface SavedEventsData {
   past: CalendarEvent[];
 }
 
+/** A small canonical query for the Home sidebar.  It reads saved_events itself
+ * rather than deriving the number from the currently loaded (and paginated)
+ * Saved Events screen. */
+export function useSavedEventsCount(userId: string | undefined) {
+  return useQuery({
+    queryKey: ["savedEventsCount", userId],
+    queryFn: async (): Promise<number> => {
+      const supabase = getSupabaseBrowser();
+      const { count, error } = await supabase
+        .from("saved_events")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId!);
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!userId,
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useSavedEvents(userId: string | undefined) {
   return useQuery({
     queryKey: ["savedEventsUpcoming", userId],
@@ -141,6 +161,13 @@ export function useUnsaveEvent(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (eventId: string) => toggleSaveEvent(userId!, eventId),
+    onMutate: (eventId) => {
+      queryClient.setQueriesData({ queryKey: ["savedEventsCount", userId] }, (count: number | undefined) =>
+        typeof count === "number" ? Math.max(0, count - 1) : count
+      );
+      return { eventId };
+    },
+    onError: () => invalidateEventState(queryClient, userId),
     onSuccess: () => invalidateEventState(queryClient, userId),
   });
 }

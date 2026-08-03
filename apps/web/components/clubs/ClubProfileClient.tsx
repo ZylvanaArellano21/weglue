@@ -15,6 +15,8 @@ import { ClubHomeTab } from "./ClubHomeTab";
 import { ClubCalendarTab } from "./ClubCalendarTab";
 import { ClubOfficersTab } from "./ClubOfficersTab";
 import { ClubMediaTab } from "./ClubMediaTab";
+import { AttendanceListModal } from "../home/AttendanceListModal";
+import { LeaveClubDialog } from "./LeaveClubDialog";
 import { EditClubModal } from "./EditClubModal";
 import { ManageClubModal } from "./ManageClubModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
@@ -75,6 +77,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const [managing, setManaging] = useState(false);
   const [compose, setCompose] = useState<"event" | "post" | null>(null);
   const [editEventId, setEditEventId] = useState<string | null>(null);
+  const [attendanceEventId, setAttendanceEventId] = useState<string | null>(null);
+  const [leaveOpen, setLeaveOpen] = useState(false);
 
   const invalidateClubContent = () => {
     void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
@@ -99,18 +103,18 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
     if (ev) setOverlay({ kind: "event", list: [ev], index: 0 });
   };
 
-  const handleRsvp = (eventId: string) =>
+  const handleRsvp = (eventId: string, previousStatus: "going" | "cant" | null) =>
     rsvp(
-      { userId, eventId, status: "going" },
+      { userId, eventId, status: "going", previousStatus },
       {
         onSuccess: () => show("RSVP updated 🎉"),
         onError: () => show("Failed to RSVP. Try again.", "error"),
       }
     );
 
-  const handleSave = (eventId: string) =>
+  const handleSave = (eventId: string, isSaved: boolean) =>
     toggleSave(
-      { userId, eventId },
+      { userId, eventId, isSaved },
       {
         onSuccess: (saved) => show(saved ? "Event saved!" : "Removed from saved"),
         onError: () => show("Failed to save event.", "error"),
@@ -119,6 +123,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
 
   const handleToggleMembership = () => {
     if (!club) return;
+    if (club.is_member) { setLeaveOpen(true); return; }
     membership.mutate(
       { join: !club.is_member },
       {
@@ -193,9 +198,10 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               past={past}
               onRsvp={handleRsvp}
               onToggleSave={handleSave}
-              onJoinClub={() => handleToggleMembership()}
+              onToggleClub={() => handleToggleMembership()}
               onOpenEvent={openSingleEvent}
               onOpenClub={() => {}}
+              onOpenAttendees={setAttendanceEventId}
               onCreateEvent={club.is_officer ? () => setCompose("event") : undefined}
               onCreatePost={club.is_member ? () => setCompose("post") : undefined}
             />
@@ -243,6 +249,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           userId={userId}
           onClose={() => setOverlay(null)}
           onOpenClub={(cid) => router.push(`/club/${cid}`)}
+          onOpenAttendees={setAttendanceEventId}
           onPrev={overlay.list.length > 1 ? () => setOverlay({ ...overlay, index: (overlay.index - 1 + overlay.list.length) % overlay.list.length }) : undefined}
           onNext={overlay.list.length > 1 ? () => setOverlay({ ...overlay, index: (overlay.index + 1) % overlay.list.length }) : undefined}
           indicator={overlay.list.length > 1 ? `${overlay.index + 1} of ${overlay.list.length}` : undefined}
@@ -253,6 +260,9 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           }}
         />
       )}
+
+      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} onClose={() => setAttendanceEventId(null)} />}
+      {leaveOpen && <LeaveClubDialog clubId={clubId} clubName={club.name} userId={userId} onClose={() => setLeaveOpen(false)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
 
       {overlay?.kind === "media" && (
         <ClubMediaOverlay

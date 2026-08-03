@@ -65,14 +65,9 @@ export default function EditActivitiesScreen() {
     // The celebratory screen shows the count from the batch we just created, so
     // it can never disagree with what Home → Events renders.
     try {
-      const batch = await regenerate.mutateAsync();
-      if (batch && batch.count > 0) {
-        router.replace({
-          pathname: '/profile/match-results',
-          params: { count: String(batch.count) },
-        } as never);
-        return;
-      }
+      const outcome = await regenerate.mutateAsync();
+      router.replace({ pathname: '/profile/match-results', params: outcome.kind === 'matches' ? { count: String(outcome.batch.count), state: 'matches' } : { state: outcome.kind } } as never);
+      return;
     } catch {
       // Recommendations are a bonus — never block saving the survey on them.
     }

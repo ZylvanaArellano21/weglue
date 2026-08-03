@@ -423,6 +423,24 @@ export async function sendMessage(input: {
   if (error) throw error;
 }
 
+/** Sends the same canonical shared_event reference used by the mobile share
+ * sheet.  No event title or internal data is copied into the message. */
+export async function shareEventToConversation(input: {
+  conversationId: string;
+  channelId: string | null;
+  eventId: string;
+  tag?: string;
+}): Promise<void> {
+  const { error } = await getSupabaseBrowser().from("messages").insert({
+    conversation_id: input.conversationId,
+    channel_id: input.channelId,
+    message_type: "shared_event",
+    shared_event_id: input.eventId,
+    client_tag: input.tag ?? clientTag(),
+  });
+  if (error) throw error;
+}
+
 export async function uploadAttachment(conversationId: string, file: File): Promise<{ path: string; name: string; size: number; mime: string; type: "image" | "video" | "file" }> {
   if (file.size > 25 * 1024 * 1024) throw new Error("This file is larger than 25 MB.");
   const type = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";

@@ -2,6 +2,7 @@
 
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
+import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
 
@@ -13,12 +14,14 @@ export function PostModal({
   userId,
   onClose,
   onOpenAuthor,
+  onOpenComments,
   officerActions,
 }: {
   postId: string;
   userId: string;
   onClose: () => void;
   onOpenAuthor: (userId: string) => void;
+  onOpenComments?: (postId: string) => void;
   /** Optional officer moderation controls (Club Media overlay). */
   officerActions?: React.ReactNode;
 }): JSX.Element {
@@ -37,15 +40,16 @@ export function PostModal({
       ) : (
         <div>
           <div className="flex items-center gap-2.5 p-4 pr-10">
-            <button type="button" onClick={() => onOpenAuthor(post.author.id)} className="flex items-center gap-2.5">
+            <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex items-center gap-2.5">
               <Avatar uri={post.author.avatar_url} size={38} name={post.author.username} />
               <span id="post-title" className="text-[15px] font-semibold text-gray-900">
                 {post.author.username}
               </span>
-            </button>
+            </ClickableUserIdentity>
             {post.tagged_clubs.length > 0 && (
-              <span className="truncate text-xs text-gray-400">
-                · {post.tagged_clubs.map((c) => c.name).join(", ")}
+              <span className="flex min-w-0 flex-wrap gap-1 text-xs" style={{ color: "#0FA6A6" }}>
+                <span className="text-gray-400">·</span>
+                {post.tagged_clubs.map((club) => <ClickableClubIdentity key={club.id} clubId={club.id} className="truncate">@{club.name}</ClickableClubIdentity>)}
               </span>
             )}
           </div>
@@ -72,10 +76,10 @@ export function PostModal({
                 <HeartIcon size={22} filled={post.user_has_liked} />
                 <span className="text-sm">{post.likes_count}</span>
               </button>
-              <span className="flex items-center gap-1.5 text-gray-700">
+              <button type="button" onClick={() => onOpenComments?.(post.id)} className="flex items-center gap-1.5 rounded-md text-gray-700 outline-none hover:text-[#0FA6A6] focus-visible:ring-2 focus-visible:ring-[#0FA6A6]">
                 <CommentIcon size={20} />
                 <span className="text-sm">{post.comments_count}</span>
-              </span>
+              </button>
             </div>
             {post.caption && (
               <p className="mt-2 text-sm text-gray-800">

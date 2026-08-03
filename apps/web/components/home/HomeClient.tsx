@@ -12,6 +12,8 @@ import { SavedEventsModal } from "./SavedEventsModal";
 import { NotificationsModal } from "./NotificationsModal";
 import { GluematesModal } from "./GluematesModal";
 import { PostModal } from "./PostModal";
+import { PostCommentsModal } from "./PostCommentsModal";
+import { AttendanceListModal } from "./AttendanceListModal";
 import { ComposePostModal } from "./ComposePostModal";
 import { ComposeEventModal } from "./ComposeEventModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
@@ -47,6 +49,8 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
 
   const eventId = params.get("event");
   const postId = params.get("post");
+  const commentsPostId = params.get("comments");
+  const attendanceEventId = params.get("attendees");
   const savedOpen = params.get("saved") === "1";
   const notifOpen = params.get("notifications") === "1";
   const gluematesOpen = params.get("gluemates") === "1";
@@ -154,6 +158,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
           userId={userId}
           onClose={() => clear("post")}
           onOpenAuthor={(id) => router.push(`/u/${id}`)}
+          onOpenComments={(id) => set("comments", id)}
         />
       )}
       {eventId && (
@@ -163,8 +168,11 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
           userId={userId}
           onClose={() => clear("event")}
           onOpenClub={openClub}
+          onOpenAttendees={(id) => set("attendees", id)}
         />
       )}
+      {commentsPostId && <PostCommentsModal postId={commentsPostId} userId={userId} onClose={() => clear("comments")} />}
+      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} onClose={() => clear("attendees")} />}
     </main>
   );
 }

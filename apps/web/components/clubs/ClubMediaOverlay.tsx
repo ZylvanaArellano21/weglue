@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
+import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
@@ -218,17 +219,15 @@ function PostPanel({
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Poster + Follow (right padding clears the Modal's close X) */}
       <div className="flex items-start gap-2.5 p-4 pr-12">
-        <button type="button" onClick={() => onOpenAuthor(post.author.id)} className="flex min-w-0 items-center gap-2.5 text-left">
+        <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex min-w-0 items-center gap-2.5 text-left">
           <Avatar uri={post.author.avatar_url} size={40} name={post.author.username} />
           <span className="min-w-0">
             <span id="club-media-title" className="block truncate text-[15px] font-semibold text-gray-900">
               {post.author.username}
             </span>
-            {post.tagged_clubs.length > 0 && (
-              <span className="block truncate text-xs text-teal">@{post.tagged_clubs[0]!.name}</span>
-            )}
           </span>
-        </button>
+        </ClickableUserIdentity>
+        {post.tagged_clubs.length > 0 && <ClickableClubIdentity clubId={post.tagged_clubs[0]!.id} className="min-w-0 truncate text-xs text-teal">@{post.tagged_clubs[0]!.name}</ClickableClubIdentity>}
         <div className="flex-1" />
         {!isAuthor && (
           <button
@@ -257,7 +256,7 @@ function PostPanel({
           <HeartIcon size={22} filled={post.user_has_liked} />
           {post.likes_count > 0 && <span className="text-sm text-gray-700">{post.likes_count}</span>}
         </button>
-        <span className="flex items-center gap-1.5 text-teal">
+        <span className="flex items-center gap-1.5 text-teal" aria-label={`${post.comments_count} comments`}>
           <CommentIcon size={20} />
           {post.comments_count > 0 && <span className="text-sm text-gray-700">{post.comments_count}</span>}
         </span>
@@ -327,9 +326,9 @@ function PostPanel({
         <ul className="space-y-2.5">
           {(comments ?? []).map((c) => (
             <li key={c.id} className="flex items-start gap-2">
-              <Avatar uri={c.author.avatar_url} size={28} name={c.author.username} />
+              <ClickableUserIdentity userId={c.author.id} ariaLabel={`Open ${c.author.username}'s profile`}><Avatar uri={c.author.avatar_url} size={28} name={c.author.username} /></ClickableUserIdentity>
               <p className="text-sm text-gray-800">
-                <button type="button" onClick={() => onOpenAuthor(c.author.id)} className="font-semibold">{c.author.username}</button>{" "}
+                <ClickableUserIdentity userId={c.author.id} className="font-semibold">{c.author.username}</ClickableUserIdentity>{" "}
                 {c.content}
               </p>
             </li>

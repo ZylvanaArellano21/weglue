@@ -55,6 +55,22 @@ export function useAddComment() {
       const { error } = await supabase.from("post_comments").insert({ post_id: postId, user_id: userId, content: content.trim() });
       if (error) throw error;
     },
+    onMutate: async ({ postId, userId, content }) => {
+      await qc.cancelQueries({ queryKey: ["postComments", postId] });
+      const own = qc.getQueryData<any>(["ownProfile", userId]);
+      const optimistic: PostComment = {
+        id: `optimistic-${crypto.randomUUID()}`,
+        content: content.trim(),
+        created_at: new Date().toISOString(),
+        author: { id: userId, username: own?.username ?? "you", avatar_url: own?.avatar_url ?? null },
+      };
+      qc.setQueryData<PostComment[]>(["postComments", postId], (current) => [...(current ?? []), optimistic]);
+      const increment = (post: any) => post?.id === postId ? { ...post, comments_count: (post.comments_count ?? 0) + 1 } : post;
+      qc.setQueriesData({ queryKey: ["postDetail", postId] }, increment);
+      qc.setQueriesData({ queryKey: ["homePostsFeed"] }, (feed: any) => feed ? { ...feed, pages: feed.pages.map((page: any[]) => page.map(increment)) } : feed);
+      return { postId };
+    },
+    onError: (_error, { postId }) => invalidatePost(qc, postId),
     onSuccess: (_d, { postId }) => invalidatePost(qc, postId),
   });
 }

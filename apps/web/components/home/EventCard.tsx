@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { Avatar } from "../shared/Avatar";
-import { AvatarStack } from "../shared/AvatarStack";
+import { ClickableClubIdentity } from "../shared/ClickableIdentity";
+import { AttendanceTrigger } from "./AttendanceTrigger";
 import {
   BookmarkIcon,
   CalendarIcon,
@@ -18,11 +19,12 @@ import type { HomeFeedEvent } from "../../lib/hooks/useHomeEventsFeed";
 
 interface EventCardProps {
   event: HomeFeedEvent;
-  onRsvp: (eventId: string) => void;
-  onToggleSave: (eventId: string) => void;
-  onJoinClub: (clubId: string) => void;
+  onRsvp: (eventId: string, previousStatus: "going" | "cant" | null) => void;
+  onToggleSave: (eventId: string, isSaved: boolean) => void;
+  onToggleClub: (clubId: string, clubName: string, isMember: boolean) => void;
   onOpenEvent: (eventId: string) => void;
   onOpenClub: (clubId: string) => void;
+  onOpenAttendees: (eventId: string) => void;
   /** Past events show no active RSVP action (Club Profile Past Events, §15). */
   isPast?: boolean;
 }
@@ -33,9 +35,10 @@ export function EventCard({
   event,
   onRsvp,
   onToggleSave,
-  onJoinClub,
+  onToggleClub,
   onOpenEvent,
   onOpenClub,
+  onOpenAttendees,
   isPast = false,
 }: EventCardProps): JSX.Element {
   const [imageError, setImageError] = useState(false);
@@ -53,11 +56,7 @@ export function EventCard({
     >
       {/* Club row */}
       <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-2">
-        <button
-          type="button"
-          onClick={() => onOpenClub(event.club_id)}
-          className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
-        >
+        <ClickableClubIdentity clubId={event.club_id} ariaLabel={`Open ${event.club.name}`} className="flex flex-1 min-w-0 items-center gap-2.5 text-left">
           <Avatar uri={event.club.logo_url} size={34} name={event.club.name} />
           <span
             className="truncate text-[15px] font-semibold"
@@ -65,15 +64,14 @@ export function EventCard({
           >
             {event.club.name}
           </span>
-        </button>
+        </ClickableClubIdentity>
         <button
           type="button"
-          onClick={() => !event.user_has_joined_club && onJoinClub(event.club_id)}
-          disabled={event.user_has_joined_club}
+          onClick={() => onToggleClub(event.club_id, event.club.name, event.user_has_joined_club)}
           className="rounded-full px-4 py-1 text-[13px] font-semibold transition-colors"
           style={
             event.user_has_joined_club
-              ? { border: "1px solid #D1D5DB", color: "#6B7280", background: "#fff" }
+              ? { border: "1px solid #D1D5DB", color: "#6B7280", background: "#fff", cursor: "pointer" }
               : { background: "#0FA6A6", color: "#fff" }
           }
         >
@@ -121,7 +119,7 @@ export function EventCard({
           </button>
           <button
             type="button"
-            onClick={() => onToggleSave(event.id)}
+            onClick={() => onToggleSave(event.id, event.is_saved)}
             aria-label={event.is_saved ? "Remove from saved" : "Save event"}
             aria-pressed={event.is_saved}
             className="shrink-0 rounded-full p-1.5"
@@ -154,16 +152,7 @@ export function EventCard({
         ) : null}
 
         <div className="mt-3 flex items-center">
-          <button
-            type="button"
-            onClick={() => onOpenEvent(event.id)}
-            className="flex items-center gap-2"
-          >
-            {event.attendee_preview.length > 0 && (
-              <AvatarStack avatars={event.attendee_preview} size={26} overlap={8} />
-            )}
-            <span className="text-xs text-black">{event.attendee_count} going</span>
-          </button>
+          <AttendanceTrigger eventId={event.id} attendees={event.attendee_preview} count={event.attendee_count} onOpen={onOpenAttendees} />
           <div className="flex-1" />
           {isPast ? (
             <span className="rounded-full px-4 py-1.5 text-xs font-semibold" style={{ background: "#F3F4F6", color: "#6B7280" }}>
@@ -172,7 +161,7 @@ export function EventCard({
           ) : (
             <button
               type="button"
-              onClick={() => onRsvp(event.id)}
+              onClick={() => onRsvp(event.id, rsvp)}
               className="rounded-full px-5 py-1.5 text-xs font-semibold transition-colors"
               style={
                 rsvp === "cant"

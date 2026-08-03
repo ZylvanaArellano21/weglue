@@ -2,6 +2,7 @@
 
 import { useCalendarSections, type CalendarEvent } from "../../lib/hooks/useCalendar";
 import { formatEventDate, formatEventTime, formatEventLocation } from "../../lib/datetime";
+import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 
 // Right-column "Upcoming Events!" — the user's going-RSVP events grouped
 // Today / This Week / … (same source as the calendar, so the two always agree).
@@ -55,20 +56,14 @@ export function UpcomingEvents({
 function UpcomingRow({ event, onOpen }: { event: CalendarEvent; onOpen: () => void }): JSX.Element {
   const location = formatEventLocation(event.building, event.room, event.location);
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="flex w-full items-center gap-2 rounded-lg border border-black/5 p-2.5 text-left hover:bg-gray-50"
-      style={{ borderLeft: "3px solid #0FA6A6" }}
-    >
+    <div className="flex w-full items-center gap-2 rounded-lg border border-black/5 p-2.5" style={{ borderLeft: "3px solid #0FA6A6" }}>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-gray-900">
-          {event.emoji ? `${event.emoji} ` : ""}
-          {event.title}
-        </p>
-        <p className="truncate text-xs font-medium" style={{ color: "#0FA6A6" }}>
-          {event.club.name}
-        </p>
+        <button type="button" onClick={onOpen} className="block w-full truncate text-left text-sm font-semibold text-gray-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6] focus-visible:ring-offset-2">
+          {event.emoji ? `${event.emoji} ` : ""}{event.title}
+        </button>
+        <ClickableClubIdentity clubId={event.club.id} className="block truncate text-xs font-medium text-[#0FA6A6]">
+          @{event.club.name}
+        </ClickableClubIdentity>
         <p className="text-xs text-gray-500">
           {formatEventDate(event.event_date)} · {formatEventTime(event.start_time)} -{" "}
           {formatEventTime(event.end_time)}
@@ -78,6 +73,6 @@ function UpcomingRow({ event, onOpen }: { event: CalendarEvent; onOpen: () => vo
       <span aria-hidden className="text-gray-300">
         ›
       </span>
-    </button>
+    </div>
   );
 }

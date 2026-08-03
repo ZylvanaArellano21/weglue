@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { isEventPast } from "../datetime";
-import { invalidateEventState } from "./eventSync";
+import { invalidateEventState, patchCachedEvent } from "./eventSync";
 import type { AttendeePreview } from "./useHomeEventsFeed";
 
 // Web port of apps/mobile/services/eventService.ts::getEventDetail +
@@ -131,8 +131,17 @@ async function rsvpToEvent(userId: string, eventId: string, status: "going" | "c
 export function useRsvpMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ eventId, status }: { eventId: string; status: "going" | "cant" }) =>
+    mutationFn: ({ eventId, status }: { eventId: string; status: "going" | "cant"; previousStatus: "going" | "cant" | null }) =>
       rsvpToEvent(userId!, eventId, status),
+    onMutate: ({ eventId, status, previousStatus }) => {
+      const nextStatus = previousStatus === status ? null : status;
+      const delta = (nextStatus === "going" ? 1 : 0) - (previousStatus === "going" ? 1 : 0);
+      patchCachedEvent(queryClient, eventId, (current) => ({
+        user_rsvp_status: nextStatus,
+        attendee_count: Math.max(0, (current.attendee_count ?? 0) + delta),
+      }));
+    },
+    onError: () => invalidateEventState(queryClient, userId),
     onSuccess: () => invalidateEventState(queryClient, userId),
   });
 }
@@ -156,7 +165,14 @@ async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean
 export function useSaveEventMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (eventId: string) => toggleSaveEvent(userId!, eventId),
+    mutationFn: ({ eventId }: { eventId: string; isSaved: boolean }) => toggleSaveEvent(userId!, eventId),
+    onMutate: ({ eventId, isSaved }) => {
+      patchCachedEvent(queryClient, eventId, { is_saved: !isSaved });
+      queryClient.setQueriesData({ queryKey: ["savedEventsCount"] }, (count: number | undefined) =>
+        typeof count === "number" ? Math.max(0, count + (isSaved ? -1 : 1)) : count
+      );
+    },
+    onError: () => invalidateEventState(queryClient, userId),
     onSuccess: () => invalidateEventState(queryClient, userId),
   });
 }

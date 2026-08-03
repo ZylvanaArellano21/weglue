@@ -15,20 +15,22 @@ export function ClubHomeTab({
   past,
   onRsvp,
   onToggleSave,
-  onJoinClub,
+  onToggleClub,
   onOpenEvent,
   onOpenClub,
+  onOpenAttendees,
   onCreateEvent,
   onCreatePost,
 }: {
   club: ClubProfileData;
   upcoming: HomeFeedEvent[];
   past: HomeFeedEvent[];
-  onRsvp: (eventId: string) => void;
-  onToggleSave: (eventId: string) => void;
-  onJoinClub: (clubId: string) => void;
+  onRsvp: (eventId: string, previousStatus: "going" | "cant" | null) => void;
+  onToggleSave: (eventId: string, isSaved: boolean) => void;
+  onToggleClub: (clubId: string, clubName: string, isMember: boolean) => void;
   onOpenEvent: (eventId: string) => void;
   onOpenClub: (clubId: string) => void;
+  onOpenAttendees: (eventId: string) => void;
   /** Officer-only event creation. */
   onCreateEvent?: () => void;
   /** Member (incl. officer) post creation. */
@@ -82,9 +84,10 @@ export function ClubHomeTab({
                 event={e}
                 onRsvp={onRsvp}
                 onToggleSave={onToggleSave}
-                onJoinClub={onJoinClub}
+                onToggleClub={onToggleClub}
                 onOpenEvent={onOpenEvent}
                 onOpenClub={onOpenClub}
+                onOpenAttendees={onOpenAttendees}
               />
             ))}
           </div>
@@ -102,9 +105,10 @@ export function ClubHomeTab({
                 isPast
                 onRsvp={onRsvp}
                 onToggleSave={onToggleSave}
-                onJoinClub={onJoinClub}
+                onToggleClub={onToggleClub}
                 onOpenEvent={onOpenEvent}
                 onOpenClub={onOpenClub}
+                onOpenAttendees={onOpenAttendees}
               />
             ))}
           </div>

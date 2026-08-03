@@ -18,7 +18,7 @@ export function ClubRightColumn({
 }: {
   club: ClubProfileData;
   upcomingEvents: HomeFeedEvent[];
-  onRsvp: (eventId: string) => void;
+  onRsvp: (eventId: string, previousStatus: "going" | "cant" | null) => void;
   onOpenEvent: (eventId: string) => void;
   onOpenPhoto: (index: number) => void;
   onSeeAllPhotos: () => void;
@@ -82,7 +82,7 @@ export function ClubRightColumn({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onRsvp(e.id)}
+                    onClick={() => onRsvp(e.id, e.user_rsvp_status)}
                     className="shrink-0 rounded-full px-4 py-1.5 text-[13px] font-semibold transition-colors"
                     style={
                       e.user_rsvp_status === "cant"

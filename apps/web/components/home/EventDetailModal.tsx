@@ -3,6 +3,10 @@
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
 import { AvatarStack } from "../shared/AvatarStack";
+import { AttendanceTrigger } from "./AttendanceTrigger";
+import { EventShareModal } from "./EventShareModal";
+import { LeaveClubDialog } from "../clubs/LeaveClubDialog";
+import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { CalendarIcon, LocationIcon, BookmarkIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { useState } from "react";
@@ -34,6 +38,7 @@ export function EventDetailModal({
   userId,
   onClose,
   onOpenClub,
+  onOpenAttendees,
   onPrev,
   onNext,
   indicator,
@@ -44,6 +49,7 @@ export function EventDetailModal({
   userId: string;
   onClose: () => void;
   onOpenClub: (clubId: string) => void;
+  onOpenAttendees?: (eventId: string) => void;
   onPrev?: () => void;
   onNext?: () => void;
   indicator?: string;
@@ -59,10 +65,12 @@ export function EventDetailModal({
   const { mutate: joinClub, isPending: joining } = useJoinClubMutation(userId);
   const { mutate: deleteEvent, isPending: deleting } = useDeleteEvent(userId);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [internalShareOpen, setInternalShareOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
 
   const doRsvp = (status: "going" | "cant") =>
     rsvp(
-      { eventId, status },
+      { eventId, status, previousStatus: event?.user_rsvp_status ?? null },
       {
         onSuccess: () => show(status === "going" ? "You're going! 🎉" : "Got it, maybe next time!"),
         onError: () => show("Failed to RSVP. Try again.", "error"),
@@ -70,13 +78,13 @@ export function EventDetailModal({
     );
 
   const doSave = () =>
-    toggleSave(eventId, {
+    toggleSave({ eventId, isSaved: event?.is_saved ?? false }, {
       onSuccess: (savedNow) => show(savedNow ? "Event saved!" : "Removed from saved"),
       onError: () => show("Failed to save event.", "error"),
     });
 
   const doShare = async () => {
-    const url = `${window.location.origin}/home?event=${eventId}`;
+    const url = `${window.location.origin}/event/${eventId}`;
     try {
       if (navigator.share) await navigator.share({ title: event?.title ?? "Event", url });
       else {
@@ -89,6 +97,7 @@ export function EventDetailModal({
   };
 
   return (
+    <>
     <Modal
       onClose={onClose}
       labelledBy="event-detail-title"
@@ -111,23 +120,19 @@ export function EventDetailModal({
         <div className="p-5 sm:p-6">
           {/* Club row */}
           <div className="mb-3 flex items-center gap-2.5 pr-8">
-            <button
-              type="button"
-              onClick={() => onOpenClub(event.club_id)}
-              className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-            >
+            <ClickableClubIdentity clubId={event.club_id} ariaLabel={`Open ${event.club.name}`} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
               <Avatar uri={event.club.avatar_url} size={36} name={event.club.name} />
               <span className="truncate text-[15px] font-semibold text-gray-900">
                 {event.club.name}
               </span>
-            </button>
+            </ClickableClubIdentity>
             <button
               type="button"
-              onClick={() => !event.user_has_joined_club && joinClub(event.club_id, {
+              onClick={() => event.user_has_joined_club ? setLeaveOpen(true) : joinClub(event.club_id, {
                 onSuccess: () => show("Joined club! 🎉"),
                 onError: () => show("Failed to join club.", "error"),
               })}
-              disabled={event.user_has_joined_club || joining}
+              disabled={joining}
               className="rounded-full px-4 py-1.5 text-[13px] font-semibold"
               style={
                 event.user_has_joined_club
@@ -182,14 +187,9 @@ export function EventDetailModal({
           </div>
 
           {/* Attendees */}
-          <div className="mt-3 flex items-center gap-3 rounded-xl bg-white p-3.5" style={{ boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>
-            {event.attendee_preview.length > 0 && (
-              <AvatarStack avatars={event.attendee_preview} size={30} overlap={8} />
-            )}
-            <div>
-              <p className="text-sm font-bold text-gray-900">{event.attendee_count} going</p>
-              <p className="text-xs text-gray-400">Be part of the community</p>
-            </div>
+          <div className="mt-3 rounded-xl bg-white p-3.5" style={{ boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>
+            {onOpenAttendees ? <AttendanceTrigger eventId={event.id} attendees={event.attendee_preview} count={event.attendee_count} onOpen={onOpenAttendees} className="gap-3" /> : <div className="flex items-center gap-3">{event.attendee_preview.length > 0 && <AvatarStack avatars={event.attendee_preview} size={30} overlap={8} />}<p className="text-sm font-bold text-gray-900">{event.attendee_count} going</p></div>}
+            <p className="mt-0.5 text-xs text-gray-400">Be part of the community</p>
           </div>
 
           {event.description && (
@@ -201,6 +201,7 @@ export function EventDetailModal({
 
           {/* Share + Save */}
           <div className="mt-4 flex items-center gap-3">
+            <button type="button" onClick={() => setInternalShareOpen(true)} className="rounded-full px-4 py-2 text-sm font-semibold" style={{ background: "rgba(15,166,166,0.1)", color: "#0FA6A6" }}>Share in We Glue</button>
             <button
               type="button"
               onClick={doShare}
@@ -309,7 +310,10 @@ export function EventDetailModal({
           )}
         </div>
       )}
+      {internalShareOpen && <EventShareModal eventId={eventId} userId={userId} onClose={() => setInternalShareOpen(false)} onShared={() => show("Event shared")} />}
     </Modal>
+    {leaveOpen && event && <LeaveClubDialog clubId={event.club_id} clubName={event.club.name} userId={userId} onClose={() => setLeaveOpen(false)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
+    </>
   );
 }
 
