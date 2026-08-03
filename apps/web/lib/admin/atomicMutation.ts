@@ -108,6 +108,13 @@ const STATUS_MESSAGE: Record<string, string> = {
   invalid_permission: "Invalid posting permission.",
   // reports
   no_change: "The report is already in that state.",
+  terminal_decision_required: "This report already has a terminal decision or requires the resolution panel.",
+  terminal_decision: "This report already has a terminal decision and cannot be silently reopened.",
+  invalid_outcome: "Choose a valid report outcome.",
+  invalid_enforcement: "Choose a valid enforcement action.",
+  enforcement_unavailable: "Automated enforcement is not available for this report target.",
+  enforcement_failed: "The enforcement action was not applied, so the report remains unresolved.",
+  public_explanation_required: "A public category and specific explanation are required for enforcement.",
   // Shared by report status changes (056) and restriction transitions (058).
   invalid_transition:
     "That change is not allowed from the record's current state. A blocked account must be unblocked first, as a separate action.",

@@ -3,7 +3,8 @@
 // ============================================================================
 // Same contract as data.ts / contentData.ts / messagingData.ts:
 //   requireSecureAdmin() FIRST, then read through the service-role client;
-//   CANONICAL columns only; counts live; NO confidential evidence EVER returned.
+//   Lists expose workflow metadata only; report detail may expose retained
+//   evidence to the already-authorized founder through a server-rendered path.
 //
 // CANONICAL SOURCE OF TRUTH — the `reports` table (migrations 033 + 038 + 040):
 //   id, reporter_id (→profiles SET NULL), reporter_username, reporter_email,
@@ -23,14 +24,14 @@
 // 051 on backend/deleted-message-privacy).
 //
 // EVIDENCE PRIVACY INVARIANTS (Day-5, non-negotiable):
-//   • content_snapshot and attachment_snapshot are RETAINED MODERATION EVIDENCE.
-//     They are NEVER selected into any row returned by this module, so they can
-//     never reach a client, a log, a URL, or the reporter-readable surface.
-//   • For message/chat reports we surface only safe workflow metadata plus a
-//     fixed notice: the private deleted-message evidence backend (migration 051)
-//     is not deployed, so retained bodies/attachments remain unavailable.
-//   • `report_evidence` is a table that exists only on the undeployed privacy
-//     branch. It is NOT queried here and is NOT part of production.
+//   • content_snapshot and attachment_snapshot are retained moderation evidence.
+//     They are selected only for the founder-only detail route, never for lists,
+//     audit payloads, logs, URLs, or reporter-readable surfaces.
+//   • For message/chat reports, migration 051 remains intentionally absent. We
+//     only display snapshots already present on the canonical reports row;
+//     unavailable/deleted media remains an honest unavailable state.
+//   • `report_evidence` is not part of the current production schema and is not
+//     queried here.
 // ============================================================================
 
 if (typeof window !== "undefined") {
@@ -73,9 +74,9 @@ export type ReportStatus = (typeof REPORT_STATUSES)[number];
  */
 export const REPORT_TRANSITIONS: Record<ReportStatus, ReportStatus[]> = {
   pending: ["reviewing", "resolved", "dismissed"],
-  reviewing: ["resolved", "dismissed", "pending"],
-  resolved: ["pending"],
-  dismissed: ["pending"],
+  reviewing: [],
+  resolved: [],
+  dismissed: [],
 };
 
 export function isReportStatus(v: unknown): v is ReportStatus {
@@ -165,13 +166,13 @@ async function resolveTargets(
     (async () => {
       const ids = Array.from(new Set(byType("event")));
       if (!ids.length) return new Map<string, any>();
-      const { data } = await admin.from("events").select("id, title").in("id", ids);
+      const { data } = await admin.from("events").select("id, title, created_by").in("id", ids);
       return new Map((data ?? []).map((e: any) => [e.id, e]));
     })(),
     (async () => {
       const ids = Array.from(new Set(byType("post")));
       if (!ids.length) return new Map<string, any>();
-      const { data } = await admin.from("posts").select("id, caption, post_type").in("id", ids);
+      const { data } = await admin.from("posts").select("id, caption, post_type, author_id").in("id", ids);
       return new Map((data ?? []).map((p: any) => [p.id, p]));
     })(),
     (async () => {
@@ -198,10 +199,12 @@ async function resolveTargets(
       const e = events.get(id);
       label = e ? e.title : r.entity_name || "Event (deleted)";
       href = `/admin/events/${id}`;
+      subjectUserId = e?.created_by ?? null;
     } else if (t === "post" && id) {
       const p = posts.get(id);
       label = p ? preview(p.caption, 60) || `${p.post_type === "event" ? "Event" : "Picture"} post` : r.entity_name || "Post (deleted)";
       href = `/admin/posts/${id}`;
+      subjectUserId = p?.author_id ?? null;
     } else if (t === "user" && id) {
       const u = users.get(id);
       label = u ? `${u.full_name || u.username} (@${u.username})` : r.entity_name || "User (deleted)";
@@ -263,6 +266,10 @@ export interface AdminReportRow {
   created_at: string;
   /** Number of OTHER reports that share this same target (grouping signal). */
   related_count: number;
+  resolution_outcome: string | null;
+  enforcement_action: string | null;
+  enforcement_status: string | null;
+  decision_at: string | null;
 }
 
 export interface ListReportsParams {
@@ -322,6 +329,9 @@ export async function listReports(params: ListReportsParams = {}): Promise<Pagin
     const like = `%${search}%`;
     const isEmail = search.includes("@");
     const parts: string[] = [];
+    // Report IDs are safe structural identifiers and are useful when following
+    // an audit or support escalation.
+    parts.push(`id.ilike.${like}`);
 
     // Reporter matches: username / email(→reporter_id) / reporter_email column.
     if (field === "any" || field === "reporter") {
@@ -378,24 +388,28 @@ export async function listReports(params: ListReportsParams = {}): Promise<Pagin
   const subjectIds = reports.map((r) => (r.entity_type === "user" ? r.entity_id : r.message_sender_id)).filter(Boolean) as string[];
   const clubIds = reports.map((r) => r.club_id).filter(Boolean) as string[];
 
-  const [reporters, subjects, clubs, targets, relatedCounts, hasEvidence] = await Promise.all([
+  const [reporters, subjects, clubs, targets, relatedCounts, hasEvidence, decisions] = await Promise.all([
     profileMap(admin, reporterIds),
     profileMap(admin, subjectIds),
     clubMap(admin, clubIds),
     resolveTargets(admin, reports),
     relatedTargetCounts(admin, reports),
     protectedEvidenceFlags(admin, reports.map((r) => r.id)),
+    latestDecisionMap(admin, reports.map((r) => r.id)),
   ]);
 
   const uniIds = [...clubs.values()].map((c) => c.university_id).filter(Boolean) as string[];
   const uniMap = await universityNameMap(admin, uniIds);
   const reporterEmails = await emailMap(reporterIds);
+  const ownerIds = reports.map((r) => targets.get(r.id)?.subjectUserId).filter(Boolean) as string[];
+  const owners = await profileMap(admin, ownerIds);
 
   const rows: AdminReportRow[] = reports.map((r) => {
     const club = r.club_id ? clubs.get(r.club_id) : null;
     const target = targets.get(r.id);
-    const subjectId = r.entity_type === "user" ? r.entity_id : r.message_sender_id;
-    const subject = subjectId ? subjects.get(subjectId) : null;
+    const subjectId = r.entity_type === "user" ? r.entity_id : r.message_sender_id ?? target?.subjectUserId;
+    const subject = subjectId ? subjects.get(subjectId) ?? owners.get(subjectId) : null;
+    const decision = decisions.get(r.id);
     return {
       id: r.id,
       status: r.status,
@@ -417,6 +431,10 @@ export async function listReports(params: ListReportsParams = {}): Promise<Pagin
       email_delivered: !!r.email_sent_at,
       created_at: r.created_at,
       related_count: relatedCounts.get(r.id) ?? 0,
+      resolution_outcome: decision?.resolution_outcome ?? null,
+      enforcement_action: decision?.enforcement_action ?? null,
+      enforcement_status: decision?.enforcement_status ?? null,
+      decision_at: decision?.created_at ?? null,
     };
   });
 
@@ -462,6 +480,18 @@ async function protectedEvidenceFlags(admin: Admin, reportIds: string[]): Promis
     .in("id", reportIds)
     .not("content_snapshot", "is", null);
   for (const r of (data ?? []) as any[]) map.set(r.id, true);
+  return map;
+}
+
+async function latestDecisionMap(admin: Admin, reportIds: string[]): Promise<Map<string, any>> {
+  const map = new Map<string, any>();
+  if (reportIds.length === 0) return map;
+  const { data } = await admin
+    .from("report_decision_history")
+    .select("id, report_id, sequence_no, new_status, resolution_outcome, enforcement_action, enforcement_status, created_at")
+    .in("report_id", reportIds)
+    .order("sequence_no", { ascending: false });
+  for (const row of (data ?? []) as any[]) if (!map.has(row.report_id)) map.set(row.report_id, row);
   return map;
 }
 
@@ -521,17 +551,41 @@ export interface ReportDetail {
   allowedTransitions: ReportStatus[];
   // Grouped reports for the same target
   relatedReports: RelatedReport[];
+  decisions: Array<{
+    id: string;
+    previous_status: string;
+    new_status: string;
+    resolution_outcome: string;
+    internal_decision_note: string;
+    public_category: string | null;
+    public_explanation: string | null;
+    enforcement_action: string;
+    enforcement_target_type: string | null;
+    enforcement_target_id: string | null;
+    enforcement_status: string;
+    notification_status: string;
+    actor_user_id: string;
+    actor_email: string | null;
+    correlation_id: string;
+    created_at: string;
+    delivery_status: string | null;
+    delivery_error: string | null;
+  }>;
+  evidence: {
+    content_snapshot: string | null;
+    attachment: { name?: string; mime?: string; size?: number; available: boolean; signed_url?: string } | null;
+  } | null;
+  auditEvents: Array<{ id: string; action: string; event_type: string; success: boolean; correlation_id: string; occurred_at: string; error_code: string | null }>;
 }
 
 export async function getReportDetail(id: string): Promise<ReportDetail | null> {
   await requireSecureAdmin();
   const admin = createAdminClient();
 
-  // NOTE: content_snapshot / attachment_snapshot are deliberately NOT selected.
   const { data: report } = await admin
     .from("reports")
     .select(
-      "id, status, entity_type, entity_id, entity_name, reason, details, reporter_id, reporter_username, reporter_email, message_id, conversation_id, conversation_type, message_type, message_sender_id, club_id, email_sent_at, email_error, created_at"
+      "id, status, entity_type, entity_id, entity_name, reason, details, reporter_id, reporter_username, reporter_email, message_id, conversation_id, conversation_type, message_type, message_sender_id, club_id, email_sent_at, email_error, content_snapshot, attachment_snapshot, created_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -539,21 +593,33 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
   const r = report as any;
 
   const subjectId = r.entity_type === "user" ? r.entity_id : r.message_sender_id;
-  const [reporterMap, subjectMap, clubs, targets, evidence] = await Promise.all([
+  const [reporterMap, subjectMap, clubs, targets, evidence, decisionRows] = await Promise.all([
     r.reporter_id ? profileMap(admin, [r.reporter_id]) : Promise.resolve(new Map<string, any>()),
     subjectId ? profileMap(admin, [subjectId]) : Promise.resolve(new Map<string, any>()),
     r.club_id ? clubMap(admin, [r.club_id]) : Promise.resolve(new Map<string, any>()),
     resolveTargets(admin, [r]),
     protectedEvidenceFlags(admin, [r.id]),
+    admin.from("report_decision_history").select("id, previous_status, new_status, resolution_outcome, internal_decision_note, public_category, public_explanation, enforcement_action, enforcement_target_type, enforcement_target_id, enforcement_status, notification_status, actor_user_id, actor_email, correlation_id, created_at").eq("report_id", r.id).order("sequence_no", { ascending: false }),
   ]);
 
   const reporter = r.reporter_id ? reporterMap.get(r.reporter_id) : null;
-  const subject = subjectId ? subjectMap.get(subjectId) : null;
+  const target = targets.get(r.id);
+  const owner = target?.subjectUserId ? (await profileMap(admin, [target.subjectUserId])).get(target.subjectUserId) : null;
+  const resolvedSubjectId = subjectId ?? target?.subjectUserId ?? null;
+  const subject = resolvedSubjectId ? subjectMap.get(resolvedSubjectId) ?? owner : null;
   const club = r.club_id ? clubs.get(r.club_id) : null;
   const uniId = club?.university_id ?? null;
   const uniName = uniId ? (await universityNameMap(admin, [uniId])).get(uniId) ?? null : null;
   const reporterEmails = r.reporter_id ? await emailMap([r.reporter_id]) : new Map<string, string | null>();
-  const target = targets.get(r.id);
+  const decisionData = (decisionRows.data ?? []) as any[];
+  const correlations = decisionData.map((d) => d.correlation_id).filter(Boolean);
+  const { data: auditRows } = correlations.length
+    ? await admin.from("admin_audit_events").select("id, action, event_type, success, correlation_id, occurred_at, error_code").in("correlation_id", correlations).order("occurred_at", { ascending: true }).limit(100)
+    : { data: [] as any[] };
+  const { data: deliveryRows } = decisionData.length
+    ? await admin.from("report_notification_deliveries").select("decision_id, state, last_error").in("decision_id", decisionData.map((d) => d.id))
+    : { data: [] as any[] };
+  const deliveryMap = new Map(((deliveryRows ?? []) as any[]).map((d) => [d.decision_id, d]));
 
   // Related reports for the same target (metadata only).
   let relatedReports: RelatedReport[] = [];
@@ -576,6 +642,12 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
   }
 
   const isMessageReport = r.entity_type === "message" || r.entity_type === "chat";
+  const attachment = r.attachment_snapshot as { name?: string; mime?: string; size?: number; url?: string } | null;
+  let signedUrl: string | undefined;
+  if (attachment?.url && !/^https?:\/\//i.test(attachment.url) && isMessageReport) {
+    const signed = await admin.storage.from("chat-attachments").createSignedUrl(attachment.url, 300);
+    if (!signed.error) signedUrl = signed.data?.signedUrl;
+  }
 
   return {
     id: r.id,
@@ -592,7 +664,7 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
     reporter_email: r.reporter_email ?? reporterEmails.get(r.reporter_id) ?? null,
     reporter_avatar: reporter?.avatar_url ?? null,
     reporter_exists: !!reporter,
-    reported_user_id: subjectId ?? null,
+    reported_user_id: resolvedSubjectId,
     reported_name: subject?.full_name ?? null,
     reported_username: subject?.username ?? null,
     reported_avatar: subject?.avatar_url ?? null,
@@ -616,6 +688,35 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
     email_error: r.email_error ?? null,
     allowedTransitions: isReportStatus(r.status) ? REPORT_TRANSITIONS[r.status as ReportStatus] : [],
     relatedReports,
+    decisions: decisionData.map((d) => ({
+      id: d.id,
+      previous_status: d.previous_status,
+      new_status: d.new_status,
+      resolution_outcome: d.resolution_outcome,
+      internal_decision_note: d.internal_decision_note,
+      public_category: d.public_category ?? null,
+      public_explanation: d.public_explanation ?? null,
+      enforcement_action: d.enforcement_action,
+      enforcement_target_type: d.enforcement_target_type ?? null,
+      enforcement_target_id: d.enforcement_target_id ?? null,
+      enforcement_status: d.enforcement_status,
+      notification_status: d.notification_status,
+      actor_user_id: d.actor_user_id,
+      actor_email: d.actor_email ?? null,
+      correlation_id: d.correlation_id,
+      created_at: d.created_at,
+      delivery_status: deliveryMap.get(d.id)?.state ?? null,
+      delivery_error: deliveryMap.get(d.id)?.last_error ?? null,
+    })),
+    evidence: isMessageReport && (r.content_snapshot || attachment)
+      ? {
+          content_snapshot: r.content_snapshot ?? null,
+          attachment: attachment
+            ? { name: attachment.name, mime: attachment.mime, size: attachment.size, available: !!signedUrl, ...(signedUrl ? { signed_url: signedUrl } : {}) }
+            : null,
+        }
+      : null,
+    auditEvents: ((auditRows ?? []) as any[]).map((a) => ({ id: a.id, action: a.action, event_type: a.event_type, success: !!a.success, correlation_id: a.correlation_id, occurred_at: a.occurred_at, error_code: a.error_code ?? null })),
   };
 }
 

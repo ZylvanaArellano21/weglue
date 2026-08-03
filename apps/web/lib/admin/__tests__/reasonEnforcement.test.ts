@@ -200,9 +200,15 @@ describe("the reason-required actions are declared as such", () => {
         "comment.restore",
         "event.remove",
         "event.restore",
+        // Day 10D — report review and terminal decisions
+        "report.dismiss",
+        "report.resolve",
+        "report.review",
+        "report.supersede",
+        "report.viewEvidence",
       ].sort()
     );
-    expect(required).toHaveLength(21);
+    expect(required).toHaveLength(26);
   });
 
   it("requires a reason for every restriction action, including the lifts", () => {

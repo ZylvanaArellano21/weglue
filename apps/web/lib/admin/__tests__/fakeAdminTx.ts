@@ -390,24 +390,28 @@ export function makeAdminTxRpcs(ctx: TxContext) {
     },
 
     admin_tx_report_set_status(a) {
-      const act = "report.setStatus";
+      const act = "report.review";
       assertReason(act, a);
-      if (!["pending", "reviewing", "resolved", "dismissed"].includes(a.p_next_status)) {
+      if (a.p_next_status !== "reviewing") {
         return reject(ctx, "invalid_status", a, act);
       }
       const r = t("reports").find((x) => x.id === a.p_report_id);
       if (!r) return reject(ctx, "not_found", a, act);
-      if (r.status === a.p_next_status) return reject(ctx, "no_change", a, act);
-      const allowed: Record<string, string[]> = {
-        pending: ["reviewing", "resolved", "dismissed"],
-        reviewing: ["resolved", "dismissed", "pending"],
-        resolved: ["pending"],
-        dismissed: ["pending"],
-      };
-      if (!(allowed[r.status] ?? []).includes(a.p_next_status)) {
-        return reject(ctx, "invalid_transition", a, act);
-      }
+      if (r.status !== "pending") return reject(ctx, "invalid_transition", a, act);
       r.status = a.p_next_status;
+      return ok(ctx, { ...r }, a, act);
+    },
+
+    admin_tx_report_decide(a) {
+      const act = a.p_new_status === "dismissed" ? "report.dismiss" : "report.resolve";
+      assertReason(act, a);
+      const r = t("reports").find((x) => x.id === a.p_report_id);
+      if (!r) return reject(ctx, "not_found", a, act);
+      if (!["pending", "reviewing"].includes(r.status)) return reject(ctx, "terminal_decision", a, act);
+      if (a.p_enforcement_action !== "none") return reject(ctx, "enforcement_failed", a, act);
+      r.status = a.p_new_status;
+      const decisions = t("report_decision_history");
+      decisions.push({ id: `decision-${decisions.length + 1}`, report_id: r.id, resolution_outcome: a.p_resolution_outcome, enforcement_action: a.p_enforcement_action });
       return ok(ctx, { ...r }, a, act);
     },
 

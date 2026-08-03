@@ -53,6 +53,11 @@ function emailFor(kind: string, payload: Record<string, unknown>): { subject: st
         subject: "Your We Glue account has been deleted",
         text: `Your We Glue account has been successfully deleted. If you did not expect this or have questions, contact ${SUPPORT_EMAIL}.`,
       };
+    case "admin_report_resolution":
+      return {
+        subject: "A We Glue moderation decision affected your account or content",
+        text: `A We Glue moderation decision was applied.\n\nCategory: ${category}\nExplanation: ${reason}\n\nIf you believe this was incorrect, contact ${SUPPORT_EMAIL}.`,
+      };
     default:
       throw new Error("unknown_email_kind");
   }
@@ -148,12 +153,14 @@ Deno.serve(async (req) => {
       await sendResend(resendKey, from, row.recipient_email, row.kind, row.payload ?? {}, row.idempotency_key);
       const { error } = await admin.rpc("complete_transactional_email_outbox", { p_worker_id: workerId, p_outbox_id: row.outbox_id, p_sent: true, p_error: null });
       if (error) throw error;
+      await updateReportDelivery(admin, row.payload, row.outbox_id, "sent");
       emailSent += 1;
     } catch (error) {
       emailFailed += 1;
       const { error: completionError } = await admin.rpc("complete_transactional_email_outbox", {
         p_worker_id: workerId, p_outbox_id: row.outbox_id, p_sent: false, p_error: safeError(error),
       });
+      await updateReportDelivery(admin, row.payload, row.outbox_id, "failed", safeError(error));
       console.error(JSON.stringify({ tag: "account_deletion_worker", stage: "deliver_email", ok: false, error: safeError(completionError ?? error) }));
     }
   }
@@ -161,3 +168,20 @@ Deno.serve(async (req) => {
   console.info(JSON.stringify({ tag: "account_deletion_worker", ok: deletionFailed === 0 && emailFailed === 0, deletionFinalized, deletionFailed, emailSent, emailFailed }));
   return json({ deletionFinalized, deletionFailed, emailSent, emailFailed });
 });
+
+async function updateReportDelivery(
+  admin: ReturnType<typeof createClient>,
+  payload: Record<string, unknown>,
+  outboxId: string,
+  state: "sent" | "failed",
+  lastError: string | null = null,
+): Promise<void> {
+  const decisionId = typeof payload.report_decision_id === "string" ? payload.report_decision_id : null;
+  if (!decisionId) return;
+  await admin.rpc("complete_report_notification_delivery", {
+    p_decision_id: decisionId,
+    p_outbox_id: outboxId,
+    p_sent: state === "sent",
+    p_error: lastError,
+  });
+}

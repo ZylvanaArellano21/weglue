@@ -141,7 +141,10 @@ export default async function AdminReportsPage({
             <Table
               head={
                 <>
+                  <Th>Report ID</Th>
                   <Th>Status</Th>
+                  <Th>Resolution</Th>
+                  <Th>Enforcement</Th>
                   <Th>Target</Th>
                   <Th>Reason</Th>
                   <Th>Reporter</Th>
@@ -156,7 +159,10 @@ export default async function AdminReportsPage({
             >
               {result.rows.map((r) => (
                 <RowLink key={r.id} href={`/admin/reports/${r.id}`}>
+                  <Td className="font-mono text-xs text-gray-500">{r.id}</Td>
                   <Td><Badge tone={STATUS_TONE[r.status] ?? "gray"}>{r.status}</Badge></Td>
+                  <Td className="text-gray-700">{r.resolution_outcome?.replace(/_/g, " ") ?? <span className="text-gray-300">—</span>}</Td>
+                  <Td className="text-gray-700">{r.enforcement_action?.replace(/_/g, " ") ?? <span className="text-gray-300">—</span>}</Td>
                   <Td>
                     <div className="min-w-0 max-w-[240px]">
                       <p className="truncate text-sm text-gray-900">{r.target_label}</p>
