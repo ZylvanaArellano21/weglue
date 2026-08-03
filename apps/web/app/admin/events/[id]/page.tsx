@@ -4,9 +4,11 @@ import { getEventDetail } from "../../../../lib/admin/contentData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
-import { DisabledAction } from "../../../../components/admin/DisabledAction";
 import { EditEventDialog } from "../../../../components/admin/EventActions";
 import { AddRsvpDialog } from "../../../../components/admin/RsvpActions";
+import { LifecycleDetails } from "../../../../components/admin/LifecycleDetails";
+import { LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
+import { getContentLifecycleDetail } from "../../../../lib/admin/lifecycleData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -38,6 +40,8 @@ const VIS_TONE: Record<string, "green" | "amber" | "blue"> = { everyone: "green"
 export default async function AdminEventDetailPage({ params }: { params: { id: string } }) {
   const event = await getEventDetail(params.id);
   if (!event) notFound();
+  const lifecycle = await getContentLifecycleDetail("event", event.id);
+  const canonicalMutable = lifecycle.available && lifecycle.record?.state === "active";
 
   const going = event.attendees.filter((a) => a.status === "going");
   const cant = event.attendees.filter((a) => a.status === "cant");
@@ -215,30 +219,35 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
   const actionsTab = (
     <SectionCard title="Actions">
       <div className="space-y-4 p-4">
-        <EditEventDialog
-          eventId={event.id}
-          initial={{
-            title: event.title,
-            description: event.description,
-            event_date: event.event_date,
-            start_time: event.start_time,
-            end_time: event.end_time,
-            location: event.location,
-            building: event.building,
-            room: event.room,
-            visibility: event.visibility,
-            emoji: event.emoji,
-          }}
-        />
-        <p className="text-xs text-gray-400">
-          Editing writes to the canonical <code>events</code> row with start/end chronology + visibility
-          validation, a read-back check, and an audit event. Requires the write kill switch to be enabled.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <DisabledAction label="Archive event" reason="No canonical archived/hidden state exists on events (use Members-only visibility to restrict)" />
-          <DisabledAction label="Restore event" reason="No archive state to restore from" />
-          <DisabledAction label="Permanently delete event" reason="Permanent deletion remains disabled" tone="danger" />
-        </div>
+        {canonicalMutable ? (
+          <>
+            <EditEventDialog
+              eventId={event.id}
+              initial={{
+                title: event.title,
+                description: event.description,
+                event_date: event.event_date,
+                start_time: event.start_time,
+                end_time: event.end_time,
+                location: event.location,
+                building: event.building,
+                room: event.room,
+                visibility: event.visibility,
+                emoji: event.emoji,
+              }}
+            />
+            <p className="text-xs text-gray-400">
+              Editing writes to the canonical <code>events</code> row with start/end chronology + visibility
+              validation, a read-back check, and audit event. Lifecycle removal and restoration are in the
+              Lifecycle tab and require recent MFA.
+            </p>
+          </>
+        ) : (
+          <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
+            Canonical editing is unavailable while lifecycle state is not active. Use the Lifecycle tab to review or
+            restore eligible content.
+          </p>
+        )}
       </div>
     </SectionCard>
   );
@@ -257,6 +266,11 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold text-gray-900">{event.title}</h1>
             {event.is_past ? <Badge tone="gray">Past</Badge> : <Badge tone="teal">Upcoming</Badge>}
+            {lifecycle.available && lifecycle.record ? (
+              <LifecycleBadge status={lifecycle.record.displayStatus} />
+            ) : (
+              <Badge tone="amber">Lifecycle unavailable</Badge>
+            )}
             <Badge tone={VIS_TONE[event.visibility] ?? "gray"}>{event.visibility}</Badge>
             {event.reportCount > 0 ? <Badge tone="red">{event.reportCount} reports</Badge> : null}
           </div>
@@ -288,6 +302,7 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
           { key: "rsvps", label: "RSVPs", count: event.goingCount + event.cantCount, content: rsvpTab },
           { key: "posts", label: "Related posts", count: event.relatedPosts.length, content: postsTab },
           { key: "reports", label: "Reports", count: event.reportCount, content: reportsTab },
+          { key: "lifecycle", label: "Lifecycle", content: <LifecycleDetails result={lifecycle} /> },
           { key: "actions", label: "Actions", content: actionsTab },
         ]}
       />

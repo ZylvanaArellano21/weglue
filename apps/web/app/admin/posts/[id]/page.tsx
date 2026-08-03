@@ -4,8 +4,10 @@ import { getPostDetail } from "../../../../lib/admin/contentData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
-import { DisabledAction } from "../../../../components/admin/DisabledAction";
 import { EditCaptionDialog, RemoveFromClubButton } from "../../../../components/admin/PostActions";
+import { LifecycleDetails } from "../../../../components/admin/LifecycleDetails";
+import { LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
+import { getContentLifecycleDetail } from "../../../../lib/admin/lifecycleData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -30,6 +32,8 @@ const REPORT_TONE: Record<string, "amber" | "blue" | "green" | "gray"> = {
 export default async function AdminPostDetailPage({ params }: { params: { id: string } }) {
   const post = await getPostDetail(params.id);
   if (!post) notFound();
+  const lifecycle = await getContentLifecycleDetail("post", post.id);
+  const canonicalMutable = lifecycle.available && lifecycle.record?.state === "active";
 
   const primaryTag = post.tags.find((t) => t.primary) ?? post.tags[0] ?? null;
 
@@ -212,23 +216,25 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
   const actionsTab = (
     <SectionCard title="Actions">
       <div className="space-y-4 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <EditCaptionDialog postId={post.id} caption={post.caption} />
-          {primaryTag ? (
-            <RemoveFromClubButton postId={post.id} clubId={primaryTag.club_id} clubName={primaryTag.name} />
-          ) : null}
-        </div>
-        <p className="text-xs text-gray-400">
-          Editing writes to the canonical <code>posts</code> row with a read-back check and an audit event.
-          &ldquo;Remove from club&rdquo; untags the post (it is not deleted). All writes require the write
-          kill switch to be enabled.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <DisabledAction label="Remove attached media" reason="Storage lifecycle does not safely support in-place media removal yet" />
-          <DisabledAction label="Hide globally" reason="No canonical global-hide state exists on posts" />
-          <DisabledAction label="Restore to club" reason="No canonical single-step re-tag inverse exists" />
-          <DisabledAction label="Permanently delete post" reason="Permanent deletion remains disabled" tone="danger" />
-        </div>
+        {canonicalMutable ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <EditCaptionDialog postId={post.id} caption={post.caption} />
+              {primaryTag ? (
+                <RemoveFromClubButton postId={post.id} clubId={primaryTag.club_id} clubName={primaryTag.name} />
+              ) : null}
+            </div>
+            <p className="text-xs text-gray-400">
+              Editing writes to the canonical <code>posts</code> row with a read-back check and audit event.
+              Lifecycle removal and restoration are in the Lifecycle tab and require recent MFA.
+            </p>
+          </>
+        ) : (
+          <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
+            Canonical editing is unavailable while lifecycle state is not active. Use the Lifecycle tab to review or
+            restore eligible content.
+          </p>
+        )}
       </div>
     </SectionCard>
   );
@@ -254,6 +260,11 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
               {post.caption ? post.caption.slice(0, 80) : "Untitled post"}
             </h1>
             <Badge tone="gray">{post.post_type}</Badge>
+            {lifecycle.available && lifecycle.record ? (
+              <LifecycleBadge status={lifecycle.record.displayStatus} />
+            ) : (
+              <Badge tone="amber">Lifecycle unavailable</Badge>
+            )}
             {primaryTag ? <Badge tone="teal">{primaryTag.name}</Badge> : <Badge tone="gray">Not tagged</Badge>}
             {post.reportCount > 0 ? <Badge tone="red">{post.reportCount} reports</Badge> : null}
           </div>
@@ -276,6 +287,7 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
           { key: "comments", label: "Comments", count: post.commentCount, content: commentsTab },
           { key: "reports", label: "Reports", count: post.reportCount, content: reportsTab },
           { key: "history", label: "History", content: historyTab },
+          { key: "lifecycle", label: "Lifecycle", content: <LifecycleDetails result={lifecycle} /> },
           { key: "actions", label: "Actions", content: actionsTab },
         ]}
       />

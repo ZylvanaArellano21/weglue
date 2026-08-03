@@ -30,6 +30,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { label: "Comments", href: "/admin/comments", icon: "💬", day: 3, ready: true, group: "Content" },
   { label: "Events", href: "/admin/events", icon: "📅", day: 3, ready: true, group: "Content" },
   { label: "RSVPs", href: "/admin/rsvps", icon: "✅", day: 3, ready: true, group: "Content" },
+  { label: "Content Lifecycle", href: "/admin/content-lifecycle", icon: "♻️", day: 10, ready: true, group: "Content" },
 
   { label: "Conversations", href: "/admin/conversations", icon: "🗨️", day: 4, ready: true, group: "Messaging" },
   { label: "Channels", href: "/admin/channels", icon: "📢", day: 4, ready: true, group: "Messaging" },

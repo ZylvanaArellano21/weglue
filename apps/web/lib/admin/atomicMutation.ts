@@ -121,6 +121,15 @@ const STATUS_MESSAGE: Record<string, string> = {
   self_target: "You cannot restrict your own account.",
   invalid_expiry: "The suspension expiration must be a valid date in the future.",
   invalid_target: "Invalid target account.",
+  // Day 10C content lifecycle (migration 063).
+  already_removed: "This content is already removed from student surfaces.",
+  not_removed: "This content is not currently removed.",
+  invalid_reason: "Internal reasons must be between 3 and 500 characters.",
+  creator_deleted: "This content was permanently deleted by its creator and cannot be restored.",
+  parent_missing: "The parent post no longer exists, so this comment cannot be restored.",
+  parent_unavailable: "Restore the parent post before restoring this comment.",
+  purge_in_progress: "This content is pending permanent purge and can no longer be restored.",
+  already_purged: "This content was permanently purged and cannot be changed.",
 };
 
 function messageFor(status: string): string {

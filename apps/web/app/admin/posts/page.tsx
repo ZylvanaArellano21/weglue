@@ -6,6 +6,8 @@ import { SectionCard, Badge, IdentityCell, EmptyState } from "../../../component
 import { ListControls } from "../../../components/admin/ListControls";
 import { Pagination } from "../../../components/admin/Pagination";
 import { Table, Th, Td, RowLink } from "../../../components/admin/Table";
+import { LifecycleBadge } from "../../../components/admin/ContentLifecycleActions";
+import { getLifecycleRecordsForEntities } from "../../../lib/admin/lifecycleData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -39,6 +41,7 @@ export default async function AdminPostsPage({
     listUniversities(),
     listClubOptions(),
   ]);
+  const lifecycle = await getLifecycleRecordsForEntities("post", result.rows.map((post) => post.id));
 
   return (
     <div className="space-y-5">
@@ -85,6 +88,7 @@ export default async function AdminPostsPage({
               head={
                 <>
                   <Th>Post</Th>
+                  <Th>Lifecycle</Th>
                   <Th>Author</Th>
                   <Th>Club</Th>
                   <Th>University</Th>
@@ -115,6 +119,13 @@ export default async function AdminPostsPage({
                         <p className="text-xs text-gray-400 capitalize">{p.post_type}</p>
                       </div>
                     </div>
+                  </Td>
+                  <Td>
+                    {lifecycle.available ? (
+                      <LifecycleBadge status={lifecycle.records.get(p.id)?.displayStatus ?? "active"} />
+                    ) : (
+                      <Badge tone="amber">Lifecycle unavailable</Badge>
+                    )}
                   </Td>
                   <Td>
                     <IdentityCell name={p.author_name || p.author_username} sub={`@${p.author_username}`} />

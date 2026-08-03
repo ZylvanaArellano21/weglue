@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { getCommentDetail } from "../../../../lib/admin/contentData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard } from "../../../../components/admin/primitives";
-import { DisabledAction } from "../../../../components/admin/DisabledAction";
 import { EditCommentDialog } from "../../../../components/admin/CommentActions";
+import { LifecycleDetails } from "../../../../components/admin/LifecycleDetails";
+import { LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
+import { getContentLifecycleDetail } from "../../../../lib/admin/lifecycleData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -22,6 +24,8 @@ function fmtDateTime(iso: string): string {
 export default async function AdminCommentDetailPage({ params }: { params: { id: string } }) {
   const comment = await getCommentDetail(params.id);
   if (!comment) notFound();
+  const lifecycle = await getContentLifecycleDetail("comment", comment.id);
+  const canonicalMutable = lifecycle.available && lifecycle.record?.state === "active";
 
   return (
     <div className="space-y-5">
@@ -32,6 +36,7 @@ export default async function AdminCommentDetailPage({ params }: { params: { id:
       <div className="grid gap-6 md:grid-cols-3">
         <SectionCard title="Comment" className="md:col-span-2">
           <div className="space-y-4 p-4">
+            {lifecycle.available && lifecycle.record ? <LifecycleBadge status={lifecycle.record.displayStatus} /> : <Badge tone="amber">Lifecycle unavailable</Badge>}
             <p className="whitespace-pre-wrap text-sm text-gray-900">{comment.content}</p>
             <div className="flex items-center gap-3 border-t border-gray-100 pt-3">
               <Link href={`/admin/users/${comment.user_id}`}>
@@ -74,18 +79,23 @@ export default async function AdminCommentDetailPage({ params }: { params: { id:
 
           <SectionCard title="Actions">
             <div className="space-y-3 p-4">
-              <EditCommentDialog commentId={comment.id} content={comment.content} />
-              <p className="text-xs text-gray-400">
-                Editing writes to the canonical <code>post_comments</code> row with a read-back check and an
-                audit event. Requires the write kill switch to be enabled.
-              </p>
-              <div className="grid gap-3">
-                <DisabledAction label="Hide / archive comment" reason="No canonical hidden state exists on comments" />
-                <DisabledAction label="Delete comment" reason="No approved comment-deletion lifecycle yet" tone="danger" />
-              </div>
+              {canonicalMutable ? (
+                <>
+                  <EditCommentDialog commentId={comment.id} content={comment.content} />
+                  <p className="text-xs text-gray-400">
+                    Editing writes to the canonical <code>post_comments</code> row with a read-back check and audit
+                    event. Lifecycle removal and restoration are below and require recent MFA.
+                  </p>
+                </>
+              ) : (
+                <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                  Canonical editing is unavailable while lifecycle state is not active. Review or restore it below.
+                </p>
+              )}
             </div>
           </SectionCard>
         </div>
+        <div className="md:col-span-3"><LifecycleDetails result={lifecycle} /></div>
       </div>
     </div>
   );

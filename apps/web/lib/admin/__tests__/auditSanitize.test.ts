@@ -19,6 +19,7 @@ import {
 const MIGRATION = [
   "055_durable_admin_audit.sql",
   "058_admin_restrictions.sql",
+  "063_content_lifecycle_dashboard.sql",
 ]
   .map((f) => readFileSync(join(__dirname, "../../../../../supabase/migrations/", f), "utf8"))
   .join("\n");
@@ -27,22 +28,22 @@ const MIGRATION = [
 // The database is the enforcer; this file is what the server believes. If they
 // disagree, audit writes fail at runtime — so the disagreement is caught here.
 
-describe("registry ↔ migration 055 parity", () => {
+describe("registry ↔ audit-catalog migration parity", () => {
   /** Parse the catalog seed rows out of the migration's INSERT statement. */
   function parseCatalog(): Record<string, { targetType: string; sensitivity: string; requiresReason: boolean }> {
     const out: Record<string, { targetType: string; sensitivity: string; requiresReason: boolean }> = {};
-    const re = /\(\s*'([a-zA-Z.]+)',\s*'([a-z_]+)',\s*'(ordinary|sensitive|destructive)',\s*(TRUE|FALSE)/g;
+    const re = /\(\s*'([a-zA-Z.]+)',\s*'([a-z_]+)',\s*'(ordinary|sensitive|destructive)',\s*(TRUE|FALSE)/gi;
     let m: RegExpExecArray | null;
     while ((m = re.exec(MIGRATION)) !== null) {
-      out[m[1]!] = { targetType: m[2]!, sensitivity: m[3]!, requiresReason: m[4] === "TRUE" };
+      out[m[1]!] = { targetType: m[2]!, sensitivity: m[3]!, requiresReason: m[4]!.toUpperCase() === "TRUE" };
     }
     return out;
   }
 
   const catalog = parseCatalog();
 
-  it("parses all 32 catalog rows from migrations 055 + 058", () => {
-    expect(Object.keys(catalog)).toHaveLength(32);
+  it("parses all 41 catalog rows from migrations 055, 058 + 063", () => {
+    expect(Object.keys(catalog)).toHaveLength(41);
   });
 
   it("registers exactly the same action names as the migration", () => {

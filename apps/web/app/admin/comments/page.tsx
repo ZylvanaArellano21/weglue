@@ -6,6 +6,8 @@ import { SectionCard, Badge, IdentityCell, EmptyState } from "../../../component
 import { ListControls } from "../../../components/admin/ListControls";
 import { Pagination } from "../../../components/admin/Pagination";
 import { Table, Th, Td, RowLink } from "../../../components/admin/Table";
+import { LifecycleBadge } from "../../../components/admin/ContentLifecycleActions";
+import { getLifecycleRecordsForEntities } from "../../../lib/admin/lifecycleData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -38,6 +40,7 @@ export default async function AdminCommentsPage({
     listUniversities(),
     listClubOptions(),
   ]);
+  const lifecycle = await getLifecycleRecordsForEntities("comment", result.rows.map((comment) => comment.id));
 
   return (
     <div className="space-y-5">
@@ -76,6 +79,7 @@ export default async function AdminCommentsPage({
               head={
                 <>
                   <Th>Comment</Th>
+                  <Th>Lifecycle</Th>
                   <Th>Author</Th>
                   <Th>Parent post</Th>
                   <Th>Club</Th>
@@ -88,6 +92,13 @@ export default async function AdminCommentsPage({
                 <RowLink key={c.id} href={`/admin/comments/${c.id}`}>
                   <Td>
                     <p className="max-w-[320px] truncate text-sm text-gray-900">{c.content}</p>
+                  </Td>
+                  <Td>
+                    {lifecycle.available ? (
+                      <LifecycleBadge status={lifecycle.records.get(c.id)?.displayStatus ?? "active"} />
+                    ) : (
+                      <Badge tone="amber">Lifecycle unavailable</Badge>
+                    )}
                   </Td>
                   <Td>
                     <IdentityCell name={c.author_name || c.author_username} sub={`@${c.author_username}`} avatarUrl={c.avatar_url} />
