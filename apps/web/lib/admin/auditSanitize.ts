@@ -78,6 +78,11 @@ export const AUDIT_ACTIONS = {
   "channel.deleteEmpty":  { targetType: "channel",      targetIdKey: "channelId",      sensitivity: "destructive", requiresReason: true,  metadataKeys: ["channelId"] },
   "notification.setRead": { targetType: "notification", targetIdKey: "notificationId", sensitivity: "ordinary",    requiresReason: false, metadataKeys: ["notificationId", "read"] },
   "report.setStatus":     { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: false, metadataKeys: ["reportId", "nextStatus", "entity_type", "entity_id"] },
+  "report.review":        { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId", "newStatus"] },
+  "report.resolve":       { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId", "decisionId", "resolutionOutcome", "enforcementAction"] },
+  "report.dismiss":       { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId", "decisionId", "resolutionOutcome", "enforcementAction"] },
+  "report.supersede":     { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId", "decisionId", "supersedesDecisionId"] },
+  "report.viewEvidence":  { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId"] },
   "deletedContent.reactivateClub": { targetType: "club", targetIdKey: "clubId",        sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["clubId"] },
 
   // ── Day 10B2: administrator account restrictions (migration 058) ──────────

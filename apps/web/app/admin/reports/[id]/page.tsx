@@ -4,7 +4,7 @@ import { getReportDetail } from "../../../../lib/admin/reportsData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
-import { ReportActions } from "../../../../components/admin/ReportActions";
+import { ReportResolutionPanel } from "../../../../components/admin/ReportResolutionPanel";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -35,7 +35,9 @@ export default async function AdminReportDetailPage({ params }: { params: { id: 
       <SectionCard title="Report" className="md:col-span-2">
         <dl className="grid gap-4 p-4 sm:grid-cols-2">
           <Field label="Status"><Badge tone={STATUS_TONE[report.status] ?? "gray"}>{report.status}</Badge></Field>
+          <Field label="Report ID"><span className="font-mono text-xs">{report.id}</span></Field>
           <Field label="Target type">{report.entity_type_label}</Field>
+          <Field label="Target ID"><span className="font-mono text-xs">{report.entity_id ?? "—"}</span></Field>
           <Field label="Reason">{report.reason ?? "—"}</Field>
           <Field label="Reported">{fmtDateTime(report.created_at)}</Field>
           <div className="sm:col-span-2">
@@ -153,16 +155,13 @@ export default async function AdminReportDetailPage({ params }: { params: { id: 
                 )}
               </Field>
             </dl>
-            <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
-              <p className="font-medium">Private deleted-message evidence is unavailable.</p>
-              <p className="mt-1 text-amber-700">
-                {report.message.has_retained_evidence
-                  ? "This report retains protected moderation evidence, but "
-                  : ""}
-                Private deleted-message evidence remains unavailable until the approved privacy backend is deployed. No
-                retained body, attachment, or snapshot is shown here.
-              </p>
-            </div>
+            {report.evidence ? (
+              <div className="rounded-lg border border-teal-100 bg-teal-50/60 px-4 py-3 text-sm text-teal-900">
+                <p className="font-medium">Retained evidence (founder-only)</p>
+                {report.evidence.content_snapshot ? <p className="mt-2 whitespace-pre-wrap">{report.evidence.content_snapshot}</p> : <p className="mt-2 text-teal-700">No retained text snapshot.</p>}
+                {report.evidence.attachment ? <p className="mt-2 text-xs">Attachment: {report.evidence.attachment.available && report.evidence.attachment.signed_url ? <a className="underline" href={report.evidence.attachment.signed_url} target="_blank" rel="noreferrer">Open short-lived secure media</a> : "Unavailable or expired"}</p> : null}
+              </div>
+            ) : <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-4 py-3 text-sm text-amber-800"><p className="font-medium">Evidence unavailable</p><p className="mt-1">No legally accessible retained evidence is currently available.</p></div>}
           </>
         ) : (
           <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-600">
@@ -171,8 +170,7 @@ export default async function AdminReportDetailPage({ params }: { params: { id: 
         )}
         <p className="text-xs text-gray-400">
           Email delivery: {report.email_delivered ? "sent to the moderation inbox" : "not yet delivered"}
-          {report.email_error ? ` · last error logged (${report.email_error})` : ""}. Confidential evidence columns are
-          never loaded by the dashboard.
+          {report.email_error ? ` · last error logged (${report.email_error})` : ""}. Evidence is server-authorized and never copied into audit metadata or browser logs.
         </p>
       </div>
     </SectionCard>
@@ -207,10 +205,12 @@ export default async function AdminReportDetailPage({ params }: { params: { id: 
   const actionsTab = (
     <SectionCard title="Moderation">
       <div className="space-y-4 p-4">
-        <ReportActions reportId={report.id} status={report.status} allowedTransitions={report.allowedTransitions} />
+        {report.decisions.length > 0 ? <div className="rounded-lg border border-gray-100 bg-gray-50 p-3"><h3 className="text-sm font-semibold text-gray-900">Decision history</h3><ol className="mt-3 space-y-3">{report.decisions.map((d) => <li key={d.id} className="border-l-2 border-teal-300 pl-3 text-sm"><div className="flex flex-wrap gap-2"><Badge tone={STATUS_TONE[d.new_status] ?? "gray"}>{d.new_status}</Badge><span className="text-gray-600">{d.resolution_outcome.replace(/_/g, " ")}</span><span className="text-xs text-gray-400">{fmtDateTime(d.created_at)}</span></div><p className="mt-1 text-gray-700">{d.internal_decision_note}</p><p className="mt-1 text-xs text-gray-400">Enforcement: {d.enforcement_action.replace(/_/g, " ")} · {d.enforcement_status} · Notification: {d.delivery_status ?? d.notification_status} · Correlation {d.correlation_id}</p></li>)}</ol></div> : null}
+        {report.auditEvents.length > 0 ? <div className="rounded-lg border border-gray-100 p-3"><h3 className="text-sm font-semibold text-gray-900">Related audit events</h3><ul className="mt-2 space-y-2 text-xs">{report.auditEvents.map((a) => <li key={a.id} className="flex flex-wrap gap-2"><Badge tone={a.success ? "green" : "red"}>{a.success ? "success" : "failure"}</Badge><span>{a.action}</span><span className="text-gray-400">{a.correlation_id}</span><span className="text-gray-400">{fmtDateTime(a.occurred_at)}</span></li>)}</ul></div> : null}
+        <ReportResolutionPanel reportId={report.id} status={report.status} entityType={report.entity_type} />
         <p className="text-xs text-gray-400">
-          Status changes write only <code>reports.status</code>, are validated against the current state, read back, and
-          audited. No sanction is applied automatically and no evidence is ever written to a reporter-readable column.
+          Decisions are terminal, append-only, atomically enforced, and linked by one correlation ID. Internal notes never
+          reach students or notification payloads.
         </p>
       </div>
     </SectionCard>

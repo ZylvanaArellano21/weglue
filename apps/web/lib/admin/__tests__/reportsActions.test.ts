@@ -10,7 +10,7 @@ vi.mock("../../supabase/server", () => ({
 }));
 vi.mock("../../supabase/admin", () => ({ createAdminClient: h.createAdminClient }));
 
-import { setReportStatus } from "../reportsActions";
+import { resolveReport, setReportStatus } from "../reportsActions";
 import { SecureAdminError } from "../secureAdmin";
 
 const FOUNDER = { id: "00000001-0000-0000-0000-000000000001", email: "founder@weglue.app" };
@@ -51,15 +51,15 @@ describe("setReportStatus — canonical transitions", () => {
     expect(h.holder.db.tables.reports.find((r: any) => r.id === R(1)).status).toBe("reviewing");
   });
 
-  it("moves pending → resolved and reviewing → dismissed", async () => {
-    expect((await setReportStatus(R(1), "resolved")).ok).toBe(true);
-    expect((await setReportStatus(R(2), "dismissed")).ok).toBe(true);
+  it("records terminal decisions", async () => {
+    expect((await resolveReport({ reportId: R(1), status: "resolved", resolutionOutcome: "content_violation", internalReason: "Reviewed evidence.", internalDecisionNote: "Content violated the rules.", enforcementAction: "none" })).ok).toBe(true);
+    expect((await resolveReport({ reportId: R(2), status: "dismissed", resolutionOutcome: "duplicate_or_invalid", internalReason: "Duplicate report.", internalDecisionNote: "This report duplicates an existing review.", enforcementAction: "none" })).ok).toBe(true);
   });
 
-  it("reopens resolved → pending", async () => {
+  it("does not reopen a terminal decision", async () => {
     const res = await setReportStatus(R(3), "pending");
-    expect(res.ok).toBe(true);
-    expect(h.holder.db.tables.reports.find((r: any) => r.id === R(3)).status).toBe("pending");
+    expect(res.ok).toBe(false);
+    expect(h.holder.db.tables.reports.find((r: any) => r.id === R(3)).status).toBe("resolved");
   });
 
   it("rejects an invalid transition (resolved → reviewing)", async () => {
@@ -109,7 +109,7 @@ describe("setReportStatus — authorization", () => {
 
 describe("setReportStatus — evidence safety", () => {
   it("never writes to evidence columns during a transition", async () => {
-    await setReportStatus(R(2), "resolved");
+    await resolveReport({ reportId: R(2), status: "resolved", resolutionOutcome: "content_violation", internalReason: "Reviewed evidence.", internalDecisionNote: "Evidence supports the decision.", enforcementAction: "none" });
     const row = h.holder.db.tables.reports.find((r: any) => r.id === R(2));
     // Only status changed; retained snapshot columns are untouched (and never
     // read into a reporter-visible surface).

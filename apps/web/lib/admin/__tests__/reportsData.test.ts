@@ -66,7 +66,7 @@ describe("transition helpers", () => {
     expect(canTransition("pending", "reviewing")).toBe(true);
     expect(canTransition("pending", "resolved")).toBe(true);
     expect(canTransition("resolved", "reviewing")).toBe(false);
-    expect(canTransition("dismissed", "pending")).toBe(true);
+    expect(canTransition("dismissed", "pending")).toBe(false);
     expect(canTransition("pending", "banned")).toBe(false);
   });
   it("declares a transition set for every status", () => {
@@ -89,12 +89,10 @@ describe("getReportDetail — safe shaping", () => {
     expect(d!.reporter_username).toBe("reporter");
     expect(d!.allowedTransitions).toEqual(REPORT_TRANSITIONS.pending);
     expect(d!.message).toBeNull();
-    // The detail object must not carry any evidence column.
-    expect(JSON.stringify(d)).not.toContain("content_snapshot");
-    expect(JSON.stringify(d)).not.toContain("attachment_snapshot");
+    expect(d!.evidence).toBeNull();
   });
 
-  it("shapes a message report as safe workflow metadata only", async () => {
+  it("shapes founder-visible retained message evidence without exposing storage paths", async () => {
     const d = await getReportDetail("r-msg");
     expect(d).not.toBeNull();
     expect(d!.message).not.toBeNull();
@@ -102,9 +100,8 @@ describe("getReportDetail — safe shaping", () => {
     expect(d!.message!.conversation_type).toBe("direct");
     expect(d!.message!.has_retained_evidence).toBe(true);
     expect(d!.reported_user_id).toBe("u-bad");
-    // Never any retained body/attachment/snapshot text anywhere in the payload.
     const json = JSON.stringify(d);
-    expect(json).not.toContain("PRIVATE DELETED BODY");
+    expect(json).toContain("PRIVATE DELETED BODY");
     expect(json).not.toContain("y.jpg");
   });
 
