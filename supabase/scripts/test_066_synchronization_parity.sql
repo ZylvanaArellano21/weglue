@@ -1,8 +1,8 @@
 -- Day 10E local database/security harness. Run only after a disposable local
--- reset with migrations through 065; never run it against Production.
+-- reset with migrations through 066; never run it against Production.
 --
 -- docker exec -i supabase_db_weglue psql -U postgres -d postgres \
---   -v ON_ERROR_STOP=1 < supabase/scripts/test_065_synchronization_parity.sql
+--   -v ON_ERROR_STOP=1 < supabase/scripts/test_066_synchronization_parity.sql
 
 \set ON_ERROR_STOP on
 \pset pager off
@@ -133,4 +133,4 @@ $$;
 RESET ROLE;
 ROLLBACK;
 
-SELECT '065 synchronization parity schema/security harness passed' AS result;
+SELECT '066 synchronization parity schema/security harness passed' AS result;
