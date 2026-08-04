@@ -82,14 +82,9 @@ export default function EditInterestsScreen() {
     // Standalone Save (from the profile screen) is a final survey save too —
     // it supersedes the old batch and celebrates the new matches.
     try {
-      const batch = await regenerate.mutateAsync();
-      if (batch && batch.count > 0) {
-        router.replace({
-          pathname: '/profile/match-results',
-          params: { count: String(batch.count) },
-        } as never);
-        return;
-      }
+      const outcome = await regenerate.mutateAsync();
+      router.replace({ pathname: '/profile/match-results', params: outcome.kind === 'matches' ? { count: String(outcome.batch.count), state: 'matches' } : { state: outcome.kind } } as never);
+      return;
     } catch {
       // Recommendations are a bonus — never block saving interests on them.
     }

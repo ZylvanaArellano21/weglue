@@ -1,11 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useHomePostsFeed, useLikePost, type FeedPost } from "../../lib/hooks/useHomePostsFeed";
 import { Avatar } from "../shared/Avatar";
+import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { EmptyState } from "./EmptyState";
+import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
+import { useToast } from "../shared/Toast";
 
 // Desktop Home → Posts feed. Same university-scoped, newest-first picture posts
 // as mobile. Full comment threads + post detail overlay land in a later phase;
@@ -15,6 +19,8 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
   const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useHomePostsFeed(userId);
   const { mutate: like } = useLikePost();
+  const [sharePostId, setSharePostId] = useState<string | null>(null);
+  const show = useToast();
 
   const posts = useMemo(() => (data ? data.pages.flat() : []), [data]);
 
@@ -55,10 +61,16 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
           onLike={() =>
             like({ userId, postId: post.id, hasLiked: post.user_has_liked })
           }
-          onOpenAuthor={() => router.push(`/u/${post.author.username}`)}
+          onOpenComments={() => {
+            const sp = new URLSearchParams(window.location.search);
+            sp.set("comments", post.id);
+            router.push(`${window.location.pathname}?${sp.toString()}`, { scroll: false });
+          }}
+          onShare={() => setSharePostId(post.id)}
         />
       ))}
 
+      {sharePostId && <UnifiedShareSheet userId={userId} content={{ type: "post", id: sharePostId }} title="Share post" onClose={() => setSharePostId(null)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
       {hasNextPage && (
         <button
           type="button"
@@ -77,11 +89,13 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
 function PostCard({
   post,
   onLike,
-  onOpenAuthor,
+  onOpenComments,
+  onShare,
 }: {
   post: FeedPost;
   onLike: () => void;
-  onOpenAuthor: () => void;
+  onOpenComments: () => void;
+  onShare: () => void;
 }): JSX.Element {
   return (
     <article
@@ -93,15 +107,16 @@ function PostCard({
       }}
     >
       <div className="flex items-center gap-2.5 px-3.5 py-3">
-        <button type="button" onClick={onOpenAuthor} className="flex items-center gap-2.5">
+        <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex items-center gap-2.5">
           <Avatar uri={post.author.avatar_url} size={34} name={post.author.username} />
           <span className="text-[15px] font-semibold text-gray-800">
             {post.author.username}
           </span>
-        </button>
+        </ClickableUserIdentity>
         {post.tagged_clubs.length > 0 && (
-          <span className="truncate text-xs text-gray-400">
-            · {post.tagged_clubs.map((c) => c.name).join(", ")}
+          <span className="flex min-w-0 flex-wrap gap-1 text-xs" style={{ color: "#0FA6A6" }}>
+            <span className="text-gray-400">·</span>
+            {post.tagged_clubs.map((club) => <ClickableClubIdentity key={club.id} clubId={club.id} className="truncate">@{club.name}</ClickableClubIdentity>)}
           </span>
         )}
       </div>
@@ -131,10 +146,11 @@ function PostCard({
             <HeartIcon size={22} filled={post.user_has_liked} />
             <span className="text-sm">{post.likes_count}</span>
           </button>
-          <span className="flex items-center gap-1.5 text-gray-700">
+          <button type="button" onClick={onOpenComments} className="flex items-center gap-1.5 rounded-md text-gray-700 outline-none hover:text-[#0FA6A6] focus-visible:ring-2 focus-visible:ring-[#0FA6A6]">
             <CommentIcon size={20} />
             <span className="text-sm">{post.comments_count}</span>
-          </span>
+          </button>
+          <button type="button" onClick={onShare} aria-label="Share post" className="rounded-full p-1 text-[#0FA6A6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6]"><ShareGlyph /></button>
         </div>
         {post.caption && (
           <p className="mt-2 text-sm text-gray-800">
@@ -145,3 +161,5 @@ function PostCard({
     </article>
   );
 }
+
+function ShareGlyph(): JSX.Element { return <svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7Z" /></svg>; }

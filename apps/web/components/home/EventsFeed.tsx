@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useHomeEventsFeed,
   useRsvpToEvent,
@@ -10,6 +10,8 @@ import {
 } from "../../lib/hooks/useHomeEventsFeed";
 import { useClubRecommendations } from "../../lib/hooks/useClubRecommendations";
 import { useJoinClubMutation } from "../../lib/hooks/useClubMembership";
+import { LeaveClubDialog } from "../clubs/LeaveClubDialog";
+import { useState } from "react";
 import { useToast } from "../shared/Toast";
 import { RecommendationStrip } from "./RecommendationStrip";
 import { EventCard } from "./EventCard";
@@ -26,6 +28,8 @@ export function EventsFeed({
   onOpenEvent: (eventId: string) => void;
 }): JSX.Element {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const show = useToast();
 
   const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
@@ -35,6 +39,7 @@ export function EventsFeed({
   const { mutate: rsvp } = useRsvpToEvent();
   const { mutate: toggleSave } = useToggleSaveEvent();
   const { mutate: joinClub } = useJoinClubMutation(userId);
+  const [leaving, setLeaving] = useState<{ id: string; name: string } | null>(null);
 
   const sections = useMemo(
     () => (data ? mergeEventFeedPages(data.pages) : []),
@@ -45,30 +50,37 @@ export function EventsFeed({
   // Event detail is the shared URL-driven overlay (see HomeClient); opening it
   // preserves the current tab so browser Back restores the exact Home state.
   const openEvent = onOpenEvent;
+  const openAttendees = (eventId: string) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    sp.set("attendees", eventId);
+    router.push(`${pathname}?${sp.toString()}`, { scroll: false });
+  };
 
-  const handleRsvp = (eventId: string) =>
+  const handleRsvp = (eventId: string, previousStatus: "going" | "cant" | null) =>
     rsvp(
-      { userId, eventId, status: "going" },
+      { userId, eventId, status: "going", previousStatus },
       {
         onSuccess: () => show("RSVP confirmed! 🎉"),
         onError: () => show("Failed to RSVP. Try again.", "error"),
       }
     );
 
-  const handleSave = (eventId: string) =>
+  const handleSave = (eventId: string, isSaved: boolean) =>
     toggleSave(
-      { userId, eventId },
+      { userId, eventId, isSaved },
       {
         onSuccess: (saved) => show(saved ? "Event saved!" : "Event removed from saved"),
         onError: () => show("Failed to save event.", "error"),
       }
     );
 
-  const handleJoin = (clubId: string) =>
+  const handleToggleClub = (clubId: string, clubName: string, isMember: boolean) => {
+    if (isMember) { setLeaving({ id: clubId, name: clubName }); return; }
     joinClub(clubId, {
       onSuccess: () => show("Joined club! 🎉"),
       onError: () => show("Failed to join club.", "error"),
     });
+  };
 
   const strip = batch ? (
     <RecommendationStrip
@@ -135,9 +147,10 @@ export function EventsFeed({
                     event={event}
                     onRsvp={handleRsvp}
                     onToggleSave={handleSave}
-                    onJoinClub={handleJoin}
+                    onToggleClub={handleToggleClub}
                     onOpenEvent={openEvent}
                     onOpenClub={openClub}
+                    onOpenAttendees={openAttendees}
                   />
                 ))}
               </div>
@@ -157,6 +170,7 @@ export function EventsFeed({
           )}
         </div>
       )}
+      {leaving && <LeaveClubDialog clubId={leaving.id} clubName={leaving.name} userId={userId} onClose={() => setLeaving(null)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
     </div>
   );
 }

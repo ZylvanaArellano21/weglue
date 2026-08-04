@@ -1,9 +1,13 @@
 "use client";
 
 import { Modal } from "../shared/Modal";
+import { useState } from "react";
 import { Avatar } from "../shared/Avatar";
+import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
+import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
+import { useToast } from "../shared/Toast";
 
 // Minimal post overlay (?post=), the destination for like/comment notifications
 // and the profile posts grid. Real shared post data; like toggles the shared
@@ -13,19 +17,24 @@ export function PostModal({
   userId,
   onClose,
   onOpenAuthor,
+  onOpenComments,
   officerActions,
 }: {
   postId: string;
   userId: string;
   onClose: () => void;
   onOpenAuthor: (userId: string) => void;
+  onOpenComments?: (postId: string) => void;
   /** Optional officer moderation controls (Club Media overlay). */
   officerActions?: React.ReactNode;
 }): JSX.Element {
   const { data: post, isLoading } = usePostDetail(postId, userId);
   const { mutate: like } = useLikePost();
+  const [shareOpen, setShareOpen] = useState(false);
+  const show = useToast();
 
   return (
+    <>
     <Modal onClose={onClose} labelledBy="post-title" maxWidth={520}>
       {isLoading ? (
         <div className="space-y-3 p-6">
@@ -37,15 +46,16 @@ export function PostModal({
       ) : (
         <div>
           <div className="flex items-center gap-2.5 p-4 pr-10">
-            <button type="button" onClick={() => onOpenAuthor(post.author.id)} className="flex items-center gap-2.5">
+            <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex items-center gap-2.5">
               <Avatar uri={post.author.avatar_url} size={38} name={post.author.username} />
               <span id="post-title" className="text-[15px] font-semibold text-gray-900">
                 {post.author.username}
               </span>
-            </button>
+            </ClickableUserIdentity>
             {post.tagged_clubs.length > 0 && (
-              <span className="truncate text-xs text-gray-400">
-                · {post.tagged_clubs.map((c) => c.name).join(", ")}
+              <span className="flex min-w-0 flex-wrap gap-1 text-xs" style={{ color: "#0FA6A6" }}>
+                <span className="text-gray-400">·</span>
+                {post.tagged_clubs.map((club) => <ClickableClubIdentity key={club.id} clubId={club.id} className="truncate">@{club.name}</ClickableClubIdentity>)}
               </span>
             )}
           </div>
@@ -72,10 +82,11 @@ export function PostModal({
                 <HeartIcon size={22} filled={post.user_has_liked} />
                 <span className="text-sm">{post.likes_count}</span>
               </button>
-              <span className="flex items-center gap-1.5 text-gray-700">
+              <button type="button" onClick={() => onOpenComments?.(post.id)} className="flex items-center gap-1.5 rounded-md text-gray-700 outline-none hover:text-[#0FA6A6] focus-visible:ring-2 focus-visible:ring-[#0FA6A6]">
                 <CommentIcon size={20} />
                 <span className="text-sm">{post.comments_count}</span>
-              </span>
+              </button>
+              <button type="button" onClick={() => setShareOpen(true)} aria-label="Share post" className="rounded-full p-2 text-[#0FA6A6]"><ShareGlyph /></button>
             </div>
             {post.caption && (
               <p className="mt-2 text-sm text-gray-800">
@@ -91,5 +102,9 @@ export function PostModal({
         </div>
       )}
     </Modal>
+    {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "post", id: postId }} title="Share post" onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
+    </>
   );
 }
+
+function ShareGlyph(): JSX.Element { return <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7Z" /></svg>; }

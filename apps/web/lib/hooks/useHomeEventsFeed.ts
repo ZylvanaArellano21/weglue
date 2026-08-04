@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { todayInAppTz, isEventPast } from "../datetime";
-import { invalidateEventState } from "./eventSync";
+import { invalidateEventState, patchCachedEvent } from "./eventSync";
 
 // Web port of apps/mobile/services/eventService.ts (getHomeEventsFeed,
 // rsvpToEvent, toggleSaveEvent) + apps/mobile/hooks/useHomeEventsFeed.ts.
@@ -268,12 +268,24 @@ export function useRsvpToEvent() {
     mutationFn: ({
       userId,
       eventId,
-      status,
+      status, previousStatus,
     }: {
       userId: string;
       eventId: string;
       status: "going" | "cant";
+      previousStatus: "going" | "cant" | null;
     }) => rsvpToEvent(userId, eventId, status),
+    onMutate: async ({ eventId, status, previousStatus }) => {
+      await queryClient.cancelQueries({ queryKey: ["eventDetail", eventId] });
+      const nextStatus = previousStatus === status ? null : status;
+      const delta = (nextStatus === "going" ? 1 : 0) - (previousStatus === "going" ? 1 : 0);
+      patchCachedEvent(queryClient, eventId, (current) => ({
+        user_rsvp_status: nextStatus,
+        attendee_count: Math.max(0, (current.attendee_count ?? 0) + delta),
+      }));
+      return { eventId, delta };
+    },
+    onError: (_error, { userId }) => invalidateEventState(queryClient, userId),
     onSuccess: (_data, { userId }) => invalidateEventState(queryClient, userId),
   });
 }
@@ -300,8 +312,15 @@ async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean
 export function useToggleSaveEvent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ userId, eventId }: { userId: string; eventId: string }) =>
+    mutationFn: ({ userId, eventId }: { userId: string; eventId: string; isSaved: boolean }) =>
       toggleSaveEvent(userId, eventId),
+    onMutate: async ({ eventId, isSaved }) => {
+      patchCachedEvent(queryClient, eventId, { is_saved: !isSaved });
+      queryClient.setQueriesData({ queryKey: ["savedEventsCount"] }, (count: number | undefined) =>
+        typeof count === "number" ? Math.max(0, count + (isSaved ? -1 : 1)) : count
+      );
+    },
+    onError: (_error, { userId }) => invalidateEventState(queryClient, userId),
     onSuccess: (_saved, { userId }) => invalidateEventState(queryClient, userId),
   });
 }

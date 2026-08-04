@@ -4,6 +4,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { clubRecommendationsKey, type ClubRecommendationBatch } from "./useClubRecommendations";
 
+export type ClubRecommendationOutcome =
+  | { kind: "matches"; batch: ClubRecommendationBatch }
+  | { kind: "all_joined" }
+  | { kind: "none_available" };
+
 // Interests rerun (spec §2): saves the updated interests + activities to the
 // shared backend, then rebuilds the recommendation batch with the SAME
 // server-side logic + minimum-two fallback mobile uses. Returns the fresh batch
@@ -31,20 +36,19 @@ export function useInterestsRerun(userId: string | undefined) {
     }: {
       interests: string[];
       activities: string[];
-    }): Promise<ClubRecommendationBatch | null> => {
+    }): Promise<ClubRecommendationOutcome> => {
       await replaceRows("user_interests", "interest", userId!, interests);
       await replaceRows("user_activities", "activity", userId!, activities);
 
       const supabase = getSupabaseBrowser();
       const { error } = await supabase.rpc("regenerate_my_club_recommendations");
       if (error) throw error;
-      // Read the batch back through the self-healing path Home uses, so the
-      // Congratulations count and Home can never disagree.
-      const { data } = await supabase.rpc("get_my_club_recommendations");
-      return (data ?? null) as ClubRecommendationBatch | null;
+      const { data, error: outcomeError } = await supabase.rpc("get_my_club_recommendation_outcome");
+      if (outcomeError) throw outcomeError;
+      return data as ClubRecommendationOutcome;
     },
-    onSuccess: (batch) => {
-      queryClient.setQueryData(clubRecommendationsKey(userId), batch);
+    onSuccess: (outcome) => {
+      queryClient.setQueryData(clubRecommendationsKey(userId), outcome.kind === "matches" ? outcome.batch : null);
       void queryClient.invalidateQueries({ queryKey: ["ownProfile", userId] });
       void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
     },

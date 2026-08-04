@@ -26,6 +26,11 @@ export interface ClubRecommendationBatch {
   clubs: RecommendedClub[];
 }
 
+export type ClubRecommendationOutcome =
+  | { kind: 'matches'; batch: ClubRecommendationBatch }
+  | { kind: 'all_joined' }
+  | { kind: 'none_available' };
+
 export const clubRecommendationsKey = (userId?: string) =>
   ['clubRecommendations', userId] as const;
 
@@ -88,15 +93,15 @@ export function useRegenerateClubRecommendations(userId?: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (): Promise<ClubRecommendationBatch | null> => {
+    mutationFn: async (): Promise<ClubRecommendationOutcome> => {
       const { error } = await supabase.rpc('regenerate_my_club_recommendations');
       if (error) throw error;
-      // Read the batch back through the same self-healing path Home uses, so
-      // the results screen and Home can never disagree about count or order.
-      return fetchClubRecommendations();
+      const { data, error: outcomeError } = await supabase.rpc('get_my_club_recommendation_outcome');
+      if (outcomeError) throw outcomeError;
+      return data as ClubRecommendationOutcome;
     },
-    onSuccess: (batch) => {
-      queryClient.setQueryData(clubRecommendationsKey(userId), batch);
+    onSuccess: (outcome) => {
+      queryClient.setQueryData(clubRecommendationsKey(userId), outcome.kind === 'matches' ? outcome.batch : null);
     },
   });
 }

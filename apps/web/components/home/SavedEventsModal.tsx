@@ -6,6 +6,7 @@ import { EmptyState } from "./EmptyState";
 import { useSavedEvents } from "../../lib/hooks/useSavedEvents";
 import { formatEventDate, formatEventTime, formatEventLocation } from "../../lib/datetime";
 import type { CalendarEvent } from "../../lib/hooks/useCalendar";
+import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 
 // The "Saved" overlay (matches the web screenshot): real saved-event records,
 // upcoming events bucketed by Today / This Week / …, then past. Each row opens
@@ -87,13 +88,8 @@ function SavedRow({
 }): JSX.Element {
   const location = formatEventLocation(event.building, event.room, event.location);
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={`flex w-full items-center gap-3 rounded-xl border border-black/5 bg-white p-2.5 text-left hover:bg-gray-50 ${
-        past ? "opacity-70" : ""
-      }`}
-    >
+    <div className={`flex w-full items-center gap-3 rounded-xl border border-black/5 bg-white p-2.5 ${past ? "opacity-70" : ""}`}>
+      <button type="button" onClick={onOpen} aria-label={`Open ${event.title}`} className="shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6] focus-visible:ring-offset-2">
       {event.cover_image_url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={event.cover_image_url} alt="" className="h-14 w-16 shrink-0 rounded-lg object-cover" />
@@ -102,14 +98,14 @@ function SavedRow({
           <ImageIcon size={22} />
         </span>
       )}
+      </button>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-gray-900">
-          {event.emoji ? `${event.emoji} ` : ""}
-          {event.title}
-        </p>
-        <p className="truncate text-xs font-medium" style={{ color: "#0FA6A6" }}>
-          {event.club.name}
-        </p>
+        <button type="button" onClick={onOpen} className="block w-full truncate text-left text-sm font-semibold text-gray-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6] focus-visible:ring-offset-2">
+          {event.emoji ? `${event.emoji} ` : ""}{event.title}
+        </button>
+        <ClickableClubIdentity clubId={event.club.id} className="block truncate text-xs font-medium text-[#0FA6A6]">
+          @{event.club.name}
+        </ClickableClubIdentity>
         <p className="text-xs text-gray-500">
           {formatEventDate(event.event_date)} · {formatEventTime(event.start_time)} -{" "}
           {formatEventTime(event.end_time)}
@@ -119,6 +115,6 @@ function SavedRow({
       <span aria-hidden className="text-gray-300">
         ›
       </span>
-    </button>
+    </div>
   );
 }

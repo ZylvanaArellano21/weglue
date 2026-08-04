@@ -17,6 +17,7 @@ import {
   type AppNotification,
   type NotificationTarget,
 } from "../../lib/hooks/useNotifications";
+import { resolveNotificationVisual } from "@weglue/shared";
 
 // Desktop adaptation of apps/mobile/app/home/notifications.tsx as a URL-driven
 // overlay (?notifications=1). Real records, same grouping, same read semantics
@@ -146,7 +147,7 @@ function NotificationRow({
       className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-black/[0.03]"
       style={{ background: item.is_read ? "transparent" : "rgba(15,166,166,0.06)" }}
     >
-      <Avatar uri={item.sender?.avatar_url} size={46} name={item.sender?.username} />
+      <NotificationVisual visual={item.visual ?? resolveNotificationVisual({ type: item.type, group_count: item.group_count, actor: item.sender, actors: item.actors, entity: item.entity })} />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-gray-900">
           {item.message ? (
@@ -212,4 +213,12 @@ function NotificationRow({
       )}
     </button>
   );
+}
+
+function NotificationVisual({ visual }: { visual: ReturnType<typeof resolveNotificationVisual> }): JSX.Element {
+  if (visual.kind === "actors") return <span className="flex h-[46px] w-[90px] shrink-0 items-center pl-1"><span className="flex min-w-[86px] -space-x-3">{visual.actors.slice(0, 3).map((actor) => <Avatar key={actor.id} uri={actor.avatar_url} size={38} name={actor.username} />)}</span></span>;
+  if (visual.kind === "actor") return <Avatar uri={visual.actor.avatar_url} size={46} name={visual.actor.username} />;
+  if (visual.kind === "entity") return <Avatar uri={visual.entity.avatar_url} size={46} name={visual.entity.name} />;
+  if (visual.kind === "system") return <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-[#0FA6A6] text-xl text-white">W</span>;
+  return <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-gray-200 text-xl text-gray-500">•••</span>;
 }

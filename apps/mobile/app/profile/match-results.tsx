@@ -24,7 +24,7 @@ import { useSidebarStore } from '../../store/sidebarStore';
  */
 export default function MatchResultsScreen() {
   const router = useRouter();
-  const { count } = useLocalSearchParams<{ count?: string }>();
+  const { count, state } = useLocalSearchParams<{ count?: string; state?: 'matches' | 'all_joined' | 'none_available' }>();
   const setActiveTab = useHomeTabStore((s) => s.setActiveTab);
 
   const matchCount = Number(count ?? 0);
@@ -41,6 +41,10 @@ export default function MatchResultsScreen() {
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const allJoined = state === 'all_joined';
+  const noClubsAvailable = state === 'none_available';
+  const showMatches = !allJoined && !noClubsAvailable && matchCount > 0;
 
   function goToMatches() {
     // Home, with Events selected — the new batch is already in the query cache
@@ -62,17 +66,11 @@ export default function MatchResultsScreen() {
       <View style={styles.content}>
         <View style={styles.partyRow}>
           <Text style={styles.partyEmoji}>🎉</Text>
-          <Text style={styles.congrats}>Congratulations!</Text>
+          <Text style={styles.congrats}>{allJoined ? 'You’ve already joined all the clubs!' : showMatches ? 'Congratulations!' : 'No clubs are available right now.'}</Text>
           <Text style={styles.partyEmoji}>🎉</Text>
         </View>
 
-        <Text style={styles.matchedText}>You matched with</Text>
-        <Text style={styles.matchCount}>{matchCount} clubs!</Text>
-
-        <Text style={styles.body}>
-          We found new clubs based on your interests and activities. Your matches
-          are waiting for you.
-        </Text>
+        {showMatches ? <><Text style={styles.matchedText}>You matched with</Text><Text style={styles.matchCount}>{matchCount} club{matchCount === 1 ? '' : 's'}!</Text><Text style={styles.body}>We found new clubs based on your interests and activities. Your matches are waiting for you.</Text></> : <Text style={styles.body}>{allJoined ? 'You’re all caught up. Check out upcoming events and see what’s happening next.' : 'Check out upcoming events and see what’s happening next.'}</Text>}
       </View>
 
       <View style={styles.footer}>
@@ -81,7 +79,7 @@ export default function MatchResultsScreen() {
           onPress={goToMatches}
           activeOpacity={0.85}
         >
-          <Text style={styles.primaryBtnText}>See my matches</Text>
+          <Text style={styles.primaryBtnText}>{showMatches ? 'See my matches' : 'Check out events'}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

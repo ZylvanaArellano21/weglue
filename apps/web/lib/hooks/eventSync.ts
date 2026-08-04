@@ -1,5 +1,32 @@
 import type { QueryClient } from "@tanstack/react-query";
 
+/** Applies a small event state change to every event-shaped cached value.  The
+ * feeds use different envelopes (infinite pages, calendar sections, detail),
+ * so keeping this traversal here avoids card/detail cache drift. */
+export function patchCachedEvent(
+  queryClient: QueryClient,
+  eventId: string,
+  patch: Record<string, unknown> | ((event: Record<string, any>) => Record<string, unknown>)
+): void {
+  const visit = (value: any): any => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!value || typeof value !== "object") return value;
+    const own = value.id === eventId && ("is_saved" in value || "user_rsvp_status" in value || "attendee_count" in value)
+      ? { ...value, ...(typeof patch === "function" ? patch(value) : patch) }
+      : value;
+    let changed = own !== value;
+    const next: Record<string, unknown> = { ...own };
+    for (const [key, child] of Object.entries(own)) {
+      const resolved = visit(child);
+      if (resolved !== child) { next[key] = resolved; changed = true; }
+    }
+    return changed ? next : value;
+  };
+  for (const key of [["homeEventsFeed"], ["eventDetail"], ["savedEventsUpcoming"], ["calendarEvents"], ["calendarDayEvents"], ["clubEventsFeed"], ["clubCalendarEvents"]]) {
+    queryClient.setQueriesData({ queryKey: key }, visit);
+  }
+}
+
 // One place that lists every cache an RSVP or save/unsave can affect, so the
 // Home feed, Upcoming Events, the calendar (list + month markers + day view),
 // Saved Events and any open event-detail overlay all refresh together — the
@@ -16,6 +43,7 @@ export function invalidateEventState(
     ["calendarDayEvents", userId],
     ["savedEventsUpcoming", userId],
     ["savedEventsPast", userId],
+    ["savedEventsCount", userId],
     ["ownThisWeekEvents", userId],
   ]) {
     void queryClient.invalidateQueries({ queryKey: key });
@@ -23,6 +51,7 @@ export function invalidateEventState(
   // Event-detail overlays are keyed by eventId; invalidate them all. Likewise
   // the club-scoped feeds + club calendar markers (Club Profile Home/Calendar).
   void queryClient.invalidateQueries({ queryKey: ["eventDetail"] });
+  void queryClient.invalidateQueries({ queryKey: ["eventAttendees"] });
   void queryClient.invalidateQueries({ queryKey: ["clubEventsFeed"] });
   void queryClient.invalidateQueries({ queryKey: ["clubCalendarEvents"] });
 }

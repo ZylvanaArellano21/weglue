@@ -6,6 +6,8 @@ import { Avatar } from "../shared/Avatar";
 import { CountBadge } from "../shared/CountBadge";
 import { CloseIcon, BookmarkIcon, HeartIcon } from "../shared/icons";
 import { useOwnProfile, useOwnClubs } from "../../lib/hooks/useOwnProfile";
+import { useSavedEventsCount } from "../../lib/hooks/useSavedEvents";
+import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import {
   usePicturePromptState,
@@ -19,14 +21,14 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
   const router = useRouter();
   const { data: profile } = useOwnProfile(userId);
   const { data: clubs } = useOwnClubs(userId);
+  const { data: savedEventsCount = 0 } = useSavedEventsCount(userId);
   const { data: summary } = useUnreadSummaryValue(userId);
   const { data: promptState } = usePicturePromptState(userId);
   const { mutate: dismissPrompt } = useDismissPicturePrompt(userId);
 
   const notifications = summary?.unread_notifications ?? 0;
   const handles = (clubs ?? [])
-    .map((c) => c.club_handle)
-    .filter((h): h is string => !!h)
+    .filter((c) => c.role === "officer" && !!c.club_handle)
     .slice(0, 3);
 
   // New accounts only, and only until they act on it (mirrors mobile exactly).
@@ -42,7 +44,7 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
         className="rounded-xl bg-white p-4"
         style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid rgba(0,0,0,0.05)" }}
       >
-        <button type="button" onClick={openProfile} className="flex w-full flex-col items-start text-left">
+        <button type="button" onClick={openProfile} className="flex w-full flex-col items-start text-left rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6] focus-visible:ring-offset-2">
           <Avatar
             uri={profile?.avatar_url}
             size={64}
@@ -54,16 +56,21 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
           {profile?.major && (
             <p className="text-sm italic text-gray-500">{profile.major}</p>
           )}
-          {handles.length > 0 && (
-            <p className="mt-1 text-sm font-medium" style={{ color: "#0FA6A6" }}>
-              {handles.map((h) => (
-                <span key={h} className="block">
-                  @{h}
-                </span>
-              ))}
-            </p>
-          )}
         </button>
+        {handles.length > 0 && (
+          <div className="mt-1 text-sm font-medium" style={{ color: "#0FA6A6" }}>
+            {handles.map((club) => (
+              <ClickableClubIdentity
+                key={club.club_id}
+                clubId={club.club_id}
+                ariaLabel={`Open ${club.club_name}`}
+                className="block w-fit cursor-pointer"
+              >
+                @{club.club_handle}
+              </ClickableClubIdentity>
+            ))}
+          </div>
+        )}
 
         {showPicturePrompt && (
           <div
@@ -100,7 +107,7 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
 
       {/* Saved Events + Interests */}
       <MenuCard>
-        <MenuRow href="/home?saved=1" label="Saved Events" icon={<BookmarkIcon size={18} />} />
+        <MenuRow href="/home?saved=1" label="Saved Events" icon={<BookmarkIcon size={18} />} count={savedEventsCount} />
         <MenuRow href="/interests" label="Interests" icon={<HeartIcon size={18} />} />
       </MenuCard>
 
@@ -145,12 +152,14 @@ function MenuRow({
   label,
   icon,
   badge = 0,
+  count,
   bold,
 }: {
   href: string;
   label: string;
   icon?: React.ReactNode;
   badge?: number;
+  count?: number;
   bold?: boolean;
 }): JSX.Element {
   return (
@@ -163,6 +172,7 @@ function MenuRow({
       {icon}
       <span className="flex-1">{label}</span>
       {badge > 0 && <CountBadge count={badge} label="unread notifications" />}
+      {typeof count === "number" && <span style={{ color: "#0FA6A6" }}>{count}</span>}
     </Link>
   );
 }

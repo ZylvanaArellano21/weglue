@@ -270,6 +270,28 @@ export function useLikePost() {
           .upsert({ user_id: userId, post_id: postId }, { onConflict: "post_id,user_id" });
       }
     },
+    onMutate: async ({ userId, postId, hasLiked }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["homePostsFeed", userId] }),
+        queryClient.cancelQueries({ queryKey: ["postDetail", postId, userId] }),
+      ]);
+      const patch = (post: FeedPost): FeedPost => post.id !== postId ? post : {
+        ...post,
+        user_has_liked: !hasLiked,
+        likes_count: Math.max(0, post.likes_count + (hasLiked ? -1 : 1)),
+      };
+      const homeKey = ["homePostsFeed", userId] as const;
+      const detailKey = ["postDetail", postId, userId] as const;
+      const home = queryClient.getQueryData<any>(homeKey);
+      const detail = queryClient.getQueryData<FeedPost | null>(detailKey);
+      if (home) queryClient.setQueryData(homeKey, { ...home, pages: home.pages.map((page: FeedPost[]) => page.map(patch)) });
+      if (detail) queryClient.setQueryData(detailKey, patch(detail));
+      return { homeKey, detailKey, home, detail };
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.home !== undefined) queryClient.setQueryData(context.homeKey, context.home);
+      if (context?.detail !== undefined) queryClient.setQueryData(context.detailKey, context.detail);
+    },
     onSettled: (_data, _err, { userId }) => {
       void queryClient.invalidateQueries({ queryKey: ["homePostsFeed", userId] });
       void queryClient.invalidateQueries({ queryKey: ["postDetail"] });

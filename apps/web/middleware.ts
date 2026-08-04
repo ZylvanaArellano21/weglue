@@ -45,6 +45,7 @@ const AUTH_FLOW_ROUTES = [
 const PROTECTED_PREFIXES = [
   "/dashboard",
   "/home",
+  "/event/",
   "/onboarding/explore-clubs",
   "/profile",
   "/u/",

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
 import { ToastProvider, useToast } from "../shared/Toast";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
-import { useInterestsRerun } from "../../lib/hooks/useInterestsRerun";
+import { useInterestsRerun, type ClubRecommendationOutcome } from "../../lib/hooks/useInterestsRerun";
 
 // Canonical taxonomy — MUST match onboarding exactly or the DB CHECK
 // constraints reject the values (see the onboarding interests/activities pages).
@@ -46,14 +46,14 @@ function Body({ userId }: { userId: string }): JSX.Element {
   // scrolled to the freshly refreshed Suggested for you. Launched from Home /
   // the Home sidebar → the established Home → Events behavior.
   const fromClubs = searchParams.get("from") === "clubs";
-  const seeMatchesHref = fromClubs ? "/clubs?matches=1" : "/home";
+  const seeMatchesHref = fromClubs ? "/clubs?matches=1" : "/home?tab=events";
   const { data: profile } = useOwnProfile(userId);
   const rerun = useInterestsRerun(userId);
 
   const [step, setStep] = useState<Step>("interests");
   const [interests, setInterests] = useState<string[]>([]);
   const [activities, setActivities] = useState<string[]>([]);
-  const [matchCount, setMatchCount] = useState(0);
+  const [outcome, setOutcome] = useState<ClubRecommendationOutcome | null>(null);
   const [seeded, setSeeded] = useState(false);
 
   // Seed the current selections once (don't clobber edits on refetch).
@@ -76,8 +76,8 @@ function Body({ userId }: { userId: string }): JSX.Element {
     rerun.mutate(
       { interests, activities },
       {
-        onSuccess: (batch) => {
-          setMatchCount(batch?.count ?? 0);
+        onSuccess: (result) => {
+          setOutcome(result);
           setStep("congrats");
         },
         onError: () => show("Could not update your matches. Please try again.", "error"),
@@ -86,6 +86,19 @@ function Body({ userId }: { userId: string }): JSX.Element {
   };
 
   if (step === "congrats") {
+    const matches = outcome?.kind === "matches" ? outcome.batch : null;
+    if (outcome?.kind !== "matches") {
+      const allJoined = outcome?.kind === "all_joined";
+      return (
+        <main className="mx-auto flex max-w-xl flex-col items-center px-6 py-16 text-center">
+          <div className="w-full rounded-2xl bg-white p-10 shadow-sm">
+            <h1 className="text-2xl font-bold text-gray-900 font-zain">{allJoined ? "You’ve already joined all the clubs!" : "No clubs are available right now."}</h1>
+            <p className="mx-auto mt-4 max-w-sm text-sm font-semibold text-gray-800">{allJoined ? "You’re all caught up. Check out upcoming events and see what’s happening next." : "Check out upcoming events and see what’s happening next."}</p>
+            <button type="button" onClick={() => router.push("/home?tab=events")} className="mt-10 w-full rounded-full py-3 text-[15px] font-semibold text-white" style={{ background: "#0FA6A6" }}>Check out events</button>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="mx-auto flex max-w-xl flex-col items-center px-6 py-16 text-center">
         <div className="w-full rounded-2xl bg-white p-10 shadow-sm">
@@ -94,7 +107,7 @@ function Body({ userId }: { userId: string }): JSX.Element {
             You matched with
           </p>
           <p className="text-4xl font-extrabold underline" style={{ color: "#0FA6A6" }}>
-            {matchCount} club{matchCount === 1 ? "" : "s"}!
+            {matches!.count} club{matches!.count === 1 ? "" : "s"}!
           </p>
           <p className="mx-auto mt-4 max-w-xs text-sm font-semibold text-gray-800">
             We found new clubs based on your interests and activities. Your matches are waiting for you.

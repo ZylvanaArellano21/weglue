@@ -55,6 +55,28 @@ export function useAddComment() {
       const { error } = await supabase.from("post_comments").insert({ post_id: postId, user_id: userId, content: content.trim() });
       if (error) throw error;
     },
+    onMutate: async ({ postId, userId, content }) => {
+      await qc.cancelQueries({ queryKey: ["postComments", postId] });
+      const own = qc.getQueryData<any>(["ownProfile", userId]);
+      const previousComments = qc.getQueryData<PostComment[]>(["postComments", postId]);
+      const optimisticId = `optimistic-${crypto.randomUUID()}`;
+      const optimistic: PostComment = {
+        id: optimisticId,
+        content: content.trim(),
+        created_at: new Date().toISOString(),
+        author: { id: userId, username: own?.username ?? "you", avatar_url: own?.avatar_url ?? null },
+      };
+      qc.setQueryData<PostComment[]>(["postComments", postId], (current) => [...(current ?? []), optimistic]);
+      const increment = (post: any) => post?.id === postId ? { ...post, comments_count: (post.comments_count ?? 0) + 1 } : post;
+      qc.setQueriesData({ queryKey: ["postDetail", postId] }, increment);
+      qc.setQueriesData({ queryKey: ["homePostsFeed"] }, (feed: any) => feed ? { ...feed, pages: feed.pages.map((page: any[]) => page.map(increment)) } : feed);
+      return { postId, previousComments, optimisticId };
+    },
+    onError: (_error, { postId }, context) => {
+      if (context?.previousComments) qc.setQueryData(["postComments", postId], context.previousComments);
+      else qc.setQueryData<PostComment[]>(["postComments", postId], (current) => current?.filter((c) => c.id !== context?.optimisticId));
+      invalidatePost(qc, postId);
+    },
     onSuccess: (_d, { postId }) => invalidatePost(qc, postId),
   });
 }

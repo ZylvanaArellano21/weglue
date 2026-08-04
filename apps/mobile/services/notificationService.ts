@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { dateInAppTz, dayDiff, todayInAppTz } from '../lib/timezone';
+import { resolveNotificationVisual, type NotificationVisual, type NotificationVisualActor, type NotificationVisualEntity } from '@weglue/shared';
 
 export type NotificationGroup = 'New' | 'Yesterday' | 'Last week' | 'Earlier';
 
@@ -32,6 +33,9 @@ export interface AppNotification {
   actor_follow_state: ActorFollowState;
   is_read: boolean;
   created_at: string;
+  actors: NotificationVisualActor[];
+  entity: NotificationVisualEntity | null;
+  visual: NotificationVisual;
 }
 
 export interface NotificationSection {
@@ -43,7 +47,7 @@ export async function getNotifications(userId: string): Promise<NotificationSect
   const { data, error } = await supabase
     .from('notifications')
     .select(`
-      id, type, entity_id, entity_type, read, created_at, message, route, group_count,
+      id, type, entity_id, entity_type, read, created_at, message, route, group_count, group_actors,
       profiles!notifications_actor_id_fkey(id, username, avatar_url)
     `)
     .eq('user_id', userId)
@@ -51,6 +55,27 @@ export async function getNotifications(userId: string): Promise<NotificationSect
     .limit(100);
 
   if (error || !data) return [];
+
+  const rows = data as any[];
+  const groupActorIds = rows.flatMap((n) => Array.isArray(n.group_actors) ? n.group_actors : []);
+  const allActorIds = [...new Set([...rows.map((n) => n.profiles?.id), ...groupActorIds].filter(Boolean) as string[])];
+  const eventTypes = ['new_event', 'event_updated', 'event_reminder_tomorrow', 'event_reminder_hour', 'event_reminder_now', 'event_last_chance', 'event_canceled', 'event_rsvp'];
+  const eventIds = [...new Set(rows.filter((n) => n.entity_type === 'event' || eventTypes.includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
+  const postIds = [...new Set(rows.filter((n) => n.entity_type === 'post' || n.type === 'club_post').map((n) => n.entity_id).filter(Boolean) as string[])];
+  const conversationIds = [...new Set(rows.filter((n) => n.entity_type === 'message' || ['group_chat_added', 'chat_invite_joined'].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
+  const clubIds = [...new Set(rows.filter((n) => n.entity_type === 'club' || ['club_joined', 'member_joined', 'club_chat_added', 'officer_chat_added', 'officer_role', 'officer_removed', 'club_removed', 'club_inactive'].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
+  const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }] = await Promise.all([
+    allActorIds.length ? supabase.from('profiles').select('id, username, avatar_url').in('id', allActorIds) : Promise.resolve({ data: [] as any[] }),
+    eventIds.length ? supabase.from('events').select('id, clubs!inner(id, name, avatar_url)').in('id', eventIds) : Promise.resolve({ data: [] as any[] }),
+    clubIds.length ? supabase.from('clubs').select('id, name, avatar_url').in('id', clubIds) : Promise.resolve({ data: [] as any[] }),
+    postIds.length ? supabase.from('posts').select('id, clubs(id, name, avatar_url)').in('id', postIds) : Promise.resolve({ data: [] as any[] }),
+    conversationIds.length ? supabase.from('conversations').select('id, clubs(id, name, avatar_url)').in('id', conversationIds) : Promise.resolve({ data: [] as any[] }),
+  ]);
+  const actorMap = new Map<string, NotificationVisualActor>((actorRows ?? []).map((p: any) => [p.id, { id: p.id, username: p.username, avatar_url: p.avatar_url ?? null }]));
+  const eventMap = new Map<string, NotificationVisualEntity>((eventRows ?? []).map((e: any) => [e.id, { id: e.clubs.id, name: e.clubs.name, avatar_url: e.clubs.avatar_url ?? null }]));
+  const clubMap = new Map<string, NotificationVisualEntity>((clubRows ?? []).map((c: any) => [c.id, { id: c.id, name: c.name, avatar_url: c.avatar_url ?? null }]));
+  const postClubMap = new Map<string, NotificationVisualEntity>((postRows ?? []).filter((p: any) => p.clubs).map((p: any) => [p.id, { id: p.clubs.id, name: p.clubs.name, avatar_url: p.clubs.avatar_url ?? null }]));
+  const conversationClubMap = new Map<string, NotificationVisualEntity>((conversationRows ?? []).filter((c: any) => c.clubs).map((c: any) => [c.id, { id: c.clubs.id, name: c.clubs.name, avatar_url: c.clubs.avatar_url ?? null }]));
 
   // One extra round-trip: how the viewer relates to each actor, so rows can
   // render Follow back / Requested correctly without N queries.
@@ -85,16 +110,24 @@ export async function getNotifications(userId: string): Promise<NotificationSect
     Earlier: [],
   };
 
-  for (const n of data as any[]) {
+  for (const n of rows) {
     const notifDay = dateInAppTz(new Date(n.created_at));
     const daysAgo = dayDiff(notifDay, today);
 
+    const sender = n.profiles ? { id: n.profiles.id, username: n.profiles.username, avatar_url: n.profiles.avatar_url } : null;
+    const actors = (Array.isArray(n.group_actors) ? n.group_actors : n.profiles?.id ? [n.profiles.id] : [])
+      .map((id: string) => actorMap.get(id)).filter(Boolean) as NotificationVisualActor[];
+    const entity = n.entity_type === 'event'
+      ? eventMap.get(n.entity_id) ?? null
+      : n.type === 'club_post' || n.entity_type === 'post'
+        ? postClubMap.get(n.entity_id) ?? null
+        : n.entity_type === 'message' || ['group_chat_added', 'chat_invite_joined'].includes(n.type)
+          ? conversationClubMap.get(n.entity_id) ?? clubMap.get(n.entity_id) ?? null
+          : clubMap.get(n.entity_id) ?? null;
     const notification: AppNotification = {
       id: n.id,
       type: n.type,
-      sender: n.profiles
-        ? { id: n.profiles.id, username: n.profiles.username, avatar_url: n.profiles.avatar_url }
-        : null,
+      sender,
       reference_id: n.entity_id ?? null,
       entity_type: n.entity_type ?? null,
       message: n.message ?? null,
@@ -105,6 +138,9 @@ export async function getNotifications(userId: string): Promise<NotificationSect
         : 'not_following',
       is_read: n.read,
       created_at: n.created_at,
+      actors,
+      entity,
+      visual: resolveNotificationVisual({ type: n.type, group_count: n.group_count, actor: sender, actors, entity }),
     };
 
     if (daysAgo <= 0) groups['New'].push(notification);

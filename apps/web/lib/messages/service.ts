@@ -19,6 +19,7 @@ export interface ConversationPreview {
   name: string;
   avatar_url: string | null;
   club_id: string | null;
+  club_handle?: string | null;
   other_user_id: string | null;
   last_message: string | null;
   last_message_at: string | null;
@@ -27,6 +28,8 @@ export interface ConversationPreview {
   unread_count: number;
   muted: boolean;
   archived: boolean;
+  /** Number of recent messages visible to the viewer; used only for ranking. */
+  message_count: number;
 }
 
 export interface ConversationDetails {
@@ -144,7 +147,7 @@ function threadFilter<T>(query: T & { eq: Function; is: Function }, channelId: s
   return channelId ? query.eq("channel_id", channelId) : query.is("channel_id", null);
 }
 
-export async function getMyConversations(userId: string): Promise<ConversationPreview[]> {
+export async function getMyConversations(userId: string, limit = 30): Promise<ConversationPreview[]> {
   const supabase = getSupabaseBrowser();
   const { data, error } = await supabase
     .from("conversation_participants")
@@ -152,7 +155,7 @@ export async function getMyConversations(userId: string): Promise<ConversationPr
       `conversation_id, last_read_at, joined_at, hidden_at, cleared_before, muted_at, archived_at,
        conversations!inner(
          id, type, name, avatar_url, club_id, created_by, deleted_at,
-         clubs(id, name, avatar_url),
+         clubs(id, name, handle, avatar_url),
          conversation_participants(user_id, profiles!user_id(username, full_name, avatar_url)),
          messages(id, sender_id, content, message_type, created_at, profiles!sender_id(username, full_name))
        )`
@@ -160,7 +163,8 @@ export async function getMyConversations(userId: string): Promise<ConversationPr
     .eq("user_id", userId)
     .order("created_at", { referencedTable: "conversations.messages", ascending: false })
     .limit(30, { referencedTable: "conversations.messages" })
-    .order("joined_at", { ascending: false });
+    .order("joined_at", { ascending: false })
+    .limit(limit);
   if (error) throw error;
 
   return ((data ?? []) as any[])
@@ -192,6 +196,7 @@ export async function getMyConversations(userId: string): Promise<ConversationPr
         name,
         avatar_url: conversation.type === "direct" ? other?.profiles?.avatar_url ?? null : club?.avatar_url ?? conversation.avatar_url ?? null,
         club_id: conversation.club_id ?? null,
+        club_handle: club?.handle ?? null,
         other_user_id: other?.user_id ?? null,
         last_message: previewForMessage(last),
         last_message_at: last?.created_at ?? null,
@@ -200,8 +205,15 @@ export async function getMyConversations(userId: string): Promise<ConversationPr
         unread_count: incoming.filter((message: any) => !lastRead || new Date(message.created_at) > new Date(lastRead)).length,
         muted: !!row.muted_at,
         archived: !!row.archived_at,
+        message_count: messages.length,
       } satisfies ConversationPreview];
-    });
+    })
+    .sort((a, b) => {
+      const at = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const bt = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return bt - at || b.message_count - a.message_count || a.name.localeCompare(b.name);
+    })
+    .slice(0, limit);
 }
 
 export async function getConversationDetails(conversationId: string, currentUserId: string): Promise<ConversationDetails | null> {
@@ -419,6 +431,48 @@ export async function sendMessage(input: {
     attachment_size: input.attachment?.size ?? null,
     attachment_mime: input.attachment?.mime ?? null,
     client_tag: input.tag ?? clientTag(),
+  });
+  if (error) throw error;
+}
+
+/** Sends the same canonical shared_event reference used by the mobile share
+ * sheet.  No event title or internal data is copied into the message. */
+export async function shareEventToConversation(input: {
+  conversationId: string;
+  channelId: string | null;
+  eventId: string;
+  tag?: string;
+}): Promise<void> {
+  const { error } = await getSupabaseBrowser().from("messages").insert({
+    conversation_id: input.conversationId,
+    channel_id: input.channelId,
+    message_type: "shared_event",
+    shared_event_id: input.eventId,
+    client_tag: input.tag ?? clientTag(),
+  });
+  if (error) throw error;
+}
+
+export type ShareableContent =
+  | { type: "event"; id: string }
+  | { type: "post"; id: string };
+
+/** Delivers the same structured share references used by mobile. */
+export async function shareContentToConversation(input: {
+  conversationId: string;
+  senderId: string;
+  content: ShareableContent;
+}): Promise<void> {
+  const channelId = await getMainConversationChannel(input.conversationId);
+  const payload = input.content.type === "event"
+    ? { shared_event_id: input.content.id, message_type: "shared_event" as const }
+    : { shared_post_id: input.content.id, message_type: "shared_post" as const };
+  const { error } = await getSupabaseBrowser().from("messages").insert({
+    conversation_id: input.conversationId,
+    channel_id: channelId,
+    sender_id: input.senderId,
+    ...payload,
+    client_tag: clientTag(),
   });
   if (error) throw error;
 }

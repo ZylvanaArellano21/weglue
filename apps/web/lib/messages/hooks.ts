@@ -21,7 +21,7 @@ import {
 } from "./service";
 
 export const messageKeys = {
-  conversations: (userId: string) => ["messages", "conversations", userId] as const,
+  conversations: (userId: string, limit = 30) => ["messages", "conversations", userId, limit] as const,
   details: (id: string, userId: string) => ["messages", "details", id, userId] as const,
   thread: (id: string, channelId: string | null) => ["messages", "thread", id, channelId ?? "direct"] as const,
   hub: (id: string, userId: string) => ["messages", "hub", id, userId] as const,
@@ -32,8 +32,8 @@ export const messageKeys = {
   shared: (id: string, channelId: string | null, type: string) => ["messages", "shared", id, channelId ?? "direct", type] as const,
 };
 
-export function useMessageConversations(userId: string) {
-  return useQuery({ queryKey: messageKeys.conversations(userId), queryFn: () => getMyConversations(userId), enabled: !!userId, staleTime: 15_000 });
+export function useMessageConversations(userId: string, limit = 30) {
+  return useQuery({ queryKey: messageKeys.conversations(userId, limit), queryFn: () => getMyConversations(userId, limit), enabled: !!userId, staleTime: 15_000 });
 }
 
 export function useMessageDetails(conversationId: string | null, userId: string) {
