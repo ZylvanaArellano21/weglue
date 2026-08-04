@@ -23,6 +23,7 @@ import { timeAgo } from '../../components/home/PostCard';
 import { markNotificationRead, type AppNotification } from '../../services/notificationService';
 import { validateNotificationRoute } from '../../lib/notifications/routes';
 import { EnableNotificationsCard } from '../../components/notifications/EnableNotificationsCard';
+import type { NotificationVisual } from '@weglue/shared';
 
 function notificationDescription(item: AppNotification): string {
   // Grouped social rows: "and 4 others liked your photo".
@@ -131,16 +132,16 @@ export default function NotificationsScreen() {
           backgroundColor: item.is_read ? 'transparent' : 'rgba(15, 166, 166, 0.06)',
         }}
       >
-        <TouchableOpacity
-          onPress={() => {
-            if (item.sender?.id) {
-              router.push({ pathname: '/profile/[userId]', params: { userId: item.sender.id } });
-            }
-          }}
-          activeOpacity={0.7}
-        >
-          <Avatar uri={item.sender?.avatar_url} size={46} username={item.sender?.username} />
-        </TouchableOpacity>
+        {item.visual.kind === 'actor' && item.sender?.id ? (
+          <TouchableOpacity
+            onPress={() => router.push({ pathname: '/profile/[userId]', params: { userId: item.sender!.id } })}
+            activeOpacity={0.7}
+          >
+            <NotificationAvatar visual={item.visual} />
+          </TouchableOpacity>
+        ) : (
+          <NotificationAvatar visual={item.visual} />
+        )}
         <View style={{ flex: 1 }}>
           {/* Club/chat notifications carry their full copy from the DB
               trigger ("You were added to X members group chat.") — render it
@@ -377,4 +378,16 @@ export default function NotificationsScreen() {
       )}
     </SafeAreaView>
   );
+}
+
+function NotificationAvatar({ visual }: { visual: NotificationVisual }) {
+  if (visual.kind === 'actors') {
+    return <View style={{ width: 58, height: 46, justifyContent: 'center', paddingLeft: 2, flexDirection: 'row', alignItems: 'center' }}>
+      {visual.actors.map((actor, index) => <View key={actor.id} style={{ marginLeft: index === 0 ? 0 : -12, zIndex: 3 - index }}><Avatar uri={actor.avatar_url} size={38} username={actor.username} /></View>)}
+    </View>;
+  }
+  if (visual.kind === 'actor') return <Avatar uri={visual.actor.avatar_url} size={46} username={visual.actor.username} />;
+  if (visual.kind === 'entity') return <Avatar uri={visual.entity.avatar_url} size={46} username={visual.entity.name} />;
+  if (visual.kind === 'system') return <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#0FA6A6', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontWeight: '700', fontSize: 19 }}>W</Text></View>;
+  return <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#6B7280', fontWeight: '700' }}>•••</Text></View>;
 }
