@@ -37,6 +37,8 @@ const BLOCK_SENSITIVE_KEYS: string[] = [
   "ownGluemates",
   // people search (both pickers)
   "memberSearch",
+  "eventAudienceMemberSearch",
+  "discoverySearch",
   "universityUserSearch",
   // feeds + personal content
   "homePostsFeed",

@@ -10,6 +10,7 @@ import { ToastProvider, useToast } from "../shared/Toast";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
 import { useMyClubs } from "../../lib/hooks/useClubTab";
+import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
 import {
   canPostInChannel,
   clientTag,
@@ -64,6 +65,7 @@ const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate speech", "Inappr
 
 export function MessagesClient({ userId }: { userId: string }): JSX.Element {
   useUnreadSummary(userId);
+  useMyClubsRealtime(userId);
   return (
     <ToastProvider>
       <div className="min-h-screen bg-cream">

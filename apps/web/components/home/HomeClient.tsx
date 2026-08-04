@@ -19,6 +19,7 @@ import { ComposeEventModal } from "./ComposeEventModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications, type NotificationTarget } from "../../lib/hooks/useNotifications";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
+import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
 import { messagesHref } from "../../lib/messages/routes";
 
 // Root of the authenticated web Home experience. Mounts the live unread-summary
@@ -28,6 +29,7 @@ import { messagesHref } from "../../lib/messages/routes";
 export function HomeClient({ userId }: { userId: string }): JSX.Element {
   useUnreadSummary(userId); // realtime badge subscription
   useRealtimeNotifications(userId); // live notification inserts
+  useMyClubsRealtime(userId); // join/leave/role changes invalidate access caches
 
   return (
     <ToastProvider>

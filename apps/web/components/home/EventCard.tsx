@@ -16,6 +16,7 @@ import {
   formatEventLocation,
 } from "../../lib/datetime";
 import type { HomeFeedEvent } from "../../lib/hooks/useHomeEventsFeed";
+import { EventAudienceBadge } from "./EventAudienceBadge";
 
 interface EventCardProps {
   event: HomeFeedEvent;
@@ -25,6 +26,7 @@ interface EventCardProps {
   onOpenEvent: (eventId: string) => void;
   onOpenClub: (clubId: string) => void;
   onOpenAttendees: (eventId: string) => void;
+  onRestricted?: () => void;
   /** Past events show no active RSVP action (Club Profile Past Events, §15). */
   isPast?: boolean;
 }
@@ -39,11 +41,19 @@ export function EventCard({
   onOpenEvent,
   onOpenClub,
   onOpenAttendees,
+  onRestricted,
   isPast = false,
 }: EventCardProps): JSX.Element {
   const [imageError, setImageError] = useState(false);
   const location = formatEventLocation(event.building, event.room, event.location);
   const rsvp = event.user_rsvp_status;
+  const openEvent = () => {
+    if (!event.can_open) {
+      onRestricted?.();
+      return;
+    }
+    onOpenEvent(event.id);
+  };
 
   return (
     <article
@@ -82,10 +92,10 @@ export function EventCard({
       {/* Event image */}
       <button
         type="button"
-        onClick={() => onOpenEvent(event.id)}
+        onClick={openEvent}
         className="relative block w-full"
         style={{ aspectRatio: "3 / 2" }}
-        aria-label={`Open ${event.title}`}
+        aria-label={event.can_open ? `Open ${event.title}` : `${event.title} is for club members only`}
       >
         {event.cover_image_url && !imageError ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -110,23 +120,25 @@ export function EventCard({
         <div className="flex items-start justify-between gap-2">
           <button
             type="button"
-            onClick={() => onOpenEvent(event.id)}
+            onClick={openEvent}
             className="text-left"
           >
             <h3 className="text-lg font-semibold leading-snug text-black line-clamp-2">
               {event.title}
             </h3>
           </button>
-          <button
-            type="button"
-            onClick={() => onToggleSave(event.id, event.is_saved)}
-            aria-label={event.is_saved ? "Remove from saved" : "Save event"}
-            aria-pressed={event.is_saved}
-            className="shrink-0 rounded-full p-1.5"
-            style={{ color: event.is_saved ? "#0FA6A6" : "#374151" }}
-          >
-            <BookmarkIcon size={20} filled={event.is_saved} />
-          </button>
+          {event.can_open ? (
+            <button
+              type="button"
+              onClick={() => onToggleSave(event.id, event.is_saved)}
+              aria-label={event.is_saved ? "Remove from saved" : "Save event"}
+              aria-pressed={event.is_saved}
+              className="shrink-0 rounded-full p-1.5"
+              style={{ color: event.is_saved ? "#0FA6A6" : "#374151" }}
+            >
+              <BookmarkIcon size={20} filled={event.is_saved} />
+            </button>
+          ) : null}
         </div>
 
         {event.description ? (
@@ -134,6 +146,8 @@ export function EventCard({
             {event.description}
           </p>
         ) : null}
+
+        <div className="mt-2"><EventAudienceBadge audience={event.visibility} /></div>
 
         <div className="mt-2 flex items-start gap-1.5" style={{ color: "#5F5D5D" }}>
           <CalendarIcon size={17} strokeWidth={1.6} />
@@ -152,7 +166,11 @@ export function EventCard({
         ) : null}
 
         <div className="mt-3 flex items-center">
-          <AttendanceTrigger eventId={event.id} attendees={event.attendee_preview} count={event.attendee_count} onOpen={onOpenAttendees} />
+          {event.can_view_attendees ? (
+            <AttendanceTrigger eventId={event.id} attendees={event.attendee_preview} count={event.attendee_count} onOpen={onOpenAttendees} />
+          ) : (
+            <span className="text-xs text-gray-500">Join the club to view attendees.</span>
+          )}
           <div className="flex-1" />
           {isPast ? (
             <span className="rounded-full px-4 py-1.5 text-xs font-semibold" style={{ background: "#F3F4F6", color: "#6B7280" }}>
@@ -161,7 +179,7 @@ export function EventCard({
           ) : (
             <button
               type="button"
-              onClick={() => onRsvp(event.id, rsvp)}
+              onClick={() => event.can_open ? onRsvp(event.id, rsvp) : onRestricted?.()}
               className="rounded-full px-5 py-1.5 text-xs font-semibold transition-colors"
               style={
                 rsvp === "cant"
@@ -169,7 +187,7 @@ export function EventCard({
                   : { background: "#0FA6A6", color: "#fff" }
               }
             >
-              {rsvp === "going" ? "Going ✓" : rsvp === "cant" ? "Can't" : "RSVP"}
+              {event.can_open ? (rsvp === "going" ? "Going ✓" : rsvp === "cant" ? "Can't" : "RSVP") : "Join to RSVP"}
             </button>
           )}
         </div>

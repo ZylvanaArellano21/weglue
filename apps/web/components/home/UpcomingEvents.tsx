@@ -3,6 +3,7 @@
 import { useCalendarSections, type CalendarEvent } from "../../lib/hooks/useCalendar";
 import { formatEventDate, formatEventTime, formatEventLocation } from "../../lib/datetime";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
+import { EventAudienceBadge } from "./EventAudienceBadge";
 
 // Right-column "Upcoming Events!" — the user's going-RSVP events grouped
 // Today / This Week / … (same source as the calendar, so the two always agree).
@@ -61,6 +62,7 @@ function UpcomingRow({ event, onOpen }: { event: CalendarEvent; onOpen: () => vo
         <button type="button" onClick={onOpen} className="block w-full truncate text-left text-sm font-semibold text-gray-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6] focus-visible:ring-offset-2">
           {event.emoji ? `${event.emoji} ` : ""}{event.title}
         </button>
+        <EventAudienceBadge audience={event.visibility} />
         <ClickableClubIdentity clubId={event.club.id} className="block truncate text-xs font-medium text-[#0FA6A6]">
           @{event.club.name}
         </ClickableClubIdentity>

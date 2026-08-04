@@ -204,11 +204,11 @@ export function useOwnThisWeekEvents(userId: string | undefined) {
       const { data: raw } = await supabase
         .from("events")
         .select(
-          `id, title, emoji, event_date, start_time, end_time, location, building, room,
+          `id, title, emoji, event_date, start_time, end_time, event_end_at, visibility, location, building, room,
            cover_image_url, clubs!inner(id, name, avatar_url)`
         )
         .in("id", ids)
-        .gte("event_date", today)
+        .gt("event_end_at", new Date().toISOString())
         .lte("event_date", sevenOut)
         .order("event_date", { ascending: true })
         .order("start_time", { ascending: true });
@@ -219,6 +219,8 @@ export function useOwnThisWeekEvents(userId: string | undefined) {
         event_date: e.event_date,
         start_time: e.start_time,
         end_time: e.end_time,
+        event_end_at: e.event_end_at,
+        visibility: (e.visibility ?? "everyone") as CalendarEvent["visibility"],
         location: e.location ?? null,
         building: e.building ?? null,
         room: e.room ?? null,

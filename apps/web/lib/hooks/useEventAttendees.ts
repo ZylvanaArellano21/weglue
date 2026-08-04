@@ -17,6 +17,16 @@ export function useEventAttendees(eventId: string | undefined, enabled = true) {
     queryKey: ["eventAttendees", eventId],
     queryFn: async (): Promise<EventAttendee[]> => {
       const supabase = getSupabaseBrowser();
+      // Check the event row first. An empty RSVP list and an unauthorized
+      // direct attendees URL are different states; the latter must resolve to
+      // a safe unavailable error rather than a misleading "No one" list.
+      const { data: event, error: eventError } = await supabase
+        .from("events")
+        .select("id")
+        .eq("id", eventId!)
+        .maybeSingle();
+      if (eventError) throw eventError;
+      if (!event) throw new Error("event_unavailable");
       const { data, error } = await supabase
         .from("event_rsvps")
         .select("user_id, profiles!inner(id, username, full_name, avatar_url)")

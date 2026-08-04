@@ -132,6 +132,8 @@ export interface UserWeeklyEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
+  visibility: "everyone" | "members" | "specific";
   location: string | null;
   building: string | null;
   room: string | null;
@@ -158,9 +160,9 @@ export function useUserWeeklyEvents(targetUserId: string | undefined, enabled: b
       const ids = (rsvps as any[]).map((r) => r.event_id);
       const { data } = await supabase
         .from("events")
-        .select("id, title, emoji, cover_image_url, event_date, start_time, end_time, location, building, room, clubs!inner(id, name)")
+        .select("id, title, emoji, cover_image_url, event_date, start_time, end_time, event_end_at, visibility, location, building, room, clubs!inner(id, name)")
         .in("id", ids)
-        .gte("event_date", today)
+        .gt("event_end_at", new Date().toISOString())
         .lte("event_date", sevenOut)
         .order("event_date", { ascending: true })
         .order("start_time", { ascending: true })
@@ -173,6 +175,8 @@ export function useUserWeeklyEvents(targetUserId: string | undefined, enabled: b
         event_date: e.event_date,
         start_time: e.start_time,
         end_time: e.end_time,
+        event_end_at: e.event_end_at,
+        visibility: (e.visibility ?? "everyone") as UserWeeklyEvent["visibility"],
         location: e.location,
         building: e.building ?? null,
         room: e.room ?? null,

@@ -202,6 +202,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               onOpenEvent={openSingleEvent}
               onOpenClub={() => {}}
               onOpenAttendees={setAttendanceEventId}
+              onRestricted={() => show("This event is for club members only. Join the club to RSVP and view attendees.", "error")}
               onCreateEvent={club.is_officer ? () => setCompose("event") : undefined}
               onCreatePost={club.is_member ? () => setCompose("post") : undefined}
             />
@@ -237,6 +238,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               openPhoto(i);
             }}
             onSeeAllPhotos={() => setTab("media")}
+            onRestricted={() => show("This event is for club members only. Join the club to RSVP and view attendees.", "error")}
           />
         </div>
       </div>

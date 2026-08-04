@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { CountBadge } from "../shared/CountBadge";
 import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon } from "../shared/icons";
 import { ProfileMenu } from "../profile/ProfileMenu";
 import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
+import { useDiscoverySearch } from "../../lib/hooks/useDiscoverySearch";
+import { Avatar } from "../shared/Avatar";
 
 // Fixed top navigation (matches the web Home + Club screenshots): logo, the
 // global search, then Home / Clubs / Messages icons + the user's avatar. Badges
@@ -30,6 +32,7 @@ import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 //    Club-tab's own filter input.
 export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const pathname = usePathname();
+  const router = useRouter();
   const { data: summary } = useUnreadSummaryValue(userId);
 
   const isHome = pathname === "/home" || pathname === "/dashboard";
@@ -42,6 +45,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const { data: searchResults, isLoading: searchLoading, isError: searchError } = useDiscoverySearch(userId, value);
 
   // Navigating to any non-Home destination returns the search to its collapsed
   // circular state (spec §3). Home always renders it expanded regardless.
@@ -87,6 +91,31 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
                 className="h-10 w-full rounded-full border bg-white pl-10 pr-4 text-sm outline-none focus:ring-2"
                 style={{ borderColor: "rgba(0,0,0,0.1)" }}
               />
+              {value.trim() && (
+                <div role="listbox" aria-label="Search results" className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border bg-white p-1 shadow-xl" style={{ borderColor: "rgba(0,0,0,0.1)" }}>
+                  {searchLoading ? <p className="px-3 py-3 text-sm text-gray-500" role="status">Searching…</p> : searchError ? <p className="px-3 py-3 text-sm text-red-600" role="alert">Search is unavailable. Try again.</p> : !searchResults?.length ? <p className="px-3 py-3 text-sm text-gray-500">No people or clubs match that search.</p> : searchResults.map((result) => (
+                    <button
+                      key={`${result.result_type}-${result.id}`}
+                      type="button"
+                      role="option"
+                      aria-label={`Open ${result.name}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setValue("");
+                        router.push(result.result_type === "person" ? `/u/${result.id}` : `/club/${result.id}`);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-black/[0.04] focus:bg-black/[0.04] focus:outline-none"
+                    >
+                      <Avatar uri={result.avatar_url} size={32} name={result.name} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-gray-900">{result.name}</span>
+                        <span className="block truncate text-xs text-gray-500">{result.sub ?? (result.result_type === "person" ? "Person" : "Club")}</span>
+                      </span>
+                      {result.result_type === "club" && <span className="text-xs font-semibold text-teal">{result.is_member ? "Joined" : "View"}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <button

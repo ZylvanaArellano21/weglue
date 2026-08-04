@@ -59,8 +59,7 @@ function localTimeString(date: Date): string {
 }
 
 /** Current wall-clock time in America/Chicago as HH:MM:SS (string-sortable). */
-export function nowTimeInAppTz(): string {
-  const now = new Date();
+export function nowTimeInAppTz(now: Date = new Date()): string {
   if (!timeFormatter) return localTimeString(now);
   try {
     return timeFormatter.format(now).replace(/^24/, "00");
@@ -76,13 +75,23 @@ export function nowTimeInAppTz(): string {
  */
 export function isEventPast(
   eventDate: string,
-  endTime: string | null | undefined
+  endTime: string | null | undefined,
+  now: Date = new Date()
 ): boolean {
-  const today = todayInAppTz();
+  const today = dateInAppTz(now);
   if (eventDate < today) return true;
   if (eventDate > today) return false;
   if (!endTime) return false;
-  return endTime < nowTimeInAppTz();
+  // An event becomes past at its complete end instant. The equality matters:
+  // there is no grace period at the exact America/Chicago end wall-clock time.
+  return endTime <= nowTimeInAppTz(now);
+}
+
+/** Canonical database timestamp check used when event_end_at is available. */
+export function isEventPastAt(eventEndAt: string | null | undefined, now: Date = new Date()): boolean {
+  if (!eventEndAt) return false;
+  const endMs = Date.parse(eventEndAt);
+  return Number.isFinite(endMs) && endMs <= now.getTime();
 }
 
 /**
@@ -90,12 +99,24 @@ export function isEventPast(
  * lib/eventDisplay.splitPastAndUpcoming): upcoming ascending, past descending.
  */
 export function splitPastAndUpcoming<
-  T extends { event_date: string; start_time: string; end_time: string | null }
->(events: T[]): { upcoming: T[]; past: T[] } {
+  T extends {
+    event_date: string;
+    start_time: string;
+    end_time: string | null;
+    /** Preferred canonical boundary. Older callers may not have migrated yet. */
+    event_end_at?: string | null;
+  }
+>(events: T[], now: Date = new Date()): { upcoming: T[]; past: T[] } {
   const upcoming: T[] = [];
   const past: T[] = [];
   for (const e of events) {
-    (isEventPast(e.event_date, e.end_time) ? past : upcoming).push(e);
+    // event_end_at is a real UTC instant derived in PostgreSQL from an
+    // America/Chicago wall-clock event time. Use it wherever it is present;
+    // the legacy date/time fallback only supports pre-migration callers.
+    const hasEnded = e.event_end_at
+      ? isEventPastAt(e.event_end_at, now)
+      : isEventPast(e.event_date, e.end_time, now);
+    (hasEnded ? past : upcoming).push(e);
   }
   upcoming.sort(
     (a, b) => a.event_date.localeCompare(b.event_date) || a.start_time.localeCompare(b.start_time)

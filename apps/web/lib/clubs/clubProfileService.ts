@@ -1,7 +1,7 @@
 "use client";
 
 import { getSupabaseBrowser } from "../supabase-browser";
-import { splitPastAndUpcoming } from "../datetime";
+import { dateInAppTz, splitPastAndUpcoming } from "../datetime";
 
 // Web port of apps/mobile/services/clubService.getClubProfile + getClubPhotos.
 // Reads the SAME tables mobile reads; RLS enforces which events/photos the
@@ -30,6 +30,7 @@ export interface ClubEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
   location: string | null;
   building: string | null;
   room: string | null;
@@ -120,15 +121,11 @@ export async function getClubProfile(
       .from("club_officers")
       .select("id, user_id, display_name, role_title, profiles(avatar_url)")
       .eq("club_id", clubId),
-    // ALL events — past AND future. Split client-side against the real end
-    // datetime; filtering here would delete past events from Past + Calendar.
-    supabase
-      .from("events")
-      .select(
-        "id, title, emoji, cover_image_url, event_date, start_time, end_time, location, building, room, visibility"
-      )
-      .eq("club_id", clubId)
-      .order("event_date", { ascending: true }),
+    // This preview-safe RPC is deliberately distinct from events SELECT:
+    // non-members may see members-only cards on a club profile, but never
+    // receive attendee data or gain direct-detail access. Selected events are
+    // omitted unless the caller is selected, creator, or officer.
+    supabase.rpc("get_club_profile_events", { p_club_id: clubId }),
     supabase
       .from("club_photos")
       .select(CLUB_PHOTOS_SELECT)
@@ -165,6 +162,7 @@ export async function getClubProfile(
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
     location: e.location,
     building: e.building,
     room: e.room,
@@ -174,8 +172,7 @@ export async function getClubProfile(
 
   // "Events this month" = events hosted by THIS club in the current calendar
   // month (spec §15) — not unseen notifications.
-  const now = new Date();
-  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const ym = dateInAppTz(new Date()).slice(0, 7);
   const eventsThisMonth = allEvents.filter((e) => e.event_date.startsWith(ym)).length;
 
   return {
