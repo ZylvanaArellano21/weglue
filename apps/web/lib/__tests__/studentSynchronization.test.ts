@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import {
   STUDENT_CONTENT_QUERY_ROOTS,
   invalidateStudentContentQueries,
+  subscribeBrowserCanonicalRecovery,
 } from "../studentSynchronization";
 
 describe("Day 10E web content synchronization", () => {
@@ -27,5 +28,30 @@ describe("Day 10E web content synchronization", () => {
     invalidateStudentContentQueries(queryClient);
 
     expect(invalidateQueries).toHaveBeenCalledTimes(STUDENT_CONTENT_QUERY_ROOTS.length * 2);
+  });
+
+  it("recovers canonically on focus, reconnect, and foreground visibility", () => {
+    const listeners = new Map<string, () => void>();
+    const windowTarget = {
+      addEventListener: (event: string, listener: () => void) => listeners.set(`window:${event}`, listener),
+      removeEventListener: (event: string) => listeners.delete(`window:${event}`),
+    };
+    const documentTarget = {
+      visibilityState: "hidden",
+      addEventListener: (event: string, listener: () => void) => listeners.set(`document:${event}`, listener),
+      removeEventListener: (event: string) => listeners.delete(`document:${event}`),
+    };
+    const recover = vi.fn();
+    const stop = subscribeBrowserCanonicalRecovery(recover, { windowTarget, documentTarget });
+
+    listeners.get("window:focus")?.();
+    listeners.get("window:online")?.();
+    listeners.get("document:visibilitychange")?.();
+    documentTarget.visibilityState = "visible";
+    listeners.get("document:visibilitychange")?.();
+    expect(recover).toHaveBeenCalledTimes(3);
+
+    stop();
+    expect(listeners.size).toBe(0);
   });
 });

@@ -16,7 +16,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'private' AND p.proname = 'can_receive_access_sync')
      OR NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                    WHERE n.nspname = 'private' AND p.proname = 'can_receive_university_sync') THEN
+                    WHERE n.nspname = 'private' AND p.proname = 'can_receive_university_sync')
+     OR NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = 'public' AND p.proname = 'my_sync_university_id') THEN
     RAISE EXCEPTION 'Day 10E receive helpers are missing';
   END IF;
 
@@ -54,13 +56,24 @@ BEGIN
   IF has_function_privilege('anon', 'private.can_receive_access_sync(text)', 'EXECUTE')
      OR has_function_privilege('anon', 'private.can_receive_university_sync(text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'private.broadcast_access_sync()', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'private.broadcast_content_lifecycle_sync()', 'EXECUTE') THEN
+     OR has_function_privilege('authenticated', 'private.broadcast_content_lifecycle_sync()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.my_sync_university_id()', 'EXECUTE') THEN
     RAISE EXCEPTION 'Day 10E grants exceed receive-only least privilege';
   END IF;
 END;
 $$;
 
 BEGIN;
+INSERT INTO public.universities (id, name, slug) VALUES
+  ('a6500000-0000-4000-8000-0000000000a1', 'Day 10E Alpha', 'day-10e-alpha'),
+  ('a6500000-0000-4000-8000-0000000000a2', 'Day 10E Beta', 'day-10e-beta');
+INSERT INTO auth.users (id, email, raw_app_meta_data) VALUES
+  ('a6500000-0000-4000-8000-000000000001', 'day10e-alpha@test.invalid', '{}'::jsonb),
+  ('a6500000-0000-4000-8000-000000000002', 'day10e-beta@test.invalid', '{}'::jsonb);
+INSERT INTO public.profiles (id, username, full_name, university_id) VALUES
+  ('a6500000-0000-4000-8000-000000000001', 'day10ealpha', 'Day 10E Alpha', 'a6500000-0000-4000-8000-0000000000a1'),
+  ('a6500000-0000-4000-8000-000000000002', 'day10ebeta', 'Day 10E Beta', 'a6500000-0000-4000-8000-0000000000a2')
+ON CONFLICT (id) DO UPDATE SET university_id = EXCLUDED.university_id;
 SET ROLE authenticated;
 SELECT set_config(
   'request.jwt.claims',
@@ -74,6 +87,46 @@ BEGIN
      OR private.can_receive_access_sync('sync:access:a6500000-0000-4000-8000-000000000002')
      OR private.can_receive_access_sync('sync:access:not-a-uuid') THEN
     RAISE EXCEPTION 'account sync topic must be self-scoped and malformed topics denied';
+  END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT private.can_receive_university_sync('sync:university:a6500000-0000-4000-8000-0000000000a1')
+     OR private.can_receive_university_sync('sync:university:a6500000-0000-4000-8000-0000000000a2') THEN
+    RAISE EXCEPTION 'university sync topic must be limited to the caller campus';
+  END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF public.my_sync_university_id() <> 'a6500000-0000-4000-8000-0000000000a1'::uuid THEN
+    RAISE EXCEPTION 'student university topic resolver must be self-scoped';
+  END IF;
+END;
+$$;
+
+SELECT set_config(
+  'request.jwt.claims',
+  json_build_object('sub', 'a6500000-0000-4000-8000-000000000002')::text,
+  false
+);
+
+DO $$
+BEGIN
+  IF private.can_receive_university_sync('sync:university:a6500000-0000-4000-8000-0000000000a1')
+     OR NOT private.can_receive_university_sync('sync:university:a6500000-0000-4000-8000-0000000000a2') THEN
+    RAISE EXCEPTION 'another student must not receive a different university topic';
+  END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF public.my_sync_university_id() <> 'a6500000-0000-4000-8000-0000000000a2'::uuid THEN
+    RAISE EXCEPTION 'student university topic resolver must not return another campus';
   END IF;
 END;
 $$;

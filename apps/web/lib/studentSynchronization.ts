@@ -13,6 +13,7 @@ export const STUDENT_CONTENT_QUERY_ROOTS = [
   "clubPhotoFeed",
   "homeEventsFeed",
   "eventDetail",
+  "eventForEdit",
   "clubEventsFeed",
   "clubCalendarEvents",
   "calendarEvents",
@@ -41,4 +42,47 @@ export function invalidateStudentContentQueries(queryClient: QueryClient): void 
   for (const root of STUDENT_CONTENT_QUERY_ROOTS) {
     void queryClient.invalidateQueries({ queryKey: [root] });
   }
+}
+
+type RecoveryEventTarget = {
+  addEventListener(event: string, listener: () => void): void;
+  removeEventListener(event: string, listener: () => void): void;
+};
+
+export interface BrowserCanonicalRecoveryTargets {
+  windowTarget: RecoveryEventTarget;
+  documentTarget: RecoveryEventTarget & { visibilityState: string };
+}
+
+/**
+ * Keep missed opaque broadcasts recoverable without polling. The callback is
+ * supplied by the caller and always performs a canonical query invalidation or
+ * access-state RPC; browser events themselves carry no state or authorization.
+ */
+export function subscribeBrowserCanonicalRecovery(
+  recover: () => void,
+  targets?: BrowserCanonicalRecoveryTargets
+): () => void {
+  const resolved = targets ?? {
+    windowTarget: {
+      addEventListener: (event: string, listener: () => void) => window.addEventListener(event, listener),
+      removeEventListener: (event: string, listener: () => void) => window.removeEventListener(event, listener),
+    },
+    documentTarget: {
+      get visibilityState() { return document.visibilityState; },
+      addEventListener: (event: string, listener: () => void) => document.addEventListener(event, listener),
+      removeEventListener: (event: string, listener: () => void) => document.removeEventListener(event, listener),
+    },
+  };
+  const onVisible = () => {
+    if (resolved.documentTarget.visibilityState === "visible") recover();
+  };
+  resolved.windowTarget.addEventListener("focus", recover);
+  resolved.windowTarget.addEventListener("online", recover);
+  resolved.documentTarget.addEventListener("visibilitychange", onVisible);
+  return () => {
+    resolved.windowTarget.removeEventListener("focus", recover);
+    resolved.windowTarget.removeEventListener("online", recover);
+    resolved.documentTarget.removeEventListener("visibilitychange", onVisible);
+  };
 }

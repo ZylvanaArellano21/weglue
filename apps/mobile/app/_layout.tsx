@@ -44,6 +44,7 @@ import {
 } from "../lib/platformAdmin";
 import { tearDownAuthenticatedSession } from "../lib/sessionCleanup";
 import { StudentSynchronizationHost } from "../components/synchronization/StudentSynchronizationHost";
+import { shouldRecoverOnMobileForeground } from "../lib/studentSynchronization";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -212,18 +213,22 @@ export default function RootLayout() {
   // backgrounded takes effect on the next resume rather than the next launch.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (status) => {
-      if (status === "active") void refreshAccess();
+      if (shouldRecoverOnMobileForeground(status)) void refreshAccess();
     });
     return () => sub.remove();
   }, [refreshAccess]);
 
-  // A live foreground session checks at a bounded interval as well as on
-  // resume/auth changes. Realtime is intentionally not a security dependency.
+  // This is not a broad access poll. It only recovers the one state change
+  // that occurs when a timed suspension expires without a database write.
+  // Every other access change converges through opaque Realtime plus the
+  // focus, reconnect, navigation, auth-refresh, denial and restart paths.
   useEffect(() => {
-    if (!session || !shouldSyncStudentProfile(session)) return;
+    const suspendedUntil = access?.state === "suspended" ? access.suspended_until : null;
+    const expiryMs = suspendedUntil ? new Date(suspendedUntil).getTime() : Number.NaN;
+    if (!session || !shouldSyncStudentProfile(session) || !Number.isFinite(expiryMs) || expiryMs <= Date.now()) return;
     const timer = setInterval(() => void refreshAccess(), 60_000);
     return () => clearInterval(timer);
-  }, [session, refreshAccess]);
+  }, [access, session, refreshAccess]);
 
   // A database guard denial while a protected React Query request is in flight
   // is an immediate convergence signal, not merely an empty-state response.

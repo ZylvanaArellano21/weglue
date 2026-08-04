@@ -4,7 +4,7 @@ import { usePathname } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { subscribeBroadcast } from '../../lib/realtime';
-import { invalidateStudentContentQueries } from '../../lib/studentSynchronization';
+import { invalidateStudentContentQueries, shouldRecoverOnMobileForeground } from '../../lib/studentSynchronization';
 
 /**
  * One mounted, student-only convergence point for Day 10E content lifecycle
@@ -25,14 +25,10 @@ export function StudentSynchronizationHost({ userId }: { userId?: string }) {
 
     const subscribe = async () => {
       if (!userId) return;
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('university_id')
-        .eq('id', userId)
-        .maybeSingle();
-      if (cancelled || error || !data?.university_id) return;
+      const { data: universityId, error } = await supabase.rpc('my_sync_university_id');
+      if (cancelled || error || typeof universityId !== 'string') return;
       removeContentSync = subscribeBroadcast(
-        `sync:university:${data.university_id}`,
+        `sync:university:${universityId}`,
         'invalidate',
         recover,
         recover,
@@ -54,7 +50,7 @@ export function StudentSynchronizationHost({ userId }: { userId?: string }) {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (status) => {
-      if (status === 'active') recover();
+      if (shouldRecoverOnMobileForeground(status)) recover();
     });
     return () => subscription.remove();
   }, [recover]);

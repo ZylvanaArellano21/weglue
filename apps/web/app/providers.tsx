@@ -7,11 +7,12 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
 import { subscribeBroadcast } from "../lib/realtime";
-import { invalidateStudentContentQueries } from "../lib/studentSynchronization";
+import { invalidateStudentContentQueries, subscribeBrowserCanonicalRecovery } from "../lib/studentSynchronization";
 
 function useApplicationAccessGate(queryClient: QueryClient): void {
   const pathname = usePathname();
   const checkRef = useRef<() => void>(() => {});
+  const [timedSuspensionFallback, setTimedSuspensionFallback] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseBrowser();
@@ -23,9 +24,19 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
       checking = true;
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
+        if (!session) {
+          setTimedSuspensionFallback(false);
+          return;
+        }
         const { data, error } = await supabase.rpc("my_access_state");
-        const state = (data as { state?: string } | null)?.state;
+        const accessState = data as { state?: string; suspended_until?: string | null } | null;
+        const state = accessState?.state;
+        if (!error && state) {
+          const suspensionEnd = accessState?.suspended_until ? new Date(accessState.suspended_until).getTime() : Number.NaN;
+          setTimedSuspensionFallback(
+            state === "suspended" && Number.isFinite(suspensionEnd) && suspensionEnd > Date.now()
+          );
+        }
         if (!error && state && state !== "active") {
           await queryClient.cancelQueries();
           queryClient.clear();
@@ -61,18 +72,8 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
       void check();
       subscribeAccessSync(data.session);
     });
-    // Retained as the non-aggressive fallback for a time-limited suspension
-    // expiring without a database write. Day 10E state changes converge via
-    // private realtime immediately; focus, navigation and reconnect also
-    // perform canonical recovery below.
-    const interval = window.setInterval(() => void check(), 60_000);
     const recover = () => void check();
-    const onVisible = () => {
-      if (document.visibilityState === "visible") recover();
-    };
-    window.addEventListener("focus", recover);
-    window.addEventListener("online", recover);
-    document.addEventListener("visibilitychange", onVisible);
+    const removeBrowserRecovery = subscribeBrowserCanonicalRecovery(recover);
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
       if (event === "SIGNED_OUT") {
         removeAccessSync?.();
@@ -92,15 +93,20 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
     });
     return () => {
       checkRef.current = () => {};
-      window.clearInterval(interval);
-      window.removeEventListener("focus", recover);
-      window.removeEventListener("online", recover);
-      document.removeEventListener("visibilitychange", onVisible);
+      removeBrowserRecovery();
       removeAccessSync?.();
       subscription.unsubscribe();
       queryUnsubscribe();
     };
   }, [queryClient]);
+
+  useEffect(() => {
+    if (!timedSuspensionFallback) return;
+    // This is not a broad access poll. It only recovers the one state change
+    // that occurs when a timed suspension expires without a database write.
+    const interval = window.setInterval(() => checkRef.current(), 60_000);
+    return () => window.clearInterval(interval);
+  }, [timedSuspensionFallback]);
 
   useEffect(() => {
     // Navigation is a canonical recovery point: a direct client transition
@@ -127,14 +133,10 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
       removeContentSync = null;
       contentSyncUserId = nextUserId;
       if (!nextUserId) return;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("university_id")
-        .eq("id", nextUserId)
-        .maybeSingle();
-      if (cancelled || request !== contentSyncRequest || error || !data?.university_id) return;
+      const { data: universityId, error } = await supabase.rpc("my_sync_university_id");
+      if (cancelled || request !== contentSyncRequest || error || typeof universityId !== "string") return;
       removeContentSync = subscribeBroadcast(
-        `sync:university:${data.university_id}`,
+        `sync:university:${universityId}`,
         "invalidate",
         () => invalidateStudentContentQueries(queryClient),
         () => invalidateStudentContentQueries(queryClient),
@@ -163,17 +165,7 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
 
   useEffect(() => {
     const recover = () => invalidateStudentContentQueries(queryClient);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") recover();
-    };
-    window.addEventListener("focus", recover);
-    window.addEventListener("online", recover);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", recover);
-      window.removeEventListener("online", recover);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
+    return subscribeBrowserCanonicalRecovery(recover);
   }, [queryClient]);
 }
 

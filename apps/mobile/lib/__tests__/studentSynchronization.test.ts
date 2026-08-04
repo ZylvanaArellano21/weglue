@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import {
   STUDENT_CONTENT_QUERY_ROOTS,
   invalidateStudentContentQueries,
+  shouldRecoverOnMobileForeground,
 } from '../studentSynchronization';
 
 describe('Day 10E mobile content synchronization', () => {
@@ -27,5 +28,11 @@ describe('Day 10E mobile content synchronization', () => {
     invalidateStudentContentQueries(queryClient);
 
     expect(invalidateQueries).toHaveBeenCalledTimes(STUDENT_CONTENT_QUERY_ROOTS.length * 2);
+  });
+
+  it('recovers only when the app returns to the foreground', () => {
+    expect(shouldRecoverOnMobileForeground('active')).toBe(true);
+    expect(shouldRecoverOnMobileForeground('background')).toBe(false);
+    expect(shouldRecoverOnMobileForeground('inactive')).toBe(false);
   });
 });

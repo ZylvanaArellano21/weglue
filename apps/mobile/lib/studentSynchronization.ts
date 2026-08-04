@@ -13,6 +13,8 @@ export const STUDENT_CONTENT_QUERY_ROOTS = [
   'clubPhotoFeed',
   'homeEventsFeed',
   'eventDetail',
+  'eventForEdit',
+  'eventAttendees',
   'clubEventsFeed',
   'calendarEvents',
   'calendarMonthMarkers',
@@ -39,4 +41,9 @@ export function invalidateStudentContentQueries(queryClient: QueryClient): void 
   for (const root of STUDENT_CONTENT_QUERY_ROOTS) {
     void queryClient.invalidateQueries({ queryKey: [root] });
   }
+}
+
+/** Mobile's foreground-only counterpart to web focus/visibility recovery. */
+export function shouldRecoverOnMobileForeground(status: string): boolean {
+  return status === 'active';
 }

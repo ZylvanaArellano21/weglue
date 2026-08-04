@@ -43,10 +43,12 @@ $$;
 -- A campus-wide event is intentionally only an opaque prompt to refetch. It
 -- is limited to active students with a profile in that campus; the refetch's
 -- existing RLS remains the authority for every individual post/comment/event.
+-- This narrowly-scoped SECURITY DEFINER check reads only auth.uid()'s own
+-- profile because student clients deliberately have no direct profiles grant.
 CREATE FUNCTION private.can_receive_university_sync(p_topic text)
 RETURNS boolean
 LANGUAGE sql
-SECURITY INVOKER
+SECURITY DEFINER
 STABLE
 SET search_path = ''
 AS $$
@@ -61,6 +63,23 @@ AS $$
        )
     ELSE false
   END;
+$$;
+
+-- The client needs its own topic name without gaining a direct profile read.
+-- This returns only the caller's university UUID and only while their
+-- canonical account state permits student access; it cannot query another user.
+CREATE FUNCTION public.my_sync_university_id()
+RETURNS uuid
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = ''
+AS $$
+  SELECT p.university_id
+    FROM public.profiles p
+   WHERE p.id = (SELECT auth.uid())
+     AND public.current_student_can_access_app()
+   LIMIT 1;
 $$;
 
 -- ── Opaque sends ────────────────────────────────────────────────────────────
@@ -150,6 +169,7 @@ REVOKE ALL ON FUNCTION private.can_receive_access_sync(text) FROM PUBLIC, anon, 
 REVOKE ALL ON FUNCTION private.can_receive_university_sync(text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION private.broadcast_access_sync() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION private.broadcast_content_lifecycle_sync() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.my_sync_university_id() FROM PUBLIC, anon, authenticated;
 
 -- 063 revoked the shared private-schema usage that 050's existing private
 -- interaction policies require. Restore only the four receiver helpers; none
@@ -159,6 +179,7 @@ GRANT EXECUTE ON FUNCTION private.can_receive_event_interaction(text) TO authent
 GRANT EXECUTE ON FUNCTION private.can_receive_post_interaction(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION private.can_receive_access_sync(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION private.can_receive_university_sync(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.my_sync_university_id() TO authenticated;
 
 -- ── Table triggers ──────────────────────────────────────────────────────────
 -- Every Day 10B access-state mutation reaches one of these canonical tables.
@@ -206,3 +227,4 @@ COMMIT;
 -- DROP FUNCTION IF EXISTS private.can_receive_university_sync(text);
 -- DROP FUNCTION IF EXISTS private.broadcast_access_sync();
 -- DROP FUNCTION IF EXISTS private.broadcast_content_lifecycle_sync();
+-- DROP FUNCTION IF EXISTS public.my_sync_university_id();
