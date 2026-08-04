@@ -6,7 +6,7 @@ import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../rea
 import { clubProfileKey } from "./useClubProfile";
 import { clubEventsFeedKey } from "./useClubEventsFeed";
 import { myClubsKey, discoveryClubsKey } from "./useClubTab";
-import { invalidateEventState } from "./eventSync";
+import { refreshPermissionSensitiveEventState } from "./eventSync";
 
 /**
  * Membership and officer role changes alter several independently cached
@@ -15,7 +15,7 @@ import { invalidateEventState } from "./eventSync";
  * while a background RLS refetch is in flight after a user leaves a club.
  */
 function refreshMembershipPermissions(queryClient: ReturnType<typeof useQueryClient>, userId: string): void {
-  invalidateEventState(queryClient, userId);
+  refreshPermissionSensitiveEventState(queryClient, userId);
   for (const key of [
     ["isOfficer", userId],
     ["officerClubs", userId],
@@ -23,12 +23,16 @@ function refreshMembershipPermissions(queryClient: ReturnType<typeof useQueryCli
     ["notifications", userId],
     ["unreadSummary", userId],
   ]) {
+    queryClient.removeQueries({ queryKey: key });
     void queryClient.invalidateQueries({ queryKey: key });
   }
   // Conversation participants are removed by the existing membership triggers.
   // Drop every messages query so a removed member never briefly reuses local
   // history while its next RLS query resolves.
   queryClient.removeQueries({ queryKey: ["messages"] });
+  queryClient.removeQueries({ queryKey: ["conversationHub"] });
+  queryClient.removeQueries({ queryKey: ["clubChannels"] });
+  queryClient.removeQueries({ queryKey: ["chatDetails"] });
 }
 
 // Cross-user realtime for the open Club Profile. Subscribes ONLY to this club's

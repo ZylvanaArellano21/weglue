@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import {
   STUDENT_CONTENT_QUERY_ROOTS,
   invalidateStudentContentQueries,
+  clearPermissionSensitiveStudentContent,
   subscribeBrowserCanonicalRecovery,
 } from "../studentSynchronization";
 
@@ -53,5 +54,18 @@ describe("Day 10E web content synchronization", () => {
 
     stop();
     expect(listeners.size).toBe(0);
+  });
+
+  it("clears selected-event and message payloads before canonical recovery", () => {
+    const removeQueries = vi.fn();
+    const queryClient = { removeQueries } as unknown as QueryClient;
+
+    clearPermissionSensitiveStudentContent(queryClient);
+
+    const keys = removeQueries.mock.calls.map(([arg]) => arg.queryKey);
+    expect(keys).toContainEqual(["eventDetail"]);
+    expect(keys).toContainEqual(["savedEventsUpcoming"]);
+    expect(keys).toContainEqual(["eventAttendees"]);
+    expect(keys).toContainEqual(["messages"]);
   });
 });

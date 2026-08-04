@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { clearPermissionSensitiveEventState } from "./hooks/eventSync";
 
 // The opaque Day 10E broadcast carries no business state. It only tells a
 // client to invalidate the student-facing views that can contain lifecycle
@@ -42,6 +43,39 @@ export function invalidateStudentContentQueries(queryClient: QueryClient): void 
   for (const root of STUDENT_CONTENT_QUERY_ROOTS) {
     void queryClient.invalidateQueries({ queryKey: [root] });
   }
+}
+
+/**
+ * The opaque campus signal can mean content was deleted or an event audience
+ * narrowed. Clear affected payloads first, then use normal RLS-backed loaders
+ * for convergence; never adopt broadcast data as application state.
+ */
+export function clearPermissionSensitiveStudentContent(queryClient: QueryClient): void {
+  clearPermissionSensitiveEventState(queryClient);
+  for (const root of [
+    "homePostsFeed",
+    "postDetail",
+    "postComments",
+    "ownPosts",
+    "userPosts",
+    "clubPhotoFeed",
+    "clubProfile",
+    "ownProfile",
+    "userProfile",
+    "notifications",
+    "unreadSummary",
+    "messages",
+    "conversationHub",
+    "clubChannels",
+    "chatDetails",
+  ]) {
+    queryClient.removeQueries({ queryKey: [root] });
+  }
+}
+
+export function refreshPermissionSensitiveStudentContent(queryClient: QueryClient): void {
+  clearPermissionSensitiveStudentContent(queryClient);
+  invalidateStudentContentQueries(queryClient);
 }
 
 type RecoveryEventTarget = {

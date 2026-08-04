@@ -7,7 +7,7 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
 import { subscribeBroadcast } from "../lib/realtime";
-import { invalidateStudentContentQueries, subscribeBrowserCanonicalRecovery } from "../lib/studentSynchronization";
+import { refreshPermissionSensitiveStudentContent, subscribeBrowserCanonicalRecovery } from "../lib/studentSynchronization";
 
 function useApplicationAccessGate(queryClient: QueryClient): void {
   const pathname = usePathname();
@@ -138,8 +138,8 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
       removeContentSync = subscribeBroadcast(
         `sync:university:${universityId}`,
         "invalidate",
-        () => invalidateStudentContentQueries(queryClient),
-        () => invalidateStudentContentQueries(queryClient),
+        () => refreshPermissionSensitiveStudentContent(queryClient),
+        () => refreshPermissionSensitiveStudentContent(queryClient),
       );
     };
 
@@ -160,11 +160,11 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
   useEffect(() => {
     // A route transition can reveal an inactive cached query. Mark all relevant
     // surfaces stale first so it cannot render an earlier lifecycle state.
-    invalidateStudentContentQueries(queryClient);
+    refreshPermissionSensitiveStudentContent(queryClient);
   }, [pathname, queryClient]);
 
   useEffect(() => {
-    const recover = () => invalidateStudentContentQueries(queryClient);
+    const recover = () => refreshPermissionSensitiveStudentContent(queryClient);
     return subscribeBrowserCanonicalRecovery(recover);
   }, [queryClient]);
 }

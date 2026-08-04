@@ -55,3 +55,39 @@ export function invalidateEventState(
   void queryClient.invalidateQueries({ queryKey: ["clubEventsFeed"] });
   void queryClient.invalidateQueries({ queryKey: ["clubCalendarEvents"] });
 }
+
+/**
+ * Drop event payloads before the next RLS-backed fetch when a capability is
+ * lost. Invalidating alone leaves React Query's old successful value renderable
+ * while a delayed refetch is in flight.
+ */
+export function clearPermissionSensitiveEventState(queryClient: QueryClient): void {
+  for (const key of [
+    ["homeEventsFeed"],
+    ["eventDetail"],
+    ["eventAttendees"],
+    ["eventForEdit"],
+    ["clubEventsFeed"],
+    ["clubCalendarEvents"],
+    ["calendarEvents"],
+    ["calendarMonthMarkers"],
+    ["calendarDayEvents"],
+    ["savedEventsUpcoming"],
+    ["savedEventsPast"],
+    ["savedEventsCount"],
+    ["ownThisWeekEvents"],
+    ["userWeeklyEvents"],
+    ["eventAudienceMemberSearch"],
+  ]) {
+    queryClient.removeQueries({ queryKey: key });
+  }
+}
+
+/** Clear first, then ask active observers to reload only authorized state. */
+export function refreshPermissionSensitiveEventState(
+  queryClient: QueryClient,
+  userId: string | undefined
+): void {
+  clearPermissionSensitiveEventState(queryClient);
+  invalidateEventState(queryClient, userId);
+}

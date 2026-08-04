@@ -168,7 +168,18 @@ export function useEventForEdit(eventId: string | undefined) {
           .from("profiles")
           .select("id, username, full_name, avatar_url")
           .in("id", ids);
-        specific_members = (profs ?? []) as any[];
+        const byId = new Map(
+          ((profs ?? []) as EventForEdit["specific_members"]).map((profile) => [profile.id, profile])
+        );
+        // Keep an unchanged historical recipient in the edit payload even if a
+        // later block/restriction hides their profile row. The database still
+        // rejects any newly injected ineligible recipient.
+        specific_members = ids.map((id) => byId.get(id) ?? {
+          id,
+          username: "selected-member",
+          full_name: "Selected member",
+          avatar_url: null,
+        });
       }
       return {
         id: e.id,
