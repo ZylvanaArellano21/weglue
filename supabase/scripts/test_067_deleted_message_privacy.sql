@@ -1,11 +1,48 @@
 -- Day 10F local database/security harness. Run only after a disposable local
--- reset with migrations through 067; never run it against Production.
+-- reset with migrations through 068; never run it against Production.
 --
 -- docker exec -i supabase_db_weglue psql -U postgres -d postgres \
 --   -v ON_ERROR_STOP=1 < supabase/scripts/test_067_deleted_message_privacy.sql
 
 \set ON_ERROR_STOP on
 \pset pager off
+
+-- Hosted PostgREST provides verified JWT claims in request.jwt.claims JSON.
+-- The service-only predicate must accept only a well-formed service_role
+-- claim, independently of the caller's request body or RPC arguments.
+DO $$
+BEGIN
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', false);
+  IF NOT private.is_service_role_request() THEN
+    RAISE EXCEPTION 'hosted service-role JSON claims were rejected';
+  END IF;
+
+  PERFORM set_config('request.jwt.claims', '{"role":"authenticated"}', false);
+  IF private.is_service_role_request() THEN
+    RAISE EXCEPTION 'ordinary authenticated JSON claims passed the service gate';
+  END IF;
+
+  PERFORM set_config('request.jwt.claims', '{"role":"anon"}', false);
+  IF private.is_service_role_request() THEN
+    RAISE EXCEPTION 'anonymous JSON claims passed the service gate';
+  END IF;
+
+  PERFORM set_config('request.jwt.claims', '', false);
+  IF private.is_service_role_request() THEN
+    RAISE EXCEPTION 'missing JSON claims passed the service gate';
+  END IF;
+
+  PERFORM set_config('request.jwt.claims', '{malformed', false);
+  IF private.is_service_role_request() THEN
+    RAISE EXCEPTION 'malformed JSON claims passed the service gate';
+  END IF;
+
+  PERFORM set_config('request.jwt.claims', '{"role":"platform_admin"}', false);
+  IF private.is_service_role_request() THEN
+    RAISE EXCEPTION 'unexpected JSON role passed the service gate';
+  END IF;
+END;
+$$;
 
 -- ── Schema, privilege, policy, and opaque-Realtime shape ───────────────────
 
@@ -144,6 +181,34 @@ GRANT SELECT, INSERT, UPDATE ON public.messages TO authenticated;
 GRANT SELECT ON public.conversations, public.conversation_participants, public.reports TO authenticated;
 GRANT SELECT ON public.reports TO service_role;
 
+-- Service-only lease RPCs must reject both regular and anonymous callers even
+-- when they supply arbitrary request claims or message identifiers.
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claims', json_build_object('sub', 'a6700000-0000-4000-8000-000000000001', 'role', 'authenticated')::text, false);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.claim_message_attachment_cleanup_for_message('forged-worker', 'a6700000-0000-4000-8000-0000000000b1');
+    RAISE EXCEPTION 'authenticated caller invoked service-only cleanup claim';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END;
+$$;
+RESET ROLE;
+
+SET ROLE anon;
+SELECT set_config('request.jwt.claims', json_build_object('role', 'anon')::text, false);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.claim_message_attachment_cleanup_for_message('forged-worker', 'a6700000-0000-4000-8000-0000000000b1');
+    RAISE EXCEPTION 'anonymous caller invoked service-only cleanup claim';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END;
+$$;
+RESET ROLE;
+
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claims', json_build_object('sub', 'a6700000-0000-4000-8000-000000000003')::text, false);
 DO $$
@@ -215,8 +280,42 @@ BEGIN
 END;
 $$;
 
+-- A service-role database principal without verified PostgREST claims cannot
+-- claim the job. The immediate deletion remains scrubbed and the canonical
+-- job stays pending for a later authenticated reconciliation attempt.
+RESET ROLE;
+SET ROLE service_role;
+SELECT set_config('request.jwt.claims', '', false);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.claim_message_attachment_cleanup_for_message(
+      'unverified-delete-message',
+      'a6700000-0000-4000-8000-0000000000b1'
+    );
+    RAISE EXCEPTION 'unverified cleanup claimant obtained a lease';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', false);
+  IF NOT EXISTS (
+    SELECT 1
+      FROM private.message_attachment_cleanup_jobs j
+      JOIN private.message_deletion_operations o ON o.id = j.operation_id
+     WHERE o.message_id = 'a6700000-0000-4000-8000-0000000000b1'
+       AND j.state = 'pending'
+       AND j.claim_token IS NULL
+       AND o.reconciliation_state = 'pending_attachment_cleanup'
+  ) THEN
+    RAISE EXCEPTION 'failed cleanup claim did not leave the job safely retryable';
+  END IF;
+END;
+$$;
+RESET ROLE;
+
 -- A participant cannot recover deleted content by a direct ID, a cache-like
 -- database query, a second report, or a remembered attachment path.
+SET ROLE authenticated;
 SELECT set_config('request.jwt.claims', json_build_object('sub', 'a6700000-0000-4000-8000-000000000002')::text, false);
 DO $$
 BEGIN
@@ -338,7 +437,7 @@ $$;
 -- harness records successful object work through its completion RPC; it never
 -- treats a failed object removal as success.
 SET ROLE service_role;
-SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', false);
 DO $$
 DECLARE v record;
 BEGIN
@@ -393,7 +492,7 @@ $$;
 CREATE FUNCTION private.day10f_force_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'day10f forced audit failure'; END; $$;
 CREATE TRIGGER trg_day10f_force_audit_failure BEFORE INSERT ON public.admin_audit_events FOR EACH ROW EXECUTE FUNCTION private.day10f_force_audit_failure();
 SET ROLE service_role;
-SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', false);
 DO $$
 DECLARE v_report uuid;
 BEGIN
@@ -418,7 +517,7 @@ END;
 $$;
 
 SET ROLE service_role;
-SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', false);
 DO $$
 DECLARE v_report uuid; v_appeal uuid;
 BEGIN
@@ -440,7 +539,7 @@ UPDATE private.report_message_evidence
  WHERE source_message_id = 'a6700000-0000-4000-8000-0000000000b2';
 
 SET ROLE service_role;
-SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', false);
 DO $$
 DECLARE v_report uuid; v_hold uuid; v record;
 BEGIN
@@ -464,7 +563,7 @@ UPDATE private.message_deletion_operations
    SET purge_after = now() - interval '1 minute'
  WHERE message_id IN ('a6700000-0000-4000-8000-0000000000b1', 'a6700000-0000-4000-8000-0000000000b2', 'a6700000-0000-4000-8000-0000000000b3');
 SET ROLE service_role;
-SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', false);
 SELECT public.purge_expired_message_deletion_metadata(100);
 RESET ROLE;
 

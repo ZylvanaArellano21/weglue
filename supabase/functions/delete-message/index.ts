@@ -6,7 +6,8 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { attachmentCleanupOutcomeWithoutLease } from "./cleanupOutcome.ts";
+import { parseDeleteMessageRequest } from "./requestValidation.ts";
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -105,10 +106,9 @@ Deno.serve(async (request) => {
   const { data: userData } = await client.auth.getUser(token);
   if (!userData.user) return json({ error: "Unauthorized" }, 401);
 
-  const input = (await request.json().catch(() => null)) as { messageId?: unknown; idempotencyKey?: unknown } | null;
-  const messageId = typeof input?.messageId === "string" ? input.messageId : "";
-  const idempotencyKey = typeof input?.idempotencyKey === "string" ? input.idempotencyKey : "";
-  if (!UUID_RE.test(messageId) || !UUID_RE.test(idempotencyKey)) return json({ error: "Invalid request" }, 400);
+  const deletionRequest = parseDeleteMessageRequest(await request.json().catch(() => null));
+  if (!deletionRequest) return json({ error: "Invalid request" }, 400);
+  const { messageId, idempotencyKey } = deletionRequest;
 
   const { data, error } = await client.rpc("begin_message_deletion", {
     p_message_id: messageId,
@@ -136,9 +136,9 @@ Deno.serve(async (request) => {
     const complete = await processCleanup(admin, claimed[0] as CleanupJob);
     return json({ state: "deleted", attachmentCleanup: complete ? "complete" : "pending" }, complete ? 200 : 202);
   }
-  // No job can mean a text-only message, a previously completed attempt, or a
-  // concurrent worker holding the lease. The response remains intentionally
-  // coarse and never claims completed attachment work unless this request did
-  // it; clients refetch canonical message state either way.
-  return json({ state: "deleted", attachmentCleanup: state === "deleted" ? "complete" : "pending" }, state === "deleted" ? 200 : 202);
+  // A failed claim is not proof that cleanup occurred. A missing lease is only
+  // complete when the canonical deletion RPC proved the message had no
+  // attachment; retries and concurrent workers remain coarse pending states.
+  const outcome = attachmentCleanupOutcomeWithoutLease(state, Boolean(claimError));
+  return json({ state: "deleted", attachmentCleanup: outcome.attachmentCleanup }, outcome.status);
 });
