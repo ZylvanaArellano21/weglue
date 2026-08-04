@@ -1,4 +1,4 @@
--- Run only against a disposable local database after migrations through 067.
+-- Run only against a disposable local database after migrations through 068.
 -- This is intentionally catalog-based as well as behavioural: RLS policy names
 -- are a security boundary and a second permissive policy can silently undo a
 -- correct-looking client implementation.
@@ -24,7 +24,7 @@ BEGIN
     RAISE EXCEPTION '067: event end timestamp trigger is missing';
   END IF;
 
-  SELECT pg_get_functiondef('private.can_mutate_event_rsvp(uuid,uuid)'::regprocedure)
+  SELECT pg_get_functiondef('private.can_current_user_mutate_event_rsvp(uuid)'::regprocedure)
     INTO v_definition;
   IF position('event_end_at > now()' IN v_definition) = 0 THEN
     RAISE EXCEPTION '067: RSVP policy must reject event_end_at <= now()';
@@ -34,7 +34,7 @@ BEGIN
     SELECT 1 FROM pg_policies
      WHERE schemaname = 'public' AND tablename = 'events'
        AND policyname = 'events: visibility-aware read'
-       AND qual LIKE '%private.can_access_event%'
+       AND qual LIKE '%private.can_current_user_access_event%'
   ) THEN
     RAISE EXCEPTION '067: event reads must use the canonical audience predicate';
   END IF;
@@ -43,7 +43,7 @@ BEGIN
     SELECT 1 FROM pg_policies
      WHERE schemaname = 'public' AND tablename = 'event_rsvps'
        AND policyname = 'event_rsvps: users insert eligible'
-       AND with_check LIKE '%private.can_mutate_event_rsvp%'
+       AND with_check LIKE '%private.can_current_user_mutate_event_rsvp%'
   ) THEN
     RAISE EXCEPTION '067: RSVP INSERT must be audience and expiry protected';
   END IF;
@@ -52,7 +52,7 @@ BEGIN
     SELECT 1 FROM pg_policies
      WHERE schemaname = 'public' AND tablename = 'saved_events'
        AND policyname = 'saved_events: users manage own'
-       AND qual LIKE '%private.can_access_event%'
+       AND qual LIKE '%private.can_current_user_access_event%'
   ) THEN
     RAISE EXCEPTION '067: saved-event access must follow current event access';
   END IF;
@@ -66,8 +66,9 @@ BEGIN
 
   IF NOT has_function_privilege('authenticated', 'public.get_club_profile_events(uuid)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.search_event_audience_members(uuid,text,integer)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'private.can_access_event(uuid,uuid)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'private.can_mutate_event_rsvp(uuid,uuid)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'private.can_current_user_access_event(uuid)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'private.can_current_user_mutate_event_rsvp(uuid)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'private.can_access_event(uuid,uuid)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.get_club_profile_events(uuid)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.search_event_audience_members(uuid,text,integer)', 'EXECUTE') THEN
     RAISE EXCEPTION '067: web event RPC grants are not least-privilege';
@@ -112,9 +113,11 @@ INSERT INTO public.events (
   ('30000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Selected', '2099-01-01', '10:00', '12:00', 'specific', ARRAY['10000000-0000-0000-0000-000000000004'::uuid]),
   ('30000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Ended', '2099-01-01', '10:00', '12:00', 'members', NULL);
 
--- Make this one exactly expired without changing its original audience.
+-- Derive an end instant at (just before) the current server time without
+-- writing event_end_at directly; 068 deliberately overwrites direct attempts.
 UPDATE public.events
-   SET event_end_at = now()
+   SET event_date = (now() AT TIME ZONE 'America/Chicago')::date,
+       end_time = (now() AT TIME ZONE 'America/Chicago')::time
  WHERE id = '30000000-0000-0000-0000-000000000004';
 
 SET LOCAL ROLE authenticated;
