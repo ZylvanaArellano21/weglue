@@ -17,7 +17,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
-import { usePostComments, useAddComment } from '../../hooks/useHomePostsFeed';
+import { usePostComments, useAddComment, usePostDetail } from '../../hooks/useHomePostsFeed';
 import { timeAgo } from './PostCard';
 import type { PostComment } from '../../services/postService';
 
@@ -34,6 +34,10 @@ export function CommentsSheet({ visible, postId, viewerUserId, onClose }: Commen
   // Android: lift the sheet (and its composer) above the keyboard; iOS keeps
   // KeyboardAvoidingView. See useAndroidKeyboardHeight for why.
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
+  const { data: post, isLoading: isPostLoading } = usePostDetail(
+    visible ? postId : undefined,
+    viewerUserId,
+  );
   const { data: comments = [], isLoading } = usePostComments(visible ? postId : undefined);
   const { mutate: submitComment, isPending } = useAddComment();
 
@@ -103,7 +107,13 @@ export function CommentsSheet({ visible, postId, viewerUserId, onClose }: Commen
               Comments
             </Text>
 
-            {isLoading ? (
+            {!isPostLoading && !post ? (
+              <View style={{ padding: 24, alignItems: 'center' }}>
+                <Text style={{ color: '#6B7280', textAlign: 'center', fontFamily: 'Inter_400Regular' }}>
+                  This post is no longer available.
+                </Text>
+              </View>
+            ) : isLoading || isPostLoading ? (
               <View style={{ padding: 24, alignItems: 'center' }}>
                 <ActivityIndicator color="#0FA6A6" />
               </View>
@@ -161,7 +171,7 @@ export function CommentsSheet({ visible, postId, viewerUserId, onClose }: Commen
               />
             )}
 
-            <View
+            {post ? <View
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -213,7 +223,7 @@ export function CommentsSheet({ visible, postId, viewerUserId, onClose }: Commen
                   <Ionicons name="send" size={16} color="#fff" />
                 )}
               </TouchableOpacity>
-            </View>
+            </View> : null}
           </SafeAreaView>
         </KeyboardAvoidingView>
       </View>
