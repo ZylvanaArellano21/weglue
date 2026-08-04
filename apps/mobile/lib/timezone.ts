@@ -30,8 +30,8 @@ function localDateString(date: Date): string {
 }
 
 // The current date in America/Chicago as YYYY-MM-DD.
-export function todayInAppTz(): string {
-  return dateInAppTz(new Date());
+export function todayInAppTz(now: Date = new Date()): string {
+  return dateInAppTz(now);
 }
 
 // Any instant → its calendar date in America/Chicago as YYYY-MM-DD.
@@ -68,8 +68,7 @@ function localTimeString(date: Date): string {
 
 // The current wall-clock time in America/Chicago as HH:MM:SS — string-sortable
 // against events.start_time/end_time (both stored as wall-clock time strings).
-export function nowTimeInAppTz(): string {
-  const now = new Date();
+export function nowTimeInAppTz(now: Date = new Date()): string {
   if (!timeFormatter) return localTimeString(now);
   try {
     // en-GB hour12:false can yield "24:xx:xx" at midnight on some ICU builds.

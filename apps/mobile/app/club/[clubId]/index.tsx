@@ -122,11 +122,13 @@ function MiniCalendar({
   const [viewYear, setViewYear] = useState(todayY);
   const [viewMonth, setViewMonth] = useState(todayM - 1);
 
-  // Every event — past AND future — marks its day. Earliest event of the day
-  // opens first when tapped.
+  // A members-only preview may mark a date, but it must not become a hidden
+  // detail deep link for a non-member.
   const eventIdByDate = new Map<string, string>();
   for (const e of events) {
-    if (!eventIdByDate.has(e.event_date)) eventIdByDate.set(e.event_date, e.id);
+    if (e.can_open && !eventIdByDate.has(e.event_date)) {
+      eventIdByDate.set(e.event_date, e.id);
+    }
   }
   const todayStr = todayInAppTz();
 
@@ -317,19 +319,31 @@ function MiniCalendar({
 // "Members only" banner hanging from the top edge, bold title, calendar +
 // location rows, right chevron — the whole card is one tappable 3D button.
 // Used for both Upcoming Events and Past Events.
-function ClubEventCard({ event, clubId }: { event: ClubUpcomingEvent; clubId: string }) {
+function ClubEventCard({
+  event,
+  clubId,
+  onRestricted,
+}: {
+  event: ClubUpcomingEvent;
+  clubId: string;
+  onRestricted: () => void;
+}) {
   const router = useRouter();
   const isRestricted = event.visibility === 'members' || event.visibility === 'specific';
   const locationText = formatEventLocation(event.building, event.room, event.location);
 
   return (
     <TouchableOpacity
-      onPress={() =>
+      onPress={() => {
+        if (!event.can_open) {
+          onRestricted();
+          return;
+        }
         router.push({
           pathname: '/club/[clubId]/events/[eventId]',
           params: { clubId, eventId: event.id },
-        })
-      }
+        });
+      }}
       activeOpacity={0.7}
       // overflow:'hidden' would clip the iOS shadow (masksToBounds), killing
       // the 3D button look — so the card keeps its shadow and only the image
@@ -381,7 +395,7 @@ function ClubEventCard({ event, clubId }: { event: ClubUpcomingEvent; clubId: st
             }}
           >
             <Text style={{ fontSize: 11, color: '#FFFFFF', fontFamily: 'Inter_700Bold' }}>
-              Members only
+              {event.visibility === 'specific' ? 'Selected members only' : 'Members only'}
             </Text>
           </View>
         )}
@@ -952,7 +966,12 @@ export default function ClubProfileScreen() {
           isEmpty={club.upcoming_events.length === 0}
         >
           {club.upcoming_events.map((event) => (
-            <ClubEventCard key={event.id} event={event} clubId={clubId!} />
+            <ClubEventCard
+              key={event.id}
+              event={event}
+              clubId={clubId!}
+              onRestricted={() => show('This event is for club members only. Join the club to RSVP and view attendees.', 'error')}
+            />
           ))}
         </Section>
 
@@ -963,7 +982,12 @@ export default function ClubProfileScreen() {
           isEmpty={club.past_events.length === 0}
         >
           {club.past_events.map((event) => (
-            <ClubEventCard key={event.id} event={event} clubId={clubId!} />
+            <ClubEventCard
+              key={event.id}
+              event={event}
+              clubId={clubId!}
+              onRestricted={() => show('This event is for club members only. Join the club to RSVP and view attendees.', 'error')}
+            />
           ))}
         </Section>
 

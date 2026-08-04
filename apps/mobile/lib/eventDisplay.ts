@@ -26,31 +26,52 @@ export function formatEventLocation(
 export function isEventPast(
   eventDate: string,
   endTime: string | null | undefined,
+  now: Date = new Date(),
 ): boolean {
-  const today = todayInAppTz();
+  const today = todayInAppTz(now);
   if (eventDate < today) return true;
   if (eventDate > today) return false;
   // Same calendar day: compare wall-clock end time. Missing end time is
   // treated as end-of-day so the event never disappears early.
   if (!endTime) return false;
-  return endTime < nowTimeInAppTz();
+  // Equality is past: an event ends at the exact end wall-clock instant.
+  return endTime <= nowTimeInAppTz(now);
+}
+
+/**
+ * `event_end_at` is the canonical UTC instant derived in PostgreSQL from the
+ * event's America/Chicago wall-clock date and end time. Prefer it everywhere
+ * it is present; the date/time helper above remains only for legacy rows.
+ */
+export function isEventPastAt(
+  eventEndAt: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!eventEndAt) return false;
+  const endMs = Date.parse(eventEndAt);
+  return Number.isFinite(endMs) && endMs <= now.getTime();
 }
 
 export interface EventTimeFields {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at?: string | null;
 }
 
-// One event source → both sections. Upcoming keeps events whose end is now or
-// later (soonest first); past keeps ended events (most recent first).
+// One event source → both sections. Upcoming keeps events whose end is strictly
+// later than now (soonest first); past includes the exact end boundary.
 export function splitPastAndUpcoming<T extends EventTimeFields>(
   events: T[],
+  now: Date = new Date(),
 ): { upcoming: T[]; past: T[] } {
   const upcoming: T[] = [];
   const past: T[] = [];
   for (const e of events) {
-    (isEventPast(e.event_date, e.end_time) ? past : upcoming).push(e);
+    const hasEnded = e.event_end_at
+      ? isEventPastAt(e.event_end_at, now)
+      : isEventPast(e.event_date, e.end_time, now);
+    (hasEnded ? past : upcoming).push(e);
   }
   upcoming.sort(
     (a, b) =>

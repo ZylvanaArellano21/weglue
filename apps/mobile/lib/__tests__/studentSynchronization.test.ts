@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import {
   STUDENT_CONTENT_QUERY_ROOTS,
   invalidateStudentContentQueries,
+  clearPermissionSensitiveStudentContent,
   shouldRecoverOnMobileForeground,
 } from '../studentSynchronization';
 
@@ -34,5 +35,17 @@ describe('Day 10E mobile content synchronization', () => {
     expect(shouldRecoverOnMobileForeground('active')).toBe(true);
     expect(shouldRecoverOnMobileForeground('background')).toBe(false);
     expect(shouldRecoverOnMobileForeground('inactive')).toBe(false);
+  });
+
+  it('removes permission-sensitive payloads before a selected-audience refetch', () => {
+    const removeQueries = vi.fn();
+    const queryClient = { removeQueries } as unknown as QueryClient;
+
+    clearPermissionSensitiveStudentContent(queryClient);
+
+    expect(removeQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(['eventDetail']);
+    expect(removeQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(['savedEventsUpcoming']);
+    expect(removeQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(['eventAttendees']);
+    expect(removeQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(['myChats']);
   });
 });

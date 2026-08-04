@@ -43,6 +43,47 @@ export function invalidateStudentContentQueries(queryClient: QueryClient): void 
   }
 }
 
+// A narrowed audience or removal is privacy-sensitive: React Query must not
+// keep the previous successful payload visible while a replacement query waits.
+export function clearPermissionSensitiveStudentContent(queryClient: QueryClient): void {
+  for (const root of [
+    'homeEventsFeed',
+    'eventDetail',
+    'eventForEdit',
+    'eventAttendees',
+    'clubEventsFeed',
+    'calendarEvents',
+    'calendarMonthMarkers',
+    'calendarDayEvents',
+    'savedEventsUpcoming',
+    'savedEventsPast',
+    'ownThisWeekEvents',
+    'userWeeklyEvents',
+    'clubProfile',
+    'clubDetail',
+    'homePostsFeed',
+    'postDetail',
+    'postComments',
+    'ownPosts',
+    'userPosts',
+    'userPostsFeed',
+    'clubPhotoFeed',
+    'notifications',
+    'unreadSummary',
+    'myChats',
+    'conversationHub',
+    'clubChannels',
+    'chatDetails',
+  ]) {
+    queryClient.removeQueries({ queryKey: [root] });
+  }
+}
+
+export function refreshPermissionSensitiveStudentContent(queryClient: QueryClient): void {
+  clearPermissionSensitiveStudentContent(queryClient);
+  invalidateStudentContentQueries(queryClient);
+}
+
 /** Mobile's foreground-only counterpart to web focus/visibility recovery. */
 export function shouldRecoverOnMobileForeground(status: string): boolean {
   return status === 'active';

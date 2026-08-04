@@ -72,6 +72,8 @@ async function enrichSavedEvents(
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
+    visibility: (e.visibility ?? 'everyone') as CalendarEvent['visibility'],
     location: e.location ?? null,
     building: e.building ?? null,
     room: e.room ?? null,
@@ -106,12 +108,12 @@ export async function getSavedEventsUpcoming(userId: string): Promise<CalendarSe
   const { data: rawEvents } = await supabase
     .from('events')
     .select(`
-      id, title, emoji, event_date, start_time, end_time,
+      id, title, emoji, event_date, start_time, end_time, event_end_at, visibility,
       location, building, room, cover_image_url,
       clubs!inner(id, name, avatar_url)
     `)
     .in('id', savedIds)
-    .gte('event_date', today)
+    .gt('event_end_at', new Date().toISOString())
     .order('event_date', { ascending: true })
     .order('start_time', { ascending: true });
 
@@ -127,20 +129,19 @@ export async function getSavedEventsPast(
   page: number = 0,
   pageSize: number = 20,
 ): Promise<CalendarEvent[]> {
-  const today = todayInAppTz();
   const savedIds = await getSavedEventIds(userId);
   if (savedIds.length === 0) return [];
 
   const { data: rawEvents } = await supabase
     .from('events')
     .select(`
-      id, title, emoji, event_date, start_time, end_time,
+      id, title, emoji, event_date, start_time, end_time, event_end_at, visibility,
       location, building, room, cover_image_url,
       clubs!inner(id, name, avatar_url)
     `)
     .in('id', savedIds)
-    .lt('event_date', today)
-    .order('event_date', { ascending: false })
+    .lte('event_end_at', new Date().toISOString())
+    .order('event_end_at', { ascending: false })
     .order('start_time', { ascending: false })
     .range(page * pageSize, (page + 1) * pageSize - 1);
 
