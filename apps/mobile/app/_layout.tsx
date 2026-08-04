@@ -24,6 +24,7 @@ import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
 import { useInviteDeepLink } from "../hooks/useInviteDeepLink";
+import { useAccessSynchronization } from "../hooks/useAccessSynchronization";
 import { LeaveClubHost } from "../components/club/LeaveClubHost";
 import { SidebarHost } from "../components/sidebar/SidebarHost";
 import { MediaPickerHost } from "../components/media/MediaPickerHost";
@@ -42,6 +43,8 @@ import {
   shouldSyncStudentProfile,
 } from "../lib/platformAdmin";
 import { tearDownAuthenticatedSession } from "../lib/sessionCleanup";
+import { StudentSynchronizationHost } from "../components/synchronization/StudentSynchronizationHost";
+import { shouldRecoverOnMobileForeground } from "../lib/studentSynchronization";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -126,6 +129,26 @@ const queryPersister = createAsyncStoragePersister({
   throttleTime: 2000,
 });
 
+// Private Broadcast channels need an explicit, current JWT. This bridge is
+// deliberately separate from the Day 10E event handlers: refreshing a token
+// only re-authorizes the socket; every access/content decision still refetches
+// canonical data through normal RPCs and RLS-backed queries.
+function useRealtimeAuthBridge(): void {
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.access_token) void supabase.realtime.setAuth(session.access_token);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        void supabase.realtime.setAuth(session.access_token);
+      } else {
+        void supabase.realtime.setAuth(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Zain_400Regular,
@@ -139,6 +162,8 @@ export default function RootLayout() {
 
   const { session, setSession, setProfile, setOnboarded, setLoading } =
     useAuthStore();
+
+  useRealtimeAuthBridge();
 
   // ONE decision, identical on iOS and Android (no Platform.OS branch anywhere
   // in this path). A platform-admin Auth identity is not a student: the whole
@@ -178,22 +203,32 @@ export default function RootLayout() {
     void refreshAccess();
   }, [refreshAccess]);
 
+  useAccessSynchronization(
+    session?.user.id,
+    !!session && shouldSyncStudentProfile(session),
+    refreshAccess,
+  );
+
   // Fresh check on every foreground, so a restriction applied while the app was
   // backgrounded takes effect on the next resume rather than the next launch.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (status) => {
-      if (status === "active") void refreshAccess();
+      if (shouldRecoverOnMobileForeground(status)) void refreshAccess();
     });
     return () => sub.remove();
   }, [refreshAccess]);
 
-  // A live foreground session checks at a bounded interval as well as on
-  // resume/auth changes. Realtime is intentionally not a security dependency.
+  // This is not a broad access poll. It only recovers the one state change
+  // that occurs when a timed suspension expires without a database write.
+  // Every other access change converges through opaque Realtime plus the
+  // focus, reconnect, navigation, auth-refresh, denial and restart paths.
   useEffect(() => {
-    if (!session || !shouldSyncStudentProfile(session)) return;
+    const suspendedUntil = access?.state === "suspended" ? access.suspended_until : null;
+    const expiryMs = suspendedUntil ? new Date(suspendedUntil).getTime() : Number.NaN;
+    if (!session || !shouldSyncStudentProfile(session) || !Number.isFinite(expiryMs) || expiryMs <= Date.now()) return;
     const timer = setInterval(() => void refreshAccess(), 60_000);
     return () => clearInterval(timer);
-  }, [session, refreshAccess]);
+  }, [access, session, refreshAccess]);
 
   // A database guard denial while a protected React Query request is in flight
   // is an immediate convergence signal, not merely an empty-state response.
@@ -211,10 +246,11 @@ export default function RootLayout() {
     if (!isRestricted) return;
     // Do not destroy auth here: the limited restricted shell still needs it.
     // Remove every cached protected screen before the navigator is replaced.
+    // Do not remove all realtime channels: the account-scoped opaque channel
+    // stays mounted so a later canonical restore can reopen this shell.
     void queryClient.cancelQueries();
     void queryClient.clear();
     void AsyncStorage.removeItem("weglue-query-cache-v1");
-    void supabase.removeAllChannels();
   }, [isRestricted]);
 
   // A restricted or not-yet-checked authenticated account must not process a
@@ -411,6 +447,7 @@ export default function RootLayout() {
         buster: "v2",
       }}
     >
+      <StudentSynchronizationHost userId={session?.user.id} />
       {/* Screens are auto-registered by expo-router from the file tree.
           Declaring names that don't match real routes (e.g. "profile" when the
           routes are "profile/[userId]", "profile/own", …) makes the navigator
