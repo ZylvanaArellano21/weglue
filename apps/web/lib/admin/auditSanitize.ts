@@ -83,6 +83,14 @@ export const AUDIT_ACTIONS = {
   "report.dismiss":       { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId", "decisionId", "resolutionOutcome", "enforcementAction"] },
   "report.supersede":     { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId", "decisionId", "supersedesDecisionId"] },
   "report.viewEvidence":  { targetType: "report",       targetIdKey: "reportId",       sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["reportId"] },
+  "report.evidenceHoldApply": { targetType: "report", targetIdKey: "reportId", sensitivity: "destructive", requiresReason: true, metadataKeys: ["reportId", "holdType"] },
+  "report.evidenceHoldRelease": { targetType: "report", targetIdKey: "reportId", sensitivity: "sensitive", requiresReason: true, metadataKeys: ["reportId", "holdId"] },
+  "report.evidenceAppeal": { targetType: "report", targetIdKey: "reportId", sensitivity: "sensitive", requiresReason: true, metadataKeys: ["reportId", "status"] },
+  "message.delete": { targetType: "message", targetIdKey: "messageId", sensitivity: "sensitive", requiresReason: false, metadataKeys: ["messageId", "actionType"] },
+  // Automated worker record: it is security-sensitive but does not accept a
+  // founder-entered reason. Treating it as destructive would incorrectly
+  // require a user-provided reason for an unattended retention job.
+  "message.purge": { targetType: "message", targetIdKey: "messageId", sensitivity: "sensitive", requiresReason: false, metadataKeys: ["messageId"] },
   "deletedContent.reactivateClub": { targetType: "club", targetIdKey: "clubId",        sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["clubId"] },
 
   // ── Day 10B2: administrator account restrictions (migration 058) ──────────

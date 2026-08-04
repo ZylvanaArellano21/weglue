@@ -191,7 +191,9 @@ export function newClientTag(): string {
 
 /** Unsend for everyone (server-authorized: sender / official-chat officer / group admin). */
 export async function unsendMessage(messageId: string): Promise<void> {
-  const { error } = await supabase.rpc('unsend_message', { p_message_id: messageId });
+  const { error } = await supabase.functions.invoke('delete-message', {
+    body: { messageId, idempotencyKey: clientUuid() },
+  });
   if (error) throw error;
 }
 
@@ -204,8 +206,8 @@ export async function hideMessageForMe(messageId: string, userId: string): Promi
 }
 
 export interface ReportMessageResult {
-  /** The report row (with a tamper-proof server-side content/attachment/poll
-   * snapshot) exists in Supabase — the durable, primary action. */
+  /** The report row and any pre-deletion private evidence capture exist on the
+   * server — the durable, primary action. */
   saved: true;
   /** The courtesy notification email to SUPPORT_EMAIL was accepted. A false
    * here never means the report was lost: the row is the source of truth and
@@ -218,9 +220,9 @@ export async function reportMessage(
   reason: string,
   details?: string,
 ): Promise<ReportMessageResult> {
-  // 1) Durable insert + moderation snapshot (server-side, so a later unsend
-  //    can't destroy the evidence; the snapshot stores the storage PATH, never
-  //    a signed URL). Must succeed — a throw here surfaces as retry in the UI.
+  // 1) Durable insert + private pre-deletion evidence capture. It is server
+  //    authorized, never stores a signed URL, and is unavailable if deletion
+  //    won the race. Must succeed — a throw here surfaces as retry in the UI.
   const { data: reportId, error } = await supabase.rpc('report_message', {
     p_message_id: messageId,
     p_reason: reason,
@@ -236,8 +238,9 @@ export async function reportMessage(
     });
     if (fnError) throw fnError;
     return { saved: true, emailed: (data as { sent?: boolean } | null)?.sent === true };
-  } catch (e) {
-    console.warn('[reportMessage] report email failed (report stored)', e);
+  } catch {
+    // Keep report/evidence-related transport errors out of browser logs.
+    console.warn('[reportMessage] report email delivery deferred (report stored)');
     return { saved: true, emailed: false };
   }
 }

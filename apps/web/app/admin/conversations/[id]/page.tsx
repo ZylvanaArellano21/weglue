@@ -272,7 +272,8 @@ export default async function AdminConversationDetailPage({ params }: { params: 
         </ul>
       )}
       <div className="border-t border-gray-100 p-4 text-xs text-gray-400">
-        Retained report snapshots (content/attachment evidence) are never displayed in this dashboard.
+        Deleted-message evidence is never displayed in conversation views. Where authorized retained evidence exists,
+        it is available only from the specific report after the founder private gateway and fresh MFA verification.
       </div>
     </SectionCard>
   );
@@ -291,7 +292,7 @@ export default async function AdminConversationDetailPage({ params }: { params: 
           <DisabledAction label="Add participant" reason="Only supported on custom groups via the canonical group-admin flow (not exposed here yet)" />
           <DisabledAction label="Remove participant" reason="Removing club-chat participants must go through club membership; group removal is officer-side" />
           <DisabledAction label="Delete conversation" reason="Global conversation deletion is disabled" tone="danger" />
-          <DisabledAction label="Purge messages" reason="Message purge is disabled until the approved deleted-message lifecycle is deployed" tone="danger" />
+          <DisabledAction label="Purge messages" reason="Automatic server-side retention purge runs outside the Dashboard; manual message purging is disabled" tone="danger" />
         </div>
       </div>
     </SectionCard>

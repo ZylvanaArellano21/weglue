@@ -7,7 +7,7 @@ import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
+import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from '../lib/realtime';
 
 export type UnreadSummary = {
   unread_notifications: number;
@@ -50,9 +50,9 @@ export function useUnreadSummary(userId: string | undefined) {
     refetchInterval: 60 * 1000,
   });
 
-  // Realtime: notification INSERT/UPDATE (cross-device read sync) and new
-  // messages both move a badge. RLS scopes the message stream to the user's
-  // own conversations.
+  // Realtime: notification INSERT/UPDATE (cross-device read sync) plus the
+  // opaque, server-authorized message-inbox signal. Message rows themselves
+  // are never used as a synchronization payload.
   useEffect(() => {
     if (!userId) return;
     const invalidate = () => {
@@ -77,15 +77,16 @@ export function useUnreadSummary(userId: string | undefined) {
           queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
         },
       },
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        callback: invalidate,
-      },
     ]);
+    const removeMessageSync = subscribeBroadcast(
+      `sync:message-inbox:${userId}`,
+      'invalidate',
+      invalidate,
+      invalidate,
+    );
     return () => {
       removeSafeChannel(channel);
+      removeMessageSync();
     };
   }, [userId, queryClient]);
 

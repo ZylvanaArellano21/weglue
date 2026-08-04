@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createSafeChannel, removeSafeChannel } from "../realtime";
+import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../realtime";
 import {
   canPostInChannel,
   getChannelMuted,
@@ -101,11 +101,16 @@ export function useMessagesRealtime(conversationId: string | null, userId: strin
       void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
     };
     const inbox = createSafeChannel("messages-inbox", [
-      { event: "INSERT", schema: "public", table: "messages", callback: invalidateInbox },
       { event: "INSERT", schema: "public", table: "conversation_participants", callback: invalidateInbox },
       { event: "UPDATE", schema: "public", table: "conversation_participants", callback: invalidateInbox },
     ]);
-    return () => removeSafeChannel(inbox);
+    // Never subscribe to raw messages here: an UPDATE event can include a
+    // pre-scrub OLD row. The database sends an authorized opaque ping instead.
+    const removeMessageSync = subscribeBroadcast(`sync:message-inbox:${userId}`, "invalidate", invalidateInbox, invalidateInbox);
+    return () => {
+      removeSafeChannel(inbox);
+      removeMessageSync();
+    };
   }, [queryClient, userId]);
 
   useEffect(() => {
@@ -120,10 +125,15 @@ export function useMessagesRealtime(conversationId: string | null, userId: strin
       void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
     };
     const open = createSafeChannel(`messages-conversation-${conversationId}`, [
-      { event: "*", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}`, callback: invalidateOpen },
       { event: "*", schema: "public", table: "conversation_participants", filter: `conversation_id=eq.${conversationId}`, callback: invalidateOpen },
       { event: "*", schema: "public", table: "conversation_channels", filter: `conversation_id=eq.${conversationId}`, callback: invalidateOpen },
     ]);
-    return () => removeSafeChannel(open);
+    // The database emits an opaque Day 10E-style invalidation for every
+    // message lifecycle event. Canonical RLS-backed refetches own visibility.
+    const removeMessageSync = subscribeBroadcast(`sync:message:${conversationId}`, "invalidate", invalidateOpen, invalidateOpen);
+    return () => {
+      removeSafeChannel(open);
+      removeMessageSync();
+    };
   }, [conversationId, queryClient, userId]);
 }

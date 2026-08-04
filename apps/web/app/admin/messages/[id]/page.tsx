@@ -49,7 +49,8 @@ export default async function AdminMessageDetailPage({ params }: { params: { id:
                 <span className="text-xs text-gray-500">deleted {fmtDateTime(msg.deleted_at)}</span>
               </div>
               <p className="mt-2 text-sm text-gray-600">
-                Private deleted-message evidence will become available only after the approved privacy backend is deployed.
+                The ordinary message body and attachment references were scrubbed. Any retained report evidence is
+                available only from its report after the founder private gateway and fresh MFA verification.
               </p>
             </div>
           ) : (
@@ -217,14 +218,14 @@ export default async function AdminMessageDetailPage({ params }: { params: { id:
   const actionsTab = (
     <SectionCard title="Actions">
       <div className="grid gap-3 p-4 sm:grid-cols-2">
-        <DisabledAction label="Delete / redact message" reason="Admin message deletion is disabled until the approved deleted-message privacy lifecycle is deployed" tone="danger" />
+        <DisabledAction label="Delete / redact message" reason="This dashboard does not bypass the dedicated server-authorized message privacy lifecycle" tone="danger" />
         <DisabledAction label="Restore deleted message" reason="Restore is disabled; retained history is never accessed" tone="danger" />
         <DisabledAction label="Clear deletion fields" reason="Direct edits to deletion state are never permitted" tone="danger" />
         <DisabledAction label="Delete attachment" reason="Managed attachment deletion is disabled in this build" tone="danger" />
       </div>
       <div className="border-t border-gray-100 p-4 text-xs text-gray-400">
         Supported here: navigate to the sender, conversation, channel, or related reports; reveal the full active body with a recent MFA
-        verification. No message mutation is exposed.
+        verification. Deleted-message evidence is available only from a related protected report. No direct message mutation is exposed.
       </div>
     </SectionCard>
   );

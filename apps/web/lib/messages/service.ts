@@ -490,7 +490,7 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
 export async function signedAttachmentUrl(path: string | null): Promise<string | null> {
   if (!path) return null;
   if (/^https?:\/\//.test(path)) return path;
-  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).createSignedUrl(path, 60 * 60);
+  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).createSignedUrl(path, 60);
   if (error) throw error;
   return data.signedUrl;
 }
@@ -560,7 +560,9 @@ export async function setChannelPostPermission(channelId: string, permission: Po
 }
 
 export async function unsendMessage(messageId: string): Promise<void> {
-  const { error } = await getSupabaseBrowser().rpc("unsend_message", { p_message_id: messageId });
+  const { error } = await getSupabaseBrowser().functions.invoke("delete-message", {
+    body: { messageId, idempotencyKey: crypto.randomUUID() },
+  });
   if (error) throw error;
 }
 
