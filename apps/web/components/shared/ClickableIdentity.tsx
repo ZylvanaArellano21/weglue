@@ -6,6 +6,14 @@ import type { ReactNode } from "react";
 const interactive =
   "rounded-md outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-[#0FA6A6] focus-visible:ring-offset-2";
 
+export function getUserProfileHref(profileId: string): string {
+  return `/u/${profileId}`;
+}
+
+export function getClubProfileHref(clubId: string): string {
+  return `/club/${clubId}`;
+}
+
 /** Canonical profile link used anywhere a user identity is actionable. */
 export function ClickableUserIdentity({
   userId,
@@ -19,7 +27,12 @@ export function ClickableUserIdentity({
   ariaLabel?: string;
 }): JSX.Element {
   return (
-    <Link href={`/u/${userId}`} aria-label={ariaLabel} className={`${interactive} ${className}`}>
+    <Link
+      href={getUserProfileHref(userId)}
+      aria-label={ariaLabel}
+      className={`${interactive} ${className}`}
+      onClick={(event) => event.stopPropagation()}
+    >
       {children}
     </Link>
   );
@@ -38,7 +51,12 @@ export function ClickableClubIdentity({
   ariaLabel?: string;
 }): JSX.Element {
   return (
-    <Link href={`/club/${clubId}`} aria-label={ariaLabel} className={`${interactive} ${className}`}>
+    <Link
+      href={getClubProfileHref(clubId)}
+      aria-label={ariaLabel}
+      className={`${interactive} ${className}`}
+      onClick={(event) => event.stopPropagation()}
+    >
       {children}
     </Link>
   );

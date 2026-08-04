@@ -4,7 +4,7 @@ import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
 import { AvatarStack } from "../shared/AvatarStack";
 import { AttendanceTrigger } from "./AttendanceTrigger";
-import { EventShareModal } from "./EventShareModal";
+import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
 import { LeaveClubDialog } from "../clubs/LeaveClubDialog";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { CalendarIcon, LocationIcon, BookmarkIcon, ImageIcon } from "../shared/icons";
@@ -65,7 +65,7 @@ export function EventDetailModal({
   const { mutate: joinClub, isPending: joining } = useJoinClubMutation(userId);
   const { mutate: deleteEvent, isPending: deleting } = useDeleteEvent(userId);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [internalShareOpen, setInternalShareOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
 
   const doRsvp = (status: "going" | "cant") =>
@@ -83,25 +83,12 @@ export function EventDetailModal({
       onError: () => show("Failed to save event.", "error"),
     });
 
-  const doShare = async () => {
-    const url = `${window.location.origin}/event/${eventId}`;
-    try {
-      if (navigator.share) await navigator.share({ title: event?.title ?? "Event", url });
-      else {
-        await navigator.clipboard.writeText(url);
-        show("Link copied to clipboard");
-      }
-    } catch {
-      /* user cancelled share */
-    }
-  };
-
   return (
     <>
     <Modal
       onClose={onClose}
       labelledBy="event-detail-title"
-      maxWidth={560}
+      maxWidth={1120}
       onPrev={onPrev}
       onNext={onNext}
       indicator={indicator}
@@ -117,7 +104,11 @@ export function EventDetailModal({
           This event is no longer available.
         </p>
       ) : (
-        <div className="p-5 sm:p-6">
+        <div className="grid max-h-[86vh] overflow-y-auto md:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+          <div className="flex min-h-[260px] items-center justify-center bg-black md:min-h-[620px]">
+            {event.cover_image_url ? <img src={event.cover_image_url} alt={event.title} className="max-h-[86vh] w-full object-contain" /> : <div className="flex h-full min-h-[260px] w-full items-center justify-center text-gray-400"><ImageIcon size={54} /></div>}
+          </div>
+          <div className="p-5 sm:p-7">
           {/* Club row */}
           <div className="mb-3 flex items-center gap-2.5 pr-8">
             <ClickableClubIdentity clubId={event.club_id} ariaLabel={`Open ${event.club.name}`} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
@@ -143,20 +134,6 @@ export function EventDetailModal({
               {event.user_has_joined_club ? "Joined ✓" : "Join"}
             </button>
           </div>
-
-          {/* Hero */}
-          {event.cover_image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={event.cover_image_url}
-              alt={event.title}
-              className="h-56 w-full rounded-xl object-cover"
-            />
-          ) : (
-            <div className="flex h-56 w-full items-center justify-center rounded-xl" style={{ background: "#E5E7EB", color: "#9CA3AF" }}>
-              <ImageIcon size={48} />
-            </div>
-          )}
 
           <h2 id="event-detail-title" className="mt-4 text-2xl font-extrabold leading-tight text-gray-900 font-zain">
             {event.emoji ? `${event.emoji} ` : ""}
@@ -201,10 +178,9 @@ export function EventDetailModal({
 
           {/* Share + Save */}
           <div className="mt-4 flex items-center gap-3">
-            <button type="button" onClick={() => setInternalShareOpen(true)} className="rounded-full px-4 py-2 text-sm font-semibold" style={{ background: "rgba(15,166,166,0.1)", color: "#0FA6A6" }}>Share in We Glue</button>
             <button
               type="button"
-              onClick={doShare}
+              onClick={() => setShareOpen(true)}
               aria-label="Share event"
               className="flex h-11 w-11 items-center justify-center rounded-full"
               style={{ background: "rgba(15,166,166,0.1)", color: "#0FA6A6" }}
@@ -308,10 +284,11 @@ export function EventDetailModal({
                 ))}
             </div>
           )}
+          </div>
         </div>
       )}
-      {internalShareOpen && <EventShareModal eventId={eventId} userId={userId} onClose={() => setInternalShareOpen(false)} onShared={() => show("Event shared")} />}
     </Modal>
+    {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "event", id: eventId }} title={event?.title ?? "Event"} onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
     {leaveOpen && event && <LeaveClubDialog clubId={event.club_id} clubName={event.club.name} userId={userId} onClose={() => setLeaveOpen(false)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
     </>
   );

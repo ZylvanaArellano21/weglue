@@ -14,6 +14,7 @@ export function Modal({
   onPrev,
   onNext,
   indicator,
+  placement = "center",
 }: {
   onClose: () => void;
   labelledBy?: string;
@@ -23,6 +24,7 @@ export function Modal({
   onPrev?: () => void;
   onNext?: () => void;
   indicator?: string;
+  placement?: "center" | "bottom";
 }): JSX.Element {
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
@@ -104,7 +106,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8"
+      className={`fixed inset-0 z-[100] flex justify-center overflow-y-auto bg-black/50 p-4 sm:p-8 ${placement === "bottom" ? "items-end sm:items-center" : "items-start"}`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -114,7 +116,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className="relative my-4 w-full rounded-2xl bg-cream shadow-2xl"
+        className={`relative w-full rounded-2xl bg-cream shadow-2xl ${placement === "bottom" ? "my-0 sm:my-4 rounded-b-none sm:rounded-b-2xl" : "my-4"}`}
         style={{ maxWidth }}
       >
         <button

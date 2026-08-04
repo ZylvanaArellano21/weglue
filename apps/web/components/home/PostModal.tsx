@@ -1,10 +1,13 @@
 "use client";
 
 import { Modal } from "../shared/Modal";
+import { useState } from "react";
 import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
+import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
+import { useToast } from "../shared/Toast";
 
 // Minimal post overlay (?post=), the destination for like/comment notifications
 // and the profile posts grid. Real shared post data; like toggles the shared
@@ -27,8 +30,11 @@ export function PostModal({
 }): JSX.Element {
   const { data: post, isLoading } = usePostDetail(postId, userId);
   const { mutate: like } = useLikePost();
+  const [shareOpen, setShareOpen] = useState(false);
+  const show = useToast();
 
   return (
+    <>
     <Modal onClose={onClose} labelledBy="post-title" maxWidth={520}>
       {isLoading ? (
         <div className="space-y-3 p-6">
@@ -80,6 +86,7 @@ export function PostModal({
                 <CommentIcon size={20} />
                 <span className="text-sm">{post.comments_count}</span>
               </button>
+              <button type="button" onClick={() => setShareOpen(true)} aria-label="Share post" className="rounded-full p-2 text-[#0FA6A6]"><ShareGlyph /></button>
             </div>
             {post.caption && (
               <p className="mt-2 text-sm text-gray-800">
@@ -95,5 +102,9 @@ export function PostModal({
         </div>
       )}
     </Modal>
+    {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "post", id: postId }} title="Share post" onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
+    </>
   );
 }
+
+function ShareGlyph(): JSX.Element { return <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7Z" /></svg>; }

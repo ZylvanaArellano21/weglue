@@ -441,6 +441,30 @@ export async function shareEventToConversation(input: {
   if (error) throw error;
 }
 
+export type ShareableContent =
+  | { type: "event"; id: string }
+  | { type: "post"; id: string };
+
+/** Delivers the same structured share references used by mobile. */
+export async function shareContentToConversation(input: {
+  conversationId: string;
+  senderId: string;
+  content: ShareableContent;
+}): Promise<void> {
+  const channelId = await getMainConversationChannel(input.conversationId);
+  const payload = input.content.type === "event"
+    ? { shared_event_id: input.content.id, message_type: "shared_event" as const }
+    : { shared_post_id: input.content.id, message_type: "shared_post" as const };
+  const { error } = await getSupabaseBrowser().from("messages").insert({
+    conversation_id: input.conversationId,
+    channel_id: channelId,
+    sender_id: input.senderId,
+    ...payload,
+    client_tag: clientTag(),
+  });
+  if (error) throw error;
+}
+
 export async function uploadAttachment(conversationId: string, file: File): Promise<{ path: string; name: string; size: number; mime: string; type: "image" | "video" | "file" }> {
   if (file.size > 25 * 1024 * 1024) throw new Error("This file is larger than 25 MB.");
   const type = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";

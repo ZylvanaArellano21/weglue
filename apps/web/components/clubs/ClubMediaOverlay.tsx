@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../shared/Modal";
+import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
 import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
@@ -194,18 +195,7 @@ function PostPanel({
   const isAuthor = post.author.id === userId;
   const isFollowing = post.author.is_following;
 
-  const doShare = async () => {
-    const url = `${window.location.origin}/club/${clubId}?tab=media`;
-    try {
-      if (navigator.share) await navigator.share({ title: "Club media", url });
-      else {
-        await navigator.clipboard.writeText(url);
-        show("Link copied to clipboard");
-      }
-    } catch {
-      /* cancelled */
-    }
-  };
+  const [shareOpen, setShareOpen] = useState(false);
 
   const doReport = () => {
     setMenuOpen(false);
@@ -260,7 +250,7 @@ function PostPanel({
           <CommentIcon size={20} />
           {post.comments_count > 0 && <span className="text-sm text-gray-700">{post.comments_count}</span>}
         </span>
-        <button type="button" onClick={doShare} aria-label="Share" className="text-teal">
+        <button type="button" onClick={() => setShareOpen(true)} aria-label="Share" className="text-teal">
           <ShareGlyph />
         </button>
         <div className="flex-1" />
@@ -287,6 +277,7 @@ function PostPanel({
           )}
         </div>
       </div>
+      {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "post", id: postId }} title="Share post" onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
 
       {/* Caption + comments (scroll) */}
       <div className="flex-1 overflow-y-auto px-4 pt-3">

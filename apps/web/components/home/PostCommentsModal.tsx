@@ -8,12 +8,12 @@ import { useAddComment, usePostComments } from "../../lib/hooks/usePostActions";
 
 export function PostCommentsModal({ postId, userId, onClose }: { postId: string; userId: string; onClose: () => void }): JSX.Element {
   const { data: comments, isLoading, isError } = usePostComments(postId, true);
-  const { mutate: addComment, isPending } = useAddComment();
+  const { mutate: addComment, isPending, isError: commentError, error: commentErrorDetails } = useAddComment();
   const [content, setContent] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!content.trim() || isPending) return;
-    addComment({ postId, userId, content }, { onSuccess: () => setContent("") });
+    addComment({ postId, userId, content: content.trim() }, { onSuccess: () => setContent("") });
   };
   return (
     <Modal onClose={onClose} labelledBy="comments-title" maxWidth={520}>
@@ -39,6 +39,7 @@ export function PostCommentsModal({ postId, userId, onClose }: { postId: string;
           <input id="new-comment" value={content} onChange={(e) => setContent(e.target.value)} maxLength={1000} placeholder="Add a comment…" className="min-w-0 flex-1 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm outline-none focus:border-[#0FA6A6] focus:ring-2 focus:ring-[#0FA6A6]/30" />
           <button type="submit" disabled={!content.trim() || isPending} className="rounded-full bg-[#0FA6A6] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isPending ? "Posting…" : "Post"}</button>
         </form>
+        {commentError && <p role="alert" className="mt-2 text-xs text-red-600">{commentErrorDetails instanceof Error ? commentErrorDetails.message : "Could not add comment. Try again."}</p>}
       </div>
     </Modal>
   );

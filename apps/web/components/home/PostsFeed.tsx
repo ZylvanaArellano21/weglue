@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useHomePostsFeed, useLikePost, type FeedPost } from "../../lib/hooks/useHomePostsFeed";
@@ -7,6 +8,8 @@ import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { EmptyState } from "./EmptyState";
+import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
+import { useToast } from "../shared/Toast";
 
 // Desktop Home → Posts feed. Same university-scoped, newest-first picture posts
 // as mobile. Full comment threads + post detail overlay land in a later phase;
@@ -16,6 +19,8 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
   const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useHomePostsFeed(userId);
   const { mutate: like } = useLikePost();
+  const [sharePostId, setSharePostId] = useState<string | null>(null);
+  const show = useToast();
 
   const posts = useMemo(() => (data ? data.pages.flat() : []), [data]);
 
@@ -61,9 +66,11 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
             sp.set("comments", post.id);
             router.push(`${window.location.pathname}?${sp.toString()}`, { scroll: false });
           }}
+          onShare={() => setSharePostId(post.id)}
         />
       ))}
 
+      {sharePostId && <UnifiedShareSheet userId={userId} content={{ type: "post", id: sharePostId }} title="Share post" onClose={() => setSharePostId(null)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
       {hasNextPage && (
         <button
           type="button"
@@ -83,10 +90,12 @@ function PostCard({
   post,
   onLike,
   onOpenComments,
+  onShare,
 }: {
   post: FeedPost;
   onLike: () => void;
   onOpenComments: () => void;
+  onShare: () => void;
 }): JSX.Element {
   return (
     <article
@@ -141,6 +150,7 @@ function PostCard({
             <CommentIcon size={20} />
             <span className="text-sm">{post.comments_count}</span>
           </button>
+          <button type="button" onClick={onShare} aria-label="Share post" className="rounded-full p-1 text-[#0FA6A6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6]"><ShareGlyph /></button>
         </div>
         {post.caption && (
           <p className="mt-2 text-sm text-gray-800">
@@ -151,3 +161,5 @@ function PostCard({
     </article>
   );
 }
+
+function ShareGlyph(): JSX.Element { return <svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7Z" /></svg>; }
