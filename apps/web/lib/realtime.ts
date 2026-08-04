@@ -78,7 +78,8 @@ export function removeSafeChannel(channel: RealtimeChannel | null): void {
 export function subscribeBroadcast(
   topic: string,
   event: string,
-  onMessage: () => void
+  onMessage: () => void,
+  onSubscribed?: () => void
 ): () => void {
   let channel: RealtimeChannel | null = null;
   let cancelled = false;
@@ -100,6 +101,14 @@ export function subscribeBroadcast(
           }
         })
         .subscribe((status: string, err?: Error) => {
+          if (status === "SUBSCRIBED") {
+            try {
+              onSubscribed?.();
+            } catch (e) {
+              console.warn(`[realtime] ${topic} subscribe callback error`, e);
+            }
+            return;
+          }
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
             console.warn(`[realtime] ${topic} ${status}`, err?.message ?? "");
           }

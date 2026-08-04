@@ -67,3 +67,55 @@ export function removeSafeChannel(channel: RealtimeChannel | null): void {
     // Never let realtime teardown crash an unmount.
   }
 }
+
+// Private Broadcast is used only for opaque invalidation pings. The database
+// authorizes the exact topic through realtime.messages RLS; callers must still
+// refetch canonical state and must never treat a broadcast as authorization.
+export function subscribeBroadcast(
+  topic: string,
+  event: string,
+  onMessage: () => void,
+  onSubscribed?: () => void,
+): () => void {
+  let channel: RealtimeChannel | null = null;
+  let cancelled = false;
+
+  void (async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) await supabase.realtime.setAuth(token);
+      if (cancelled) return;
+
+      channel = supabase
+        .channel(topic, { config: { private: true } })
+        .on('broadcast', { event }, () => {
+          try {
+            onMessage();
+          } catch (e) {
+            console.warn(`[realtime] ${topic} broadcast callback error`, e);
+          }
+        })
+        .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            try {
+              onSubscribed?.();
+            } catch (e) {
+              console.warn(`[realtime] ${topic} subscribe callback error`, e);
+            }
+            return;
+          }
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn(`[realtime] ${topic} ${status}`, err?.message ?? '');
+          }
+        });
+    } catch (e) {
+      console.warn(`[realtime] failed to subscribe broadcast ${topic}`, e);
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+    removeSafeChannel(channel);
+  };
+}

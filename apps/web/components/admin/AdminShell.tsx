@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { ADMIN_NAV, ADMIN_NAV_GROUPS, findNavItem } from "../../lib/admin/nav";
 import { GlobalSearch } from "./GlobalSearch";
 import { AdminSessionGuard } from "./AdminSessionGuard";
+import { AdminCanonicalRefresh } from "./AdminCanonicalRefresh";
 
 /**
  * The Admin Dashboard application shell: persistent collapsible sidebar, top bar
@@ -31,6 +32,7 @@ export function AdminShell({
 
   return (
     <div className="flex min-h-screen bg-gray-50 text-gray-900">
+      <AdminCanonicalRefresh />
       {/* Sidebar */}
       <aside
         className={`sticky top-0 flex h-screen flex-col border-r border-gray-200 bg-white transition-all duration-200 ${

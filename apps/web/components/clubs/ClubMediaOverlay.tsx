@@ -187,7 +187,12 @@ function PostPanel({
   }, [comments?.length]);
 
   if (!post) {
-    return <div className="flex flex-1 items-center justify-center p-8 text-sm text-gray-400"><ImageIcon size={28} /></div>;
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-sm text-gray-400">
+        <ImageIcon size={28} />
+        <p>This post is no longer available.</p>
+      </div>
+    );
   }
 
   const isAuthor = post.author.id === userId;
