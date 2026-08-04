@@ -46,4 +46,5 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.get_my_club_recommendation_outcome() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_my_club_recommendation_outcome() FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_my_club_recommendation_outcome() TO authenticated;
