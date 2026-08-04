@@ -18,6 +18,9 @@ export type NotificationVisual =
   | { kind: "fallback" };
 
 const aggregateTypes = new Set(["like", "comment", "event_rsvp", "new_follower"]);
+// Social-proof rows whose primary subject is a specific club. Even when the
+// row contains many actor IDs, the club remains the visual source.
+const clubAggregateTypes = new Set(["club_joined", "member_joined"]);
 const entityTypes = new Set([
   "new_event", "event_updated", "event_reminder_tomorrow", "event_reminder_hour", "event_reminder_now",
   "event_last_chance", "event_canceled", "club_post", "club_joined", "member_joined", "club_chat_added",
@@ -33,6 +36,7 @@ export function resolveNotificationVisual(input: {
   entity?: NotificationVisualEntity | null;
 }): NotificationVisual {
   const actors = dedupeActors(input.actors ?? []);
+  if (clubAggregateTypes.has(input.type)) return input.entity ? { kind: "entity", entity: input.entity } : { kind: "fallback" };
   if ((input.group_count ?? 1) > 1 && actors.length > 1) return { kind: "actors", actors: actors.slice(0, 3) };
   // Entity notifications must never fall back to the viewer or an arbitrary
   // actor when their related club/event row is unavailable (old rows can lack

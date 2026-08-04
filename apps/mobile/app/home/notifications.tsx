@@ -382,8 +382,8 @@ export default function NotificationsScreen() {
 
 function NotificationAvatar({ visual }: { visual: NotificationVisual }) {
   if (visual.kind === 'actors') {
-    return <View style={{ width: 58, height: 46, justifyContent: 'center', paddingLeft: 2, flexDirection: 'row', alignItems: 'center' }}>
-      {visual.actors.map((actor, index) => <View key={actor.id} style={{ marginLeft: index === 0 ? 0 : -12, zIndex: 3 - index }}><Avatar uri={actor.avatar_url} size={38} username={actor.username} /></View>)}
+    return <View style={{ width: 90, height: 46, justifyContent: 'center', paddingLeft: 2, flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
+      {visual.actors.slice(0, 3).map((actor, index) => <View key={actor.id} style={{ marginLeft: index === 0 ? 0 : -12, zIndex: 3 - index }}><Avatar uri={actor.avatar_url} size={38} username={actor.username} /></View>)}
     </View>;
   }
   if (visual.kind === 'actor') return <Avatar uri={visual.actor.avatar_url} size={46} username={visual.actor.username} />;
