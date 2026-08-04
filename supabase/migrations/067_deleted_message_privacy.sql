@@ -1450,6 +1450,312 @@ BEGIN
 END;
 $$;
 
+-- ── Day 10B compatibility: verified account-deletion retries ───────────────
+--
+-- 061 made the durable worker reuse private.delete_account_atomic_for().  Its
+-- original missing-auth guard was correct for an unknown state, but it also
+-- rejected a retry after this same transaction had already removed auth.users.
+-- The outbox row below is inserted in that transaction, before auth.users is
+-- deleted, and rolls back with every incomplete deletion.  Its immutable,
+-- unique idempotency key is therefore sufficient proof of a prior successful
+-- deletion without adding a second retention-bearing account record.
+--
+-- Do not treat a merely missing auth.users row as success: without this exact
+-- marker, callers receive an explicit reconciliation failure.  The no-op path
+-- creates no audit event, email, notification, job, or data mutation.
+CREATE OR REPLACE FUNCTION private.delete_account_atomic_for(
+  p_user_id uuid, p_email_kind text, p_case_id uuid DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, pg_temp
+AS $$
+DECLARE
+  v_email text;
+  v_avatars text[] := ARRAY[]::text[];
+  v_posts text[] := ARRAY[]::text[];
+  v_club_photos text[] := ARRAY[]::text[];
+  v_attachments text[] := ARRAY[]::text[];
+  v_case public.account_deletion_cases%ROWTYPE;
+  v_completion_key text;
+  v_completion_kind text;
+BEGIN
+  IF p_user_id IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated' USING ERRCODE = '42501';
+  END IF;
+
+  v_completion_key := CASE p_email_kind
+    WHEN 'voluntary_deletion_completed' THEN 'voluntary-deletion:' || p_user_id::text
+    WHEN 'admin_deletion_finalized' THEN CASE WHEN p_case_id IS NULL THEN NULL ELSE 'deletion-finalized:' || p_case_id::text END
+    ELSE NULL
+  END;
+  v_completion_kind := CASE p_email_kind
+    WHEN 'voluntary_deletion_completed' THEN 'voluntary_deletion_completed'
+    WHEN 'admin_deletion_finalized' THEN 'admin_deletion_finalized'
+    ELSE NULL
+  END;
+
+  SELECT email INTO v_email FROM auth.users WHERE id = p_user_id FOR UPDATE;
+  IF v_email IS NULL THEN
+    IF v_completion_key IS NOT NULL
+       AND EXISTS (
+         SELECT 1
+           FROM public.transactional_email_outbox o
+          WHERE o.kind = v_completion_kind
+            AND o.idempotency_key = v_completion_key
+       )
+       AND (
+         p_email_kind <> 'admin_deletion_finalized'
+         OR EXISTS (
+           SELECT 1
+             FROM public.account_deletion_cases c
+            WHERE c.id = p_case_id
+              AND c.state = 'finalized'
+         )
+       ) THEN
+      RETURN jsonb_build_object(
+        'status', 'already_completed',
+        'avatars', '[]'::jsonb,
+        'posts', '[]'::jsonb,
+        'club-photos', '[]'::jsonb,
+        'chat-attachments', '[]'::jsonb
+      );
+    END IF;
+    RAISE EXCEPTION 'Account deletion state is incomplete and requires reconciliation'
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  IF p_case_id IS NOT NULL THEN
+    SELECT * INTO v_case
+      FROM public.account_deletion_cases
+     WHERE id = p_case_id
+     FOR UPDATE;
+  END IF;
+
+  SELECT COALESCE(array_agg(DISTINCT p) FILTER (WHERE p IS NOT NULL), ARRAY[]::text[])
+    INTO v_avatars
+    FROM (
+      SELECT public.storage_path_from_public_url(pr.avatar_url, 'avatars') AS p
+        FROM public.profiles pr
+       WHERE pr.id = p_user_id
+         AND pr.avatar_url IS NOT NULL
+         AND COALESCE(pr.avatar_type, '') <> 'text'
+    ) s;
+  SELECT COALESCE(array_agg(DISTINCT p) FILTER (WHERE p IS NOT NULL), ARRAY[]::text[])
+    INTO v_posts
+    FROM (
+      SELECT public.storage_path_from_public_url(po.image_url, 'posts') AS p
+        FROM public.posts po
+       WHERE po.author_id = p_user_id
+         AND po.image_url IS NOT NULL
+    ) s;
+  SELECT COALESCE(array_agg(DISTINCT p) FILTER (WHERE p IS NOT NULL), ARRAY[]::text[])
+    INTO v_club_photos
+    FROM (
+      SELECT public.storage_path_from_public_url(cp.url, 'club-photos') AS p
+        FROM public.club_photos cp
+       WHERE cp.uploaded_by = p_user_id
+         AND cp.url IS NOT NULL
+    ) s;
+  SELECT COALESCE(array_agg(DISTINCT m.attachment_url), ARRAY[]::text[])
+    INTO v_attachments
+    FROM public.messages m
+   WHERE m.sender_id = p_user_id
+     AND m.attachment_url IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+         FROM public.conversation_participants cp
+        WHERE cp.conversation_id = m.conversation_id
+          AND cp.user_id <> p_user_id
+     );
+
+  UPDATE public.events
+     SET specific_user_ids = array_remove(specific_user_ids, p_user_id)
+   WHERE specific_user_ids IS NOT NULL AND p_user_id = ANY (specific_user_ids);
+  UPDATE public.notifications
+     SET group_actors = array_remove(group_actors, p_user_id),
+         group_count = GREATEST(COALESCE(array_length(array_remove(group_actors, p_user_id), 1), 0), 0)
+   WHERE group_actors IS NOT NULL AND p_user_id = ANY (group_actors);
+  DELETE FROM public.deletion_requests WHERE lower(email) = lower(v_email);
+  UPDATE public.reports
+     SET reporter_id = NULL, reporter_email = NULL, reporter_username = NULL
+   WHERE reporter_id = p_user_id;
+  DELETE FROM public.club_officers WHERE user_id = p_user_id;
+  DELETE FROM public.chat_invitations WHERE created_by = p_user_id;
+  DELETE FROM public.channel_posters WHERE user_id = p_user_id;
+  DELETE FROM public.club_photos cp
+   WHERE cp.uploaded_by = p_user_id
+      OR cp.post_id IN (SELECT id FROM public.posts WHERE author_id = p_user_id);
+  DELETE FROM public.messages m
+   WHERE m.sender_id = p_user_id
+     AND NOT EXISTS (
+       SELECT 1
+         FROM public.conversation_participants cp
+        WHERE cp.conversation_id = m.conversation_id
+          AND cp.user_id <> p_user_id
+     );
+  UPDATE public.messages SET sender_id = NULL WHERE sender_id = p_user_id;
+  UPDATE public.messages SET deleted_by = NULL WHERE deleted_by = p_user_id;
+  UPDATE public.messages m
+     SET shared_post_id = NULL
+   WHERE m.shared_post_id IN (SELECT id FROM public.posts WHERE author_id = p_user_id);
+  UPDATE public.messages m
+     SET shared_event_id = NULL
+   WHERE m.shared_event_id IN (SELECT id FROM public.events WHERE created_by = p_user_id);
+  UPDATE public.conversations SET created_by = NULL WHERE created_by = p_user_id;
+  UPDATE public.conversation_channels SET created_by = NULL WHERE created_by = p_user_id;
+  UPDATE public.channel_posters SET added_by = NULL WHERE added_by = p_user_id;
+
+  IF p_email_kind = 'voluntary_deletion_completed' THEN
+    SELECT * INTO v_case
+      FROM public.account_deletion_cases
+     WHERE user_id = p_user_id
+       AND state IN ('pending', 'processing')
+     ORDER BY created_at DESC
+     LIMIT 1
+     FOR UPDATE;
+    UPDATE public.account_deletion_cases
+       SET state = 'voluntarily_deleted', finalized_at = now()
+     WHERE id = v_case.id;
+    UPDATE public.account_deletion_jobs
+       SET state = 'cancelled'
+     WHERE case_id = v_case.id
+       AND state IN ('pending', 'processing', 'retry_pending');
+    INSERT INTO public.transactional_email_outbox(kind, recipient_email, payload, idempotency_key, correlation_id)
+    VALUES (
+      'voluntary_deletion_completed',
+      v_email,
+      jsonb_build_object('support_email', 'zylvana.arellano.campos@gmail.com'),
+      v_completion_key,
+      COALESCE(v_case.correlation_id, gen_random_uuid())
+    ) ON CONFLICT (idempotency_key) DO NOTHING;
+  ELSIF p_email_kind = 'admin_deletion_finalized' THEN
+    UPDATE public.account_deletion_cases
+       SET state = 'finalized', finalized_at = now()
+     WHERE id = p_case_id;
+    INSERT INTO public.transactional_email_outbox(kind, recipient_email, payload, idempotency_key, correlation_id)
+    VALUES (
+      'admin_deletion_finalized',
+      v_email,
+      jsonb_build_object(
+        'violation_category', private.violation_category_label(v_case.violation_category),
+        'public_reason', v_case.public_reason,
+        'support_email', 'zylvana.arellano.campos@gmail.com'
+      ),
+      v_completion_key,
+      v_case.correlation_id
+    ) ON CONFLICT (idempotency_key) DO NOTHING;
+  ELSE
+    RAISE EXCEPTION 'invalid account deletion completion kind' USING ERRCODE = '22023';
+  END IF;
+
+  DELETE FROM auth.users WHERE id = p_user_id;
+  RETURN jsonb_build_object(
+    'avatars', to_jsonb(v_avatars),
+    'posts', to_jsonb(v_posts),
+    'club-photos', to_jsonb(v_club_photos),
+    'chat-attachments', to_jsonb(v_attachments)
+  );
+END;
+$$;
+
+-- A stale worker lease can arrive after a committed finalization response was
+-- lost. Reconcile that exact verified state to `completed` before auditing or
+-- calling the destructive helper again. Any missing-auth state without the
+-- immutable completion marker remains an error and is retried/reconciled.
+CREATE OR REPLACE FUNCTION public.finalize_claimed_account_deletion(p_worker_id text, p_job_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, pg_temp
+AS $$
+DECLARE
+  v_job public.account_deletion_jobs%ROWTYPE;
+  v_case public.account_deletion_cases%ROWTYPE;
+  v_paths jsonb;
+BEGIN
+  SELECT * INTO v_job
+    FROM public.account_deletion_jobs
+   WHERE id = p_job_id
+   FOR UPDATE;
+  IF v_job.id IS NULL
+     OR v_job.state <> 'processing'
+     OR v_job.claimed_by <> p_worker_id
+     OR v_job.lease_expires_at < now() THEN
+    RAISE EXCEPTION 'job is not held by this worker' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT * INTO v_case
+    FROM public.account_deletion_cases
+   WHERE id = v_job.case_id
+   FOR UPDATE;
+
+  IF v_case.state = 'finalized'
+     AND NOT EXISTS (SELECT 1 FROM auth.users WHERE id = v_case.user_id)
+     AND EXISTS (
+       SELECT 1
+         FROM public.transactional_email_outbox o
+        WHERE o.kind = 'admin_deletion_finalized'
+          AND o.idempotency_key = 'deletion-finalized:' || v_case.id::text
+     ) THEN
+    UPDATE public.account_deletion_jobs
+       SET state = 'completed',
+           completed_at = COALESCE(completed_at, now()),
+           lease_expires_at = NULL,
+           last_error = NULL
+     WHERE id = v_job.id;
+    RETURN jsonb_build_object('status', 'already_completed');
+  END IF;
+
+  IF v_case.state <> 'pending' THEN
+    UPDATE public.account_deletion_jobs
+       SET state = 'cancelled', lease_expires_at = NULL
+     WHERE id = v_job.id;
+    RETURN jsonb_build_object('status', 'cancelled');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = v_case.user_id) THEN
+    RAISE EXCEPTION 'Account deletion state is incomplete and requires reconciliation'
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  UPDATE public.account_deletion_cases SET state = 'processing' WHERE id = v_case.id;
+  PERFORM private.admin_tx_ok(
+    v_case.created_by,
+    NULL,
+    'deletion.finalize',
+    'user',
+    v_case.user_id,
+    v_case.internal_reason,
+    NULL,
+    jsonb_build_object('id', v_case.id, 'state', 'finalizing'),
+    jsonb_build_object('userId', v_case.user_id),
+    v_case.correlation_id
+  );
+  v_paths := private.delete_account_atomic_for(v_case.user_id, 'admin_deletion_finalized', v_case.id);
+  UPDATE public.account_deletion_jobs
+     SET state = 'completed', completed_at = now(), lease_expires_at = NULL
+   WHERE id = v_job.id;
+  RETURN jsonb_build_object('status', 'finalized', 'paths', v_paths);
+EXCEPTION WHEN OTHERS THEN
+  UPDATE public.account_deletion_jobs
+     SET state = CASE WHEN attempts >= 5 THEN 'reconciliation_required' ELSE 'retry_pending' END,
+         last_error = left(SQLERRM, 240),
+         lease_expires_at = NULL,
+         run_at = now() + interval '5 minutes'
+   WHERE id = p_job_id;
+  UPDATE public.account_deletion_cases
+     SET state = CASE
+                   WHEN (SELECT attempts FROM public.account_deletion_jobs WHERE id = p_job_id) >= 5
+                     THEN 'reconciliation_required'
+                   ELSE 'pending'
+                 END,
+         finalization_error = left(SQLERRM, 240)
+   WHERE id = (SELECT case_id FROM public.account_deletion_jobs WHERE id = p_job_id);
+  RAISE;
+END;
+$$;
+
 REVOKE ALL ON FUNCTION public.claim_message_attachment_cleanup_jobs(text, integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.claim_message_attachment_cleanup_for_message(text, uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.complete_message_attachment_cleanup(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
