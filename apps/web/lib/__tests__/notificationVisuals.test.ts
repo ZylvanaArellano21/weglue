@@ -19,5 +19,6 @@ describe("notification visual source", () => {
   it("uses a single actor for direct social actions and a typed fallback otherwise", () => {
     expect(resolveNotificationVisual({ type: "like", actor: actor("student") }).kind).toBe("actor");
     expect(resolveNotificationVisual({ type: "comment" }).kind).toBe("fallback");
+    expect(resolveNotificationVisual({ type: "club_joined", actor: actor("viewer") }).kind).toBe("fallback");
   });
 });

@@ -34,8 +34,11 @@ export function resolveNotificationVisual(input: {
 }): NotificationVisual {
   const actors = dedupeActors(input.actors ?? []);
   if ((input.group_count ?? 1) > 1 && actors.length > 1) return { kind: "actors", actors: actors.slice(0, 3) };
+  // Entity notifications must never fall back to the viewer or an arbitrary
+  // actor when their related club/event row is unavailable (old rows can lack
+  // complete metadata). Use the typed fallback instead.
+  if (entityTypes.has(input.type)) return input.entity ? { kind: "entity", entity: input.entity } : { kind: "fallback" };
   if (input.actor && !entityTypes.has(input.type)) return { kind: "actor", actor: input.actor };
-  if (input.entity && entityTypes.has(input.type)) return { kind: "entity", entity: input.entity };
   if (input.actor) return { kind: "actor", actor: input.actor };
   if (input.entity) return { kind: "entity", entity: input.entity };
   if (systemTypes.has(input.type)) return { kind: "system" };
