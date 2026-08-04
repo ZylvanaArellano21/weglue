@@ -28,7 +28,7 @@ export function MessageBodyReveal({ messageId, deleted }: { messageId: string; d
       <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
         <p className="text-sm font-medium text-gray-700">Message deleted</p>
         <p className="text-xs text-gray-400">
-          Private deleted-message evidence will become available only after the approved privacy backend is deployed.
+          If evidence was captured before deletion, it can be reviewed only from the related report after the founder private gateway and recent MFA verification.
         </p>
       </div>
     );

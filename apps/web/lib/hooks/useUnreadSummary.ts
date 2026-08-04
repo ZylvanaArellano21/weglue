@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
+import { subscribeBroadcast } from "../realtime";
 
 // Web port of apps/mobile/hooks/useUnreadSummary.ts. Same `get_unread_summary`
 // RPC, same two counts — so web badges and mobile badges are driven by the
@@ -77,15 +78,17 @@ export function useUnreadSummary(userId: string | undefined) {
           void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
         }
       )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        invalidate
-      )
       .subscribe();
+    const removeMessageSync = subscribeBroadcast(
+      `sync:message-inbox:${userId}`,
+      "invalidate",
+      invalidate,
+      invalidate,
+    );
 
     return () => {
       void supabase.removeChannel(channel);
+      removeMessageSync();
     };
   }, [userId, queryClient]);
 

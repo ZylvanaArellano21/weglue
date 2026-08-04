@@ -187,7 +187,7 @@ export default async function AdminReportsPage({
                   </Td>
                   <Td>
                     {r.has_protected_evidence ? (
-                      <span title="Protected evidence retained; unavailable in this build">
+                      <span title="Protected evidence is available only after the founder private gateway and fresh MFA verification.">
                         <Badge tone="gray">🔒 Retained</Badge>
                       </span>
                     ) : (
@@ -204,8 +204,8 @@ export default async function AdminReportsPage({
       </SectionCard>
 
       <p className="text-xs text-gray-400">
-        Message &amp; conversation reports show only safe workflow metadata. Retained deleted-message evidence stays
-        unavailable until the approved privacy backend is deployed.
+        Message &amp; conversation reports show only safe workflow metadata. Retained evidence is available only from an
+        authorized report detail view after the founder private gateway and fresh MFA verification.
       </p>
     </div>
   );

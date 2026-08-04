@@ -41,6 +41,7 @@ type PushRow = {
   body: string | null;
   route: Record<string, unknown>;
   attempts: number;
+  source_message_id: string | null;
 };
 
 type TokenRow = {
@@ -124,8 +125,27 @@ async function deliverPending(admin: SupabaseClient) {
   type OutMessage = { pushId: string; tokenId: string; message: Record<string, unknown> };
   const outbox: OutMessage[] = [];
   const skippedIds: string[] = [];
+  const suppressedIds: string[] = [];
+  const deferredIds: string[] = [];
 
   for (const row of rows) {
+    // A deletion may race this already-claimed batch. Re-check the canonical
+    // visibility predicate immediately before building an Expo payload. If the
+    // check is unavailable, fail closed for this run and retry rather than
+    // risking a stale private preview in a notification.
+    if (row.source_message_id) {
+      const { data: active, error: activeError } = await admin.rpc('message_is_active', {
+        p_message_id: row.source_message_id,
+      });
+      if (activeError) {
+        deferredIds.push(row.id);
+        continue;
+      }
+      if (active !== true) {
+        suppressedIds.push(row.id);
+        continue;
+      }
+    }
     const tokens = tokensByUser.get(row.user_id) ?? [];
     if (tokens.length === 0) {
       skippedIds.push(row.id);
@@ -155,6 +175,18 @@ async function deliverPending(admin: SupabaseClient) {
       .update({ status: "skipped", error: "no active device tokens" })
       .in("id", skippedIds);
   }
+  if (suppressedIds.length > 0) {
+    await admin
+      .from('push_queue')
+      .update({ status: 'suppressed', body: null, route: {}, error: 'source message unavailable' })
+      .in('id', suppressedIds);
+  }
+  if (deferredIds.length > 0) {
+    await admin
+      .from('push_queue')
+      .update({ status: 'pending', scheduled_for: new Date(Date.now() + 2 * 60_000).toISOString(), error: 'message visibility retry' })
+      .in('id', deferredIds);
+  }
 
   const expoHeaders: Record<string, string> = {
     "Content-Type": "application/json",
@@ -176,8 +208,9 @@ async function deliverPending(admin: SupabaseClient) {
         body: JSON.stringify(chunk.map((m) => m.message)),
       });
       if (!res.ok) {
-        const text = await res.text();
-        for (const m of chunk) failedIds.set(m.pushId, `expo http ${res.status}: ${text.slice(0, 200)}`);
+        // Expo response bodies are not a privacy-safe storage boundary: never
+        // persist a provider response that might reflect notification text.
+        for (const m of chunk) failedIds.set(m.pushId, `expo_http_${res.status}`);
         continue;
       }
       const payload = await res.json();
@@ -199,12 +232,13 @@ async function deliverPending(admin: SupabaseClient) {
             // Token dead ≠ push failed: another device may have received it.
             if (!sentIds.has(m.pushId)) skippedIds.push(m.pushId);
           } else if (!sentIds.has(m.pushId)) {
-            failedIds.set(m.pushId, ticket.message ?? ticket.details?.error ?? "ticket error");
+            // Store only a fixed code; ticket messages are third-party data.
+            failedIds.set(m.pushId, "expo_ticket_error");
           }
         }
       }
-    } catch (e) {
-      for (const m of chunk) failedIds.set(m.pushId, `send error: ${String(e).slice(0, 200)}`);
+    } catch {
+      for (const m of chunk) failedIds.set(m.pushId, "expo_send_failed");
     }
   }
 
@@ -244,7 +278,7 @@ async function deliverPending(admin: SupabaseClient) {
   return {
     claimed: rows.length,
     sent: sentIds.size,
-    skipped: skippedIds.length,
+    skipped: skippedIds.length + suppressedIds.length,
     failed: failedIds.size,
   };
 }

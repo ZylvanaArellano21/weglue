@@ -172,6 +172,7 @@ export function makeDb(initial: Record<string, any[]>, authUsers: FakeAuthUser[]
   const rpc = vi.fn(async (fn: string, args: any) => {
     rpcCalls.push({ fn, args });
     if (state.rpcImpl) return state.rpcImpl(fn, args);
+    if (fn === "admin_record_report_evidence_view") return { data: true, error: null };
     const handler = txRpcs[fn];
     if (handler) {
       try {
@@ -185,5 +186,10 @@ export function makeDb(initial: Record<string, any[]>, authUsers: FakeAuthUser[]
     return { data: `audit-${rpcCalls.length}`, error: null };
   });
 
-  return { from, tables, auth, rpc, rpcCalls, state, auditRows };
+  const storage = {
+    from: vi.fn(() => ({
+      createSignedUrl: vi.fn(async () => ({ data: { signedUrl: "https://signed.invalid/evidence" }, error: null })),
+    })),
+  };
+  return { from, schema: () => ({ from }), storage, tables, auth, rpc, rpcCalls, state, auditRows };
 }

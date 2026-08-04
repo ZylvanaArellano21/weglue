@@ -15,8 +15,9 @@
 //
 // EXPLICITLY NOT IMPLEMENTED (disabled in the UI with reasons):
 //   • restoring a deleted conversation — no canonical restore-conversation op.
-//   • restoring/purging a deleted message — retained content is privacy-locked
-//     (migration 051 not deployed); admin never resurrects or hard-deletes it.
+//   • restoring/purging a deleted message — Day 10F makes sender deletion
+//     privacy-locked and automatically purges it; admin never resurrects or
+//     directly hard-deletes it.
 //   • permanent purge of ANY entity — no approved canonical purge lifecycle; we
 //     never perform a direct hard delete as a shortcut.
 // ============================================================================

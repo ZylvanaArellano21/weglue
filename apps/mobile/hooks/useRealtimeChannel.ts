@@ -1,34 +1,26 @@
 import { useEffect } from 'react';
-import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
+import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from '../lib/realtime';
 
 // ─── Channel messages (System 1: messages table) ──────────────────────────────
 
 export interface RealtimeChannelOptions {
   channelId: string;
   conversationId: string;
-  onNewMessage?: (payload: any) => void;
+  /** Called after an opaque, server-authorized message invalidation. */
+  onNewMessage?: () => void;
 }
 
 export function useRealtimeMessages(options: RealtimeChannelOptions): void {
   useEffect(() => {
     if (!options.channelId || !options.conversationId) return;
 
-    const channel = createSafeChannel(`messages:channel:${options.channelId}`, [
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `channel_id=eq.${options.channelId}`,
-        callback: (payload) => {
-          options.onNewMessage?.(payload.new);
-        },
-      },
-    ]);
-
-    return () => {
-      removeSafeChannel(channel);
-    };
-  }, [options.channelId, options.conversationId]);
+    return subscribeBroadcast(
+      `sync:message:${options.conversationId}`,
+      'invalidate',
+      () => options.onNewMessage?.(),
+      () => options.onNewMessage?.(),
+    );
+  }, [options.channelId, options.conversationId, options.onNewMessage]);
 }
 
 // ─── Poll votes (System 1: poll_votes table) ──────────────────────────────────
@@ -122,33 +114,21 @@ export function useRealtimeClubMembers(options: RealtimeMemberOptions): void {
 
 export interface RealtimeConvOptions {
   conversationId: string;
-  onNewMessage?: (payload: any) => void;
-  onDeleteMessage?: (payload: any) => void;
+  onNewMessage?: () => void;
+  onDeleteMessage?: () => void;
 }
 
 export function useRealtimeConversation(options: RealtimeConvOptions): void {
   useEffect(() => {
     if (!options.conversationId) return;
 
-    const channel = createSafeChannel(`messages:conv:${options.conversationId}`, [
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${options.conversationId}`,
-        callback: (payload) => options.onNewMessage?.(payload.new),
+    return subscribeBroadcast(
+      `sync:message:${options.conversationId}`,
+      'invalidate',
+      () => {
+        options.onNewMessage?.();
+        options.onDeleteMessage?.();
       },
-      {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${options.conversationId}`,
-        callback: (payload) => options.onDeleteMessage?.(payload.old),
-      },
-    ]);
-
-    return () => {
-      removeSafeChannel(channel);
-    };
-  }, [options.conversationId]);
+    );
+  }, [options.conversationId, options.onNewMessage, options.onDeleteMessage]);
 }

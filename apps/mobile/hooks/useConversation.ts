@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
+import { subscribeBroadcast } from '../lib/realtime';
 import {
   getThreadMessages,
   sendMessage,
@@ -57,24 +57,23 @@ export function useConversationRealtime(conversationId: string | undefined, chan
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!conversationId) return;
-    const channel = createSafeChannel(`conv:${conversationId}`, [
-      {
-        event: '*',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${conversationId}`,
-        callback: () => {
-          queryClient.invalidateQueries({ queryKey: ['thread', conversationId] });
-          queryClient.invalidateQueries({ queryKey: ['convMedia', conversationId] });
-          queryClient.invalidateQueries({ queryKey: ['convFiles', conversationId] });
-          queryClient.invalidateQueries({ queryKey: ['convEvents', conversationId] });
-          queryClient.invalidateQueries({ queryKey: ['convPolls', conversationId] });
-          queryClient.invalidateQueries({ queryKey: ['myChats'] });
-        },
+    // Canonical refetch follows an opaque server signal. Raw message change
+    // payloads are intentionally not subscribed to because an UPDATE can
+    // retain a pre-scrub OLD row while deletion is committed.
+    const removeMessageSync = subscribeBroadcast(
+      `sync:message:${conversationId}`,
+      'invalidate',
+      () => {
+        queryClient.invalidateQueries({ queryKey: ['thread', conversationId] });
+        queryClient.invalidateQueries({ queryKey: ['convMedia', conversationId] });
+        queryClient.invalidateQueries({ queryKey: ['convFiles', conversationId] });
+        queryClient.invalidateQueries({ queryKey: ['convEvents', conversationId] });
+        queryClient.invalidateQueries({ queryKey: ['convPolls', conversationId] });
+        queryClient.invalidateQueries({ queryKey: ['myChats'] });
       },
-    ]);
+    );
     return () => {
-      removeSafeChannel(channel);
+      removeMessageSync();
     };
   }, [conversationId, channelId, queryClient]);
 }

@@ -20,7 +20,7 @@ import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
 // Own content:   Copy (text) · Unsend for everyone · Delete for me
 // Others':       Copy (text) · Delete for me · Report
 // Officers/group admin additionally get "Delete for everyone" on others'
-// messages in chats they moderate (server re-validates in unsend_message).
+// messages in chats they moderate (server re-validates in delete-message).
 
 export const REPORT_REASONS = [
   'Spam',

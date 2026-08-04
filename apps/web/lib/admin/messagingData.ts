@@ -34,17 +34,17 @@
 //                                route/read_at/seen_at/group_* (046), created_at.
 //   • reports                   — message reports carry message_id,
 //                                conversation_id, conversation_type, message_type,
-//                                message_sender_id, content_snapshot,
-//                                attachment_snapshot (040). We NEVER surface the
-//                                snapshot columns (retained evidence).
+//                                message_sender_id. Legacy content_snapshot /
+//                                attachment_snapshot are scrubbed by Day 10F;
+//                                private retained evidence is never surfaced here.
 //   • club_members.role='officer' — the ONLY canonical officer authority.
 //
 // PRIVACY INVARIANTS (Day-4):
 //   • Message list rows carry METADATA only. A short active-message preview is
 //     shown only for currently-visible (deleted_at IS NULL) text messages.
 //   • A message with deleted_at set is reported as deleted/redacted and its
-//     content/attachment fields are forced to null — retained history is never
-//     read back here (migration 051 is NOT deployed and NOT imported).
+//     content/attachment fields are forced to null — private retained evidence
+//     is never read back here.
 //   • Full private message bodies are NEVER returned by this module. The
 //     recent-MFA gated reveal lives in messagingActions.ts.
 // ============================================================================

@@ -17,7 +17,10 @@ BEGIN INSERT INTO t061_results VALUES (p_name,coalesce(p_ok,false)); END; $$;
 INSERT INTO auth.users (id,email,raw_app_meta_data) VALUES
   (:ADM,'founder-061@test.invalid','{"account_type":"platform_admin"}'::jsonb),
   (:USER,'student-061@test.invalid','{}'::jsonb);
-INSERT INTO public.profiles (id,username,full_name) VALUES (:USER,'day10b061','Day 10B 061');
+-- The auth-user trigger may have already created the profile in a full local
+-- migration reset; make the fixture valid in both production-shaped orders.
+INSERT INTO public.profiles (id,username,full_name) VALUES (:USER,'day10b061','Day 10B 061')
+ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, full_name = EXCLUDED.full_name;
 
 SELECT t061_ok('v2 suspension accepts category/public/internal separation',
   (public.admin_tx_restriction_suspend_v2(

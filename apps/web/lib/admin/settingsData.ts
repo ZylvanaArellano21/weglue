@@ -71,7 +71,7 @@ export interface AdminSettings {
   sessionMaxAgeMinutes: number;
   /** Live-probed; replaces the Day-5 hardcoded `false`. */
   auditPersistence: CapabilityProbe;
-  /** Live-probed marker for the migration-051 privacy backend. */
+  /** Live-probed marker for the Day 10F (migration 067) privacy backend. */
   privacyBackend: CapabilityProbe;
   environment: string;
   /** Deployed Git commit SHA (short), from VERCEL_GIT_COMMIT_SHA. */
@@ -196,19 +196,31 @@ async function probeAuditPersistence(
 }
 
 /**
- * Migration 051 (deleted-message privacy) marker. Same read-only approach, and
- * the same reason for existing: this was ALSO hardcoded, so it would have
- * silently kept saying "Not deployed" after 051 ships.
+ * Day 10F (migration 067) privacy marker. This remains read-only: capability
+ * checks must never create an evidence-view audit row just to show Settings.
  */
 async function probePrivacyBackend(
   admin: ReturnType<typeof createAdminClient>
 ): Promise<CapabilityProbe> {
-  // A partial table/function cannot prove the reviewed Day 10F system exists.
-  // 051 is intentionally absent from Production, so retain this explicit
-  // fail-closed state until the complete reviewed backend ships a dedicated
-  // immutable deployment marker. No message data is queried or mutated.
-  void admin;
-  return { status: "unavailable", detail: "Not deployed — the complete reviewed deleted-message privacy backend (migration 051 and its workers) is absent." };
+  try {
+    // These two private tables plus the server-mediated deletion RPC are the
+    // minimal additive 067 surface. Every query is a bounded HEAD read.
+    const [evidence, operations, deletionRpc] = await Promise.all([
+      admin.schema("private").from("report_message_evidence").select("id", { head: true, count: "exact" }).limit(1),
+      admin.schema("private").from("message_deletion_operations").select("id", { head: true, count: "exact" }).limit(1),
+      rpcExposed("begin_message_deletion"),
+    ]);
+    const missing = [evidence.error, operations.error].some((error) => MISSING_CODES.has(error?.code ?? ""));
+    if (missing || deletionRpc === false) {
+      return { status: "unavailable", detail: "Not deployed — the complete Day 10F deleted-message privacy backend (migration 067) is absent." };
+    }
+    if (evidence.error || operations.error || deletionRpc === null) {
+      return { status: "error", detail: "Could not verify the Day 10F deleted-message privacy backend." };
+    }
+    return { status: "active", detail: "Day 10F private evidence, structural deletion metadata, and sender-deletion RPC are live." };
+  } catch {
+    return { status: "error", detail: "Could not verify the Day 10F deleted-message privacy backend." };
+  }
 }
 
 export async function getAdminSettings(): Promise<AdminSettings> {

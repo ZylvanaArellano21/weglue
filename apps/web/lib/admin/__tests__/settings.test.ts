@@ -61,7 +61,7 @@ function dbWithoutAudit() {
 }
 
 /** A db whose audit tables exist. `events` may legitimately be empty. */
-function dbWithAudit(events = 0, catalog = 26) {
+function dbWithAudit(events = 0, catalog = 26, privacyBackend = false) {
   const db = makeDb({ universities: [{ id: "u", name: "State U" }] }, []);
   const orig = db.from;
   (db as any).from = (t: string) => {
@@ -74,7 +74,7 @@ function dbWithAudit(events = 0, catalog = 26) {
       };
       return b;
     }
-    if (t === "message_deletion_attempts") {
+    if ((t === "report_message_evidence" || t === "message_deletion_operations") && !privacyBackend) {
       const b: any = {
         select: () => b,
         limit: () => Promise.resolve({ data: null, count: null, error: { code: "PGRST205", message: "not found" } }),
@@ -258,11 +258,19 @@ describe("audit persistence status is probed, never hardcoded", () => {
 });
 
 describe("privacy backend status is probed, never hardcoded", () => {
-  it("reports UNAVAILABLE while migration 051 is absent", async () => {
+  it("reports UNAVAILABLE while migration 067 is absent", async () => {
     h.holder.db = dbWithAudit(0, 26);
     const s = await getAdminSettings();
     expect(s.privacyBackend.status).toBe("unavailable");
-    expect(s.privacyBackend.detail).toMatch(/051/);
+    expect(s.privacyBackend.detail).toMatch(/067/);
+  });
+
+  it("reports ACTIVE when the complete Day 10F surface is present", async () => {
+    h.holder.db = dbWithAudit(0, 26, true);
+    stubRpcSpec(["/rpc/admin_audit_log", "/rpc/begin_message_deletion"]);
+    const s = await getAdminSettings();
+    expect(s.privacyBackend.status).toBe("active");
+    expect(s.privacyBackend.detail).toMatch(/Day 10F/);
   });
 });
 
