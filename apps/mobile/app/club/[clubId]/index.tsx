@@ -25,7 +25,7 @@ import { ReportButton } from '../../../components/shared/ReportButton';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../lib/chatNavigation';
 import { todayInAppTz } from '../../../lib/timezone';
-import { formatEventLocation } from '../../../lib/eventDisplay';
+import { formatEventLocation, openEventOrExplain } from '../../../lib/eventDisplay';
 import { parseMeetingSchedule, groupScheduleForDisplay } from '../../../lib/meetingSchedule';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -322,11 +322,13 @@ function MiniCalendar({
 function ClubEventCard({
   event,
   clubId,
+  clubName,
   onRestricted,
 }: {
   event: ClubUpcomingEvent;
   clubId: string;
-  onRestricted: () => void;
+  clubName?: string | null;
+  onRestricted: (message: string) => void;
 }) {
   const router = useRouter();
   const isRestricted = event.visibility === 'members' || event.visibility === 'specific';
@@ -334,16 +336,18 @@ function ClubEventCard({
 
   return (
     <TouchableOpacity
-      onPress={() => {
-        if (!event.can_open) {
-          onRestricted();
-          return;
-        }
-        router.push({
-          pathname: '/club/[clubId]/events/[eventId]',
-          params: { clubId, eventId: event.id },
-        });
-      }}
+      onPress={() =>
+        openEventOrExplain({
+          canOpen: event.can_open,
+          clubName,
+          onRestricted,
+          onOpen: () =>
+            router.push({
+              pathname: '/club/[clubId]/events/[eventId]',
+              params: { clubId, eventId: event.id },
+            }),
+        })
+      }
       activeOpacity={0.7}
       // overflow:'hidden' would clip the iOS shadow (masksToBounds), killing
       // the 3D button look — so the card keeps its shadow and only the image
@@ -970,7 +974,8 @@ export default function ClubProfileScreen() {
               key={event.id}
               event={event}
               clubId={clubId!}
-              onRestricted={() => show('This event is for club members only. Join the club to RSVP and view attendees.', 'error')}
+              clubName={club?.name}
+              onRestricted={(message) => show(message, 'error')}
             />
           ))}
         </Section>
@@ -986,7 +991,8 @@ export default function ClubProfileScreen() {
               key={event.id}
               event={event}
               clubId={clubId!}
-              onRestricted={() => show('This event is for club members only. Join the club to RSVP and view attendees.', 'error')}
+              clubName={club?.name}
+              onRestricted={(message) => show(message, 'error')}
             />
           ))}
         </Section>

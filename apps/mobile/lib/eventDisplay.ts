@@ -85,3 +85,35 @@ export function splitPastAndUpcoming<T extends EventTimeFields>(
   );
   return { upcoming, past };
 }
+
+/**
+ * Guidance shown when a non-member taps a restricted club-profile event card.
+ * Names the club so "join" is actionable — a club profile is reachable from
+ * search, a shared link, or another member's profile, so "join the club" alone
+ * can be ambiguous. Mirrors the web copy in lib/permissions/eventAccess.ts.
+ */
+export function restrictedEventMessage(clubName?: string | null): string {
+  const name = (clubName ?? '').trim();
+  return name
+    ? `Join ${name} to be able to attend this event.`
+    : 'Join this club to be able to attend this event.';
+}
+
+/**
+ * The single decision behind tapping an event card on a club profile. Both the
+ * Upcoming and Past lists route through here so the restricted branch cannot
+ * drift between them: a restricted card explains itself exactly once and
+ * performs no other action — no navigation, and no attendance mutation.
+ */
+export function openEventOrExplain(args: {
+  canOpen: boolean;
+  clubName?: string | null;
+  onRestricted: (message: string) => void;
+  onOpen: () => void;
+}): void {
+  if (!args.canOpen) {
+    args.onRestricted(restrictedEventMessage(args.clubName));
+    return;
+  }
+  args.onOpen();
+}

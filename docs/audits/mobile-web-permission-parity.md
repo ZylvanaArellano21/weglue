@@ -145,6 +145,113 @@ Columns: Domain | Feature | Actor | Preconditions | Mobile (source of truth) | C
    would have created the overlapping RLS this task forbids. Raised for a
    separate hardening task.
 
+
+## Sensitive Mutation and Identity Integrity Audit (2026-08-05)
+
+Threat model: the client is not trusted. Every row below was exercised as a real
+`authenticated` caller — SQL with a JWT claim, and PostgREST over HTTP — i.e.
+exactly what DevTools, a patched bundle, or a hand-written request can send.
+Nothing here depends on a hidden input, a disabled button, a TypeScript type, or
+a route guard.
+
+Method: the live catalog was read first (57 public tables, RLS on all of them),
+then each protected column was actually attacked before and after the fix.
+PostgreSQL reuses a policy's `USING` expression as its `WITH CHECK` when none is
+given, so self-bound predicates such as `user_id = auth.uid()` already prevent
+moving a row to another user — that whole class needed **no** change and got
+none. The real gap was columns the policies never mention.
+
+### Fixed — migration 072 (protected identity immutability)
+
+One generic `private.reject_protected_identity_change()` guard, attached to six
+tables. Existing RLS still decides WHO may write; the guard decides WHICH COLUMNS
+can never change afterwards. It is SECURITY INVOKER on purpose, so trusted paths
+(SECURITY DEFINER RPCs/triggers owned by postgres, service_role maintenance,
+migrations) are unaffected and keep working.
+
+| Table | Column | Actor who could rewrite it | Consequence | Now |
+| --- | --- | --- | --- | --- |
+| profiles | university_id | any student, own row | move self to another university | blocked |
+| profiles | email_verified | any student, own row | self-assert verification | blocked |
+| profiles | is_seed | any student, own row | forge seed/demo status | blocked |
+| profiles | created_at | any student, own row | rewrite account history | blocked |
+| clubs | university_id | club officer | move a club to another university | blocked |
+| clubs | created_at | club officer | rewrite club history | blocked |
+| clubs | member_count | club officer | inflate discovery ranking | blocked |
+| clubs | is_seed / claimed | club officer | forge seed/claimed status | blocked |
+| events | created_by | club officer | reassign event authorship | blocked |
+| events | club_id | officer of two clubs | move an event between clubs | blocked |
+| club_members | user_id | club officer | reassign a membership to another person | blocked |
+| club_members | club_id | club officer | move a membership to another club | blocked |
+| posts | created_at | post author | rewrite post history | blocked |
+| event_rsvps | id | RSVP owner | rewrite an attendance primary key | blocked |
+| all six | id | as above | rewrite a primary key | blocked explicitly |
+
+### Already secure — verified, deliberately not duplicated
+
+| Attack | Why it already fails |
+| --- | --- |
+| Change `profiles.id` / edit another user's profile | `id = auth.uid()` is reused as the WITH CHECK |
+| Change `posts.author_id`, edit another author's post | `author_id = auth.uid()` reused as WITH CHECK |
+| Reassign `event_rsvps.user_id`, `notifications.user_id` | self-bound predicates reused as WITH CHECK |
+| Member self-promotes to officer | `is_club_officer(club_id)` is false for a member |
+| Non-member / non-officer / former officer edits a club | officer predicate reads `club_members` live |
+| Officer of another club edits this club | predicate is per-club |
+| Add self to a private conversation | `conversation_participants` insert policy |
+| Forge a follow or a block on someone else's behalf | self-bound insert policies |
+| Save an event for another user | `saved_events` self-bound policy |
+| Update any `reports` row | that permissive policy is granted to `service_role` only, not `authenticated` |
+| Change a university row | `universities` has no UPDATE policy for clients |
+| Unauthenticated club edit | HTTP 401 |
+
+### Deliberately NOT changed
+
+`posts.club_id` is writable by any student on insert and update. This is not a
+defect: both clients let any user tag any active club (the picker lists all
+active clubs with no membership filter), and the audit already records official
+club posts as intentionally shared-context content across a personal block.
+Locking it would break a shipped feature and change post audience rules, which
+this task excludes. One consequence is worth a product decision rather than a
+silent change: because migration 069's posts SELECT policy treats
+`club_id IS NOT NULL` as a bypass of the private-account and blocking branch, a
+private account can make one of its posts campus-visible by tagging a club.
+**Product decision required** — is that intended for private accounts?
+
+### Club schema classification
+
+| Class | Columns |
+| --- | --- |
+| A — officer-editable content | name, description, avatar_url, banner_url, cover_image_url, meeting_day, meeting_time_start, meeting_time_end, meeting_location, meeting_building, meeting_room, meeting_schedule, is_active (mobile's soft delete) |
+| B — system-controlled via an approved path | member_count (update_club_member_count), university text (sync_university_name), updated_at, last_activity_at, inactivity_warned_at |
+| C — immutable protected identity | id, university_id, created_at, is_seed, claimed |
+| D — product decision | handle (public slug / search identifier): no client writes it today and it is not an authorization scope, so it was left officer-editable rather than locked. Confirm whether it should become immutable. |
+
+Note: `clubs` has no `created_by` column, so there is no club creator field to
+protect — club ownership is expressed entirely through `club_members.role`.
+
+### Verification
+
+- `test_072_protected_identity.sql` — catalog + behaviour, including the
+  founder's Nature Club -> Forest Club rename with club id, university,
+  members, officers and events all still connected afterwards; a mixed
+  `name + university_id` request that must reject wholesale and persist neither
+  field; and wrong-actor cases (member, non-member, other-club officer, former
+  officer).
+- Negative control: neutering the guard's body while leaving its triggers
+  registered makes the behaviour harness fail on "officer moved a club to
+  another university", so the assertions are not vacuous.
+- HTTP club-manipulation matrix: 20/20, every protected field rejected with
+  HTTP 403 and the club name unchanged after every attempt.
+- Persona API matrix re-run with 072 applied: 38/38, no regression.
+
+### Harness defect found and fixed along the way
+
+The compact 057 fixture leaves **RLS disabled on `clubs` and `club_members`**.
+Any earlier local assertion about who may edit a club was therefore vacuous —
+no policy was consulted at all. `test_072_protected_identity.sql` now enables
+RLS and recreates the owning policies (001 clubs update, 034 club_members
+update, 063 events update) before testing, so its wrong-actor cases are real.
+
 ## Genuine product ambiguities
 
 - There is no user-visible mobile event-search result surface: `useDiscoveryEvents`

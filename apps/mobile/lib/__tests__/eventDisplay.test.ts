@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { isEventPast, isEventPastAt, splitPastAndUpcoming } from '../eventDisplay';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  isEventPast,
+  isEventPastAt,
+  openEventOrExplain,
+  restrictedEventMessage,
+  splitPastAndUpcoming,
+} from '../eventDisplay';
 
 describe('mobile event expiration', () => {
   it('treats the exact America/Chicago end boundary as past', () => {
@@ -25,5 +31,61 @@ describe('mobile event expiration', () => {
 
     expect(result.past.map((event) => event.id)).toEqual(['ended']);
     expect(result.upcoming.map((event) => event.id)).toEqual(['later']);
+  });
+});
+
+describe('restricted members-only event guidance', () => {
+  it('names the actual club', () => {
+    expect(restrictedEventMessage('Forest Club')).toBe(
+      'Join Forest Club to be able to attend this event.',
+    );
+    expect(restrictedEventMessage('Film Club')).toBe(
+      'Join Film Club to be able to attend this event.',
+    );
+  });
+
+  it('trims surrounding whitespace instead of producing a double space', () => {
+    expect(restrictedEventMessage('  Forest Club  ')).toBe(
+      'Join Forest Club to be able to attend this event.',
+    );
+  });
+
+  it('falls back when the club name is missing', () => {
+    expect(restrictedEventMessage()).toBe('Join this club to be able to attend this event.');
+    expect(restrictedEventMessage(null)).toBe('Join this club to be able to attend this event.');
+    expect(restrictedEventMessage(undefined)).toBe(
+      'Join this club to be able to attend this event.',
+    );
+  });
+
+  it('falls back when the club name is blank', () => {
+    expect(restrictedEventMessage('')).toBe('Join this club to be able to attend this event.');
+    expect(restrictedEventMessage('   ')).toBe('Join this club to be able to attend this event.');
+  });
+});
+
+describe('club-profile event tap', () => {
+  it('explains once and performs no other action when the card is restricted', () => {
+    const onRestricted = vi.fn();
+    const onOpen = vi.fn();
+
+    openEventOrExplain({ canOpen: false, clubName: 'Forest Club', onRestricted, onOpen });
+
+    // Exactly one toast, with the dynamic copy...
+    expect(onRestricted).toHaveBeenCalledTimes(1);
+    expect(onRestricted).toHaveBeenCalledWith('Join Forest Club to be able to attend this event.');
+    // ...and nothing else runs: no navigation, so no RSVP/attendance mutation
+    // can be reached from the restricted branch.
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('opens the event and shows no message when the viewer is allowed', () => {
+    const onRestricted = vi.fn();
+    const onOpen = vi.fn();
+
+    openEventOrExplain({ canOpen: true, clubName: 'Forest Club', onRestricted, onOpen });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onRestricted).not.toHaveBeenCalled();
   });
 });
