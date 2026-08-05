@@ -23,6 +23,14 @@ LANGUAGE sql
 STABLE
 AS $$ SELECT true $$;
 
+-- The 057 fixture issues `GRANT ... ON ALL TABLES IN SCHEMA public` before this
+-- bridge runs, so the tables created above start with no privileges at all. In
+-- production they come from 001 and carry the ordinary authenticated grants.
+-- Without this, `authenticated` fails on a table-level permission check and the
+-- audience-aware RLS policy on event_interests is never actually exercised.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.event_interests TO authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.post_club_tags TO authenticated, service_role;
+
 -- The production base schema enables RLS on these event tables. The compact
 -- 057 fixture deliberately omits unrelated pre-057 policies, so reproduce the
 -- toggle here before the 069 policies are exercised under `authenticated`.

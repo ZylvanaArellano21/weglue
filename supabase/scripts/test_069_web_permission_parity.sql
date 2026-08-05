@@ -198,6 +198,207 @@ BEGIN
 END;
 $$;
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- Resolution of the four rows the audit previously left at `investigating`.
+-- These are negative assertions: the guards above are only meaningful if the
+-- ineligible caller is actually refused, so each block drives the rejecting
+-- path rather than the accepting one.
+-- ───────────────────────────────────────────────────────────────────────────
+
+RESET ROLE;
+-- Seed the payloads an unauthorized caller must never receive. Written as the
+-- BYPASSRLS harness owner so the seed itself is not the thing under test.
+INSERT INTO public.event_activities (event_id, activity) VALUES
+  ('30000000-0000-0000-0000-000000000003', 'volleyball');
+INSERT INTO public.event_interests (event_id, interest) VALUES
+  ('30000000-0000-0000-0000-000000000003', 'sports');
+INSERT INTO public.event_rsvps (event_id, user_id, status) VALUES
+  ('30000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'going'),
+  ('30000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', 'going'),
+  ('30000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', 'going');
+-- Two notifications for the same outsider: one about an event they may not see
+-- and one about an event they may. Keeping both is what makes the negative
+-- assertion below meaningful rather than an empty-table tautology.
+INSERT INTO public.notifications (user_id, type, actor_id, entity_type, entity_id, message) VALUES
+  ('10000000-0000-0000-0000-000000000003', 'event_updated',
+   '10000000-0000-0000-0000-000000000001', 'event',
+   '30000000-0000-0000-0000-000000000003', 'Selected event was updated'),
+  ('10000000-0000-0000-0000-000000000003', 'event_updated',
+   '10000000-0000-0000-0000-000000000001', 'event',
+   '30000000-0000-0000-0000-000000000001', 'Everyone event was updated');
+SET LOCAL ROLE authenticated;
+
+-- Row: "Selected audience / officer" — only a CURRENT officer may search or
+-- edit. An ordinary member is refused by the RPC and changes no event row.
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000002', true);
+DO $$
+DECLARE
+  v_rows int;
+BEGIN
+  BEGIN
+    PERFORM public.search_event_audience_members('20000000-0000-0000-0000-000000000001', '', 50);
+    RAISE EXCEPTION '069: non-officer member was allowed to search selected recipients';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+
+  -- RLS filters UPDATE silently rather than raising, so assert on row count.
+  UPDATE public.events SET title = 'Hijacked'
+   WHERE id = '30000000-0000-0000-0000-000000000001';
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION '069: non-officer member edited an event (% rows)', v_rows;
+  END IF;
+
+  -- Row: "RSVP / expired or unauthorized" — the exact end boundary blocks
+  -- cancellation and status change, not only new attendance.
+  DELETE FROM public.event_rsvps
+   WHERE event_id = '30000000-0000-0000-0000-000000000004' AND user_id = auth.uid();
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION '069: RSVP cancellation succeeded at the exact end boundary';
+  END IF;
+
+  UPDATE public.event_rsvps SET status = 'cant'
+   WHERE event_id = '30000000-0000-0000-0000-000000000004' AND user_id = auth.uid();
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION '069: RSVP status change succeeded at the exact end boundary';
+  END IF;
+
+  -- Positive control for the outsider assertions further down: an authorized
+  -- member DOES see the members-only attendee row that the outsider must not.
+  IF (SELECT count(*) FROM public.event_rsvps
+       WHERE event_id = '30000000-0000-0000-0000-000000000002') <> 1 THEN
+    RAISE EXCEPTION '069: member cannot see attendees of a members-only event they may access';
+  END IF;
+
+  -- The same member may still cancel an RSVP on a live event, proving the
+  -- boundary check is the discriminator and not a blanket denial. Uses the
+  -- everyone-event row so the members-only attendee row above survives.
+  DELETE FROM public.event_rsvps
+   WHERE event_id = '30000000-0000-0000-0000-000000000001' AND user_id = auth.uid();
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 1 THEN
+    RAISE EXCEPTION '069: member could not cancel an RSVP on a live event';
+  END IF;
+END;
+$$;
+
+-- Positive control for the tag assertions: the selected recipient DOES receive
+-- the activity/interest payload that the outsider must never see.
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000004', true);
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.event_activities
+       WHERE event_id = '30000000-0000-0000-0000-000000000003') <> 1
+     OR (SELECT count(*) FROM public.event_interests
+          WHERE event_id = '30000000-0000-0000-0000-000000000003') <> 1 THEN
+    RAISE EXCEPTION '069: selected recipient lost the tag payload for their own event';
+  END IF;
+END;
+$$;
+
+-- Row: "Direct links, saves, attendees, activity" and "Members-only event /
+-- non-member" — no selected/members-only payload reaches an outsider through
+-- any secondary route.
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000003', true);
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.event_rsvps
+       WHERE event_id = '30000000-0000-0000-0000-000000000002') <> 0 THEN
+    RAISE EXCEPTION '069: outsider read attendee rows for a members-only event';
+  END IF;
+
+  IF (SELECT count(*) FROM public.event_activities
+       WHERE event_id = '30000000-0000-0000-0000-000000000003') <> 0 THEN
+    RAISE EXCEPTION '069: outsider read activity tags for a selected event';
+  END IF;
+
+  IF (SELECT count(*) FROM public.event_interests
+       WHERE event_id = '30000000-0000-0000-0000-000000000003') <> 0 THEN
+    RAISE EXCEPTION '069: outsider read interest tags for a selected event';
+  END IF;
+
+  IF (SELECT count(*) FROM public.notifications
+       WHERE entity_type = 'event'
+         AND entity_id = '30000000-0000-0000-0000-000000000003') <> 0 THEN
+    RAISE EXCEPTION '069: outsider read a notification for an inaccessible event';
+  END IF;
+
+  -- Positive control: the sibling notification about an event they CAN see is
+  -- still delivered, so the filter above is audience-based, not a blanket hide.
+  IF (SELECT count(*) FROM public.notifications
+       WHERE entity_type = 'event'
+         AND entity_id = '30000000-0000-0000-0000-000000000001') <> 1 THEN
+    RAISE EXCEPTION '069: notification filtering hid an accessible event notification';
+  END IF;
+
+  -- Direct-ID access is the same predicate, so a known UUID leaks nothing.
+  IF EXISTS (SELECT 1 FROM public.events
+              WHERE id = '30000000-0000-0000-0000-000000000003') THEN
+    RAISE EXCEPTION '069: outsider reached a selected event by direct id';
+  END IF;
+END;
+$$;
+
+-- Row: "Members-only event / non-member" — join grants access and leave
+-- removes it, with no re-authentication and no cached decision in between.
+RESET ROLE;
+INSERT INTO public.club_members (club_id, user_id, role) VALUES
+  ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000003', 'member');
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000003', true);
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.events) <> 3 THEN
+    RAISE EXCEPTION '069: joining the club did not grant members-only access';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.events
+              WHERE id = '30000000-0000-0000-0000-000000000003') THEN
+    RAISE EXCEPTION '069: joining the club leaked a selected event';
+  END IF;
+END;
+$$;
+
+RESET ROLE;
+DELETE FROM public.club_members
+ WHERE club_id = '20000000-0000-0000-0000-000000000001'
+   AND user_id = '10000000-0000-0000-0000-000000000003';
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000003', true);
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.events) <> 1 THEN
+    RAISE EXCEPTION '069: leaving the club did not revoke members-only access';
+  END IF;
+END;
+$$;
+
+-- Row: "Selected audience / officer" — demotion takes effect immediately,
+-- because the guard reads club_members live rather than a cached claim.
+RESET ROLE;
+UPDATE public.club_members SET role = 'member'
+ WHERE club_id = '20000000-0000-0000-0000-000000000001'
+   AND user_id = '10000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.search_event_audience_members('20000000-0000-0000-0000-000000000001', '', 50);
+    RAISE EXCEPTION '069: demoted officer retained selected-recipient search';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+END;
+$$;
+RESET ROLE;
+UPDATE public.club_members SET role = 'officer'
+ WHERE club_id = '20000000-0000-0000-0000-000000000001'
+   AND user_id = '10000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE authenticated;
+
 -- Mobile keeps an already-selected recipient eligible after a later club
 -- leave. The DB preserves that allow-list without allowing a stale creator
 -- submission to add a former member in the first place.
