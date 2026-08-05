@@ -15,6 +15,7 @@ export const STUDENT_CONTENT_QUERY_ROOTS = [
   "homeEventsFeed",
   "eventDetail",
   "eventForEdit",
+  "eventAttendees",
   "clubEventsFeed",
   "clubCalendarEvents",
   "calendarEvents",
@@ -29,6 +30,11 @@ export const STUDENT_CONTENT_QUERY_ROOTS = [
   "userProfile",
   "ownClubs",
   "myClubs",
+  // Discovery search results carry other students and clubs, so a block, a
+  // restriction or an account deletion changes who may legitimately appear.
+  // Mobile already invalidates this root; without it the web copy could keep
+  // showing a now-hidden person for the lifetime of its stale window.
+  "discoverySearch",
   "notifications",
   "unreadSummary",
 ] as const;

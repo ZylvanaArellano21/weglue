@@ -27,6 +27,7 @@ import { useClubEventsFeed, clubEventsFeedKey } from "../../lib/hooks/useClubEve
 import { useManageClubPhoto } from "../../lib/hooks/useClubManagement";
 import { useRsvpToEvent, useToggleSaveEvent } from "../../lib/hooks/useHomeEventsFeed";
 import type { HomeFeedEvent } from "../../lib/hooks/useHomeEventsFeed";
+import { eventRestrictionMessage } from "../../lib/permissions/eventAccess";
 import { clubChannelHref, clubHubHref, personMessageHref } from "../../lib/messages/routes";
 import { getMainConversationChannel, reopenClubConversation } from "../../lib/messages/service";
 
@@ -202,7 +203,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               onOpenEvent={openSingleEvent}
               onOpenClub={() => {}}
               onOpenAttendees={setAttendanceEventId}
-              onRestricted={() => show("This event is for club members only. Join the club to RSVP and view attendees.", "error")}
+              onRestricted={() => show(eventRestrictionMessage("members_only", club.name) ?? "", "error")}
               onCreateEvent={club.is_officer ? () => setCompose("event") : undefined}
               onCreatePost={club.is_member ? () => setCompose("post") : undefined}
             />
@@ -238,7 +239,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               openPhoto(i);
             }}
             onSeeAllPhotos={() => setTab("media")}
-            onRestricted={() => show("This event is for club members only. Join the club to RSVP and view attendees.", "error")}
+            onRestricted={() => show(eventRestrictionMessage("members_only", club.name) ?? "", "error")}
           />
         </div>
       </div>

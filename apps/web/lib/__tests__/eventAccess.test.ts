@@ -3,9 +3,11 @@ import {
   canManageEvent,
   canOpenEvent,
   canRsvpToEvent,
+  canSaveEvent,
   canViewEventAttendees,
   canViewEventInClubProfile,
   eventRestriction,
+  eventRestrictionMessage,
 } from "../permissions/eventAccess";
 
 const base = {
@@ -59,5 +61,48 @@ describe("event audience access", () => {
     expect(canRsvpToEvent(facts)).toBe(false);
     expect(canViewEventAttendees(facts)).toBe(true);
     expect(eventRestriction(facts)).toBe("ended");
+  });
+
+  it("hides Save from a non-member on a members-only club-profile card, as mobile does", () => {
+    const facts = { ...base, audience: "members" as const };
+    expect(canSaveEvent(facts)).toBe(false);
+    expect(canSaveEvent({ ...facts, isClubMember: true })).toBe(true);
+  });
+});
+
+describe("restricted-event guidance message", () => {
+  it("names the club so 'join' is actionable", () => {
+    expect(eventRestrictionMessage("members_only", "Film Club")).toBe(
+      "Join Film Club to be able to attend this event."
+    );
+    expect(eventRestrictionMessage("members_only", "Parity QA Club")).toBe(
+      "Join Parity QA Club to be able to attend this event."
+    );
+  });
+
+  it("falls back to a sensible sentence rather than printing an empty or undefined name", () => {
+    expect(eventRestrictionMessage("members_only")).toBe(
+      "Join this club to be able to attend this event."
+    );
+    expect(eventRestrictionMessage("members_only", null)).toBe(
+      "Join this club to be able to attend this event."
+    );
+    expect(eventRestrictionMessage("members_only", "   ")).toBe(
+      "Join this club to be able to attend this event."
+    );
+  });
+
+  it("trims a padded club name instead of producing a double space", () => {
+    expect(eventRestrictionMessage("members_only", "  Film Club  ")).toBe(
+      "Join Film Club to be able to attend this event."
+    );
+  });
+
+  it("leaves the selected-members and ended copy alone", () => {
+    expect(eventRestrictionMessage("selected_members_only", "Film Club")).toBe(
+      "This event is available only to selected club members."
+    );
+    expect(eventRestrictionMessage("ended", "Film Club")).toBe("This event has ended.");
+    expect(eventRestrictionMessage(null, "Film Club")).toBeNull();
   });
 });

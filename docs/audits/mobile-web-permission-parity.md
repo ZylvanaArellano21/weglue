@@ -13,7 +13,7 @@ status of **investigating** is deliberately not treated as a product decision.
 | Events | Historical recipient / former member | Existing unchanged recipient remains allowed after leaving; newly added recipient must be currently eligible; removed recipient cannot be re-added unless eligible. | Restores IDs and labels (with an inaccessible-profile fallback) in `getEventForEdit`. | Preserves IDs in the existing edit hook. | `070` updates the existing validator to check only IDs newly added relative to the same club. | Existing audience trigger. | No second audience table/function; update trigger semantics and both edit restorations. | `test_070_cross_platform_event_permission_parity.sql`. | Fixed cross-platform |
 | Events | Selected-event read / selected recipient | Selected recipient, creator, and only audited officer exception can read. Other users receive no event payload. | RLS-governed reads. | Event access layer and RLS-governed queries. | `070` keeps the internal predicate but revokes it from clients; policies use caller-bound `private.can_current_user_access_event`. | Canonical event access predicate. | Safe internal predicate plus caller-bound policy wrapper, not parallel rules. | `test_069_web_permission_parity.sql`, `test_070_cross_platform_event_permission_parity.sql`. | Fixed in backend |
 | Events | Selected-event access loss | Audience removal clears event, attendees, saves, notifications, and open detail before refetch. | Existing synchronization host now removes sensitive query roots first. | Existing `eventSync` now removes event-shaped roots before refetch. | `070` sends an opaque `{}` campus sync through the existing 066 topic on an audience change. | Existing `eventSync` and access-sync infrastructure. | Clear-first extension of existing cache/realtime paths; no second subscription. | `eventSync.test.ts`, student synchronization tests, `test_070_cross_platform_event_permission_parity.sql`. | Fixed cross-platform |
-| Events | Members-only event / non-member | Hidden from Home; club-profile preview is labelled; cannot open, save, RSVP, or see attendees; join updates access and leave removes it. | `clubService` carries `can_open` and `app/club/[clubId]/index.tsx` blocks navigation when false. | `EventCard`/`ClubRightColumn` route `can_open === false` to `onRestricted`; `useClubEventsFeed` zeroes `attendee_count`/`attendee_preview` for those rows. | 069/070 RLS hides the row from Home and discovery; `get_club_profile_events` is the only preview surface and returns `can_open = false`. | Existing event access, RPC, badge. | None to behavior. Every enforcement point verified; one payload-shape question is escalated rather than guessed (see below). | `test_069_web_permission_parity.sql` (Home hidden, 2 preview cards, RSVP refused, join grants access, leave revokes it); persona API matrix: non-member Home browser-verified to show only the everyone event. | **Verified except one product decision — see "Open product decision" below** |
+| Events | Members-only event / non-member | Hidden from Home; club-profile preview is labelled; cannot open, save, RSVP, or see attendees; join updates access and leave removes it. | `clubService` carries `can_open` and `app/club/[clubId]/index.tsx` blocks navigation when false. | `EventCard`/`ClubRightColumn` route `can_open === false` to `onRestricted`; `useClubEventsFeed` zeroes `attendee_count`/`attendee_preview` for those rows. | 069/070 RLS hides the row from Home and discovery; `get_club_profile_events` is the only preview surface and returns `can_open = false`. | Existing event access, RPC, badge. | None to behavior. Every enforcement point verified; one payload-shape question is escalated rather than guessed (see below). | `test_069_web_permission_parity.sql` (Home hidden, 2 preview cards, RSVP refused, join grants access, leave revokes it); persona API matrix: non-member Home browser-verified to show only the everyone event. | **Already correct — verified** (founder resolved the presentation question: complete card, restricted actions) |
 | Events | Event audience labels / eligible viewer | Restricted audience label is shown once, including past events; selected events never render for ineligible viewers. | New reusable `components/events/EventAudienceBadge.tsx` is used by Home, Calendar/Saved, and detail cards; club profile uses its existing banner. | Existing `EventAudienceBadge` and event cards. | Audience is enforced separately. | Existing web badge; new single mobile badge because none existed. | Added mobile component without duplicate labels. | Mobile typecheck and visual QA required. | Fixed on mobile |
 | Events | Expiration / all actors | `event_end_at <= server now` is past; past events retain data/audience, leave Home/Upcoming, enter club Past, and prohibit RSVP insert/delete. | `eventDisplay`, Home, calendar, saved, weekly, club profile, RSVP, and detail paths now carry/use `event_end_at`. | Existing canonical timestamp helper remains unchanged. | RSVP predicate already used `> now`; 070 protects derivation on all updates. | Existing `event_end_at`, display helper, RSVP predicate. | Corrected mobile canonical helper/data shape only; retained web implementation. | `eventDisplay.test.ts`, existing web datetime tests, SQL 069/070 harnesses. | Fixed cross-platform |
 | Events | Event end timestamp / client | `event_end_at` is server-derived from Chicago date/end-time and cannot be client overridden. | Continues to write date/time shape only. | Continues to write date/time shape only. | 070 recreates the existing trigger for every INSERT/UPDATE, overwriting direct values. | Existing derivation trigger. | Follow-up migration avoids editing committed 069. | `test_070_cross_platform_event_permission_parity.sql`. | Fixed in backend |
@@ -58,40 +58,92 @@ The current patch only changes the rows marked **Fixed** below.
 | Direct links / stale cache | Event, profile, conversation and notification targets | Direct rows are RLS guarded; selected-event access loss drops cache before refetch, preventing payload flash. | event detail routes + `lib/studentSynchronization.ts` | event detail hooks + `eventSync.ts` | RLS in 057/059/069/070 | SQL event RLS and cache-removal tests. | Fixed cross-platform for confirmed event gap; otherwise already correct |
 | Admin/officer capability | Student vs platform-admin and officer-only actions | Existing separate admin and student gates remain deliberately separate; no shared client-side bypass is introduced. | `services/accessService.ts`, officer hooks | `platformAdminGuard.ts`, admin server actions | `053_platform_admin_accounts.sql`, `056_atomic_admin_mutations.sql`, `058_admin_restrictions.sql` | Existing admin/restriction suites; no change. | Already correct cross-platform |
 
-## Open product decision — members-only preview payload
+## Resolved — members-only club-profile presentation (founder, 2026-08-05)
 
-Raised by the pre-merge verification of PR #29. **No behavior was changed; this
-needs a founder decision before merge.**
+The question raised by the previous pass ("does the members-only preview keep
+full description/location, or drop to title + date only?") has been **resolved by
+the founder in favour of the complete presentation**, matching mobile.
 
-`get_club_profile_events` returns the members-only preview to a club
-non-member with `can_open = false`, which is the intended "permitted preview".
-That preview row currently carries the event's **`description`, `location`,
-`building`, `room`, `event_date`, `start_time` and `end_time`** in full. It
-deliberately blanks `activity_tags` and `interest_tags` for the same row, and
-the web feed separately zeroes `attendee_count`/`attendee_preview`, so the
-withholding of some fields but not others looks like a conscious choice rather
-than an oversight.
+A club non-member sees the **complete** members-only event on the club profile:
+image, title, full description, date, start and end time, building, room,
+location, club identity, and the red "Members only" badge. Nothing is redacted.
 
-Verified on the local stack: a non-member's club-profile response contained
-`"description": "Members only secret plan"` and `"location": "Room 204"`, and
-the web `EventCard` renders `event.description`.
+Only the **actions** are restricted: the card does not open, RSVP/Going is
+refused, Save is not offered, and attendee identities and counts stay hidden.
+Tapping the restricted control returns the guidance message and runs no
+mutation.
 
-The two readings are both defensible:
+This is now locked in by an assertion in `test_069_web_permission_parity.sql`
+("members-only club-profile information was redacted from a non-member"), which
+was confirmed to fail when the RPC is altered to blank `description` for
+`can_open = false`. Row 16 above is updated accordingly.
 
-- **Preview is a teaser (current behavior).** Title, time and place are what
-  make a non-member want to join; a members-only event is not secret, just
-  members-only. Nothing actionable is exposed — no attendees, no tags, no
-  opening, no RSVP, no save.
-- **Preview is title-only.** Officers may reasonably write private logistics
-  into `description`/`room` and not expect a non-member to read them. Under
-  this reading the RPC should blank those fields when `can_open = false`, the
-  same way it already blanks tags.
+## Update 2 — full mobile→web permission parity sweep (2026-08-05)
 
-**Decision needed:** does the members-only preview keep full
-description/location/time, or drop to title + date only? The second option is a
-one-place change in the `get_club_profile_events` `CASE WHEN` that already
-exists for tags, and would need its own regression test. It is deliberately not
-implemented here because it changes product behavior.
+Mobile is the source of truth. The parity mechanism across almost every domain
+is that **both clients call the same Supabase RLS policies and RPCs**, so a
+client cannot diverge on an enforced rule — it can only diverge where a rule is
+implemented purely in client code. This sweep therefore concentrated on
+client-only surfaces (conditional rendering, query filters, cache invalidation,
+realtime listeners, navigation guards) and verified the rest reduces to shared
+backend enforcement.
+
+Columns: Domain | Feature | Actor | Preconditions | Mobile (source of truth) | Current web | Backend enforcement | Match | Existing implementation reused | Change required | Files changed | Tests | Status
+
+| Domain | Feature | Actor | Preconditions | Mobile (source of truth) | Current web | Backend enforcement | Match | Reused | Change | Files | Tests | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Auth | Signup / login / session restore | Any | — | `lib/supabase.ts`, `app/auth/*` | `app/actions/auth.ts`, `lib/authFlow.ts` | Supabase Auth owns credentials; `is_educational_email` gates domain | Match | Supabase Auth | None | — | existing auth suites | Already correct — no change |
+| Auth | Suspended / deleted / restricted account | Restricted user | account acted on | `services/accessService.ts` + `_layout` guard | `lib/auth/restrictionGuard.ts` + middleware | `my_access_state()` self-bound; RLS is the enforcement point | Match | `my_access_state` | None | — | restriction-guard tests | Already correct — no change |
+| Auth | Direct URL to a guarded page | Signed-out / restricted | — | Expo Router guard | `middleware.ts` catch-all matcher `/((?!_next/static\|_next/image\|favicon.ico\|...).*)` | RLS returns no rows regardless of route | Match | existing middleware | None | — | persona matrix direct-link rows | Already correct — no change |
+| Home | Posts (private account, blocked, lifecycle) | Any student | — | `services/postService.ts` | `hooks/useHomePostsFeed.ts` | 069 `posts: read respecting privacy, blocking, and lifecycle` | Match | single posts policy | None | — | existing post/block suites | Already correct — no change |
+| Home | Members-only event excluded from feed | Non-member | event `members` | RLS-governed feed | RLS-governed feed | 070 `events: visibility-aware read` | Match | event predicate | None | — | 069 harness; browser-verified non-member Home | Already correct — no change |
+| Home | Selected event excluded everywhere | Unselected / non-member | event `specific` | RLS-governed | RLS-governed | 070 caller-bound predicate | Match | event predicate | None | — | 069 harness + persona matrix | Already correct — no change |
+| Events | Members-only club-profile card shows full info | Non-member | on club profile | Card shows image, title, date, times, location, red badge; no description field in the mobile card model | Card shows image, title, **description**, date, times, location, club identity, red badge | `get_club_profile_events` returns the full row with `can_open=false` | Match (web is a superset by design; founder confirmed nothing may be redacted) | existing RPC | None — do not redact | — | `eventAccess.test.ts` | Already correct — no change |
+| Events | Restricted card does not open | Non-member | `can_open=false` | `onPress` → `onRestricted()`, no navigation | `openEvent` → `onRestricted?.()`, no navigation | RLS would return no row anyway | Match | existing handler | None | — | `eventAccess.test.ts` | Already correct — no change |
+| Events | Restricted RSVP / Going control | Non-member | `can_open=false` | Control routes to `onRestricted` | Control routes to `onRestricted`; label "Join to RSVP" | `can_current_user_mutate_event_rsvp` rejects | Match | existing handler | None to mechanics | — | 069 harness; persona matrix | Already correct — no change |
+| Events | Restricted-control guidance copy | Non-member | taps restricted control | Static toast: "This event is for club members only…" | **Was** the same static string; **now** dynamic per founder | n/a (copy) | Mismatch vs founder spec | existing `eventRestrictionMessage` + existing Toast | Web now emits "Join {Club Name} to be able to attend this event." | `lib/permissions/eventAccess.ts`, `components/clubs/ClubProfileClient.tsx` | `eventAccess.test.ts` (5 cases incl. trim + fallback) | Fixed in web |
+| Events | Save on a restricted card | Non-member | `can_open=false` | No Save control on the club-profile card | Save button already gated by `event.can_open` and not rendered | `saved_events` RLS requires event access | Match | existing gate | None | — | `eventAccess.test.ts` `canSaveEvent` | Already correct — no change |
+| Events | Going count / attendee identities | Non-member | members-only | Not rendered on the club-profile card | `can_view_attendees=false`, counts zeroed, "Join the club to view attendees." | `event_rsvps` SELECT bound to event access | Match | existing mapping | None | — | 069 harness attendee rows | Already correct — no change |
+| Events | Red audience badge placement | Any eligible viewer | restricted visibility | Badge keyed to **visibility**, rendered once on the image | `EventAudienceBadge` keyed to `event.visibility`, rendered once | n/a | Match | existing badge | None | — | existing tests | Already correct — no change |
+| Events | Join transition | Non-member → member | joins club | Membership refresh re-runs RLS reads | `useClubRealtime` removes + invalidates membership caches | `club_members` drives the predicate live | Match | existing realtime hook | None | — | 069 harness join case | Already correct — no change |
+| Events | Leave transition | Member → non-member | leaves club | Caches cleared, then refetch | Same clear-then-refetch | RLS revokes immediately | Match | existing hook | None | — | 069 harness leave case | Already correct — no change |
+| Events | Officer create / edit / delete | Officer vs member | — | Live `club_members` re-check before mutating | `useOfficerClubs` + server re-check | `is_club_officer` on INSERT/UPDATE/DELETE | Match | `is_club_officer` | None | — | 069 harness (non-officer + demoted officer) | Already correct — no change |
+| Events | Historical selected recipient | Former member | still on audience | IDs restored in `getEventForEdit` | IDs preserved in the edit hook | 070 validates only newly added IDs | Match | audience trigger | None | — | 070 harness; persona matrix | Already correct — no change |
+| Events | Expiration boundary | Any | `event_end_at` reached | `isEventPastAt` `endMs <= now` | identical semantics | `event_end_at > now()` for RSVP mutation | Match | canonical helper | None | — | boundary tests + 069 harness | Already correct — no change |
+| Posts | Comments / likes / tags / reporting | Author, viewer | — | `services/postService.ts`, `reportService.ts` | `usePostActions.ts`, `useReport.ts` | 057/064/069 policies | Match | existing policies | None | — | existing suites | Already correct — no change |
+| Clubs | Join / leave | Any student | — | `leave_club` RPC | `leave_club` RPC | race-safe RPC + 054 last-officer trigger | Match | same RPC | None | — | existing club tests | Already correct — no change |
+| Clubs | Officer assignment / removal | Officer | — | `add_club_officer` / `remove_club_officer` | **same two RPCs** | RPCs authorize internally | Match | same RPCs | None | — | existing tests | Already correct — no change |
+| Clubs | Club editing | Officer | — | direct `clubs` update | direct `clubs` update | `clubs FOR UPDATE USING (is_club_officer(id))` | Match | existing policy | None | — | — | Already correct — no change |
+| Profiles | Private profile / pending vs accepted follower | Viewer | target private | RLS-governed reads | RLS-governed; privacy flags drive UI only | 026/057 policies | Match | existing policies | None | — | existing profile suites | Already correct — no change |
+| Social | Block / unblock | Either party | — | `block_user`, `unblock_user`, `current_user_blocks`, `get_my_blocked_users`, `target_is_blocked_from_current_user` | **identical five RPCs** | 057 block model | Match | same RPCs | None | — | `blocking.test.ts` | Already correct — no change |
+| Messages | Sending / reading / participation | Participant | — | direct `messages` insert | direct `messages` insert | messages RLS + `can_post_in_channel` | Match | same policies | None | — | existing message tests | Already correct — no change |
+| Messages | Former member / former officer access | Former participant | removed | membership triggers remove participant rows | `useClubRealtime` drops `messages`/`conversationHub`/`clubChannels`/`chatDetails` | participant RLS | Match | existing hook | None | — | existing tests | Already correct — no change |
+| Messages | Group management (add/remove participant, archive, invitations) | Participant | — | RPCs exist and are used | **web does not implement these features** | RPCs authorize internally when called | Not a permission mismatch — a feature-scope gap | — | None (building them is feature work, not parity) | — | — | Product decision required |
+| Search | People / clubs scope, blocked and restricted filtering | Any student | — | `search_discovery` etc. | **same RPCs** | caller-bound, block/restriction aware | Match | same RPCs | None | — | existing tests | Already correct — no change |
+| Notifications | Recipient eligibility and event-target filtering | Recipient | — | RLS-filtered | RLS-filtered | 070 notifications policy | Match | single policy | None | — | 069 harness (with positive control) | Already correct — no change |
+| Saved content | Access lost after audience change | Former recipient | — | roots removed before refetch | roots removed before refetch | `saved_events` RLS | Match | existing eventSync | None | — | 069 harness | Already correct — no change |
+| Realtime / cache | Officer promotion / demotion, join, leave | Any | club change | `useClubRealtimeSync` + officer-status refresh | `useClubRealtime` removes + invalidates `officerClubs`, `clubMemberList`, `myClubs`, chat roots | `club_members` is authoritative | Match | existing hook | None | — | existing tests | Already correct — no change |
+| Realtime / cache | Attendee list after access change | Any | campus sync fires | `eventAttendees` is in mobile's invalidate roots | **was missing** from web's invalidate roots (only in the clear path) | RLS still filters on refetch | Mismatch | existing roots list | Added `eventAttendees` to web roots | `lib/studentSynchronization.ts` | `studentSynchronization.test.ts` | Fixed in web |
+| Realtime / cache | Discovery search after block / restriction / deletion | Any | campus sync fires | `discoverySearch` is in mobile's invalidate roots | **was never invalidated** on web (30s stale window) | `search_discovery` filters on refetch, so no leak — but the cached page could keep showing a now-hidden person | Mismatch | existing roots list | Added `discoverySearch` to web roots | `lib/studentSynchronization.ts` | `studentSynchronization.test.ts` | Fixed in web |
+
+### Observations recorded, deliberately not acted on
+
+1. **Restricted detail-view copy differs across platforms.** Web's
+   `EventDetailModal` shows "This event is for club members only. Join the club
+   to RSVP and view attendees."; mobile's event detail shows "Join the club to
+   RSVP". Both are passive state labels, not the restricted-control response the
+   founder specified, and a non-member cannot reach either view (the card does
+   not open). Changing them was out of scope; flagging for a copy decision.
+2. **Mobile's club-profile toast still uses the old static string.** The founder
+   specified the new dynamic message in the context of web. Mobile is the source
+   of truth and was not edited — and any mobile copy change would need an OTA,
+   which is not authorized. If the founder wants the wording identical on both
+   platforms, that is a separate mobile task.
+3. **`clubs FOR UPDATE` has `USING` but no `WITH CHECK`** (001). An officer could
+   in principle update columns such as `university_id` on their own club. This is
+   identical on both platforms, so it is not a parity defect, and adding a policy
+   would have created the overlapping RLS this task forbids. Raised for a
+   separate hardening task.
 
 ## Genuine product ambiguities
 

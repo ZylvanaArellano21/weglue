@@ -56,9 +56,24 @@ export function eventAudienceLabel(audience: EventAudience): string | null {
   return null;
 }
 
-export function eventRestrictionMessage(restriction: EventRestriction): string | null {
+/**
+ * Guidance shown when someone taps a restricted event control. The members-only
+ * copy names the club, because "join the club" is only actionable if the person
+ * can tell which club is being talked about — a club profile is reachable from
+ * search, a shared link, or another member's profile.
+ *
+ * `clubName` is optional so an unnamed caller still gets a sensible sentence
+ * rather than "Join undefined to ...".
+ */
+export function eventRestrictionMessage(
+  restriction: EventRestriction,
+  clubName?: string | null,
+): string | null {
   if (restriction === "members_only") {
-    return "This event is for club members only. Join the club to RSVP and view attendees.";
+    const name = (clubName ?? "").trim();
+    return name
+      ? `Join ${name} to be able to attend this event.`
+      : "Join this club to be able to attend this event.";
   }
   if (restriction === "selected_members_only") {
     return "This event is available only to selected club members.";

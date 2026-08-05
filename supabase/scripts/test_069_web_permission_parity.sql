@@ -208,6 +208,16 @@ $$;
 RESET ROLE;
 -- Seed the payloads an unauthorized caller must never receive. Written as the
 -- BYPASSRLS harness owner so the seed itself is not the thing under test.
+-- Founder decision (2026-08-05): the members-only club-profile card is a
+-- COMPLETE presentation for a non-member — nothing is redacted. Give the
+-- members-only event real content so the assertion below is meaningful.
+UPDATE public.events
+   SET description = 'Full members-only description',
+       location = 'Main Hall',
+       building = 'Building A',
+       room = '204'
+ WHERE id = '30000000-0000-0000-0000-000000000002';
+
 INSERT INTO public.event_activities (event_id, activity) VALUES
   ('30000000-0000-0000-0000-000000000003', 'volleyball');
 INSERT INTO public.event_interests (event_id, interest) VALUES
@@ -338,6 +348,37 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.events
               WHERE id = '30000000-0000-0000-0000-000000000003') THEN
     RAISE EXCEPTION '069: outsider reached a selected event by direct id';
+  END IF;
+END;
+$$;
+
+-- Members-only club-profile presentation is COMPLETE for a non-member. This is
+-- the founder's resolution of the preview question: the card is a full event
+-- presentation carrying a red "Members only" badge, and only the ACTIONS are
+-- restricted. A future change that starts blanking these fields must fail here.
+DO $$
+DECLARE
+  v_row record;
+BEGIN
+  SELECT * INTO v_row
+    FROM public.get_club_profile_events('20000000-0000-0000-0000-000000000001')
+   WHERE id = '30000000-0000-0000-0000-000000000002';
+
+  IF v_row IS NULL THEN
+    RAISE EXCEPTION '069: non-member lost the members-only club-profile card entirely';
+  END IF;
+  IF v_row.can_open IS DISTINCT FROM false THEN
+    RAISE EXCEPTION '069: members-only card must stay action-restricted for a non-member';
+  END IF;
+  IF v_row.description IS DISTINCT FROM 'Full members-only description'
+     OR v_row.location IS DISTINCT FROM 'Main Hall'
+     OR v_row.building IS DISTINCT FROM 'Building A'
+     OR v_row.room IS DISTINCT FROM '204'
+     OR v_row.event_date IS NULL
+     OR v_row.start_time IS NULL
+     OR v_row.end_time IS NULL
+     OR v_row.event_end_at IS NULL THEN
+    RAISE EXCEPTION '069: members-only club-profile information was redacted from a non-member';
   END IF;
 END;
 $$;
