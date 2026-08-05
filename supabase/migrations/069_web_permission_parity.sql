@@ -1,5 +1,5 @@
 -- ============================================================================
--- 067 — Web permission parity: canonical event expiry and audience enforcement
+-- 069 — Web permission parity: canonical event expiry and audience enforcement
 --
 -- Mobile continues to write event_date/start_time/end_time exactly as shipped.
 -- This migration derives event_end_at from those columns in America/Chicago,

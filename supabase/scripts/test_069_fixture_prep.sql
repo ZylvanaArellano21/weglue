@@ -1,5 +1,5 @@
 -- Minimal bridge from the existing 057 production-shaped security fixture to
--- the 063 content-lifecycle baseline. Used only by the local 067 harness; it
+-- the 063 content-lifecycle baseline. Used only by the local 069 harness; it
 -- does not replace migration testing on a fully reset Supabase stack.
 
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS building text;
@@ -25,7 +25,7 @@ AS $$ SELECT true $$;
 
 -- The production base schema enables RLS on these event tables. The compact
 -- 057 fixture deliberately omits unrelated pre-057 policies, so reproduce the
--- toggle here before the 067 policies are exercised under `authenticated`.
+-- toggle here before the 069 policies are exercised under `authenticated`.
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.event_activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.event_interests ENABLE ROW LEVEL SECURITY;

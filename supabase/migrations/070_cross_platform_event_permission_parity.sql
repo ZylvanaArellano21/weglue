@@ -1,7 +1,7 @@
 -- =============================================================================
--- 068 — Cross-platform event permission parity hardening
+-- 070 — Cross-platform event permission parity hardening
 --
--- 067 is retained unchanged because it is a committed migration. This
+-- 069 is retained unchanged because it is a committed migration. This
 -- follow-up tightens its canonical enforcement without changing the established
 -- mobile write shape: event_date + end_time remain the only lifecycle inputs.
 -- =============================================================================
