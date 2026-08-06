@@ -41,7 +41,60 @@ export interface ThreadPage {
 const MESSAGE_SELECT =
   'id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url)';
 
-function mapMessage(m: any): ThreadMessage {
+export interface SharedIdentity {
+  id: string;
+  username: string;
+  full_name: string | null;
+  avatar_url: string | null;
+}
+
+/**
+ * Minimal structural identity for the people in ONE conversation the viewer
+ * already participates in (migration 074). Used only to fill in what the
+ * profiles policy removes: a blocked person is hidden from `profiles` in both
+ * directions, so `profiles!sender_id(...)` embeds as null and their existing
+ * messages would otherwise render with no name and no avatar.
+ *
+ * Not a profile bypass. The RPC is caller-bound, refuses non-participants,
+ * returns only id/username/full_name/avatar_url for this conversation, and
+ * discloses nothing about who blocked whom.
+ */
+export async function getConversationSharedIdentities(
+  conversationId: string,
+): Promise<Map<string, SharedIdentity>> {
+  const { data, error } = await supabase.rpc('conversation_shared_identities', {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
+  return new Map(
+    ((data ?? []) as any[]).map((row) => [
+      row.id as string,
+      {
+        id: row.id as string,
+        username: (row.username ?? '') as string,
+        full_name: row.full_name ?? null,
+        avatar_url: row.avatar_url ?? null,
+      },
+    ]),
+  );
+}
+
+/**
+ * Senders in this conversation whose ATTACHMENT payload the viewer may not
+ * read, because of a block in either direction (074). Symmetric, so it never
+ * reveals the direction. Presentation only: the storage policy refuses the
+ * bytes independently of anything this client believes.
+ */
+export async function getConversationRestrictedSenders(conversationId: string): Promise<string[]> {
+  const { data, error } = await supabase.rpc('conversation_restricted_senders', {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
+  return ((data ?? []) as string[]) ?? [];
+}
+
+function mapMessage(m: any, identities?: Map<string, SharedIdentity>): ThreadMessage {
+  const shared = m.sender_id ? identities?.get(m.sender_id) : undefined;
   return {
     id: m.id,
     conversation_id: m.conversation_id,
@@ -60,9 +113,9 @@ function mapMessage(m: any): ThreadMessage {
     created_at: m.created_at,
     sender: {
       id: m.profiles?.id ?? m.sender_id ?? '',
-      username: m.profiles?.username ?? '',
-      full_name: m.profiles?.full_name ?? null,
-      avatar_url: m.profiles?.avatar_url ?? null,
+      username: m.profiles?.username ?? shared?.username ?? '',
+      full_name: m.profiles?.full_name ?? shared?.full_name ?? null,
+      avatar_url: m.profiles?.avatar_url ?? shared?.avatar_url ?? null,
     },
   };
 }
@@ -111,10 +164,11 @@ export async function getThreadMessages(
   query = channelId ? query.eq('channel_id', channelId) : query.is('channel_id', null);
   if (cursor) query = query.lt('created_at', cursor);
 
-  const [{ data, error }, hiddenIds, clearedBefore] = await Promise.all([
+  const [{ data, error }, hiddenIds, clearedBefore, identities] = await Promise.all([
     query,
     getHiddenMessageIds(conversationId),
     getClearedBefore(conversationId, userId),
+    getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
 
@@ -125,7 +179,7 @@ export async function getThreadMessages(
   });
 
   return {
-    messages: rows.map(mapMessage),
+    messages: rows.map((m) => mapMessage(m, identities)),
     next_cursor: (data ?? []).length === PAGE_SIZE ? (data as any[])[(data as any[]).length - 1].created_at : null,
   };
 }
@@ -455,15 +509,16 @@ export async function getConversationMedia(
     .is('deleted_at', null)
     .in('message_type', ['image', 'video']);
   if (channelId) q = q.eq('channel_id', channelId);
-  const [{ data, error }, hiddenIds, clearedBefore] = await Promise.all([
+  const [{ data, error }, hiddenIds, clearedBefore, identities] = await Promise.all([
     q.order('created_at', { ascending: false }).limit(200),
     getHiddenMessageIds(conversationId),
     getClearedBefore(conversationId, userId),
+    getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
   return ((data ?? []) as any[])
     .filter((m) => !hiddenIds.has(m.id) && (!clearedBefore || new Date(m.created_at) > new Date(clearedBefore)))
-    .map(mapMessage);
+    .map((m) => mapMessage(m, identities));
 }
 
 export async function getConversationFiles(
@@ -478,15 +533,16 @@ export async function getConversationFiles(
     .is('deleted_at', null)
     .eq('message_type', 'file');
   if (channelId) q = q.eq('channel_id', channelId);
-  const [{ data, error }, hiddenIds, clearedBefore] = await Promise.all([
+  const [{ data, error }, hiddenIds, clearedBefore, identities] = await Promise.all([
     q.order('created_at', { ascending: false }).limit(200),
     getHiddenMessageIds(conversationId),
     getClearedBefore(conversationId, userId),
+    getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
   return ((data ?? []) as any[])
     .filter((m) => !hiddenIds.has(m.id) && (!clearedBefore || new Date(m.created_at) > new Date(clearedBefore)))
-    .map(mapMessage);
+    .map((m) => mapMessage(m, identities));
 }
 
 export interface SharedCalendarEvent {

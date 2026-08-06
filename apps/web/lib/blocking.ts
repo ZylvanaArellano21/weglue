@@ -100,6 +100,11 @@ export async function isInteractionBlocked(targetUserId: string): Promise<boolea
 
 export const UNAVAILABLE_TITLE = "This account isn’t available";
 export const UNAVAILABLE_BODY = "This account can’t be viewed right now.";
+// Kept byte-identical to apps/mobile/lib/blockPrompts.ts.
+export const ATTACHMENT_UNAVAILABLE_TEXT = "This attachment is no longer available.";
+export const YOU_BLOCKED_TITLE = "You blocked this student";
+export const YOU_BLOCKED_BODY =
+  "You won’t see their profile, posts or weekly events while they’re blocked. Unblock to see them again.";
 export const BLOCKED_EMPTY_TITLE = "You haven’t blocked anyone";
 export const BLOCKED_EMPTY_BODY =
   "People you block will appear here. They won’t be told, and you can unblock them at any time.";

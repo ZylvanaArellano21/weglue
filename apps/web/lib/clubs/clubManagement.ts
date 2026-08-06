@@ -140,22 +140,48 @@ export interface ClubMemberRow {
   joined_at: string;
 }
 
+/**
+ * A club is a legitimate shared context: two students who have blocked each
+ * other stay in it, and each still needs to see who the members and officers
+ * are. `profiles!inner` used to drop a blocked person's row entirely (058 hides
+ * the profile row in BOTH directions), so the person silently disappeared from
+ * the list and the club looked smaller than it is.
+ *
+ * Membership rows come from `club_members`, whose SELECT rule is unchanged.
+ * Display identity comes from the narrow, caller-bound `club_shared_identities`
+ * RPC (074): id, username, full_name, avatar_url, role for the CURRENT members
+ * of this one club and nothing else — no bio, posts, events or follow state, and
+ * no way to ask about an arbitrary user. The normal profile stays unreadable.
+ */
 export async function getClubMemberList(clubId: string): Promise<ClubMemberRow[]> {
   const supabase = getSupabaseBrowser();
-  const { data, error } = await supabase
-    .from("club_members")
-    .select("user_id, role, joined_at, profiles!inner(id, username, full_name, avatar_url)")
-    .eq("club_id", clubId)
-    .order("joined_at", { ascending: true });
+  const [{ data, error }, { data: identityRows, error: identityError }] = await Promise.all([
+    supabase
+      .from("club_members")
+      .select("user_id, role, joined_at")
+      .eq("club_id", clubId)
+      .order("joined_at", { ascending: true }),
+    supabase.rpc("club_shared_identities", { p_club_id: clubId }),
+  ]);
   if (error) throw error;
-  return ((data ?? []) as any[]).map((m) => ({
-    id: m.profiles.id,
-    username: m.profiles.username,
-    full_name: m.profiles.full_name,
-    avatar_url: m.profiles.avatar_url,
-    role: m.role === "officer" ? "officer" : "member",
-    joined_at: m.joined_at,
-  }));
+  if (identityError) throw identityError;
+  const identities = new Map<string, any>(
+    ((identityRows ?? []) as any[]).map((row) => [row.id as string, row])
+  );
+  return ((data ?? []) as any[])
+    .map((m) => {
+      const identity = identities.get(m.user_id);
+      if (!identity) return null;
+      return {
+        id: m.user_id,
+        username: identity.username,
+        full_name: identity.full_name,
+        avatar_url: identity.avatar_url,
+        role: m.role === "officer" ? "officer" : "member",
+        joined_at: m.joined_at,
+      } as ClubMemberRow;
+    })
+    .filter((row): row is ClubMemberRow => row !== null);
 }
 
 // Officer removes a member. A plain delete guarded by RLS (only officers of the

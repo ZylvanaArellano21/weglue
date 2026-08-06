@@ -10,7 +10,7 @@ import {
   Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { MediaViewer, type ViewerMediaItem } from './MediaViewer';
@@ -35,6 +35,7 @@ import {
   type ThreadMessage,
 } from '../../services/messagingService';
 import { resolveAttachmentUrl } from '../../lib/chatAttachments';
+import { getConversationRestrictedSenders } from '../../services/messagingService';
 import { displayNameOrFallback } from '../../lib/displayName';
 import { markConversationRead } from '../../services/chatService';
 import { setActiveThread, clearActiveThread } from '../../lib/notifications/activeThread';
@@ -97,6 +98,21 @@ export function ConversationThread({
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
 
   const { data: page } = useThread(conversationId, channelId, currentUserId);
+  // Senders whose attachment payload this viewer may not read (a block in
+  // either direction). Keyed under 'messages' so the existing access-sync cache
+  // clearing already drops it and it re-resolves after an unblock. Symmetric,
+  // so it never tells the viewer who blocked whom. The storage policy is the
+  // enforcement point; this only chooses which card renders.
+  const { data: restrictedSenderIds } = useQuery({
+    queryKey: ['messages', 'restrictedSenders', conversationId],
+    queryFn: () => getConversationRestrictedSenders(conversationId!),
+    enabled: !!conversationId,
+    staleTime: 0,
+  });
+  const restrictedSenders = useMemo(
+    () => new Set(restrictedSenderIds ?? []),
+    [restrictedSenderIds],
+  );
   useConversationRealtime(conversationId, channelId);
 
   const pipeline = useSendPipeline({
@@ -180,7 +196,12 @@ export function ConversationThread({
   const mediaItems: ViewerMediaItem[] = useMemo(
     () =>
       serverMessages
-        .filter((m) => (m.message_type === 'image' || m.message_type === 'video') && m.attachment_url)
+        .filter(
+          (m) =>
+            (m.message_type === 'image' || m.message_type === 'video') &&
+            m.attachment_url &&
+            !(m.sender_id && restrictedSenders.has(m.sender_id)),
+        )
         .map((m) => ({
           messageId: m.id,
           source: m.attachment_url!,
@@ -188,7 +209,7 @@ export function ConversationThread({
           senderName: displayNameOrFallback(m.sender),
           sentAt: m.created_at,
         })),
-    [serverMessages],
+    [serverMessages, restrictedSenders],
   );
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
@@ -343,6 +364,7 @@ export function ConversationThread({
             attachmentUrl={m.attachment_url}
             attachmentName={m.attachment_name}
             attachmentSize={m.attachment_size}
+            attachmentUnavailable={!!m.sender_id && restrictedSenders.has(m.sender_id)}
             messageType={m.message_type}
             createdAt={m.created_at}
             isOwn={isOwn}

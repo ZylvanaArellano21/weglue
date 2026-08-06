@@ -116,8 +116,61 @@ function previewForMessage(message: { content: string | null; message_type: stri
   return message.content;
 }
 
-function messageFromRow(row: any): ThreadMessage {
+export interface SharedIdentity {
+  id: string;
+  username: string;
+  full_name: string | null;
+  avatar_url: string | null;
+}
+
+/**
+ * Minimal structural identity for the people in ONE conversation the viewer
+ * already participates in (074). Used only to fill in what the profiles policy
+ * removes: a blocked person is hidden from `profiles` in both directions, so
+ * `profiles!sender_id(...)` embeds as null and their existing messages would
+ * otherwise render with no name and no avatar.
+ *
+ * Not a profile bypass — the RPC returns id/username/full_name/avatar_url for
+ * this conversation's participants and active senders only, refuses
+ * non-participants outright, and discloses nothing about who blocked whom.
+ */
+export async function conversationSharedIdentities(
+  conversationId: string
+): Promise<Map<string, SharedIdentity>> {
+  const { data, error } = await getSupabaseBrowser().rpc("conversation_shared_identities", {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
+  return new Map(
+    ((data ?? []) as any[]).map((row) => [
+      row.id as string,
+      {
+        id: row.id as string,
+        username: (row.username ?? "") as string,
+        full_name: row.full_name ?? null,
+        avatar_url: row.avatar_url ?? null,
+      },
+    ])
+  );
+}
+
+/**
+ * Senders in this conversation whose ATTACHMENT payload the viewer may not
+ * read, because of a block in either direction (074). Symmetric, so it never
+ * reveals the direction. Presentation only: the storage policy refuses the
+ * bytes independently of anything the client believes.
+ */
+export async function conversationRestrictedSenders(conversationId: string): Promise<string[]> {
+  const { data, error } = await getSupabaseBrowser().rpc("conversation_restricted_senders", {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
+  return ((data ?? []) as string[]) ?? [];
+}
+
+function messageFromRow(row: any, identities?: Map<string, SharedIdentity>): ThreadMessage {
   const poll = Array.isArray(row.polls) ? row.polls[0] : row.polls;
+  const shared = row.sender_id ? identities?.get(row.sender_id) : undefined;
   return {
     id: row.id,
     conversation_id: row.conversation_id,
@@ -136,9 +189,9 @@ function messageFromRow(row: any): ThreadMessage {
     created_at: row.created_at,
     sender: {
       id: row.profiles?.id ?? row.sender_id ?? "",
-      username: row.profiles?.username ?? "",
-      full_name: row.profiles?.full_name ?? null,
-      avatar_url: row.profiles?.avatar_url ?? null,
+      username: row.profiles?.username ?? shared?.username ?? "",
+      full_name: row.profiles?.full_name ?? shared?.full_name ?? null,
+      avatar_url: row.profiles?.avatar_url ?? shared?.avatar_url ?? null,
     },
   };
 }
@@ -218,7 +271,12 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
 
 export async function getConversationDetails(conversationId: string, currentUserId: string): Promise<ConversationDetails | null> {
   const supabase = getSupabaseBrowser();
-  const [{ data: conversation, error }, { data: participantRows }] = await Promise.all([
+  // A shared conversation is a legitimate shared context: a blocked person stays
+  // a participant and their name must remain readable in the roster and on their
+  // existing messages. The profiles embed returns null for them (058 hides the
+  // row both ways), so 074's narrow, participant-gated identity RPC fills only
+  // that gap. The normal profile stays unreadable.
+  const [{ data: conversation, error }, { data: participantRows }, identities] = await Promise.all([
     supabase
       .from("conversations")
       .select("id, type, name, avatar_url, club_id, created_by, clubs(id, name, avatar_url)")
@@ -228,10 +286,24 @@ export async function getConversationDetails(conversationId: string, currentUser
       .from("conversation_participants")
       .select("user_id, joined_at, profiles!user_id(username, full_name, avatar_url)")
       .eq("conversation_id", conversationId),
+    conversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
   if (!conversation) return null;
-  const participants = (participantRows ?? []) as any[];
+  const participants = ((participantRows ?? []) as any[]).map((participant) => {
+    if (participant.profiles) return participant;
+    const shared = identities.get(participant.user_id);
+    return shared
+      ? {
+          ...participant,
+          profiles: {
+            username: shared.username,
+            full_name: shared.full_name,
+            avatar_url: shared.avatar_url,
+          },
+        }
+      : participant;
+  });
   const other = participants.find((participant) => participant.user_id !== currentUserId);
   const raw = conversation as any;
   const name = raw.type === "direct"
@@ -316,10 +388,16 @@ export async function getThread(conversationId: string, channelId: string | null
     channelId
   );
   if (cursor) query = query.lt("created_at", cursor);
-  const { data, error } = await query;
+  const [{ data, error }, identities] = await Promise.all([
+    query,
+    conversationSharedIdentities(conversationId),
+  ]);
   if (error) throw error;
   const rows = (data ?? []) as any[];
-  return { messages: rows.map(messageFromRow), next_cursor: rows.length === PAGE_SIZE ? rows[rows.length - 1].created_at : null };
+  return {
+    messages: rows.map((row) => messageFromRow(row, identities)),
+    next_cursor: rows.length === PAGE_SIZE ? rows[rows.length - 1].created_at : null,
+  };
 }
 
 export async function getMessageSuggestions(): Promise<Person[]> {
@@ -658,9 +736,12 @@ export async function getSharedMessages(conversationId: string, channelId: strin
     supabase.from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url)").eq("conversation_id", conversationId).eq("message_type", type).order("created_at", { ascending: false }).limit(100),
     channelId
   );
-  const { data, error } = await query;
+  const [{ data, error }, identities] = await Promise.all([
+    query,
+    conversationSharedIdentities(conversationId),
+  ]);
   if (error) throw error;
-  return ((data ?? []) as any[]).map(messageFromRow);
+  return ((data ?? []) as any[]).map((row) => messageFromRow(row, identities));
 }
 
 /**

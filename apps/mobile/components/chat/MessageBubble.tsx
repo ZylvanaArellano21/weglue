@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../lib/chatAttachments';
 import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from './chatTheme';
+import { ATTACHMENT_UNAVAILABLE_TEXT } from '../../lib/blockPrompts';
 
 interface Props {
   id: string;
@@ -14,6 +15,13 @@ interface Props {
   attachmentUrl: string | null;
   attachmentName?: string | null;
   attachmentSize?: number | null;
+  /**
+   * True when this sender's attachment payload is unavailable to the viewer
+   * (a block in either direction). The message row is still rendered, as
+   * historical context, with the canonical unavailable text instead of the
+   * media. Presentation only: the storage policy refuses the bytes regardless.
+   */
+  attachmentUnavailable?: boolean;
   messageType: string;
   createdAt: string;
   isOwn: boolean;
@@ -119,6 +127,7 @@ export function MessageBubble({
   attachmentUrl,
   attachmentName,
   attachmentSize,
+  attachmentUnavailable,
   messageType,
   createdAt,
   isOwn,
@@ -164,6 +173,17 @@ export function MessageBubble({
         ) : isCard ? (
           <TouchableOpacity onLongPress={longPress} activeOpacity={0.9}>
             {cardSlot}
+          </TouchableOpacity>
+        ) : attachmentUnavailable && (isMedia || isFile) ? (
+          <TouchableOpacity onLongPress={longPress} activeOpacity={0.9} style={styles.fileCard}>
+            <View style={styles.fileIconWrap}>
+              <Ionicons name="eye-off-outline" size={22} color={chatColors.textMuted} />
+            </View>
+            <View style={styles.fileMeta}>
+              <Text style={styles.fileName} numberOfLines={2}>
+                {ATTACHMENT_UNAVAILABLE_TEXT}
+              </Text>
+            </View>
           </TouchableOpacity>
         ) : isMedia ? (
           <View>
