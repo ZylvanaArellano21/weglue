@@ -288,9 +288,9 @@ Checked before adding the indexes: **zero** normalized name or handle collisions
 
 `grep` across both apps found **no** handle-based lookup anywhere: every club read, route, deep link, notification and saved reference uses the immutable club id. Making the handle university-scoped therefore introduces no ambiguity and required no route changes.
 
-### Open product decision — structural identity under a block
+### RESOLVED — structural identity under a block (founder, 2026-08-06, migration 074)
 
-Migration 058 hides a blocked person's `profiles` row in both directions. That satisfies "the profile must not load", but it also means a blocked person disappears entirely from club member lists, officer lists and group participant lists, rather than showing the basic identity (avatar, display name, username, club role) that this task asks to preserve. Exposing that identity means either loosening the profiles policy (which would then require both clients to render "User not found" themselves) or adding a shared-context identity RPC. Both are larger than a bug fix and change an approved privacy model, so this pass **diagnosed but did not change it**. Decision needed before it is implemented.
+The previous pass diagnosed but did not change this: migration 058 hides a blocked person's `profiles` row in both directions, so they disappeared entirely from club member lists, officer lists and group participant lists. The founder has resolved it in favour of **preserving minimal structural identity in authorized shared contexts only**. Implemented in migration 074 — see the dedicated section below.
 
 ## Genuine product ambiguities
 
@@ -300,3 +300,152 @@ Migration 058 hides a blocked person's `profiles` row in both directions. That s
 - The current product contract deliberately retains historical group/club-chat
   context across a personal block and keeps official club posts as shared-context
   content. These are explicit migration comments and were not broadened here.
+
+
+## Shared-Context Identity, Directional Blocking, and Message Content Types (2026-08-06, migration 074)
+
+Mobile is the source of truth; every change below lands on both platforms.
+
+### 1. Structural identity in authorized shared contexts
+
+**The general `profiles` SELECT policy (058) is unchanged.** A blocked person's
+profile, posts, weekly events and general search presence remain inaccessible in
+both directions. What 074 restores is only the identity a shared space needs in
+order to be readable at all.
+
+| Reader | Authorization | Returns | Refuses |
+| --- | --- | --- | --- |
+| `public.club_shared_identities(p_club_id)` | `auth.uid()` + `current_student_can_access_app()`. Mirrors the CURRENT `club_members` SELECT rule (`USING (true)` for authenticated) — neither broadened nor narrowed. | `id, username, full_name, avatar_url, role` for **current** members only | former members; ineligible accounts; anonymous callers |
+| `public.conversation_shared_identities(p_conversation_id)` | `auth.uid()` + `is_conversation_participant()` — the existing conversation rule | `id, username, full_name, avatar_url` for participants + active-message senders | non-participants get **zero rows**; private rosters never leak |
+
+Both take **only a scope argument** — there is no viewer parameter, so
+impersonation is structurally impossible (asserted: passing `p_viewer` is a
+hard error). Both are `SECURITY DEFINER` with a fixed empty `search_path`.
+Neither returns bio, posts, events, interests, activities, follow state,
+privacy flags, email, university or any administrative column. **Neither
+discloses that a block exists**: every current member/participant is returned,
+so the result is byte-identical with or without one.
+
+Client changes replace ONLY the data source that RLS had emptied:
+
+| Surface | Was | Now |
+| --- | --- | --- |
+| web `getClubMemberList` | `profiles!inner` — dropped the row, and `count` under-reported the club | `club_members` + `club_shared_identities` |
+| mobile `getClubMembers` | `profiles!inner`, username search via `profiles.username` | `club_members` (unchanged ordering/pagination) + `club_shared_identities`; search resolves through the same source |
+| web `getConversationDetail` | `profiles!user_id` embedded null | fills only the null participants |
+| web `getThread` / `getSharedMessages`, mobile `getThreadMessages` / media / files | `sender.username` fell back to `""` | falls back to shared identity |
+
+No list or card was redesigned.
+
+### 2. Directional blocked-profile outcomes
+
+| Viewer | Backend signal | State |
+| --- | --- | --- |
+| Was blocked | profile row absent; `current_user_blocks` = **false** | canonical `UNAVAILABLE_TITLE` / `UNAVAILABLE_BODY` — byte-identical to deleted and never-existed, so the state cannot disclose which occurred. No posts, weekly events, Follow, Message or Unblock. |
+| Created the block | profile row absent; `current_user_blocks` = **true** | new `YOU_BLOCKED_TITLE` / `YOU_BLOCKED_BODY` + **Unblock** |
+
+The directional question uses the **existing** `current_user_blocks` RPC — no
+new backend surface. It is true only for the person who created the block, so
+"target blocked viewer" is never expressed as a state. Unblock calls the same
+`useUnblockUser` / `unblockMutation` as the profile menu (web's two entry points
+now share one `runUnblock`), so there is exactly one unblock implementation and
+073's access-sync convergence applies unchanged. Both clients wait for the
+directional answer before rendering, so the blocker never flashes the generic
+state first.
+
+### 3. Every shared-message content type
+
+| Type | Native or reference | Owner | Protected by | Block applies | Behaviour while blocked | After unblock |
+| --- | --- | --- | --- | --- | --- | --- |
+| `text` | native | sender | `messages` participant RLS | **no** (by product contract) | history remains readable | unchanged |
+| `poll` | native + `polls`/`poll_options`/`poll_votes` | sender | messages RLS + 067 poll policies | **no** (same contract) | history remains readable | unchanged |
+| `image` | reference → Storage object | sender (`storage.objects.owner`) | `chat-attachments` SELECT policy → `private.active_chat_attachment_readable` | **yes (074)** | row kept; payload refused; canonical unavailable card | restored |
+| `video` | reference → Storage object | sender | same | **yes (074)** | same | restored |
+| `file` | reference → Storage object | sender | same | **yes (074)** | same | restored |
+| `shared_post` | reference → `posts.id` | post author | posts SELECT policy (069 + 073) | yes (already) | id-only probe returns nothing; "This post is no longer available." | restored |
+| `shared_event` | reference → `events.id` | event club | events SELECT policy (070) | yes (already) | id-only probe returns nothing; "This event is no longer available." | restored |
+
+Ordinary text and poll history is deliberately **not** hidden: 040 and 057
+record retaining shared conversation history across a personal block as the
+product contract. Profile and personal-content access remain blocked
+independently.
+
+### 4. Attachment / storage findings
+
+| # | Finding | Severity | Status |
+| --- | --- | --- | --- |
+| 1 | `chat-attachments` storage SELECT authorized on "active message + participant" and **never considered blocking**. Two students who had blocked each other but still shared a club or group chat could each fetch the other's image/video/file bytes — in-app, via a signed URL, or by replaying the object path straight at Storage. | **High — confirmed leak** | **Fixed (074)** — the existing helper is corrected in place, so the single existing storage policy starts refusing. Both directions. |
+| 2 | Mobile cached signed URLs for 60s in a module-level `Map` that was **never cleared on an access change**, so a URL minted while authorized stayed reusable after a block. | Low — bounded by TTL | **Fixed** — `clearSignedAttachmentCache()` now runs inside `clearPermissionSensitiveStudentContent`. |
+| 3 | `messages`, `clubMembers`/`clubMemberList` were not in either client's permission-sensitive clear roots, so the new identity and restricted-sender results could survive a block. | Low | **Fixed** — added to both roots lists. |
+
+Verified NOT vulnerable: the `chat-attachments` bucket is **private**
+(`public = false`), so no permanent public URL exists; `messages.attachment_url`
+stores the storage PATH, never a URL; both clients render exclusively through
+short-lived signed URLs (60s on each); no service-role key appears anywhere in
+mobile or in web client code.
+
+**Provenance limitation, stated plainly.** Every OFFICIAL share flow keeps a
+reference to the original record — `shared_post_id`, `shared_event_id`, and an
+attachment whose `storage.objects.owner` is the uploader — so the original
+owner's RLS is what decides access, and 074 secures all of them. If a third
+party screenshots, downloads and re-uploads someone else's media as a NEW file,
+the new object's owner is the re-uploader and the database stores no link back
+to the original author. **The application cannot infer ownership it does not
+record, and this document does not claim otherwise.** That is a content-policy
+and reporting problem, not an access-control one.
+
+### 5. Verification
+
+- Full local chain **001→074 including 067 and 068** — the first time these
+  harnesses have run against the chain production actually has. Four
+  environment gaps had to be bridged first (see
+  `test_full_chain_grants_bridge.sql`).
+- SQL harnesses green: 069, 070, 072, 073, 073 handle matrix (26/26), 074.
+- HTTP matrices **47/47** (`matrix_074_http.py`) as real `authenticated`
+  students over PostgREST and Storage: directional blocking, shared-context
+  identity, all message types, direct storage access, club manipulation.
+- Negative controls, both confirmed to FAIL the suite:
+  restoring 067's block-blind attachment helper → 074 catalog check fails and
+  HTTP D2 mints a signed URL for a blocked pair (the original leak);
+  removing the participant gate from the conversation reader → HTTP B6/B7 fail.
+- web 905/905, mobile 99/99, both type-checks clean, `next build` clean.
+
+### 6. Production duplicate preflight for 073 (read-only, 2026-08-06)
+
+Run against project `yoozrnosmqtaiksgcixc` ("We Glue") through an explicitly
+read-only transaction (`current_user = supabase_read_only_user`,
+`transaction_read_only = on`, `pg_is_in_recovery = false`). Production's ledger
+is **68 migrations, latest `068`** — 069, 070, 072, 073 and 074 are NOT applied.
+Nothing was created, updated, deleted, renamed or repaired.
+
+| Check | Result |
+| --- | --- |
+| Duplicate normalized names within a university | **0** |
+| Duplicate derived handles within a university | **0** |
+| Empty or NULL club names | **0** |
+| Empty derived handles | **0** |
+| Clubs with NULL `university_id` | **0** |
+| Valid cross-university duplicates | 0 (production has one university) |
+| **Handles 073 would rewrite** | **6 of 6** |
+
+**073 can be applied with no rename and no invented number.** But all six clubs
+change handle, and four currently carry a handle that does not match their own
+name — pre-existing drift from earlier renames that 073 corrects:
+
+| Club | Current handle | Derived handle |
+| --- | --- | --- |
+| Business Club | `business-club` | `BusinessClub` |
+| Chess Club | `stock-market-club` | `ChessClub` |
+| Clay Club | `nature-club` | `ClayClub` |
+| Dog Club | `dog-club` | `DogClub` |
+| Film club | `clay-club` | `Filmclub` |
+| Tech Club | `number-club` | `TechClub` |
+
+Re-verified for this pass: no handle-based lookup exists in either client. The
+handle appears only as display text (`@{club.handle}`) and as one ILIKE field in
+admin club search, alongside name. Every club read, route, deep link,
+notification and saved reference is keyed by the immutable club id, so the
+rewrite changes no route and no relationship.
+
+The exact queries are committed at
+`supabase/scripts/preflight_073_production_duplicates.sql`.

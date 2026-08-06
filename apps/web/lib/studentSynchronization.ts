@@ -37,6 +37,12 @@ export const STUDENT_CONTENT_QUERY_ROOTS = [
   "discoverySearch",
   "notifications",
   "unreadSummary",
+  // 074: shared-context identity, the restricted-sender signal and the club
+  // member roster are all permission-derived, so a block or an unblock changes
+  // what they legitimately return. Keyed under "messages" for the conversation
+  // queries, matching the key the message hooks already use.
+  "messages",
+  "clubMemberList",
 ] as const;
 
 /**

@@ -169,6 +169,21 @@ export async function uploadChatAttachment(opts: {
 const SIGNED_TTL_SECONDS = 60;
 const signedCache = new Map<string, { url: string; expiresAt: number }>();
 
+/**
+ * Drop every cached signed URL. Called whenever access may have changed (a
+ * block, an unblock, a removal from a conversation), because a cached URL was
+ * minted while the viewer WAS authorized and would otherwise stay usable for
+ * the rest of its TTL.
+ *
+ * Note the inherent bound: a Supabase signed URL is a self-contained token and
+ * cannot be revoked once issued. Clearing the cache stops this client reusing
+ * one; the authoritative control is that Storage refuses to MINT a new one, and
+ * the TTL is deliberately short (SIGNED_TTL_SECONDS).
+ */
+export function clearSignedAttachmentCache(): void {
+  signedCache.clear();
+}
+
 /** True when the stored attachment value is a private-bucket storage path. */
 export function isStoragePath(value: string | null | undefined): boolean {
   return !!value && !value.startsWith('http') && !value.startsWith('file:') && !value.startsWith('content:');
