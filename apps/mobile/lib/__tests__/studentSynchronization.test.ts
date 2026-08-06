@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { QueryClient } from '@tanstack/react-query';
 
-// `studentSynchronization` now clears the signed-attachment cache too, and
+// `studentSynchronization` now clears the local attachment cache too, and
 // `chatAttachments` reaches expo-modules-core (which expects React Native's
 // `__DEV__` global). Same stub the other mobile suites use.
-const clearSignedAttachmentCache = vi.fn();
+const clearAttachmentCache = vi.fn();
 vi.mock('../chatAttachments', () => ({
-  clearSignedAttachmentCache: () => clearSignedAttachmentCache(),
+  clearAttachmentCache: () => clearAttachmentCache(),
 }));
 
 import {
@@ -16,16 +16,16 @@ import {
   shouldRecoverOnMobileForeground,
 } from '../studentSynchronization';
 
-describe('signed attachment URLs are dropped on an access change', () => {
-  it('clears the signed-URL cache, not only React Query state', () => {
-    clearSignedAttachmentCache.mockClear();
+describe('cached attachment bytes are dropped on an access change', () => {
+  it('clears the local attachment cache, not only React Query state', () => {
+    clearAttachmentCache.mockClear();
     const queryClient = { removeQueries: vi.fn(), setQueryData: vi.fn() } as unknown as QueryClient;
 
     clearPermissionSensitiveStudentContent(queryClient);
 
-    // A URL minted while the viewer WAS authorized would otherwise stay usable
-    // for the rest of its TTL after a block.
-    expect(clearSignedAttachmentCache).toHaveBeenCalledTimes(1);
+    // Every fetch is re-authorized by Storage, but a file already written to
+    // the app cache would still render until it is removed.
+    expect(clearAttachmentCache).toHaveBeenCalledTimes(1);
   });
 });
 

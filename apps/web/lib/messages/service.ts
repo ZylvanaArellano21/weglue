@@ -565,12 +565,42 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
   return { path, name: file.name, size: file.size, mime: file.type || "application/octet-stream", type };
 }
 
-export async function signedAttachmentUrl(path: string | null): Promise<string | null> {
+/**
+ * Attachment delivery. AUTHORIZATION IS CHECKED WHEN THE FILE IS FETCHED.
+ *
+ * This used to call `createSignedUrl`. A Supabase signed URL is a
+ * self-contained token: Storage validates the signature and the expiry and
+ * serves the object WITHOUT re-evaluating the bucket's RLS policy. That was
+ * demonstrated, not assumed — a link minted while the viewer was authorized
+ * still returned HTTP 200 with the bytes after the sender blocked them.
+ *
+ * `download()` issues GET /storage/v1/object/authenticated/... carrying the
+ * viewer's own access token, so the `chat-attachments` SELECT policy — and
+ * therefore 074's blocking check — runs on EVERY request. A blocked viewer is
+ * refused immediately, with no window and nothing to replay.
+ *
+ * The returned value is a same-origin blob: URL. It is not a credential and
+ * cannot be handed to anyone else: it only resolves inside this browsing
+ * context, and it dies with the tab. Callers must revoke it (see
+ * `releaseAttachmentUrl`) so the blob is not retained after the message
+ * unmounts or access changes.
+ *
+ * What this does NOT do, and does not claim to do: recall a file the viewer
+ * already downloaded, screenshotted or re-shared before the block. Nothing
+ * server-side can.
+ */
+export async function attachmentObjectUrl(path: string | null): Promise<string | null> {
   if (!path) return null;
   if (/^https?:\/\//.test(path)) return path;
-  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).createSignedUrl(path, 60);
+  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).download(path);
   if (error) throw error;
-  return data.signedUrl;
+  if (!data) return null;
+  return URL.createObjectURL(data);
+}
+
+/** Frees a blob: URL created by `attachmentObjectUrl`. Safe to call with null. */
+export function releaseAttachmentUrl(url: string | null | undefined): void {
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
 export async function markConversationRead(conversationId: string): Promise<void> {

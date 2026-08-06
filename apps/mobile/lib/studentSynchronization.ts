@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { clearSignedAttachmentCache } from './chatAttachments';
+import { clearAttachmentCache } from './chatAttachments';
 
 // The Day 10E private broadcast is deliberately opaque. These are the only
 // student cache roots it can invalidate; it never writes received data into a
@@ -47,9 +47,10 @@ export function invalidateStudentContentQueries(queryClient: QueryClient): void 
 // A narrowed audience or removal is privacy-sensitive: React Query must not
 // keep the previous successful payload visible while a replacement query waits.
 export function clearPermissionSensitiveStudentContent(queryClient: QueryClient): void {
-  // Signed attachment URLs are not React Query state, so removing query roots
-  // would leave a URL minted under the OLD permissions usable until it expired.
-  clearSignedAttachmentCache();
+  // Locally cached attachment bytes are not React Query state. Every fetch is
+  // re-authorized by Storage, but a file already written to the app cache would
+  // still render, so the cache is dropped too.
+  void clearAttachmentCache();
   for (const root of [
     'homeEventsFeed',
     'eventDetail',

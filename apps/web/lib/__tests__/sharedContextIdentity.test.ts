@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 // ============================================================================
 // Shared-context structural identity + blocked attachments — web client half
@@ -103,6 +104,40 @@ describe("conversationRestrictedSenders", () => {
   it("propagates transport errors rather than assuming nothing is restricted", async () => {
     rpc.mockResolvedValue({ data: null, error: new Error("network") });
     await expect(conversationRestrictedSenders(CONVERSATION)).rejects.toThrow("network");
+  });
+});
+
+describe("attachment delivery is re-authorized on every fetch", () => {
+  const source = readFileSync(
+    new URL("../messages/service.ts", import.meta.url).pathname,
+    "utf8"
+  );
+  const client = readFileSync(
+    new URL("../../components/messages/MessagesClient.tsx", import.meta.url).pathname,
+    "utf8"
+  );
+
+  // A Supabase signed URL is a self-contained token: Storage serves it without
+  // re-evaluating the bucket policy, so one minted before a block still works
+  // afterwards. Proven end-to-end by matrix_attachment_replay.py; pinned here
+  // so nobody reintroduces it as a "simplification".
+  it("never mints a signed URL for attachment delivery", () => {
+    // Match the CALL, not the prose: the doc comment above the replacement
+    // deliberately names createSignedUrl to explain why it is gone.
+    expect(source).not.toContain(".createSignedUrl(");
+    expect(client).not.toContain(".createSignedUrl(");
+    expect(client).not.toContain("signedAttachmentUrl");
+  });
+
+  it("downloads through the authenticated endpoint instead", () => {
+    expect(source).toContain(".download(path)");
+    expect(source).toContain("export async function attachmentObjectUrl");
+  });
+
+  it("revokes the blob URL so it is not retained after unmount", () => {
+    expect(source).toContain("URL.revokeObjectURL");
+    // Every consumer must release what it created.
+    expect(client.split("releaseAttachmentUrl(").length - 1).toBeGreaterThanOrEqual(4);
   });
 });
 

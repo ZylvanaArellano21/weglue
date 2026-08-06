@@ -114,6 +114,32 @@ describe('the club member list uses the shared-identity source, not profiles!inn
   });
 });
 
+describe('attachment delivery is re-authorized on every fetch', () => {
+  const attachments = source('../../lib/chatAttachments.ts');
+
+  // Same defect as web: a signed URL minted before a block still works after
+  // it. Proven end-to-end by matrix_attachment_replay.py.
+  it('never mints a signed URL for delivery', () => {
+    // Match the CALL, not the prose: the header deliberately names
+    // createSignedUrl to explain why it is gone.
+    expect(attachments).not.toContain('.createSignedUrl(');
+  });
+
+  it('fetches through the authenticated storage endpoint with the viewer token', () => {
+    expect(attachments).toContain('/storage/v1/object/authenticated/');
+    expect(attachments).toContain('Authorization: `Bearer ${accessToken}`');
+  });
+
+  it('treats a non-200 as refused rather than trusting the written file', () => {
+    expect(attachments).toContain('if (result.status !== 200)');
+  });
+
+  it('clears the local cache on an access change', () => {
+    expect(attachments).toContain('export async function clearAttachmentCache');
+    expect(source('../../lib/studentSynchronization.ts')).toContain('clearAttachmentCache()');
+  });
+});
+
 describe('copy stays in lockstep with web', () => {
   it('unavailable-attachment wording matches the existing share-card family', () => {
     expect(ATTACHMENT_UNAVAILABLE_TEXT).toBe('This attachment is no longer available.');

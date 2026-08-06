@@ -216,6 +216,49 @@ MANIFEST = [
          criterion="shell",
          note="Runs after test_057_student_blocking on the same `wg` database, "
               "exactly as its header documents."),
+
+    # ---- PR #29 permission-parity family (069, 070, 072, 073, 074, 075).
+    #      These were written AFTER the fixture families and deliberately need
+    #      no fixture and no grants bridge: migration 075 gives the client roles
+    #      their table privileges, so `supabase db reset` alone is the whole
+    #      environment. Every one of them RAISEs on a failed assertion.
+    dict(file="test_069_web_permission_parity.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated (SET ROLE + request.jwt.claim.sub)",
+         criterion="raise",
+         note="Catalog + RLS behaviour for the canonical event predicate."),
+    dict(file="test_070_cross_platform_event_permission_parity.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated (SET ROLE + request.jwt.claim.sub)",
+         criterion="raise",
+         note="Caller-bound access, historical recipients, Chicago end timestamp."),
+    dict(file="test_072_protected_identity.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated (real PostgREST-shaped statements)",
+         criterion="raise",
+         note="Applies dependency DDL outside its transaction, so run it LAST "
+              "on a stack you are about to discard."),
+    dict(file="test_073_blocking_and_club_identity.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated (SET ROLE + request.jwt.claim.sub)",
+         criterion="raise",
+         note="Blocking overrides the club-tag exception; club name/handle identity."),
+    dict(file="test_073_handle_matrix.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated officer (SET ROLE)",
+         criterion="raise",
+         note="All 26 club-handle cases."),
+    dict(file="test_074_shared_context_identity.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated (SET ROLE + request.jwt.claim.sub)",
+         criterion="raise",
+         note="Shared-context identity readers and chat-attachment blocking."),
+    dict(file="test_075_client_table_privileges.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="privilege inventory for anon / authenticated",
+         criterion="raise",
+         note="Fresh-database permissions. Must pass with NO fixture and NO "
+              "grants bridge — that is the whole point of the file."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the

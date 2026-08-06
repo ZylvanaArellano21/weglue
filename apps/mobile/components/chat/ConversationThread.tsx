@@ -7,7 +7,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -34,7 +33,7 @@ import {
   newClientTag,
   type ThreadMessage,
 } from '../../services/messagingService';
-import { resolveAttachmentUrl } from '../../lib/chatAttachments';
+import { resolveAttachmentUrl, openAttachmentExternally } from '../../lib/chatAttachments';
 import { getConversationRestrictedSenders } from '../../services/messagingService';
 import { displayNameOrFallback } from '../../lib/displayName';
 import { markConversationRead } from '../../services/chatService';
@@ -225,14 +224,12 @@ export function ConversationThread({
     async (messageId: string) => {
       const msg = serverMessages.find((m) => m.id === messageId);
       if (!msg?.attachment_url) return;
-      const url = await resolveAttachmentUrl(msg.attachment_url);
-      if (!url) {
+      // Fetched through the authenticated endpoint, so Storage re-checks the
+      // viewer's CURRENT authorization; a blocked viewer gets nothing to open.
+      const opened = await openAttachmentExternally(msg.attachment_url);
+      if (!opened) {
         Alert.alert('Unavailable', 'This file could not be opened.');
-        return;
       }
-      // iOS Quick-Look-capable formats render in Safari; Android hands the
-      // file to the system browser/downloader with its registered viewers.
-      void Linking.openURL(url);
     },
     [serverMessages],
   );

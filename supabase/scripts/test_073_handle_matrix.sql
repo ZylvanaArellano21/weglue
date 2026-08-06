@@ -1,8 +1,9 @@
 -- =============================================================================
 -- Migration 073 — CLUB HANDLE MATRIX (26 cases)
 --
--- Run against a disposable local database on the FULL 001->074 chain with
--- test_full_chain_grants_bridge.sql applied first.
+-- Run against a disposable local database on the FULL 001->075 chain.
+-- No fixture and no grants bridge: migration 075 gives the client roles their
+-- table privileges, so `supabase db reset` alone is enough.
 --
 -- This VERIFIES the shipped 073 implementation; it does not redesign it. Every
 -- case is a real statement, and the officer cases are issued as the ordinary

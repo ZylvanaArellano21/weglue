@@ -18,9 +18,10 @@ Matrices covered:
 Usage:
     python3 supabase/scripts/matrix_074_http.py
 
-Requires: a running `supabase start` stack with the full 001->074 chain and
-test_full_chain_grants_bridge.sql applied. Uses the well-known LOCAL demo JWT
-secret only; no production credential is read, written or printed.
+Requires: a running `supabase start` stack with the full 001->075 chain.
+No grants bridge: migration 075 gives the client roles their table privileges.
+Uses the well-known LOCAL demo JWT secret only; no production credential is
+read, written or printed.
 """
 
 import base64

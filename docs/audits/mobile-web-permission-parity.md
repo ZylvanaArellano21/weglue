@@ -428,9 +428,16 @@ Nothing was created, updated, deleted, renamed or repaired.
 | Valid cross-university duplicates | 0 (production has one university) |
 | **Handles 073 would rewrite** | **6 of 6** |
 
-**073 can be applied with no rename and no invented number.** But all six clubs
-change handle, and four currently carry a handle that does not match their own
-name — pre-existing drift from earlier renames that 073 corrects:
+**073 can be applied with no rename and no invented number.**
+
+CORRECTION to the previous pass: applying 073 does **not** rewrite any existing
+handle. `trg_clubs_derive_handle` is a BEFORE INSERT OR UPDATE trigger, so it
+only fires when a club is created or edited; the two unique indexes are built
+over the values already stored. Verified on the full local chain — after 001→075
+the seeded clubs still hold their original hyphenated handles. The six rows
+below are the ones whose handle *will* change **the next time an officer edits
+that club**, not on the day 073 is applied. Four of them currently carry a handle
+that does not match their own name — pre-existing drift from earlier renames:
 
 | Club | Current handle | Derived handle |
 | --- | --- | --- |
@@ -449,3 +456,166 @@ rewrite changes no route and no relationship.
 
 The exact queries are committed at
 `supabase/scripts/preflight_073_production_duplicates.sql`.
+
+
+## Attachment Link Replay, Fresh-Database Permissions, Migration Order, Club Profile (2026-08-06)
+
+### 1. Old attachment links kept working after a block — CONFIRMED, then FIXED
+
+The founder's scenario was run exactly as written, and step 4 succeeded:
+
+| Step | Result |
+| --- | --- |
+| 1-2 Lola holds a working signed image/video/file link | HTTP 200, bytes returned |
+| 3 Silvana blocks Lola | — |
+| 4 **the same link is replayed** | **HTTP 200, bytes returned** |
+
+**Root cause.** A Supabase signed URL is a self-contained token. Storage
+validates its signature and expiry and serves the object *without* re-evaluating
+the bucket's RLS policy. Migration 074's blocking check was therefore correct and
+still bypassable by anyone who had kept a link — for the whole TTL, and for a
+link that could have been minted with any expiry the client asked for.
+
+**Fix — the official delivery path no longer mints a link at all.** Both clients
+now fetch `/storage/v1/object/authenticated/…` carrying the viewer's own access
+token, so the `chat-attachments` policy runs on **every request**:
+
+| | Was | Now |
+| --- | --- | --- |
+| web | `createSignedUrl(path, 60)` → `<img src=…>` | `storage.download(path)` → `blob:` URL, revoked on unmount |
+| mobile | `createSignedUrl` + in-memory URL cache | authenticated `downloadAsync` into an app-private cache file; non-200 is treated as refused |
+
+A `blob:` URL is not a credential: it resolves only inside that browsing context
+and dies with the tab. Android file opening keeps working through a new
+`openAttachmentExternally()` helper (`content://` grant via
+`FileSystem.getContentUriAsync`), so no call site lost behaviour.
+
+Proven by `supabase/scripts/matrix_attachment_replay.py` — **21/21**, including
+the replay itself as an *asserted* fact so nobody reverts to signed URLs, plus
+positive controls (the author and an unrelated participant still fetch), unblock
+restoration, removed participants, deleted messages and unauthenticated fetches.
+Browser-verified on a production build: while blocked the row renders
+"This attachment is no longer available." with **0 blob images and 0 signed
+URLs**; after unblock the image returns.
+
+**Not claimed:** We Glue cannot recall a file the viewer already downloaded,
+screenshotted or re-shared before the block. Nothing server-side can.
+
+### 2. A fresh database could not run the product — FIXED (migration 075)
+
+Every migration here assumed the old Supabase default privileges
+(anon/authenticated/service_role got full DML on each new public table);
+055/057/058/061/063 say so and REVOKE them back off the protected tables.
+Current Supabase images grant `Dxtm` only, so a database built from this chain
+had RLS policies everywhere and **no table privileges at all** — `authenticated`
+could not read `posts`, `profiles` or `clubs`, and PostgREST answered "permission
+denied" before any policy was consulted. A disaster-recovery rebuild would not
+have come up. It stayed invisible because production still carries the old
+defaults and the test fixture issued a blanket grant.
+
+**Migration 075 grants privileges derived mechanically from `pg_policy`** — role
+by role, table by table, command by command. A privilege is granted only where a
+policy already authorises that role for that command; tables with no client
+policy (admin audit, restrictions, deletion cases/jobs, email outbox, content
+lifecycle, push pipeline, rate limits, chat invitations) appear nowhere and stay
+unreachable. `user_blocks` is left to 057, which grants it SELECT and only
+SELECT. There is no `ON ALL TABLES` anywhere.
+
+`anon` is confined to the pre-authentication surface: SELECT on `universities`,
+`clubs`, `club_interests`, `app_config` and INSERT on `deletion_requests`.
+
+RPCs needed no change: of the 72 `supabase.rpc(...)` names both clients call, 65
+already had explicit EXECUTE grants and the remaining 7 are service-role admin
+routines that are correctly denied to students.
+
+Verified by `test_075_client_table_privileges.sql` on a database built from
+migrations **alone**. It is deliberately paired — ~90 positive checks that the
+product's tables are reachable, and negative checks that protected/admin/
+service-only tables are not, that `anon` cannot touch student content, that
+`user_blocks` stays RPC-only, and — the mechanical one — **that no client role
+holds a privilege without a policy authorising it**, which a blanket grant fails
+immediately. The migration re-runs the protected-table half of that as a
+fail-closed self-check, so a clean install aborts rather than shipping a readable
+audit log.
+
+`test_full_chain_grants_bridge.sql` is **deleted**: real migration coverage
+replaced it, and all six pre-existing harnesses now pass with no bridge.
+
+### 3. Migration 071 / PR #30 ordering — no renumbering needed
+
+Neither PR was modified. Analysis (`supabase/scripts/check_migration_order.py`,
+read-only, reads Git refs only):
+
+- **No duplicate versions.** 071 exists only in PR #30.
+- **No dependency either way.** 071 touches only the two pg_cron installer
+  functions; 069–075 never reference cron or vault.
+- PR #29 has an interior gap at 071 that it cannot see, and vice versa.
+- Production is at **068**, so every pending version is above the high-water
+  mark and a single `supabase db push` applies 069→075 in numeric order.
+
+Proven, not asserted: PR #30's 071 was copied into the local chain (never
+committed to this branch), `supabase db reset` applied
+`069,070,071,072,073,074,075` in order, and all seven SQL harnesses plus both
+HTTP matrices passed on that combined chain.
+
+**Approved deployment order**
+
+1. Merge PR #30 and PR #29 into `main` in either order — merge order does not matter.
+2. Verify `main` contains 069, 070, 071, 072, 073, 074, 075 with no gap.
+3. Apply **once**: `supabase db push` covering the whole 069→075 range.
+4. Only then deploy web / consider a mobile release.
+
+**The condition, and the only real hazard:** do not apply either PR's migrations
+to production on its own. Applying one alone raises the high-water mark and turns
+the other PR's versions into out-of-order inserts that `supabase db push` refuses
+without `--include-all`.
+
+### 4. Club profile stuck on its loading skeleton — DEV-SERVER ARTIFACT, with proof
+
+Diagnosed to a definite answer rather than left as "local only".
+
+**It is not data, not permissions, and not a failing query.** Every one of the
+eight requests `getClubProfile()` makes returns HTTP 200 as a real authenticated
+student, on a database built from migrations alone — driven request by request in
+the new `supabase/scripts/matrix_club_profile.py` (**11/11**, including a negative
+control that `anon` cannot read the roster). In the browser, 46 Supabase requests
+completed with zero errors while the page still showed the skeleton, and the
+React Query cache showed the club query had never been registered: the subtree
+never finished hydrating, so React kept the server-rendered output — the skeleton.
+
+**It is not the frontend source either.** A missing `<Suspense>` boundary around
+the `useSearchParams()`-reading body looked like the cause and appeared to fix it
+under `next dev`. It did not survive scrutiny:
+
+| Environment | Boundary | Result |
+| --- | --- | --- |
+| `next dev` | absent | skeleton (first observation) |
+| `next dev` | present | renders |
+| `next dev` | absent | skeleton |
+| **`next build` + `next start`** | **absent** | **renders** |
+| `next build` + `next start` | present | renders |
+| `next dev` (later, same source) | absent | renders |
+
+The dev result is **non-deterministic** and the production build renders
+correctly with the boundary absent — which is the shipped source. The failure
+tracks `next dev`'s on-demand route compilation (the dev log shows
+`✓ Compiled /club/[clubId]` on the same request that served the page), not the
+component. **No source change was kept**, because none of them was the fix. The
+same was re-checked for the messages thread: broken once under `next dev`,
+correct on the production build without any change.
+
+Recorded as an observation, deliberately not "fixed": `ClubProfileClient` and
+`MessagesClient` read `useSearchParams()` in a nested body without a Suspense
+boundary, while `UserProfileClient`, `OwnProfileClient` and `HomeClient` all have
+one and document why. Adding it is defensible practice — Next.js asks for it —
+but it fixes nothing observable here, so it belongs to a separate consistency
+task rather than to this one.
+
+### 5. Verification
+
+- Full clean chain 001→075 from migrations alone, no fixture, no bridge.
+- SQL harnesses: 069, 070, 072, 073, 073 handle matrix (26/26), 074, 075 — all green.
+- HTTP matrices: shared-context/blocking **47/47**, attachment replay **21/21**,
+  club-profile data path **11/11**.
+- All seven new/updated harnesses registered in `harness_manifest.py` (29 total).
+- web tsc clean, mobile tsc clean, web 913/913, mobile 103/103, `next build` clean.

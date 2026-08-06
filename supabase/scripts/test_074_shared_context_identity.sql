@@ -1,5 +1,6 @@
--- Run only against a disposable local database after the FULL 001->074 chain,
--- with test_full_chain_grants_bridge.sql applied first.
+-- Run only against a disposable local database after the FULL 001->075 chain.
+-- No fixture and no grants bridge: migration 075 gives the client roles their
+-- table privileges, so `supabase db reset` alone is enough.
 --
 -- Proves the three halves of migration 074 together, each with a positive
 -- control so a regression that simply hides everything cannot pass:
