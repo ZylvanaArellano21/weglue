@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { clientUuid } from '../lib/chatAttachments';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -382,10 +383,9 @@ export async function sendMessage(
 }
 
 export async function deleteMessage(messageId: string): Promise<void> {
-  const { error } = await supabase
-    .from('messages')
-    .delete()
-    .eq('id', messageId);
+  const { error } = await supabase.functions.invoke('delete-message', {
+    body: { messageId, idempotencyKey: clientUuid() },
+  });
 
   if (error) throw error;
 }

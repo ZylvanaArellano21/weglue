@@ -182,8 +182,8 @@ $$;
 -- ===========================================================================
 SELECT t_assert(
   (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public' AND p.proname LIKE 'admin\_tx\_%') = 22,
-  '1.1  all 22 atomic mutation RPCs exist'
+    WHERE n.nspname = 'public' AND p.proname LIKE 'admin\_tx\_%') >= 22,
+  '1.1  the Day 10A baseline atomic mutation RPCs exist (later additive admin transactions allowed)'
 );
 
 SET ROLE anon;
@@ -203,8 +203,10 @@ RESET ROLE;
 SELECT t_assert(
   (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public' AND p.proname LIKE 'admin\_tx\_%'
-      AND has_function_privilege('service_role', p.oid, 'EXECUTE')) = 22,
-  '1.4  service_role can execute all 22 (the server path)'
+      AND has_function_privilege('service_role', p.oid, 'EXECUTE')) =
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname LIKE 'admin\_tx\_%'),
+  '1.4  service_role can execute every atomic mutation RPC (the server path)'
 );
 SELECT t_assert(
   (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace

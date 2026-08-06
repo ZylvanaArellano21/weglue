@@ -57,6 +57,7 @@ INSERT INTO secdef_classification (proname, category, justification) VALUES
 ('my_access_state',                'shell_allowlisted','Returns the caller''s own sanitized access state (generic label, optional expiry, public support email). Cannot return an internal reason, administrator identity, history or correlation id.'),
 ('current_student_can_access_app', 'shell_allowlisted','Argument-free self check used by RLS and the clients. Discloses nothing about anyone else.'),
 ('delete_own_account_atomic',      'shell_allowlisted','Account deletion MUST remain available while restricted (App Store 5.1.1(v)). Deliberately ungated.'),
+('begin_message_deletion',          'internal','Day 10F sender privacy deletion: own-message removal remains available while restricted; every non-sender moderation branch is restriction-guarded.'),
 
 -- ── 3. INTERNAL — not student RPCs ─────────────────────────────────────────
 -- Trigger functions. Calling one directly raises "trigger functions can only be
@@ -148,6 +149,20 @@ INSERT INTO secdef_classification (proname, category, justification) VALUES
 ('is_account_restricted','internal','Per-user probe; service_role only.'),
 ('can_student_access_app','internal','Per-user probe; service_role only.'),
 ('safe_like_fragment','internal','Pure string helper.');
+
+-- Day 10E/10F student-readable helpers. These are deliberately not wrapper
+-- twins: each is either self-scoped or has its own explicit access predicate.
+INSERT INTO secdef_classification (proname, category, justification) VALUES
+('preview_chat_invitation','internal','Invitation-token preview; returns only safe invitation metadata for the supplied capability token.'),
+('can_manage_chat_invitation','internal','Read-only caller-role predicate for an official chat officer or custom-group creator.'),
+('content_is_student_visible','internal','Read-only lifecycle predicate used by RLS; returns no content.'),
+('get_message_suggestions','internal','Bounded, block-aware active-student suggestion query; returns empty for restricted callers.'),
+('search_message_people','internal','Bounded, block-aware active-student people search; returns empty for restricted callers.'),
+('get_my_club_recommendation_outcome','internal','Self-scoped recommendation outcome used by the active student Home flow.'),
+('my_sync_university_id','internal','Returns only the active caller''s university topic UUID for opaque synchronization.'),
+('search_message_content','internal','Participant-scoped message search with an explicit active-message predicate; returns empty for restricted callers.');
+INSERT INTO secdef_classification (proname, category, justification) VALUES
+('chat_attachment_available_to_sender','internal','Attachment-bind predicate permits only the caller''s own object in their current conversation and reveals no cross-user storage state.');
 
 GRANT SELECT ON secdef_classification TO authenticated;
 
@@ -344,6 +359,11 @@ INSERT INTO writer_exceptions VALUES
 ('handle_new_user',          'Trigger on auth.users; not client-invocable.'),
 ('before_user_created',      'GoTrue auth hook; not client-invocable.'),
 ('delete_own_user_data',     'Internal helper on the deletion path, which stays open while restricted.');
+-- Day 10F: a restricted/deletion-pending student may remove only their own
+-- message to reduce exposure. The same function blocks restricted actors from
+-- using an officer/group-admin branch against another participant.
+INSERT INTO writer_exceptions VALUES
+('begin_message_deletion',   'Sender privacy deletion remains available while restricted; moderator deletion branch explicitly invokes current_student_can_access_app().');
 
 SELECT t_ok('S7b every student-reachable SECDEF WRITER is guarded or justified',
   (SELECT count(*) = 0

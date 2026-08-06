@@ -5,6 +5,7 @@ import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { ReportResolutionPanel } from "../../../../components/admin/ReportResolutionPanel";
+import { EvidenceRetentionControls } from "../../../../components/admin/EvidenceRetentionControls";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -208,6 +209,13 @@ export default async function AdminReportDetailPage({ params }: { params: { id: 
         {report.decisions.length > 0 ? <div className="rounded-lg border border-gray-100 bg-gray-50 p-3"><h3 className="text-sm font-semibold text-gray-900">Decision history</h3><ol className="mt-3 space-y-3">{report.decisions.map((d) => <li key={d.id} className="border-l-2 border-teal-300 pl-3 text-sm"><div className="flex flex-wrap gap-2"><Badge tone={STATUS_TONE[d.new_status] ?? "gray"}>{d.new_status}</Badge><span className="text-gray-600">{d.resolution_outcome.replace(/_/g, " ")}</span><span className="text-xs text-gray-400">{fmtDateTime(d.created_at)}</span></div><p className="mt-1 text-gray-700">{d.internal_decision_note}</p><p className="mt-1 text-xs text-gray-400">Enforcement: {d.enforcement_action.replace(/_/g, " ")} · {d.enforcement_status} · Notification: {d.delivery_status ?? d.notification_status} · Correlation {d.correlation_id}</p></li>)}</ol></div> : null}
         {report.auditEvents.length > 0 ? <div className="rounded-lg border border-gray-100 p-3"><h3 className="text-sm font-semibold text-gray-900">Related audit events</h3><ul className="mt-2 space-y-2 text-xs">{report.auditEvents.map((a) => <li key={a.id} className="flex flex-wrap gap-2"><Badge tone={a.success ? "green" : "red"}>{a.success ? "success" : "failure"}</Badge><span>{a.action}</span><span className="text-gray-400">{a.correlation_id}</span><span className="text-gray-400">{fmtDateTime(a.occurred_at)}</span></li>)}</ul></div> : null}
         <ReportResolutionPanel reportId={report.id} status={report.status} entityType={report.entity_type} />
+        {report.evidence_retention ? (
+          <EvidenceRetentionControls
+            reportId={report.id}
+            activeHold={report.evidence_retention.active_hold}
+            appealStatus={report.evidence_retention.appeal_status}
+          />
+        ) : null}
         <p className="text-xs text-gray-400">
           Decisions are terminal, append-only, atomically enforced, and linked by one correlation ID. Internal notes never
           reach students or notification payloads.

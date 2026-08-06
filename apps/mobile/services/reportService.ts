@@ -102,8 +102,10 @@ async function doSubmitReport(input: SubmitReportInput): Promise<SubmitReportRes
     if (fnError) throw fnError;
     const emailed = (data as { sent?: boolean } | null)?.sent === true;
     return { saved: true, emailed };
-  } catch (e) {
-    console.warn('[reportService] report email failed (report stored)', e);
+  } catch {
+    // The durable report is canonical; never write a response object (which
+    // could include submitted details) to a device log.
+    console.warn('[reportService] report email delivery deferred (report stored)');
     return { saved: true, emailed: false };
   }
 }

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
+import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from '../lib/realtime';
 
 /**
  * Subscribes to new messages in a conversation and auto-invalidates
@@ -12,20 +12,11 @@ export function useRealtimeDirectMessages(conversationId: string | undefined): v
   useEffect(() => {
     if (!conversationId) return;
 
-    const channel = createSafeChannel(`dm:${conversationId}`, [
-      {
-        event: '*',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${conversationId}`,
-        callback: () => {
-          queryClient.invalidateQueries({ queryKey: ['directMessages', conversationId] });
-          queryClient.invalidateQueries({ queryKey: ['myChats'] });
-        },
-      },
-    ]);
-
-    return () => { removeSafeChannel(channel); };
+    const invalidate = () => {
+      queryClient.invalidateQueries({ queryKey: ['directMessages', conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['myChats'] });
+    };
+    return subscribeBroadcast(`sync:message:${conversationId}`, 'invalidate', invalidate, invalidate);
   }, [conversationId, queryClient]);
 }
 

@@ -21,8 +21,8 @@
 //                 removal is an un-tag, not a deletion. Not listed as deleted.
 //   • notifications / media — no deletion-metadata surface to detect safely.
 //
-// Migration 051 (retained deleted-message history) is NOT deployed and is NOT
-// imported/queried here. No snapshot table is referenced.
+// Day 10F retained evidence lives in a private table and is never
+// imported/queried here. This surface remains metadata-only.
 // ============================================================================
 
 if (typeof window !== "undefined") {

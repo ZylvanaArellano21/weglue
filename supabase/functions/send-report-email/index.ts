@@ -51,7 +51,9 @@ Deno.serve(async (req) => {
   // report can trigger a send.
   const { data: report, error: reportError } = await admin
     .from("reports")
-    .select("*")
+    // This delivery notice must not read evidence snapshots, reporter
+    // identity, or private notes merely to construct an email.
+    .select("id, reporter_id, entity_type, entity_id, entity_name, club_id, reason, status, created_at, conversation_id, conversation_type, message_id, message_type, message_sender_id, email_sent_at")
     .eq("id", reportId)
     .eq("reporter_id", user.id)
     .maybeSingle();
@@ -77,41 +79,30 @@ Deno.serve(async (req) => {
   const lines = [
     `A new report was submitted in We Glue.`,
     ``,
-    `Reporter username: @${report.reporter_username ?? "unknown"}`,
-    `Reporter email:    ${report.reporter_email ?? "unknown"}`,
-    `Reporter user id:  ${report.reporter_id}`,
-    ``,
     `Entity type:  ${report.entity_type}`,
     `Entity id:    ${report.entity_id ?? "—"}`,
     `Entity name:  ${report.entity_name ?? "—"}`,
     `Club id:      ${report.club_id ?? "—"}`,
     `Reason:       ${report.reason ?? "—"}`,
-    `Details:      ${report.details ?? "—"}`,
     ``,
     `Report id:    ${report.id}`,
     `Status:       ${report.status}`,
     `Created at:   ${report.created_at}`,
   ];
 
-  // Message reports carry a tamper-proof moderation snapshot. Only the storage
-  // PATH is included — never a signed URL — so the email leaks no direct media
-  // access. Investigators open the report row (RLS-protected) to view content.
+  // Day 10F: email is a delivery notice, never an evidence transport. A report
+  // can contain private text, attachment paths, reporter identity, and notes;
+  // all of that remains inside the founder-only Dashboard evidence boundary.
   if (report.entity_type === "message") {
-    const att = report.attachment_snapshot as
-      | { name?: string; mime?: string; size?: number; url?: string }
-      | null;
     lines.push(
       ``,
-      `── Message snapshot ──`,
+      `── Message report metadata ──`,
       `Conversation id:   ${report.conversation_id ?? "—"}`,
       `Conversation type: ${report.conversation_type ?? "—"}`,
       `Message id:        ${report.message_id ?? "—"}`,
       `Message type:      ${report.message_type ?? "—"}`,
       `Sender user id:    ${report.message_sender_id ?? "—"}`,
-      `Content snapshot:  ${report.content_snapshot ?? "—"}`,
-      `Attachment:        ${
-        att ? `${att.name ?? "file"} (${att.mime ?? "?"}, path: ${att.url ?? "?"})` : "—"
-      }`,
+      `Evidence:          Open the private Dashboard to review if authorized.`,
     );
   }
 
@@ -131,12 +122,13 @@ Deno.serve(async (req) => {
     });
 
     if (!res.ok) {
-      // Resend's error body has no secrets — safe to persist for retry/audit.
-      const errText = (await res.text()).slice(0, 500);
-      console.error("[send-report-email] Resend error:", res.status, errText);
-      await recordEmailError(admin, reportId, `Resend ${res.status}: ${errText}`);
+      // Third-party responses are not a safe logging/persistence boundary.
+      // Keep only a fixed, non-content status code.
+      const errorCode = `resend_http_${res.status}`;
+      console.error("[send-report-email] delivery failed", errorCode);
+      await recordEmailError(admin, reportId, errorCode);
       return json(
-        { sent: false, reason: "email_failed", resendStatus: res.status, resendError: errText },
+        { sent: false, reason: "email_failed" },
         200,
       );
     }
@@ -149,8 +141,8 @@ Deno.serve(async (req) => {
 
     return json({ sent: true, resendId: resendBody?.id ?? null }, 200);
   } catch (e) {
-    console.error("[send-report-email] Resend request threw:", e);
-    await recordEmailError(admin, reportId, `Request failed: ${String(e).slice(0, 300)}`);
+    console.error("[send-report-email] delivery request failed");
+    await recordEmailError(admin, reportId, "resend_request_failed");
     return json({ sent: false, reason: "email_failed" }, 200);
   }
 });

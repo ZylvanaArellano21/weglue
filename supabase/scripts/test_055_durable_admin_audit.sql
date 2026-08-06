@@ -115,7 +115,10 @@ SELECT t_assert(
   '1.4  zero RLS policies exist -> deny-all for every non-bypassing role'
 );
 
-SELECT t_assert((SELECT count(*) FROM admin_audit_actions) = 26, '1.5  action catalog seeded with 26 actions');
+-- Day 10B–10F add controlled-vocabulary actions additively. This harness owns
+-- the Day 10A baseline, so assert it remains present without rejecting later
+-- audited features; exact current parity is covered by the web registry test.
+SELECT t_assert((SELECT count(*) FROM admin_audit_actions) >= 26, '1.5  action catalog retains the Day 10A baseline');
 SELECT t_assert((SELECT count(*) FROM admin_audit_events) = 0,   '1.6  audit table starts EMPTY (no fabricated backfill)');
 
 

@@ -23,8 +23,8 @@
 // ============================================================================
 
 import { createAdminClient } from "../supabase/admin";
-import { requireSecureAdmin } from "./secureAdmin";
-import { adminAudit } from "./audit";
+import { requireRecentMfaWrite, requireSecureAdmin } from "./secureAdmin";
+import { adminAudit, newCorrelationId } from "./audit";
 import { runAtomicMutation } from "./atomicMutation";
 import { isReportStatus } from "./reportsData";
 import type { ActionResult } from "./actions";
@@ -103,4 +103,61 @@ export async function resolveReport(input: {
     },
     target: { reportId: input.reportId, resolutionOutcome: input.resolutionOutcome, enforcementAction: input.enforcementAction },
   });
+}
+
+// Day 10F private evidence-retention controls. These are deliberately server
+// actions: a browser never receives the service-role credential, a hold reason,
+// or an evidence row. The database RPC writes the hold/appeal and its durable
+// audit event in one transaction.
+export async function applyReportEvidenceHold(input: {
+  reportId: string;
+  holdType: "legal" | "safety";
+  internalReason: string;
+}): Promise<ActionResult<{ holdId: string }>> {
+  const actor = await requireRecentMfaWrite();
+  if (!isUuid(input.reportId) || !["legal", "safety"].includes(input.holdType) || input.internalReason.trim().length < 3 || input.internalReason.trim().length > 500) {
+    return fail("report.evidenceHoldApply", actor, "Invalid evidence-hold input.", { reportId: input.reportId, holdType: input.holdType });
+  }
+  const { data, error } = await createAdminClient().rpc("admin_tx_apply_report_evidence_hold", {
+    p_actor_id: actor.id, p_actor_email: actor.email ?? null, p_reason: input.internalReason.trim(),
+    p_correlation_id: newCorrelationId(), p_report_id: input.reportId, p_hold_type: input.holdType,
+  });
+  if (error || typeof data !== "string") {
+    return fail("report.evidenceHoldApply", actor, "Could not apply the evidence hold.", { reportId: input.reportId, holdType: input.holdType });
+  }
+  return { ok: true, data: { holdId: data } };
+}
+
+export async function releaseReportEvidenceHold(input: {
+  reportId: string;
+  holdId: string;
+  internalReason: string;
+}): Promise<ActionResult> {
+  const actor = await requireRecentMfaWrite();
+  if (!isUuid(input.reportId) || !isUuid(input.holdId) || input.internalReason.trim().length < 3 || input.internalReason.trim().length > 500) {
+    return fail("report.evidenceHoldRelease", actor, "Invalid evidence-hold release input.", { reportId: input.reportId, holdId: input.holdId });
+  }
+  const { error } = await createAdminClient().rpc("admin_tx_release_report_evidence_hold", {
+    p_actor_id: actor.id, p_actor_email: actor.email ?? null, p_reason: input.internalReason.trim(),
+    p_correlation_id: newCorrelationId(), p_hold_id: input.holdId,
+  });
+  if (error) return fail("report.evidenceHoldRelease", actor, "Could not release the evidence hold.", { reportId: input.reportId, holdId: input.holdId });
+  return { ok: true, data: null };
+}
+
+export async function setReportEvidenceAppeal(input: {
+  reportId: string;
+  status: "active" | "resolved";
+  internalReason: string;
+}): Promise<ActionResult<{ appealId: string }>> {
+  const actor = await requireRecentMfaWrite();
+  if (!isUuid(input.reportId) || !["active", "resolved"].includes(input.status) || input.internalReason.trim().length < 3 || input.internalReason.trim().length > 500) {
+    return fail("report.evidenceAppeal", actor, "Invalid evidence-appeal input.", { reportId: input.reportId, status: input.status });
+  }
+  const { data, error } = await createAdminClient().rpc("admin_tx_set_report_evidence_appeal", {
+    p_actor_id: actor.id, p_actor_email: actor.email ?? null, p_reason: input.internalReason.trim(),
+    p_correlation_id: newCorrelationId(), p_report_id: input.reportId, p_status: input.status,
+  });
+  if (error || typeof data !== "string") return fail("report.evidenceAppeal", actor, "Could not update the evidence appeal.", { reportId: input.reportId, status: input.status });
+  return { ok: true, data: { appealId: data } };
 }

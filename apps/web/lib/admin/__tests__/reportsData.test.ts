@@ -26,7 +26,7 @@ function asFounder() {
   process.env.ADMIN_FOUNDER_USER_IDS = FOUNDER.id;
   process.env.ADMIN_FOUNDER_EMAILS = FOUNDER.email;
   h.getUser.mockResolvedValue({ data: { user: FOUNDER } });
-  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "password", timestamp: Math.floor(Date.now() / 1000) }] } });
+  h.getAAL.mockResolvedValue({ data: { currentLevel: "aal2", nextLevel: "aal2", currentAuthenticationMethods: [{ method: "totp", timestamp: Math.floor(Date.now() / 1000) }] } });
 }
 
 function seed() {
@@ -34,7 +34,7 @@ function seed() {
     {
       reports: [
         { id: "r-post", status: "pending", entity_type: "post", entity_id: "post-1", entity_name: null, reason: "Spam", details: "look here", reporter_id: "u-rep", reporter_username: "reporter", reporter_email: "rep@my.edu", club_id: "club-1", created_at: "2026-07-20T00:00:00Z", content_snapshot: null, attachment_snapshot: null },
-        { id: "r-msg", status: "reviewing", entity_type: "message", entity_id: "msg-1", entity_name: "Reported message", reason: "Harassment", details: null, reporter_id: "u-rep", reporter_username: "reporter", reporter_email: null, message_id: "msg-1", conversation_id: "conv-1", conversation_type: "direct", message_type: "text", message_sender_id: "u-bad", club_id: null, created_at: "2026-07-21T00:00:00Z", content_snapshot: "PRIVATE DELETED BODY", attachment_snapshot: { url: "https://x/y.jpg" } },
+        { id: "r-msg", status: "reviewing", entity_type: "message", entity_id: "msg-1", entity_name: "Reported message", reason: "Harassment", details: null, reporter_id: "u-rep", reporter_username: "reporter", reporter_email: null, message_id: "msg-1", conversation_id: "conv-1", conversation_type: "direct", message_type: "text", message_sender_id: "u-bad", club_id: null, created_at: "2026-07-21T00:00:00Z" },
       ],
       posts: [{ id: "post-1", caption: "hello world caption", post_type: "picture" }],
       clubs: [{ id: "club-1", name: "Chess Club", handle: "chess", university_id: "uni-1" }],
@@ -42,6 +42,9 @@ function seed() {
       profiles: [
         { id: "u-rep", full_name: "Rep Orter", username: "reporter", avatar_url: null, university_id: "uni-1" },
         { id: "u-bad", full_name: "Bad Actor", username: "badactor", avatar_url: null, university_id: "uni-1" },
+      ],
+      report_message_evidence: [
+        { report_id: "r-msg", content_snapshot: "PRIVATE DELETED BODY", attachment_name: "evidence.jpg", attachment_size: 2, attachment_mime: "image/jpeg", source_attachment_path: null, retained_attachment_bucket: "deleted-message-evidence", retained_attachment_path: "report-evidence/r-msg/attachment", attachment_state: "retained" },
       ],
     },
     [
@@ -102,7 +105,8 @@ describe("getReportDetail — safe shaping", () => {
     expect(d!.reported_user_id).toBe("u-bad");
     const json = JSON.stringify(d);
     expect(json).toContain("PRIVATE DELETED BODY");
-    expect(json).not.toContain("y.jpg");
+    expect(json).not.toContain("report-evidence/");
+    expect(h.holder.db.rpc).toHaveBeenCalledWith("admin_record_report_evidence_view", expect.objectContaining({ p_report_id: "r-msg" }));
   });
 
   it("denies a non-founder", async () => {

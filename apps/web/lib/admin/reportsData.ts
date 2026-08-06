@@ -15,23 +15,22 @@
 //   email_sent_at, email_error                                     (038 bookkeeping)
 //   message_id, conversation_id, conversation_type, message_type,
 //   message_sender_id,
-//   content_snapshot (TEXT), attachment_snapshot (JSONB)           (040 EVIDENCE)
+//   content_snapshot / attachment_snapshot are legacy columns only. Day 10F
+//   moves message evidence into private.report_message_evidence.
 //
 // The schema has NO updated_at / resolved_at / assigned_to / reviewed_by /
 // moderation_notes columns. Those features are therefore reported HONESTLY as
 // "not recorded in the current schema" — never faked, and NOT added here (a new
-// migration on this branch would collide with the separate, undeployed migration
-// 051 on backend/deleted-message-privacy).
+// migration outside the approved Day 10F scope would require a separate
+// reviewed migration).
 //
-// EVIDENCE PRIVACY INVARIANTS (Day-5, non-negotiable):
-//   • content_snapshot and attachment_snapshot are retained moderation evidence.
-//     They are selected only for the founder-only detail route, never for lists,
-//     audit payloads, logs, URLs, or reporter-readable surfaces.
-//   • For message/chat reports, migration 051 remains intentionally absent. We
-//     only display snapshots already present on the canonical reports row;
-//     unavailable/deleted media remains an honest unavailable state.
-//   • `report_evidence` is not part of the current production schema and is not
-//     queried here.
+// EVIDENCE PRIVACY INVARIANTS (Day 10F, non-negotiable):
+//   • Message evidence is read only from private.report_message_evidence, never
+//     the student-readable reports row.
+//   • A valid private gateway, AAL2, recent MFA, and a successful durable audit
+//     are required before this loader selects a body or issues a signed URL.
+//   • Lists expose only an existence flag; unavailable/expired/purged evidence
+//     remains an honest unavailable state.
 // ============================================================================
 
 if (typeof window !== "undefined") {
@@ -39,7 +38,8 @@ if (typeof window !== "undefined") {
 }
 
 import { createAdminClient } from "../supabase/admin";
-import { requireSecureAdmin } from "./secureAdmin";
+import { requireRecentMfa, requireSecureAdmin } from "./secureAdmin";
+import { randomUUID } from "crypto";
 import { emailMap, universityNameMap, PAGE_SIZE } from "./data";
 import type { Paginated } from "./data";
 
@@ -468,18 +468,18 @@ async function relatedTargetCounts(admin: Admin, reports: any[]): Promise<Map<st
 
 /**
  * Which reports RETAIN protected evidence — WITHOUT reading the evidence. We
- * only read whether content_snapshot IS NOT NULL, as a boolean availability
- * signal. The snapshot text/attachment is never selected.
+ * only read whether a private evidence row exists. The snapshot text and
+ * attachment path are never selected on list paths.
  */
 async function protectedEvidenceFlags(admin: Admin, reportIds: string[]): Promise<Map<string, boolean>> {
   const map = new Map<string, boolean>();
   if (reportIds.length === 0) return map;
   const { data } = await admin
-    .from("reports")
-    .select("id")
-    .in("id", reportIds)
-    .not("content_snapshot", "is", null);
-  for (const r of (data ?? []) as any[]) map.set(r.id, true);
+    .schema("private")
+    .from("report_message_evidence")
+    .select("report_id")
+    .in("report_id", reportIds);
+  for (const r of (data ?? []) as any[]) map.set(r.report_id, true);
   return map;
 }
 
@@ -575,6 +575,11 @@ export interface ReportDetail {
     content_snapshot: string | null;
     attachment: { name?: string; mime?: string; size?: number; available: boolean; signed_url?: string } | null;
   } | null;
+  /** Structural retention state only; internal hold/appeal reasons stay private. */
+  evidence_retention: {
+    active_hold: { id: string; hold_type: "legal" | "safety"; applied_at: string } | null;
+    appeal_status: "active" | "resolved" | null;
+  } | null;
   auditEvents: Array<{ id: string; action: string; event_type: string; success: boolean; correlation_id: string; occurred_at: string; error_code: string | null }>;
 }
 
@@ -585,7 +590,7 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
   const { data: report } = await admin
     .from("reports")
     .select(
-      "id, status, entity_type, entity_id, entity_name, reason, details, reporter_id, reporter_username, reporter_email, message_id, conversation_id, conversation_type, message_type, message_sender_id, club_id, email_sent_at, email_error, content_snapshot, attachment_snapshot, created_at"
+      "id, status, entity_type, entity_id, entity_name, reason, details, reporter_id, reporter_username, reporter_email, message_id, conversation_id, conversation_type, message_type, message_sender_id, club_id, email_sent_at, email_error, created_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -593,7 +598,7 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
   const r = report as any;
 
   const subjectId = r.entity_type === "user" ? r.entity_id : r.message_sender_id;
-  const [reporterMap, subjectMap, clubs, targets, evidence, decisionRows] = await Promise.all([
+  const [reporterMap, subjectMap, clubs, targets, evidenceFlags, decisionRows] = await Promise.all([
     r.reporter_id ? profileMap(admin, [r.reporter_id]) : Promise.resolve(new Map<string, any>()),
     subjectId ? profileMap(admin, [subjectId]) : Promise.resolve(new Map<string, any>()),
     r.club_id ? clubMap(admin, [r.club_id]) : Promise.resolve(new Map<string, any>()),
@@ -642,10 +647,66 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
   }
 
   const isMessageReport = r.entity_type === "message" || r.entity_type === "chat";
-  const attachment = r.attachment_snapshot as { name?: string; mime?: string; size?: number; url?: string } | null;
+  let evidenceRow: any = null;
+  let evidenceRetention: ReportDetail["evidence_retention"] = null;
+  // Never read private evidence before a fresh founder step-up and durable
+  // audit acknowledgement. A failed audit is fail-closed for evidence reads.
+  if (isMessageReport && evidenceFlags.get(r.id)) {
+    try {
+      const actor = await requireRecentMfa();
+      const { data: audited, error: auditError } = await admin.rpc("admin_record_report_evidence_view", {
+        p_actor_id: actor.id,
+        p_actor_email: actor.email ?? null,
+        p_report_id: r.id,
+        p_correlation_id: randomUUID(),
+      });
+      if (!auditError && audited === true) {
+        const privateAdmin = admin.schema("private");
+        const [{ data }, { data: holds }, { data: appeals }] = await Promise.all([
+          privateAdmin
+            .from("report_message_evidence")
+            .select("content_snapshot, attachment_name, attachment_size, attachment_mime, source_attachment_path, retained_attachment_bucket, retained_attachment_path, attachment_state")
+            .eq("report_id", r.id)
+            .maybeSingle(),
+          privateAdmin
+            .from("report_evidence_holds")
+            .select("id, hold_type, applied_at")
+            .eq("report_id", r.id)
+            .is("released_at", null)
+            .maybeSingle(),
+          privateAdmin
+            .from("report_evidence_appeals")
+            .select("status")
+            .eq("report_id", r.id)
+            .order("submitted_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+        evidenceRow = data ?? null;
+        evidenceRetention = {
+          active_hold: holds?.id && (holds.hold_type === "legal" || holds.hold_type === "safety") && holds.applied_at
+            ? { id: holds.id, hold_type: holds.hold_type, applied_at: holds.applied_at }
+            : null,
+          appeal_status: appeals?.status === "active" || appeals?.status === "resolved" ? appeals.status : null,
+        };
+      }
+    } catch {
+      // The report's structural metadata remains available; evidence is not.
+    }
+  }
   let signedUrl: string | undefined;
-  if (attachment?.url && !/^https?:\/\//i.test(attachment.url) && isMessageReport) {
-    const signed = await admin.storage.from("chat-attachments").createSignedUrl(attachment.url, 300);
+  const evidencePath = evidenceRow?.attachment_state === "retained"
+    ? evidenceRow.retained_attachment_path
+    : evidenceRow?.attachment_state === "source_pending"
+      ? evidenceRow.source_attachment_path
+      : null;
+  const evidenceBucket = evidenceRow?.attachment_state === "retained"
+    ? evidenceRow.retained_attachment_bucket
+    : evidenceRow?.attachment_state === "source_pending"
+      ? "chat-attachments"
+      : null;
+  if (evidenceBucket && evidencePath) {
+    const signed = await admin.storage.from(evidenceBucket).createSignedUrl(evidencePath, 300);
     if (!signed.error) signedUrl = signed.data?.signedUrl;
   }
 
@@ -681,7 +742,7 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
           conversation_type: r.conversation_type ?? null,
           message_type: r.message_type ?? null,
           conversation_href: r.conversation_id ? `/admin/conversations/${r.conversation_id}` : null,
-          has_retained_evidence: evidence.get(r.id) ?? false,
+          has_retained_evidence: evidenceFlags.get(r.id) ?? false,
         }
       : null,
     email_delivered: !!r.email_sent_at,
@@ -708,14 +769,15 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
       delivery_status: deliveryMap.get(d.id)?.state ?? null,
       delivery_error: deliveryMap.get(d.id)?.last_error ?? null,
     })),
-    evidence: isMessageReport && (r.content_snapshot || attachment)
+    evidence: isMessageReport && evidenceRow
       ? {
-          content_snapshot: r.content_snapshot ?? null,
-          attachment: attachment
-            ? { name: attachment.name, mime: attachment.mime, size: attachment.size, available: !!signedUrl, ...(signedUrl ? { signed_url: signedUrl } : {}) }
+          content_snapshot: evidenceRow.content_snapshot ?? null,
+          attachment: evidenceRow.attachment_name
+            ? { name: evidenceRow.attachment_name, mime: evidenceRow.attachment_mime, size: evidenceRow.attachment_size, available: !!signedUrl, ...(signedUrl ? { signed_url: signedUrl } : {}) }
             : null,
         }
       : null,
+    evidence_retention: isMessageReport && evidenceRow ? evidenceRetention : null,
     auditEvents: ((auditRows ?? []) as any[]).map((a) => ({ id: a.id, action: a.action, event_type: a.event_type, success: !!a.success, correlation_id: a.correlation_id, occurred_at: a.occurred_at, error_code: a.error_code ?? null })),
   };
 }

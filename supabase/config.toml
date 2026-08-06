@@ -10,7 +10,9 @@ enabled = true
 port = 54321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
 # endpoints. `public` and `graphql_public` schemas are included by default.
-schemas = ["public", "graphql_public"]
+# `private` is required only for server-held service-role Dashboard evidence
+# reads. Its Day 10F tables force RLS and grant no student table privileges.
+schemas = ["public", "graphql_public", "private"]
 # Extra schemas to add to the search_path of every request.
 extra_search_path = ["public", "extensions"]
 # The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
@@ -466,4 +468,13 @@ verify_jwt = false
 # per-project Vault-backed secret header. It has no user JWT to present, and
 # verifies ACCOUNT_DELETION_WORKER_SECRET before it can claim any work.
 [functions.process-account-deletion-jobs]
+verify_jwt = false
+
+# Day 10F sender deletion validates the caller's JWT in the function and then
+# calls the caller-authorized database RPC. The reconciler is scheduler-only and
+# separately verifies MESSAGE_PRIVACY_WORKER_SECRET before it can claim work.
+[functions.delete-message]
+verify_jwt = false
+
+[functions.reconcile-deleted-messages]
 verify_jwt = false

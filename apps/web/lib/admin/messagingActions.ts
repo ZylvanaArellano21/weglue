@@ -22,8 +22,9 @@
 //     • setNotificationRead (mark read/unread; notifications.read + read_at)
 //
 // EXPLICITLY NOT EXPORTED (disabled in the UI with reasons):
-//   • any message UPDATE/DELETE/redact/restore — the retained-evidence privacy
-//     backend (migration 051) is NOT deployed; admin message deletion stays off.
+//   • direct message UPDATE/DELETE/redact/restore — the Day 10F privacy
+//     lifecycle permits only its dedicated server-authorized deletion path;
+//     this dashboard never bypasses it or restores content.
 //   • notification removal / resend — push_queue.notification_id CASCADEs, so a
 //     removal would corrupt pending delivery state; no admin resend fn exists.
 //
@@ -93,7 +94,7 @@ export async function revealMessageBody(messageId: string): Promise<ActionResult
   // Retained-evidence protection: deleted rows never reveal original content.
   if (m.deleted_at) {
     await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target: { messageId, deleted: true }, ok: false, error: "deleted_denied" });
-    return { ok: false, error: "This message is deleted. Retained deleted-message evidence is unavailable until the approved privacy backend is deployed." };
+    return { ok: false, error: "This message is deleted. Only pre-captured evidence may be available through its protected report." };
   }
 
   let pollQuestion: string | null = null;

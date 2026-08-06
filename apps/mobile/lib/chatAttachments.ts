@@ -164,7 +164,9 @@ export async function uploadChatAttachment(opts: {
 
 // ─── Signed URL resolution + cache ───────────────────────────────────────────
 
-const SIGNED_TTL_SECONDS = 60 * 60;
+// Deletion removes the object immediately when the interactive endpoint is
+// available; a short TTL also bounds any already-issued URL on older clients.
+const SIGNED_TTL_SECONDS = 60;
 const signedCache = new Map<string, { url: string; expiresAt: number }>();
 
 /** True when the stored attachment value is a private-bucket storage path. */
