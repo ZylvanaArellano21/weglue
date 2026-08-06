@@ -43,16 +43,24 @@ INSERT INTO auth.users (id, email, raw_app_meta_data) VALUES
   ('11000000-0000-0000-0000-000000000003', 'outsider-070@example.test', '{}'::jsonb),
   ('11000000-0000-0000-0000-000000000004', 'selected-070@example.test', '{}'::jsonb);
 
+-- ON CONFLICT so this fixture runs on BOTH chains — see the same note in the
+-- 069 harness: the full chain's handle_new_user already inserted these rows.
 INSERT INTO public.profiles (
   id, username, full_name, email_verified, onboarding_complete, onboarding_completed
 ) VALUES
   ('11000000-0000-0000-0000-000000000001', 'creator070', 'Creator 070', true, true, true),
   ('11000000-0000-0000-0000-000000000002', 'former070', 'Former 070', true, true, true),
   ('11000000-0000-0000-0000-000000000003', 'outsider070', 'Outsider 070', true, true, true),
-  ('11000000-0000-0000-0000-000000000004', 'selected070', 'Selected 070', true, true, true);
+  ('11000000-0000-0000-0000-000000000004', 'selected070', 'Selected 070', true, true, true)
+ON CONFLICT (id) DO UPDATE SET
+  username = EXCLUDED.username, full_name = EXCLUDED.full_name,
+  email_verified = EXCLUDED.email_verified,
+  onboarding_complete = EXCLUDED.onboarding_complete,
+  onboarding_completed = EXCLUDED.onboarding_completed;
 
-INSERT INTO public.clubs (id, name, handle) VALUES
-  ('21000000-0000-0000-0000-000000000001', 'Parity 070 Club', 'parity-070-club');
+-- description is NOT NULL on the full chain; see the same note in the 069 harness.
+INSERT INTO public.clubs (id, name, handle, description) VALUES
+  ('21000000-0000-0000-0000-000000000001', 'Parity 070 Club', 'parity-070-club', 'parity fixture');
 INSERT INTO public.club_members (club_id, user_id, role) VALUES
   ('21000000-0000-0000-0000-000000000001', '11000000-0000-0000-0000-000000000001', 'officer'),
   ('21000000-0000-0000-0000-000000000001', '11000000-0000-0000-0000-000000000002', 'member'),

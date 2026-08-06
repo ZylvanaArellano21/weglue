@@ -89,16 +89,26 @@ INSERT INTO auth.users (id, email, raw_app_meta_data) VALUES
   ('10000000-0000-0000-0000-000000000003', 'outsider@example.test', '{}'::jsonb),
   ('10000000-0000-0000-0000-000000000004', 'selected@example.test', '{}'::jsonb);
 
+-- ON CONFLICT so this fixture runs on BOTH chains: the compact 057 fixture has
+-- no auth trigger, while the full 001->073 chain's handle_new_user already
+-- created a profile row for each auth.users insert above.
 INSERT INTO public.profiles (
   id, username, full_name, email_verified, onboarding_complete, onboarding_completed
 ) VALUES
   ('10000000-0000-0000-0000-000000000001', 'creator', 'Event Creator', true, true, true),
   ('10000000-0000-0000-0000-000000000002', 'member', 'Club Member', true, true, true),
   ('10000000-0000-0000-0000-000000000003', 'outsider', 'Club Outsider', true, true, true),
-  ('10000000-0000-0000-0000-000000000004', 'selected', 'Selected Member', true, true, true);
+  ('10000000-0000-0000-0000-000000000004', 'selected', 'Selected Member', true, true, true)
+ON CONFLICT (id) DO UPDATE SET
+  username = EXCLUDED.username, full_name = EXCLUDED.full_name,
+  email_verified = EXCLUDED.email_verified,
+  onboarding_complete = EXCLUDED.onboarding_complete,
+  onboarding_completed = EXCLUDED.onboarding_completed;
 
-INSERT INTO public.clubs (id, name, handle) VALUES
-  ('20000000-0000-0000-0000-000000000001', 'Parity Club', 'parity-club');
+-- description is NOT NULL on the full chain; the handle column value is
+-- deliberately left "wrong" here because 073's trigger re-derives it anyway.
+INSERT INTO public.clubs (id, name, handle, description) VALUES
+  ('20000000-0000-0000-0000-000000000001', 'Parity Club', 'parity-club', 'parity fixture');
 
 INSERT INTO public.club_members (club_id, user_id, role) VALUES
   ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'officer'),
@@ -419,6 +429,14 @@ $$;
 -- Row: "Selected audience / officer" — demotion takes effect immediately,
 -- because the guard reads club_members live rather than a cached claim.
 RESET ROLE;
+-- The full 001->073 chain carries migration 054's last-officer protection, which
+-- the compact 057 fixture does not. Promote the existing ordinary member first
+-- so the club never drops to zero officers; this is a fixture requirement, not
+-- part of what is being asserted. The demoted officer below is still the only
+-- subject of the assertion.
+UPDATE public.club_members SET role = 'officer'
+ WHERE club_id = '20000000-0000-0000-0000-000000000001'
+   AND user_id = '10000000-0000-0000-0000-000000000002';
 UPDATE public.club_members SET role = 'member'
  WHERE club_id = '20000000-0000-0000-0000-000000000001'
    AND user_id = '10000000-0000-0000-0000-000000000001';
@@ -438,6 +456,10 @@ RESET ROLE;
 UPDATE public.club_members SET role = 'officer'
  WHERE club_id = '20000000-0000-0000-0000-000000000001'
    AND user_id = '10000000-0000-0000-0000-000000000001';
+-- Restore the fixture's original single-officer shape.
+UPDATE public.club_members SET role = 'member'
+ WHERE club_id = '20000000-0000-0000-0000-000000000001'
+   AND user_id = '10000000-0000-0000-0000-000000000002';
 SET LOCAL ROLE authenticated;
 
 -- Mobile keeps an already-selected recipient eligible after a later club

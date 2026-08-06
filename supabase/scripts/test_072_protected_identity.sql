@@ -130,9 +130,11 @@ SELECT '072 protected-identity catalog harness passed' AS result;
 -- ── Behaviour ───────────────────────────────────────────────────────────────
 BEGIN;
 
+-- Names are suffixed because the full 001->073 chain already seeds the real
+-- universities and `universities.name` is unique. The compact fixture does not.
 INSERT INTO public.universities (id, name, slug) VALUES
-  ('40000000-0000-0000-0000-0000000000a1', 'Lone Star College', 'lone-star-college-072'),
-  ('40000000-0000-0000-0000-0000000000a2', 'Rival University',  'rival-university-072');
+  ('40000000-0000-0000-0000-0000000000a1', 'Lone Star College 072', 'lone-star-college-072'),
+  ('40000000-0000-0000-0000-0000000000a2', 'Rival University 072',  'rival-university-072');
 
 INSERT INTO auth.users (id, email, raw_app_meta_data) VALUES
   ('41000000-0000-0000-0000-000000000001', 'officer-072@example.test',   '{}'::jsonb),
@@ -146,13 +148,21 @@ INSERT INTO public.profiles (
   ('41000000-0000-0000-0000-000000000001', 'officer072',  'Olivia Officer', true, true, true, '40000000-0000-0000-0000-0000000000a1'),
   ('41000000-0000-0000-0000-000000000002', 'member072',   'Marco Member',   true, true, true, '40000000-0000-0000-0000-0000000000a1'),
   ('41000000-0000-0000-0000-000000000003', 'outsider072', 'Nina Outsider',  true, true, true, '40000000-0000-0000-0000-0000000000a1'),
-  ('41000000-0000-0000-0000-000000000004', 'other072',    'Otto Other',     true, true, true, '40000000-0000-0000-0000-0000000000a1');
+  ('41000000-0000-0000-0000-000000000004', 'other072',    'Otto Other',     true, true, true, '40000000-0000-0000-0000-0000000000a1')
+-- ON CONFLICT so this fixture runs on the full 001->073 chain too, where
+-- handle_new_user already created a profile row for each auth.users insert.
+ON CONFLICT (id) DO UPDATE SET
+  username = EXCLUDED.username, full_name = EXCLUDED.full_name,
+  email_verified = EXCLUDED.email_verified,
+  onboarding_complete = EXCLUDED.onboarding_complete,
+  onboarding_completed = EXCLUDED.onboarding_completed,
+  university_id = EXCLUDED.university_id;
 
 -- "Nature Club" is the founder's worked example; the second club exists so a
 -- cross-club move is actually reachable for someone who is an officer of both.
-INSERT INTO public.clubs (id, name, handle, university_id) VALUES
-  ('42000000-0000-0000-0000-000000000001', 'Nature Club', 'nature-club-072', '40000000-0000-0000-0000-0000000000a1'),
-  ('42000000-0000-0000-0000-000000000002', 'Other Club',  'other-club-072',  '40000000-0000-0000-0000-0000000000a1');
+INSERT INTO public.clubs (id, name, handle, university_id, description) VALUES
+  ('42000000-0000-0000-0000-000000000001', 'Nature Club', 'nature-club-072', '40000000-0000-0000-0000-0000000000a1', 'fixture'),
+  ('42000000-0000-0000-0000-000000000002', 'Other Club',  'other-club-072',  '40000000-0000-0000-0000-0000000000a1', 'fixture');
 
 INSERT INTO public.club_members (club_id, user_id, role) VALUES
   ('42000000-0000-0000-0000-000000000001', '41000000-0000-0000-0000-000000000001', 'officer'),
@@ -197,7 +207,11 @@ BEGIN
   END IF;
 
   -- The rename must not have disturbed identity or relationships.
-  SELECT id INTO v_id FROM public.clubs WHERE name = 'Forest Club';
+  -- Scoped to the fixture university: the full 001->073 chain seeds a real
+  -- "Nature Club" at a different university, and 073 makes name uniqueness
+  -- university-scoped, so a global name lookup is no longer well defined.
+  SELECT id INTO v_id FROM public.clubs
+   WHERE name = 'Forest Club' AND university_id = '40000000-0000-0000-0000-0000000000a1';
   IF v_id IS DISTINCT FROM '42000000-0000-0000-0000-000000000001' THEN
     RAISE EXCEPTION '072: club id changed during a rename';
   END IF;
@@ -214,10 +228,14 @@ BEGIN
   IF (SELECT count(*) FROM public.events WHERE club_id = v_id) <> 1 THEN
     RAISE EXCEPTION '072: rename disconnected club events';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.clubs WHERE name = 'Forest Club') THEN
+  IF NOT EXISTS (SELECT 1 FROM public.clubs
+                  WHERE name = 'Forest Club'
+                    AND university_id = '40000000-0000-0000-0000-0000000000a1') THEN
     RAISE EXCEPTION '072: renamed club is not findable by its new name';
   END IF;
-  IF EXISTS (SELECT 1 FROM public.clubs WHERE name = 'Nature Club') THEN
+  IF EXISTS (SELECT 1 FROM public.clubs
+              WHERE name = 'Nature Club'
+                AND university_id = '40000000-0000-0000-0000-0000000000a1') THEN
     RAISE EXCEPTION '072: the old club name still resolves after a rename';
   END IF;
 
@@ -402,6 +420,13 @@ $$;
 
 -- Former officer: demotion takes effect on the very next request.
 RESET ROLE;
+-- The full 001->073 chain carries migration 054's last-officer protection, which
+-- the compact 057 fixture does not. Promote the existing member first so the
+-- club never reaches zero officers. This is a fixture requirement; the assertion
+-- below is still solely about the demoted officer losing authority immediately.
+UPDATE public.club_members SET role = 'officer'
+ WHERE club_id = '42000000-0000-0000-0000-000000000001'
+   AND user_id = '41000000-0000-0000-0000-000000000002';
 UPDATE public.club_members SET role = 'member'
  WHERE club_id = '42000000-0000-0000-0000-000000000001'
    AND user_id = '41000000-0000-0000-0000-000000000001';
