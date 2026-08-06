@@ -660,3 +660,31 @@ export async function getSharedMessages(conversationId: string, channelId: strin
   if (error) throw error;
   return ((data ?? []) as any[]).map(messageFromRow);
 }
+
+/**
+ * Shared-content availability, resolved by the same RLS the rest of the app
+ * uses: a post or event whose author has blocked the viewer (or which was
+ * deleted, or whose audience no longer includes the viewer) simply returns no
+ * row. Mirrors mobile's PostShareCard/EventShareCard, which fetch the target
+ * and fall back to an unavailable card when it resolves to nothing.
+ *
+ * Only the id is selected, so an inaccessible target never puts a caption,
+ * image URL, location or any other payload on the wire.
+ */
+export async function sharedPostIsAvailable(postId: string): Promise<boolean> {
+  const { data } = await getSupabaseBrowser()
+    .from("posts")
+    .select("id")
+    .eq("id", postId)
+    .maybeSingle();
+  return !!data;
+}
+
+export async function sharedEventIsAvailable(eventId: string): Promise<boolean> {
+  const { data } = await getSupabaseBrowser()
+    .from("events")
+    .select("id")
+    .eq("id", eventId)
+    .maybeSingle();
+  return !!data;
+}

@@ -38,8 +38,7 @@ import {
   type MessageSearchResult,
   type Person,
   type PostingPermission,
-  type ThreadMessage,
-} from "../../lib/messages/service";
+  type ThreadMessage, sharedPostIsAvailable, sharedEventIsAvailable } from "../../lib/messages/service";
 import {
   messageKeys,
   useMessageChannels,
@@ -430,7 +429,17 @@ function EventMessage({ eventId }: { eventId: string | null }): JSX.Element {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  // RLS decides availability (blocking, deletion, audience). Keyed under
+  // "messages" so the existing permission-sensitive cache clearing already
+  // drops it on an access change, and it re-resolves after an unblock.
+  const { data: available } = useQuery({
+    queryKey: ["messages", "sharedEventAvailable", eventId],
+    queryFn: () => sharedEventIsAvailable(eventId!),
+    enabled: !!eventId,
+    staleTime: 0,
+  });
   if (!eventId) return <p className="text-sm">Shared an event</p>;
+  if (available === false) return <p className="text-sm opacity-80">This event is no longer available.</p>;
   return <button type="button" onClick={() => { const next = new URLSearchParams(params.toString()); next.set("event", eventId); router.push(`${pathname}?${next.toString()}`, { scroll: false }); }} className="rounded-lg bg-black/10 px-3 py-2 text-left text-sm font-semibold underline">📅 View shared event</button>;
 }
 
@@ -438,7 +447,14 @@ function PostMessage({ postId }: { postId: string | null }): JSX.Element {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const { data: available } = useQuery({
+    queryKey: ["messages", "sharedPostAvailable", postId],
+    queryFn: () => sharedPostIsAvailable(postId!),
+    enabled: !!postId,
+    staleTime: 0,
+  });
   if (!postId) return <p className="text-sm">Shared a post</p>;
+  if (available === false) return <p className="text-sm opacity-80">This post is no longer available.</p>;
   return <button type="button" onClick={() => { const next = new URLSearchParams(params.toString()); next.set("post", postId); router.push(`${pathname}?${next.toString()}`, { scroll: false }); }} className="rounded-lg bg-black/10 px-3 py-2 text-left text-sm font-semibold underline">🖼️ View shared post</button>;
 }
 

@@ -252,6 +252,46 @@ no policy was consulted at all. `test_072_protected_identity.sql` now enables
 RLS and recreates the owning policies (001 clubs update, 034 club_members
 update, 063 events update) before testing, so its wrong-actor cases are real.
 
+
+## Blocking, Shared Content, Private Club Tags and Club Identity (2026-08-05, migration 073)
+
+Columns: Actor | Block direction | Shared context | Mobile | Web | Backend | Reused | Mismatch | Correction | Tests | Status
+
+| Actor | Block dir. | Shared context | Mobile | Web | Backend | Reused | Mismatch | Correction | Tests | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Blocked student reads blocker's club-tagged post | either | club profile / direct link / saved / notification / shared message | RLS-governed | RLS-governed | **069 let `club_id IS NOT NULL` bypass the blocking branch** | `blocked_user_ids()` (already symmetric) | **Yes — real leak** | 073 evaluates blocking FIRST for every post, club-tagged included | `test_073` negative + positive control | **Fixed in backend** |
+| Ordinary viewer reads a private author's club-tagged post | none | club profile | allowed | allowed | exception kept | same policy | No | none | `test_073` positive control | Already correct — no change |
+| Non-follower reads a private author's personal post | none | anywhere | hidden | hidden | privacy branch | same policy | No | none | `test_073` | Already correct — no change |
+| Blocker / blocked profile row | either | any | hidden | hidden | 058 `profiles` policy hides the row both ways | 058 | No | none | existing | Already correct — no change |
+| People search finds the blocker | either | search | filtered | filtered | block-aware RPCs | 057 RPCs | No | none | existing | Already correct — no change |
+| Shared post/event in a message | either | DM / group | fetches target; renders **"This post is no longer available."** / **"This event is no longer available."** | **rendered a "View shared post" link from the id alone, never checking access** | RLS on the embedded row | mobile wording + existing `useQuery` | **Yes** | web now resolves availability (id-only select, no payload) and renders the same canonical wording | web type-check/build; wording matches mobile verbatim | **Fixed in web** |
+| Unblock restores access | either | all surfaces | subscribes `sync:access:<uid>` | subscribes `sync:access:<uid>` | **`user_blocks` emitted no signal at all** | 066 topic + both existing listeners | **Yes** | 073 broadcasts an opaque `{}` to BOTH parties on INSERT/DELETE | `test_073` catalog assertion | **Fixed in backend** |
+| Club rename | n/a | club | officer edits name | officer edits name | handle was client-supplied and globally unique | existing officer RLS + 072 guard | **Yes** | 073 derives handle from name atomically; university-scoped uniqueness | `test_073` + 20/20 club matrix | **Fixed in backend** |
+| Duplicate club name at same university | n/a | club | — | — | none | 073 normalization | **Yes** | rejected outright, **never** numbered | `test_073` (create + rename, case/whitespace variants) | **Fixed in backend** |
+| Same club name at a different university | n/a | club | — | — | globally unique handle blocked it | 073 scoped indexes | **Yes** | allowed | `test_073` | **Fixed in backend** |
+| Officer supplies handle directly | n/a | club | — | — | trusted | 073 derivation trigger | **Yes** | always re-derived from the name | `test_073` | **Fixed in backend** |
+| Officer moves club/university, rewrites id | n/a | club | — | — | 072 guard | 072 | No | none | club matrix 20/20 | Already correct — no change |
+| Structural identity of a blocked person in club members / group participants | either | shared club or chat | not verified this pass | not verified this pass | 058 hides the profile row entirely, so shared lists lose the person | — | **Unresolved** | none — see below | — | **Product decision required** |
+
+### Contracts introduced by 073
+
+- **Name normalization:** `public.normalized_club_name(text)` = lower + trim + internal whitespace collapsed. `Forest Club`, `forest club`, `FOREST CLUB`, `" Forest Club "`, `Forest     Club` all collide **within one university**.
+- **Handle derivation:** `public.club_handle_from_name(text)` strips every non-alphanumeric character, preserving the officer's capitalisation. `Nature Club → NatureClub`, `Forest Club → ForestClub`, `Robotics 2026 → Robotics2026`. Comparison is case-insensitive.
+- **Atomicity:** one BEFORE trigger sets the handle from the name on the same statement, so name and handle always move together or not at all. A client-supplied handle is overwritten, never trusted.
+- **No invented numbers:** a collision raises `club_name_already_exists_at_university` (SQLSTATE 23505). Nothing is renamed, nothing is suffixed, nothing partially saves. Two university-scoped unique indexes remain the concurrent-safe guarantee.
+
+### Existing-data inspection
+
+Checked before adding the indexes: **zero** normalized name or handle collisions among the clubs present in the local chain. This check ran against a fresh local reset of migrations 001→073 plus QA seed, **not** against production — production must be re-checked with the same two queries before this migration is applied remotely.
+
+### Handle-based lookup audit
+
+`grep` across both apps found **no** handle-based lookup anywhere: every club read, route, deep link, notification and saved reference uses the immutable club id. Making the handle university-scoped therefore introduces no ambiguity and required no route changes.
+
+### Open product decision — structural identity under a block
+
+Migration 058 hides a blocked person's `profiles` row in both directions. That satisfies "the profile must not load", but it also means a blocked person disappears entirely from club member lists, officer lists and group participant lists, rather than showing the basic identity (avatar, display name, username, club role) that this task asks to preserve. Exposing that identity means either loosening the profiles policy (which would then require both clients to render "User not found" themselves) or adding a shared-context identity RPC. Both are larger than a bug fix and change an approved privacy model, so this pass **diagnosed but did not change it**. Decision needed before it is implemented.
+
 ## Genuine product ambiguities
 
 - There is no user-visible mobile event-search result surface: `useDiscoveryEvents`

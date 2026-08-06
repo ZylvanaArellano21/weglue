@@ -29,6 +29,22 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email_domain     text;
 -- not carry 034 (club_members role updates) or 063 (event officer updates).
 -- 072 is about WHICH COLUMNS may change, not about who may update a row, so
 -- these are dependencies of the test rather than the subject of it.
+-- is_club_officer is owned by 001 and is the caller-bound officer predicate the
+-- policies below depend on; recreated verbatim for the compact chain.
+CREATE OR REPLACE FUNCTION public.is_club_officer(p_club_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.club_members
+     WHERE club_id = p_club_id
+       AND user_id = auth.uid()
+       AND role = 'officer'
+  );
+$$;
+
 -- The compact 057 fixture leaves RLS OFF on clubs and club_members. Without
 -- this, every "wrong actor is refused" assertion below would pass vacuously
 -- because no policy is consulted at all. Production enables RLS on both from
@@ -48,22 +64,6 @@ CREATE POLICY "clubs: officers can update"
 DROP POLICY IF EXISTS "club_members: anyone authenticated can read" ON public.club_members;
 CREATE POLICY "club_members: anyone authenticated can read"
   ON public.club_members FOR SELECT TO authenticated USING (true);
-
--- is_club_officer is owned by 001 and is the caller-bound officer predicate the
--- policies below depend on; recreated verbatim for the compact chain.
-CREATE OR REPLACE FUNCTION public.is_club_officer(p_club_id uuid)
-RETURNS boolean
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.club_members
-     WHERE club_id = p_club_id
-       AND user_id = auth.uid()
-       AND role = 'officer'
-  );
-$$;
 
 DROP POLICY IF EXISTS "club_members: officers can update roles" ON public.club_members;
 CREATE POLICY "club_members: officers can update roles"
