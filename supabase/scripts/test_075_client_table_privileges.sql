@@ -191,6 +191,92 @@ BEGIN
 END;
 $$;
 
+-- ── 5b. NEGATIVE: no client role holds TRUNCATE / REFERENCES / TRIGGER ────
+-- This is the class the first version of 075 missed entirely. Production was
+-- provisioned when Supabase's default privileges handed anon and authenticated
+-- ALL EIGHT privileges on every new table, and TRUNCATE is NOT subject to RLS —
+-- so a row policy is no defence against whoever can reach it.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT c.relname, role.name AS role, p.priv
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      CROSS JOIN (VALUES ('anon'), ('authenticated')) AS role(name)
+      CROSS JOIN (VALUES ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv)
+     WHERE n.nspname = 'public' AND c.relkind = 'r'
+       AND has_table_privilege(role.name, c.oid, p.priv)
+  LOOP
+    RAISE EXCEPTION '075 NEGATIVE: % still holds % on public.%', r.role, r.priv, r.relname;
+  END LOOP;
+END;
+$$;
+
+-- ── 5c. NEGATIVE: protected tables are closed on EVERY privilege ──────────
+-- The original harness only checked SELECT, which is why a table carrying the
+-- full legacy blanket could still have looked half-acceptable.
+DO $$
+DECLARE v_table text; v_priv text;
+BEGIN
+  FOREACH v_table IN ARRAY ARRAY[
+    'admin_audit_events', 'admin_audit_actions', 'account_restrictions',
+    'account_deletion_cases', 'account_deletion_jobs',
+    'transactional_email_outbox', 'content_lifecycle',
+    'push_queue', 'push_tickets', 'auth_probe_rate_limits',
+    'chat_invitations', 'notification_config', 'social_proof_events',
+    'report_decision_history', 'report_notification_deliveries'
+  ] LOOP
+    CONTINUE WHEN to_regclass('public.' || quote_ident(v_table)) IS NULL;
+    FOREACH v_priv IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE',
+                                  'TRUNCATE','REFERENCES','TRIGGER'] LOOP
+      IF has_table_privilege('authenticated', 'public.' || quote_ident(v_table), v_priv)
+         OR has_table_privilege('anon', 'public.' || quote_ident(v_table), v_priv) THEN
+        RAISE EXCEPTION '075 NEGATIVE: % holds % for a client role', v_table, v_priv;
+      END IF;
+    END LOOP;
+  END LOOP;
+END;
+$$;
+
+-- ── 5d. service_role holds only what the server flows actually perform ────
+-- 064 locked report_decision_history and report_notification_deliveries to
+-- SELECT. The first version of 075 re-granted write on both; this pins the
+-- correction. The positive half proves the two Edge Functions still work, so a
+-- future over-tightening cannot pass by revoking everything.
+DO $$
+DECLARE v_table text;
+BEGIN
+  FOREACH v_table IN ARRAY ARRAY['report_decision_history',
+                                 'report_notification_deliveries'] LOOP
+    IF has_table_privilege('service_role', 'public.' || quote_ident(v_table), 'INSERT')
+       OR has_table_privilege('service_role', 'public.' || quote_ident(v_table), 'UPDATE')
+       OR has_table_privilege('service_role', 'public.' || quote_ident(v_table), 'DELETE') THEN
+      RAISE EXCEPTION '075 NEGATIVE: service_role may not write % (064 owns it)', v_table;
+    END IF;
+  END LOOP;
+
+  -- send-push and send-report-email, the only service_role writers in the repo.
+  IF NOT has_table_privilege('service_role', 'public.push_queue', 'UPDATE')
+     OR NOT has_table_privilege('service_role', 'public.push_tokens', 'UPDATE')
+     OR NOT has_table_privilege('service_role', 'public.push_tickets', 'INSERT')
+     OR NOT has_table_privilege('service_role', 'public.push_tickets', 'UPDATE')
+     OR NOT has_table_privilege('service_role', 'public.reports', 'UPDATE') THEN
+    RAISE EXCEPTION '075 POSITIVE: an Edge Function lost a write it performs';
+  END IF;
+
+  -- The Admin Dashboard reads; it never writes a table directly.
+  IF NOT has_table_privilege('service_role', 'public.profiles', 'SELECT')
+     OR NOT has_table_privilege('service_role', 'public.reports', 'SELECT')
+     OR NOT has_table_privilege('service_role', 'public.admin_audit_events', 'SELECT') THEN
+    RAISE EXCEPTION '075 POSITIVE: the Admin Dashboard lost a read it depends on';
+  END IF;
+  IF has_table_privilege('service_role', 'public.posts', 'DELETE')
+     OR has_table_privilege('service_role', 'public.profiles', 'DELETE') THEN
+    RAISE EXCEPTION '075 NEGATIVE: service_role kept a mass-delete capability it never uses';
+  END IF;
+END;
+$$;
+
 -- ── 6. NEGATIVE: user_blocks stays RPC-only for mutation ───────────────────
 DO $$
 BEGIN
