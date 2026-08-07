@@ -7,15 +7,15 @@ import { useEffect, useRef, useState } from "react";
 import { CountBadge } from "../shared/CountBadge";
 import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon } from "../shared/icons";
 import { ProfileMenu } from "../profile/ProfileMenu";
-import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
+import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { useDiscoverySearch } from "../../lib/hooks/useDiscoverySearch";
 import { Avatar } from "../shared/Avatar";
 
 // Fixed top navigation (matches the web Home + Club screenshots): logo, the
 // global search, then Home / Clubs / Messages icons + the user's avatar. Badges
 // use the SAME shared counts as mobile — Home = unread notifications,
-// Messages = unread threads. Mobile has no club-activity badge, so the Clubs
-// icon shows none.
+// Messages = unread direct messages + unread group messages. Mobile has no
+// club-activity badge, so the Clubs icon shows none.
 //
 // The avatar is NOT a link to the profile: clicking it toggles the profile
 // dropdown (ProfileMenu), which is the desktop stand-in for the mobile sidebar
@@ -37,7 +37,9 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
 
   const isHome = pathname === "/home" || pathname === "/dashboard";
   const notifications = summary?.unread_notifications ?? 0;
-  const threads = summary?.unread_threads ?? 0;
+  // Messages badge = Single + Groups from the SAME canonical RPC the two
+  // Message-tab controls read, so the three numbers can never disagree.
+  const messages = messageBadgeCounts(summary).total;
   const isClubs = pathname === "/clubs" || pathname.startsWith("/club/");
   const isMessages = pathname === "/messages";
 
@@ -142,7 +144,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           <NavIcon href="/clubs" label="Clubs" active={isClubs}>
             <PeopleIcon size={27} filled={isClubs} />
           </NavIcon>
-          <NavIcon href="/messages" label="Messages" active={isMessages} badge={threads} badgeLabel="unread conversations">
+          <NavIcon href="/messages" label="Messages" active={isMessages} badge={messages} badgeLabel="unread messages">
             <ChatIcon size={26} filled={isMessages} />
           </NavIcon>
 

@@ -6,8 +6,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
 import { PageOverlays } from "../shared/PageOverlays";
 import { Avatar } from "../shared/Avatar";
+import { CountBadge } from "../shared/CountBadge";
+import { PeopleIcon, SearchIcon } from "../shared/icons";
 import { ToastProvider, useToast } from "../shared/Toast";
-import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
+import { messageBadgeCounts, useUnreadSummary, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
 import { useMyClubs } from "../../lib/hooks/useClubTab";
 import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
@@ -67,10 +69,16 @@ const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate speech", "Inappr
 export function MessagesClient({ userId }: { userId: string }): JSX.Element {
   useUnreadSummary(userId);
   useMyClubsRealtime(userId);
+  // From `md` up the Message tab is a FIXED-height application shell: the
+  // document itself never scrolls, and the only scrollable region is the
+  // conversation list inside the Chats column (plus each thread's own message
+  // list). Below `md` the columns stack, so normal document flow is kept.
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-cream">
-        <AppHeader userId={userId} />
+      <div className="flex min-h-screen flex-col bg-cream md:h-[100dvh] md:min-h-0 md:overflow-hidden">
+        <div className="shrink-0">
+          <AppHeader userId={userId} />
+        </div>
         <MessagesBody userId={userId} />
       </div>
     </ToastProvider>
@@ -201,9 +209,9 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
       try { await setChannelPostPermission(channelId, permission, userIds); await refreshHub(); show("Posting permissions updated"); } catch { show("Couldn’t update posting permissions.", "error"); }
     }} />;
   } else if (composerMode === "new-message") {
-    center = <NewMessagePicker onSelect={openPerson} onClose={() => setComposerMode("none")} />;
+    center = <NewMessagePicker onSelect={openPerson} onGroupChat={() => setComposerMode("new-group")} onClose={() => setComposerMode("none")} />;
   } else if (composerMode === "new-group") {
-    center = <NewGroupPicker onClose={() => setComposerMode("none")} onContinue={(ids, name) => {
+    center = <NewGroupPicker onBack={() => setComposerMode("new-message")} onContinue={(ids, name) => {
       setComposerMode("none");
       destination({ filter: "groups", draftGroupIds: ids, draftGroupName: name });
     }} />;
@@ -216,11 +224,19 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
   }
 
   return (
-    <main className="mx-auto max-w-[1400px] px-0 py-0 sm:px-4 sm:py-6">
-      <div className="overflow-hidden border-y bg-cream shadow-[0_2px_8px_rgba(0,0,0,0.16)] sm:rounded-sm sm:border" style={{ borderColor: "rgba(0,0,0,0.17)", minHeight: "calc(100vh - 88px)" }}>
-        <div className={infoOpen && conversationId ? "grid min-h-[calc(100vh-88px)] grid-cols-1 lg:grid-cols-[292px_minmax(0,1fr)_360px]" : "grid min-h-[calc(100vh-88px)] grid-cols-1 md:grid-cols-[292px_minmax(0,1fr)]"}>
-          <MessagesSidebar filter={filter} loading={conversationsLoading} conversations={filter === "single" ? directConversations : groupConversations} suggestionsEnabled={filter === "single" && directConversations.length === 0 && !composerMode && !conversationId && !isDraft} activeConversationId={conversationId} onFilter={setFilter} onOpen={openConversation} onNew={() => setComposerMode(filter === "single" ? "new-message" : "new-group")} onOpenPerson={openPerson} onOpenMessage={openSearchResult} />
-          <section className="relative min-w-0 bg-[#fffdf4]">{center}</section>
+    <main className="mx-auto w-full max-w-[1400px] px-0 py-0 sm:px-4 sm:py-6 md:flex md:min-h-0 md:flex-1 md:flex-col">
+      {/* The shell owns the viewport height and clips: nothing inside it may
+          grow the document. `min-h-0` on every descendant in this chain is what
+          lets the list below actually reach `overflow-y-auto` instead of
+          stretching its parent. */}
+      <div className="min-h-[calc(100vh-88px)] overflow-hidden border-y bg-cream shadow-[0_2px_8px_rgba(0,0,0,0.16)] sm:rounded-sm sm:border md:min-h-0 md:flex-1" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
+        <div className={infoOpen && conversationId ? "grid grid-cols-1 md:h-full md:grid-rows-[minmax(0,1fr)] lg:grid-cols-[292px_minmax(0,1fr)_360px]" : "grid grid-cols-1 md:h-full md:grid-cols-[292px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)]"}>
+          {/* suggestionsEnabled: `composerMode` is a STRING union whose idle value
+              is "none" — truthy — so the previous `!composerMode` test was
+              permanently false and the empty-Single Suggested section could never
+              render. It must compare against "none". */}
+          <MessagesSidebar userId={userId} filter={filter} loading={conversationsLoading} conversations={filter === "single" ? directConversations : groupConversations} suggestionsEnabled={filter === "single" && directConversations.length === 0 && composerMode === "none" && !conversationId && !isDraft} activeConversationId={conversationId} onFilter={setFilter} onOpen={openConversation} onNew={() => setComposerMode("new-message")} onOpenPerson={openPerson} onOpenMessage={openSearchResult} />
+          <section className="relative flex min-w-0 flex-col bg-[#fffdf4] md:min-h-0 md:overflow-y-auto">{center}</section>
           {infoOpen && conversationId && details && (
             <InfoPanel userId={userId} conversationId={conversationId} channelId={channelId} details={details} infoTab={infoTab} onClose={() => destination({ filter, conversationId, channelId })} onTab={(tab) => destination({ filter, conversationId, channelId, info: true, infoTab: tab })} onOpenEvent={(eventId) => destination({ filter, conversationId, channelId, info: true, infoTab, eventId })} onOpenMessage={openSearchResult} onError={(message) => show(message, "error")} />
           )}
@@ -231,33 +247,47 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
   );
 }
 
-function MessagesSidebar({ filter, loading, conversations, suggestionsEnabled, activeConversationId, onFilter, onOpen, onNew, onOpenPerson, onOpenMessage }: { filter: Filter; loading: boolean; conversations: ConversationPreview[]; suggestionsEnabled: boolean; activeConversationId: string | null; onFilter: (filter: Filter) => void; onOpen: (conversation: ConversationPreview) => void; onNew: () => void; onOpenPerson: (person: Person) => void; onOpenMessage: (result: MessageSearchResult) => void }): JSX.Element {
+function MessagesSidebar({ userId, filter, loading, conversations, suggestionsEnabled, activeConversationId, onFilter, onOpen, onNew, onOpenPerson, onOpenMessage }: { userId: string; filter: Filter; loading: boolean; conversations: ConversationPreview[]; suggestionsEnabled: boolean; activeConversationId: string | null; onFilter: (filter: Filter) => void; onOpen: (conversation: ConversationPreview) => void; onNew: () => void; onOpenPerson: (person: Person) => void; onOpenMessage: (result: MessageSearchResult) => void }): JSX.Element {
   const [query, setQuery] = useState("");
   const { data: people = [], isLoading: peopleLoading } = useMessagePeopleSearch(query);
   const { data: contentResults = [], isLoading: contentLoading } = useMessageContentSearch(query, null);
-  const { data: suggestions = [] } = useMessageSuggestions(suggestionsEnabled);
+  const { data: suggestions = [], isLoading: suggestionsLoading, isError: suggestionsFailed } = useMessageSuggestions(suggestionsEnabled);
+  const { data: summary } = useUnreadSummaryValue(userId);
+  const { single: singleUnread, groups: groupsUnread } = messageBadgeCounts(summary);
   const term = query.trim().toLowerCase();
   const filtered = term ? conversations.filter((conversation) => `${conversation.name} ${conversation.last_message ?? ""}`.toLowerCase().includes(term)) : conversations;
   const active = filtered.filter((conversation) => !conversation.archived).sort(compareConversation);
   const archived = filtered.filter((conversation) => conversation.archived).sort(compareConversation);
   return (
-    <aside className="flex min-h-0 flex-col border-b bg-cream md:border-b-0 md:border-r" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
-      <div className="px-5 pb-3 pt-5">
+    <aside className="flex min-h-0 flex-col border-b bg-cream md:overflow-hidden md:border-b-0 md:border-r" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
+      {/* Fixed header: heading, plus, search and the Single/Groups controls
+          never scroll away — only the list below them moves. */}
+      <div className="shrink-0 px-5 pb-3 pt-5">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-950 font-zain">Chats</h1>
-          <button type="button" onClick={onNew} aria-label={filter === "single" ? "Start a new direct message" : "Create a group chat"} className="rounded-full p-1 text-2xl text-gray-950 transition hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-teal">+</button>
+          {/* Always New message now (group chat is reached from inside it), so
+              the label must not depend on the active filter. */}
+          <button type="button" onClick={onNew} aria-label="New message" className="rounded-full p-1 text-2xl text-gray-950 transition hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-teal">+</button>
         </div>
+        {/* The real magnifying glass from the shared icon set (same one the
+            header search uses) — not the ⌕ text glyph, which rendered at the
+            font's own size and sat off the optical centre. */}
         <label className="relative mt-3 block">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-800">⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} type="search" placeholder="Search" className="h-10 w-full rounded-full border bg-white pl-9 pr-9 text-sm outline-none focus:ring-2 focus:ring-teal" style={{ borderColor: "rgba(0,0,0,0.2)", boxShadow: "0 2px 3px rgba(0,0,0,0.16)" }} />
+          <span className="pointer-events-none absolute left-3.5 top-1/2 flex -translate-y-1/2 items-center text-gray-500">
+            <SearchIcon size={17} />
+          </span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} type="search" placeholder="Search" aria-label="Search conversations and people" className="h-10 w-full rounded-full border bg-white pl-11 pr-9 text-sm outline-none placeholder:text-gray-500 focus:ring-2 focus:ring-teal" style={{ borderColor: "rgba(0,0,0,0.2)", boxShadow: "0 2px 3px rgba(0,0,0,0.16)" }} />
           {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-1 text-gray-500 hover:bg-gray-100">×</button>}
         </label>
         <div className="mt-3 flex gap-3" role="tablist" aria-label="Conversation type">
-          <FilterButton label="Single" active={filter === "single"} onClick={() => onFilter("single")} />
-          <FilterButton label="Groups" active={filter === "groups"} onClick={() => onFilter("groups")} />
+          <FilterButton label="Single" active={filter === "single"} badge={singleUnread} badgeLabel="unread direct messages" onClick={() => onFilter("single")} />
+          <FilterButton label="Groups" active={filter === "groups"} badge={groupsUnread} badgeLabel="unread group messages" onClick={() => onFilter("groups")} />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
+      {/* THE one scrollable region of the Chats column. `min-h-0` is required:
+          without it this flex child refuses to shrink below its content and the
+          overflow escapes to the document instead. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-5">
         {term.length >= 3 && (
           <div className="pb-2">
             <p className="px-2 pb-1 pt-1 text-xs font-bold uppercase tracking-wide text-gray-500">People</p>
@@ -274,7 +304,7 @@ function MessagesSidebar({ filter, loading, conversations, suggestionsEnabled, a
         {!loading && !term && suggestionsEnabled && (
           <div className="mt-3">
             <p className="px-2 pb-2 text-base font-bold text-gray-900 font-zain">Suggested</p>
-            {suggestions.length ? suggestions.map((person) => <PersonRow key={person.user_id} person={person} onClick={() => onOpenPerson(person)} />) : <p className="px-2 text-sm leading-6 text-gray-500">Search above to find people, or browse clubs to meet members.</p>}
+            <SuggestedPeople people={suggestions} loading={suggestionsLoading} failed={suggestionsFailed} onSelect={onOpenPerson} />
           </div>
         )}
         {!loading && !term && active.length === 0 && !suggestionsEnabled && <p className="px-2 py-6 text-sm text-gray-500">No conversations yet.</p>}
@@ -284,8 +314,26 @@ function MessagesSidebar({ filter, loading, conversations, suggestionsEnabled, a
   );
 }
 
-function FilterButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }): JSX.Element {
-  return <button type="button" role="tab" aria-selected={active} onClick={onClick} className="rounded-full px-5 py-1 text-sm font-medium shadow-sm transition focus:outline-none focus:ring-2 focus:ring-teal" style={active ? { background: "#0FA6A6", color: "#fff" } : { background: "#fff", color: "#0FA6A6" }}>{label}</button>;
+// The category control carries the compact red CountBadge already used by the
+// header and mobile — no pill, banner, or label. CountBadge itself renders
+// nothing at 0, which is exactly the "hide when zero" rule.
+function FilterButton({ label, active, badge = 0, badgeLabel, onClick }: { label: string; active: boolean; badge?: number; badgeLabel?: string; onClick: () => void }): JSX.Element {
+  return (
+    <span className="relative inline-flex">
+      <button type="button" role="tab" aria-selected={active} onClick={onClick} className="rounded-full px-5 py-1 text-sm font-medium shadow-sm transition focus:outline-none focus:ring-2 focus:ring-teal" style={active ? { background: "#0FA6A6", color: "#fff" } : { background: "#fff", color: "#0FA6A6" }}>{label}</button>
+      <CountBadge count={badge} label={badgeLabel} style={{ position: "absolute", top: -7, right: -7, pointerEvents: "none" }} />
+    </span>
+  );
+}
+
+/** Suggested rows shared by the Chats column, New message and New group chat,
+ * so all three render the same avatar/name/username row and the same states.
+ * A failed lookup must never masquerade as "nobody to suggest". */
+function SuggestedPeople({ people, loading, failed, selectedIds, onSelect }: { people: Person[]; loading: boolean; failed: boolean; selectedIds?: Set<string>; onSelect: (person: Person) => void }): JSX.Element {
+  if (loading) return <p className="px-2 py-3 text-sm text-gray-500">Loading suggestions…</p>;
+  if (failed) return <p className="px-2 text-sm leading-6 text-red-600">Couldn’t load suggestions. Check your connection and try again.</p>;
+  if (!people.length) return <p className="px-2 text-sm leading-6 text-gray-500">Search above to find people, or browse clubs to meet members.</p>;
+  return <>{people.map((person) => <PersonRow key={person.user_id} person={person} selected={selectedIds?.has(person.user_id)} onClick={() => onSelect(person)} />)}</>;
 }
 
 function ConversationRow({ conversation, active, onClick }: { conversation: ConversationPreview; active: boolean; onClick: () => void }): JSX.Element {
@@ -315,24 +363,75 @@ function MessagesLanding({ noClubs, onJoinClub }: { noClubs: boolean; onJoinClub
 
 function Unavailable({ onBack }: { onBack: () => void }): JSX.Element { return <div className="flex min-h-[480px] flex-col items-center justify-center px-6 text-center"><p className="text-xl font-bold text-gray-900">This conversation isn’t available</p><p className="mt-2 text-sm text-gray-500">It may have been removed, or you may no longer have access.</p><button type="button" onClick={onBack} className="mt-5 rounded-full bg-teal px-5 py-2 text-sm font-semibold text-white">Back to Messages</button></div>; }
 
-function NewMessagePicker({ onSelect, onClose }: { onSelect: (person: Person) => void; onClose: () => void }): JSX.Element {
-  const [query, setQuery] = useState("");
-  const { data: people = [], isLoading } = useMessagePeopleSearch(query);
-  const { data: suggestions = [] } = useMessageSuggestions(query.trim().length < 3);
-  const peopleToShow = query.trim().length >= 3 ? people : suggestions;
-  return <div className="mx-auto max-w-xl px-6 py-7"><div className="flex items-center justify-between"><h2 className="text-xl font-bold text-gray-900">New message</h2><button type="button" onClick={onClose} className="rounded-full px-2 py-1 text-sm text-gray-500 hover:bg-black/5">Cancel</button></div><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people (3+ characters)" className="mt-4 h-11 w-full rounded-full border bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-teal" /><p className="mt-5 text-sm font-bold text-gray-600">Suggested</p><div className="mt-2">{isLoading ? <p className="py-4 text-sm text-gray-500">Searching…</p> : peopleToShow.map((person) => <PersonRow key={person.user_id} person={person} onClick={() => onSelect(person)} />)}</div></div>;
+// New message / New group chat both render INSIDE the right-hand content area
+// (the Chats column stays visible throughout) and mirror the mobile flow:
+// plus → New message → "Group chat" row → New group chat → back.
+function ComposerSearchField({ value, onChange, autoFocus = false }: { value: string; onChange: (value: string) => void; autoFocus?: boolean }): JSX.Element {
+  return (
+    <label className="relative mt-4 block">
+      <span className="pointer-events-none absolute left-4 top-1/2 flex -translate-y-1/2 items-center text-gray-500"><SearchIcon size={17} /></span>
+      <input autoFocus={autoFocus} value={value} onChange={(event) => onChange(event.target.value)} type="search" placeholder="Search" aria-label="Search people" className="h-11 w-full rounded-full border bg-white pl-12 pr-4 text-sm outline-none placeholder:text-gray-500 focus:ring-2 focus:ring-teal" style={{ borderColor: "rgba(0,0,0,0.2)" }} />
+    </label>
+  );
 }
 
-function NewGroupPicker({ onClose, onContinue }: { onClose: () => void; onContinue: (ids: string[], name: string | null) => void }): JSX.Element {
+function NewMessagePicker({ onSelect, onGroupChat, onClose }: { onSelect: (person: Person) => void; onGroupChat: () => void; onClose: () => void }): JSX.Element {
+  const [query, setQuery] = useState("");
+  const searching = query.trim().length >= 3;
+  const { data: people = [], isLoading: searchLoading } = useMessagePeopleSearch(query);
+  const { data: suggestions = [], isLoading: suggestionsLoading, isError: suggestionsFailed } = useMessageSuggestions(!searching);
+  return (
+    <div className="mx-auto w-full max-w-xl px-6 py-7">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-900">New message</h2>
+        <button type="button" onClick={onClose} className="rounded-full px-2 py-1 text-sm text-gray-500 hover:bg-black/5">Cancel</button>
+      </div>
+      <ComposerSearchField autoFocus value={query} onChange={setQuery} />
+      {!searching && (
+        <button type="button" onClick={onGroupChat} className="mt-4 flex w-full items-center gap-3.5 rounded-xl px-2 py-3 text-left transition hover:bg-black/[0.035] focus:outline-none focus:ring-2 focus:ring-teal">
+          <span className="flex h-10 w-10 items-center justify-center rounded-full text-teal" style={{ background: "rgba(15,166,166,0.1)", color: "#0FA6A6" }}><PeopleIcon size={20} /></span>
+          <span className="flex-1 text-[15px] font-semibold text-gray-900">Group chat</span>
+          <span aria-hidden className="text-gray-400">›</span>
+        </button>
+      )}
+      <p className="mt-5 text-sm font-bold text-gray-600">{searching ? "Results" : "Suggested"}</p>
+      <div className="mt-2">
+        {searching
+          ? searchLoading ? <p className="py-4 text-sm text-gray-500">Searching…</p> : people.length ? people.map((person) => <PersonRow key={person.user_id} person={person} onClick={() => onSelect(person)} />) : <p className="px-2 py-3 text-sm text-gray-500">No people found.</p>
+          : <SuggestedPeople people={suggestions} loading={suggestionsLoading} failed={suggestionsFailed} onSelect={onSelect} />}
+      </div>
+    </div>
+  );
+}
+
+function NewGroupPicker({ onBack, onContinue }: { onBack: () => void; onContinue: (ids: string[], name: string | null) => void }): JSX.Element {
   const [name, setName] = useState("");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Person[]>([]);
-  const { data: people = [] } = useMessagePeopleSearch(query);
-  const { data: suggestions = [] } = useMessageSuggestions(query.trim().length < 3);
-  const peopleToShow = query.trim().length >= 3 ? people : suggestions;
+  const searching = query.trim().length >= 3;
+  const { data: people = [], isLoading: searchLoading } = useMessagePeopleSearch(query);
+  const { data: suggestions = [], isLoading: suggestionsLoading, isError: suggestionsFailed } = useMessageSuggestions(!searching);
   const selectedIds = new Set(selected.map((person) => person.user_id));
   const toggle = (person: Person) => setSelected((current) => current.some((item) => item.user_id === person.user_id) ? current.filter((item) => item.user_id !== person.user_id) : [...current, person]);
-  return <div className="mx-auto max-w-xl px-6 py-7"><div className="flex items-center justify-between"><h2 className="text-xl font-bold text-gray-900">New group chat</h2><button type="button" onClick={onClose} className="rounded-full px-2 py-1 text-sm text-gray-500 hover:bg-black/5">Cancel</button></div><input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Group name (optional)" className="mt-4 h-11 w-full rounded-xl border bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-teal" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people (3+ characters)" className="mt-3 h-11 w-full rounded-full border bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-teal" />{selected.length > 0 && <p className="mt-3 text-xs text-gray-500">{selected.map((person) => person.full_name || person.username).join(", ")}</p>}<div className="mt-4">{peopleToShow.map((person) => <PersonRow key={person.user_id} person={person} selected={selectedIds.has(person.user_id)} onClick={() => toggle(person)} />)}</div><button type="button" disabled={!selected.length} onClick={() => onContinue(selected.map((person) => person.user_id), name.trim() || null)} className="mt-5 rounded-full bg-teal px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-40">Continue</button></div>;
+  return (
+    <div className="mx-auto w-full max-w-xl px-6 py-7">
+      <div className="flex items-center justify-between gap-3">
+        <button type="button" onClick={onBack} aria-label="Back to new message" className="rounded-full px-2 py-1 text-lg text-gray-500 hover:bg-black/5">‹</button>
+        <h2 className="flex-1 text-center text-xl font-bold text-gray-900">New group chat</h2>
+        {/* Same minimum as mobile: at least one other person before Next. */}
+        <button type="button" disabled={!selected.length} onClick={() => onContinue(selected.map((person) => person.user_id), name.trim() || null)} className="rounded-full px-2 py-1 text-sm font-semibold text-teal transition hover:bg-black/5 disabled:text-gray-400 disabled:hover:bg-transparent">Next</button>
+      </div>
+      <input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Group name (optional)" aria-label="Group name (optional)" className="mt-4 h-11 w-full rounded-xl border bg-white px-4 text-sm outline-none placeholder:text-gray-500 focus:ring-2 focus:ring-teal" style={{ borderColor: "rgba(0,0,0,0.2)" }} />
+      <ComposerSearchField value={query} onChange={setQuery} />
+      {selected.length > 0 && <p className="mt-3 text-xs text-gray-500">{selected.map((person) => person.full_name?.trim() || person.username).join(", ")}</p>}
+      <p className="mt-5 text-sm font-bold text-gray-600">{searching ? "Results" : "Suggested"}</p>
+      <div className="mt-2">
+        {searching
+          ? searchLoading ? <p className="py-4 text-sm text-gray-500">Searching…</p> : people.length ? people.map((person) => <PersonRow key={person.user_id} person={person} selected={selectedIds.has(person.user_id)} onClick={() => toggle(person)} />) : <p className="px-2 py-3 text-sm text-gray-500">No people found.</p>
+          : <SuggestedPeople people={suggestions} loading={suggestionsLoading} failed={suggestionsFailed} selectedIds={selectedIds} onSelect={toggle} />}
+      </div>
+    </div>
+  );
 }
 
 function DraftThread({ userId, draftPerson, groupName, groupIds, onMaterialized, onError }: { userId: string; draftPerson: Person | null | undefined; groupName: string | null; groupIds: string[]; onMaterialized: (id: string) => void; onError: (message: string) => void }): JSX.Element {
@@ -404,11 +503,13 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
       onInvalidate();
     } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t send the message."); }
   };
-  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} />) : <EmptyThread label="No messages yet" />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only permitted members can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={send} onPoll={async (question, options, allowMultiple) => { try { await createPoll({ conversationId, channelId, question, options, allowMultiple }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
+  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} />) : <EmptyThread label="No messages yet" />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only permitted members can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={send} onPoll={async (question, options, allowMultiple) => { try { await createPoll({ conversationId, channelId, question, options, allowMultiple }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
 }
 
 function ThreadShell({ title, subtitle, onOpenHub, onOpenInfo, children }: { title: string; subtitle: string | null; onOpenHub?: () => void; onOpenInfo?: () => void; children: React.ReactNode }): JSX.Element {
-  return <div className="flex min-h-[calc(100vh-88px)] flex-col"><header className="flex min-h-[76px] items-center justify-center border-b px-5 text-center" style={{ borderColor: "rgba(0,0,0,0.16)" }}><div className="flex min-w-0 items-center gap-2">{onOpenHub && <button type="button" onClick={onOpenHub} aria-label="Open channel navigator" className="rounded-full p-2 text-lg hover:bg-black/5">☰</button>}<button type="button" onClick={onOpenInfo} className="min-w-0 rounded-lg px-2 py-1 transition hover:bg-black/[0.03] focus:outline-none focus:ring-2 focus:ring-teal" aria-label={`${title} information`}><span className="block truncate text-xl font-bold text-gray-950">{title}{onOpenInfo && <span className="ml-2 text-teal">›</span>}</span>{subtitle && <span className="block truncate text-sm font-semibold text-gray-500">{subtitle}</span>}</button></div></header>{children}</div>;
+  // `md:h-full` (not a viewport min-height) keeps the thread exactly as tall as
+  // its column, so the message list scrolls internally and the page does not.
+  return <div className="flex min-h-[calc(100vh-88px)] flex-col md:h-full md:min-h-0"><header className="flex min-h-[76px] shrink-0 items-center justify-center border-b px-5 text-center" style={{ borderColor: "rgba(0,0,0,0.16)" }}><div className="flex min-w-0 items-center gap-2">{onOpenHub && <button type="button" onClick={onOpenHub} aria-label="Open channel navigator" className="rounded-full p-2 text-lg hover:bg-black/5">☰</button>}<button type="button" onClick={onOpenInfo} className="min-w-0 rounded-lg px-2 py-1 transition hover:bg-black/[0.03] focus:outline-none focus:ring-2 focus:ring-teal" aria-label={`${title} information`}><span className="block truncate text-xl font-bold text-gray-950">{title}{onOpenInfo && <span className="ml-2 text-teal">›</span>}</span>{subtitle && <span className="block truncate text-sm font-semibold text-gray-500">{subtitle}</span>}</button></div></header>{children}</div>;
 }
 
 function EmptyThread({ label }: { label: string }): JSX.Element { return <p className="m-auto text-sm text-gray-400">{label}</p>; }
@@ -518,7 +619,7 @@ function InfoPanel({ userId, conversationId, channelId, details, infoTab, onClos
       onError("Couldn’t update mute settings.");
     }
   };
-  return <aside className="relative flex min-h-0 flex-col border-l bg-[#fffdf4] shadow-xl lg:shadow-none" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
+  return <aside className="relative flex min-h-0 flex-col border-l bg-[#fffdf4] shadow-xl lg:overflow-hidden lg:shadow-none" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
     <div className="flex items-center justify-between p-4"><button type="button" onClick={onClose} aria-label="Close information panel" className="rounded-full p-2 text-xl hover:bg-black/5">‹</button><button type="button" aria-label="More chat options" className="rounded-full p-2 hover:bg-black/5">•••</button></div>
     <div className="px-5 pb-4 text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal text-3xl font-bold text-white">{isChannel ? "#" : details.name.slice(0, 1).toUpperCase()}</div><h2 className="mt-3 text-2xl font-bold text-gray-950">{isChannel ? "Channel" : details.name}</h2><p className="text-sm text-gray-500">{details.type === "club_group" ? "Members chat" : details.type === "officer_chat" ? "Officer chat" : `${details.participants.length} participants`}</p><div className="mt-4 flex justify-center gap-8"><label className="flex flex-col items-center gap-1 text-xs font-semibold"><span className="rounded-full p-2 text-lg">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" className="w-24 border-b bg-transparent text-center text-xs outline-none focus:border-teal" /></label><button type="button" onClick={() => void toggleMute()} className="flex flex-col items-center gap-1 text-xs font-semibold"><span className="rounded-full p-2 text-lg">{muted ? "♩" : "♩̸"}</span>{muted ? "Unmute" : "Mute"}</button></div></div>
     <div role="tablist" className="grid grid-cols-4 border-y" style={{ borderColor: "rgba(0,0,0,0.1)" }}><InfoTabButton label="Polls" icon="☑" active={infoTab === "polls"} onClick={() => onTab("polls")} /><InfoTabButton label="Media" icon="▧" active={infoTab === "media"} onClick={() => onTab("media")} /><InfoTabButton label="Events" icon="▦" active={infoTab === "events"} onClick={() => onTab("events")} /><InfoTabButton label="Files" icon="⌇" active={infoTab === "files"} onClick={() => onTab("files")} /></div>

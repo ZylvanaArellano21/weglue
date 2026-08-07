@@ -22,7 +22,7 @@ vi.mock('../../lib/chatAttachments', () => ({
   clientUuid: () => 'attachment-id',
 }));
 
-import { getSuggestedPeople, searchChats } from '../chatService';
+import { MESSAGE_SUGGESTION_LIMIT, getSuggestedPeople, searchChats } from '../chatService';
 
 const source = (relativePath: string) =>
   readFileSync(decodeURIComponent(new URL(relativePath, import.meta.url).pathname), 'utf8');
@@ -44,7 +44,41 @@ describe('Messages people search and suggestions', () => {
     await expect(getSuggestedPeople('viewer-1')).resolves.toEqual([
       { user_id: 'person-1', username: 'marcus', full_name: 'Marcus Lee', avatar_url: null },
     ]);
-    expect(rpc).toHaveBeenCalledWith('get_message_suggestions', { p_limit: 6 });
+    expect(rpc).toHaveBeenCalledWith('get_message_suggestions', { p_limit: 10 });
+  });
+
+  it('asks for the ten-person product floor everywhere Suggested is rendered', () => {
+    // The RPC clamped itself to six before migration 076, so requesting six was
+    // the reason no Suggested section could ever reach ten.
+    expect(MESSAGE_SUGGESTION_LIMIT).toBe(10);
+
+    const newMessage = source('../../app/chat/new-message.tsx');
+    const newGroup = source('../../app/chat/new-group.tsx');
+    const messagesIndex = source('../../app/(tabs)/messages/index.tsx');
+
+    // All three contexts render Suggested without the user typing first.
+    for (const [label, file] of [
+      ['new message', newMessage],
+      ['new group chat', newGroup],
+    ] as const) {
+      expect(file, label).toContain('useSuggestedPeople(isTyping ? undefined : userId)');
+      expect(file, label).toContain('Suggested');
+    }
+    // The empty-Single list is no longer re-sliced down to six.
+    expect(messagesIndex).toContain('suggestedPeople.slice(0, MESSAGE_SUGGESTION_LIMIT)');
+    expect(messagesIndex).not.toContain('suggestedPeople.slice(0, 6)');
+  });
+
+  it('never lets a failed suggestions query render as an empty Suggested section', () => {
+    for (const relativePath of [
+      '../../app/chat/new-message.tsx',
+      '../../app/chat/new-group.tsx',
+      '../../app/(tabs)/messages/index.tsx',
+    ]) {
+      const file = source(relativePath);
+      expect(file, relativePath).toContain('isError');
+      expect(file, relativePath).toContain('Couldn’t load suggestions');
+    }
   });
 
   it('uses the secure people-search RPC and limits chat search to the viewer’s own group conversations', async () => {

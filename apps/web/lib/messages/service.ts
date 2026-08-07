@@ -400,8 +400,14 @@ export async function getThread(conversationId: string, channelId: string | null
   };
 }
 
+/** Product floor for every Suggested section (empty Single, New message, New
+ * group chat). The server returns fewer only when fewer accounts are eligible. */
+export const MESSAGE_SUGGESTION_LIMIT = 10;
+
 export async function getMessageSuggestions(): Promise<Person[]> {
-  const { data, error } = await getSupabaseBrowser().rpc("get_message_suggestions", { p_limit: 6 });
+  const { data, error } = await getSupabaseBrowser().rpc("get_message_suggestions", {
+    p_limit: MESSAGE_SUGGESTION_LIMIT,
+  });
   if (error) throw error;
   return ((data ?? []) as any[]).map((row) => ({ user_id: row.user_id, username: row.username, full_name: row.full_name ?? null, avatar_url: row.avatar_url ?? null }));
 }
