@@ -1,6 +1,24 @@
 "use client";
 
+import { applyThreadVisibility, loadThreadVisibility } from "@weglue/shared";
 import { getSupabaseBrowser } from "../supabase-browser";
+
+/**
+ * The signed-in user's id, straight from the auth session.
+ *
+ * Every write that RLS checks against `auth.uid()` must carry it explicitly.
+ * `messages.sender_id` is nullable at the column level (migration 016 dropped
+ * NOT NULL so an account deletion can orphan a row rather than cascade it), and
+ * it has no DEFAULT — so an insert that omits it stores NULL, and the INSERT
+ * policy's `sender_id = auth.uid()` evaluates to NULL, which is not TRUE. The
+ * row is rejected. That is a silent, total send failure, not a permission
+ * problem the user can act on.
+ */
+async function requireUserId(): Promise<string> {
+  const { data, error } = await getSupabaseBrowser().auth.getUser();
+  if (error || !data.user) throw new Error("You’re signed out. Sign in again to send messages.");
+  return data.user.id;
+}
 
 export type ConversationType = "direct" | "group" | "club_group" | "officer_chat";
 export type MessageType = "text" | "image" | "video" | "file" | "poll" | "shared_event" | "shared_post";
@@ -304,7 +322,14 @@ export async function getConversationHub(conversationId: string, userId: string)
   }));
 }
 
-export async function getThread(conversationId: string, channelId: string | null, cursor?: string): Promise<ThreadPage> {
+/**
+ * One page of a thread, with the SAME visibility rules mobile applies.
+ *
+ * Unsent messages are already excluded by RLS (migration 067). Delete-for-me
+ * and the conversation-delete watermark are not, and are applied here through
+ * the shared contract so the two platforms cannot diverge again.
+ */
+export async function getThread(conversationId: string, channelId: string | null, userId: string, cursor?: string): Promise<ThreadPage> {
   const supabase = getSupabaseBrowser();
   let query = threadFilter(
     supabase
@@ -316,10 +341,16 @@ export async function getThread(conversationId: string, channelId: string | null
     channelId
   );
   if (cursor) query = query.lt("created_at", cursor);
-  const { data, error } = await query;
+  const [{ data, error }, visibility] = await Promise.all([
+    query,
+    loadThreadVisibility(supabase, conversationId, userId),
+  ]);
   if (error) throw error;
-  const rows = (data ?? []) as any[];
-  return { messages: rows.map(messageFromRow), next_cursor: rows.length === PAGE_SIZE ? rows[rows.length - 1].created_at : null };
+  const raw = (data ?? []) as any[];
+  const rows = applyThreadVisibility(raw, visibility);
+  // Cursor is derived from the RAW page: a page whose rows were all hidden must
+  // still advance, or the history would appear to end there.
+  return { messages: rows.map(messageFromRow), next_cursor: raw.length === PAGE_SIZE ? raw[raw.length - 1].created_at : null };
 }
 
 /** Product floor for every Suggested section (empty Single, New message, New
@@ -427,17 +458,24 @@ export async function sendMessage(input: {
   attachment?: { path: string; name: string | null; size: number; mime: string } | null;
   tag?: string;
 }): Promise<void> {
+  const senderId = await requireUserId();
+  const tag = input.tag ?? clientTag();
   const { error } = await getSupabaseBrowser().from("messages").insert({
     conversation_id: input.conversationId,
     channel_id: input.channelId,
+    sender_id: senderId,
     content: input.content?.trim() || null,
     message_type: input.messageType ?? "text",
     attachment_url: input.attachment?.path ?? null,
     attachment_name: input.attachment?.name ?? null,
     attachment_size: input.attachment?.size ?? null,
     attachment_mime: input.attachment?.mime ?? null,
-    client_tag: input.tag ?? clientTag(),
+    client_tag: tag,
   });
+  // Same retry contract as mobile: a lost response may have stored the row, and
+  // the unique (sender_id, client_tag) index turns the retry into a no-op rather
+  // than a duplicate message.
+  if (error && (error as { code?: string }).code === "23505") return;
   if (error) throw error;
 }
 
@@ -449,13 +487,16 @@ export async function shareEventToConversation(input: {
   eventId: string;
   tag?: string;
 }): Promise<void> {
+  const senderId = await requireUserId();
   const { error } = await getSupabaseBrowser().from("messages").insert({
     conversation_id: input.conversationId,
     channel_id: input.channelId,
+    sender_id: senderId,
     message_type: "shared_event",
     shared_event_id: input.eventId,
     client_tag: input.tag ?? clientTag(),
   });
+  if (error && (error as { code?: string }).code === "23505") return;
   if (error) throw error;
 }
 
@@ -522,6 +563,32 @@ export async function setConversationMuted(conversationId: string, muted: boolea
   if (error) throw error;
 }
 
+/** Archive / unarchive for this viewer only — the same per-user RPC mobile
+ *  calls from the group info screen's Archive action. */
+export async function setConversationArchived(conversationId: string, archived: boolean): Promise<void> {
+  const { error } = await getSupabaseBrowser().rpc("set_conversation_archived", { p_conversation_id: conversationId, p_archived: archived });
+  if (error) throw error;
+}
+
+/**
+ * Direct-chat "Delete" — delete-for-me on a whole conversation.
+ *
+ * Byte-for-byte the mobile contract (`hideConversationForMe`): it removes the
+ * conversation from THIS user's inbox and sets the `cleared_before` watermark
+ * so their copy of the history stays hidden, while the other participant keeps
+ * theirs. A new message from either side restores it. It is NOT a delete for
+ * everyone, and it must never be presented as one.
+ */
+export async function deleteDirectConversationForMe(conversationId: string, userId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await getSupabaseBrowser()
+    .from("conversation_participants")
+    .update({ hidden_at: now, cleared_before: now })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
 export async function setChannelMuted(channelId: string, muted: boolean): Promise<void> {
   const { error } = await getSupabaseBrowser().rpc("set_channel_muted", { p_channel_id: channelId, p_muted: muted });
   if (error) throw error;
@@ -534,14 +601,20 @@ export async function getChannelMuted(channelId: string, userId: string): Promis
 }
 
 export async function getConversationMuted(conversationId: string, userId: string): Promise<boolean> {
+  return (await getConversationFlags(conversationId, userId)).muted;
+}
+
+/** This viewer's mute + archive flags, matching mobile's `getConversationFlags`. */
+export async function getConversationFlags(conversationId: string, userId: string): Promise<{ muted: boolean; archived: boolean }> {
   const { data, error } = await getSupabaseBrowser()
     .from("conversation_participants")
-    .select("muted_at")
+    .select("muted_at, archived_at")
     .eq("conversation_id", conversationId)
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
-  return !!(data as any)?.muted_at;
+  const row = data as { muted_at?: string | null; archived_at?: string | null } | null;
+  return { muted: !!row?.muted_at, archived: !!row?.archived_at };
 }
 
 export async function createChannel(conversationId: string, name: string): Promise<string> {
@@ -558,6 +631,15 @@ export async function renameChannel(channelId: string, name: string): Promise<vo
 export async function deleteChannel(channelId: string): Promise<void> {
   const { error } = await getSupabaseBrowser().rpc("delete_conversation_channel", { p_channel_id: channelId });
   if (error) throw error;
+}
+
+/** The people currently allowed to post in a "certain people" channel. The
+ *  permissions sheet must seed itself with these — opening it and saving without
+ *  them would silently revoke everyone's posting access. */
+export async function getChannelPosters(channelId: string): Promise<string[]> {
+  const { data, error } = await getSupabaseBrowser().from("channel_posters").select("user_id").eq("channel_id", channelId);
+  if (error) throw error;
+  return ((data ?? []) as Array<{ user_id: string }>).map((row) => row.user_id);
 }
 
 export async function setChannelPostPermission(channelId: string, permission: PostingPermission, userIds: string[] = []): Promise<void> {
@@ -582,15 +664,33 @@ export async function reportMessage(messageId: string, reason: string, details?:
   if (error) throw error;
 }
 
-export async function createPoll(input: { conversationId: string; channelId: string | null; question: string; options: string[]; allowMultiple: boolean }): Promise<void> {
+export interface CreatePollInput {
+  conversationId: string;
+  channelId: string | null;
+  question: string;
+  options: string[];
+  allowMultiple: boolean;
+  /** ISO instant. Omitted / null = start immediately (mobile's rule). */
+  startAt?: string | null;
+  /** ISO instant. Omitted / null = no end time (mobile's rule). */
+  endAt?: string | null;
+}
+
+/**
+ * Creates a poll through the same `create_poll` RPC mobile uses — the RPC owns
+ * the posting-permission check (migration 041 routes it through
+ * can_post_in_channel), so poll permission automatically follows the chat's
+ * current posting permission with no separate web rule.
+ */
+export async function createPoll(input: CreatePollInput): Promise<void> {
   const { error } = await getSupabaseBrowser().rpc("create_poll", {
     p_conversation_id: input.conversationId,
     p_channel_id: input.channelId,
     p_question: input.question,
     p_options: input.options,
     p_allow_multiple: input.allowMultiple,
-    p_start_at: null,
-    p_end_at: null,
+    p_start_at: input.startAt ?? null,
+    p_end_at: input.endAt ?? null,
     p_client_tag: clientTag(),
   });
   if (error) throw error;
@@ -641,16 +741,19 @@ export interface SharedEvent {
   location: string | null;
 }
 
-export async function getSharedEvents(conversationId: string, channelId: string | null): Promise<SharedEvent[]> {
+export async function getSharedEvents(conversationId: string, channelId: string | null, userId: string): Promise<SharedEvent[]> {
   const supabase = getSupabaseBrowser();
   const query = threadFilter(
-    supabase.from("messages").select("shared_event_id, events!shared_event_id(id, title, emoji, cover_image_url, event_date, start_time, location)").eq("conversation_id", conversationId).eq("message_type", "shared_event").not("shared_event_id", "is", null).order("created_at", { ascending: false }).limit(100),
+    supabase.from("messages").select("id, created_at, shared_event_id, events!shared_event_id(id, title, emoji, cover_image_url, event_date, start_time, location)").eq("conversation_id", conversationId).eq("message_type", "shared_event").not("shared_event_id", "is", null).order("created_at", { ascending: false }).limit(100),
     channelId
   );
-  const { data, error } = await query;
+  const [{ data, error }, visibility] = await Promise.all([
+    query,
+    loadThreadVisibility(supabase, conversationId, userId),
+  ]);
   if (error) throw error;
   const seen = new Set<string>();
-  return ((data ?? []) as any[]).flatMap((row) => {
+  return applyThreadVisibility((data ?? []) as any[], visibility).flatMap((row) => {
     const event = row.events;
     if (!event || seen.has(event.id)) return [];
     seen.add(event.id);
@@ -658,13 +761,20 @@ export async function getSharedEvents(conversationId: string, channelId: string 
   });
 }
 
-export async function getSharedMessages(conversationId: string, channelId: string | null, type: "image" | "video" | "file" | "poll"): Promise<ThreadMessage[]> {
+/** Photos, videos, files and polls obey exactly the same deletion rules as the
+ *  thread itself: an unsent item is gone by RLS, and a delete-for-me item must
+ *  disappear from this panel too — otherwise a "deleted" photo stays one tab
+ *  away from the person who deleted it. */
+export async function getSharedMessages(conversationId: string, channelId: string | null, type: "image" | "video" | "file" | "poll", userId: string): Promise<ThreadMessage[]> {
   const supabase = getSupabaseBrowser();
   const query = threadFilter(
     supabase.from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url)").eq("conversation_id", conversationId).eq("message_type", type).order("created_at", { ascending: false }).limit(100),
     channelId
   );
-  const { data, error } = await query;
+  const [{ data, error }, visibility] = await Promise.all([
+    query,
+    loadThreadVisibility(supabase, conversationId, userId),
+  ]);
   if (error) throw error;
-  return ((data ?? []) as any[]).map(messageFromRow);
+  return applyThreadVisibility((data ?? []) as any[], visibility).map(messageFromRow);
 }

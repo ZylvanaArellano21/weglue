@@ -7,3 +7,4 @@ export { supabase, getSupabaseClient } from "./lib/supabase";
 export * from "./legal/termsAndConditions";
 export * from "./avatarCatalog";
 export * from "./notificationVisuals";
+export * from "./messaging/threadVisibility";

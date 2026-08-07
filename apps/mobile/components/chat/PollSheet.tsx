@@ -142,7 +142,7 @@ export function PollSheet({ visible, onClose, onSubmit }: Props) {
             )}
 
             <View style={styles.toggleRow}>
-              <Text style={styles.label}>Multiple options</Text>
+              <Text style={styles.label}>Allow multiple answers</Text>
               <Switch
                 value={allowMultiple}
                 onValueChange={setAllowMultiple}

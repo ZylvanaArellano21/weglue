@@ -518,10 +518,10 @@ function PollSheet({
               )}
             </View>
 
-            {/* Multiple options toggle */}
+            {/* Allow-multiple-answers toggle */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={{ fontSize: 14, color: '#374151', fontFamily: 'Inter_400Regular' }}>
-                Multiple options
+                Allow multiple answers
               </Text>
               <Switch
                 value={allowMultiple}
