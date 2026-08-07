@@ -1,5 +1,4 @@
 import { supabase } from '../lib/supabase';
-import { todayInAppTz } from '../lib/timezone';
 import type { AttendeePreview } from './eventService';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -11,6 +10,8 @@ export interface CalendarEvent {
   event_date: string;   // YYYY-MM-DD
   start_time: string;   // HH:MM:SS
   end_time: string;     // HH:MM:SS
+  event_end_at: string; // canonical UTC lifecycle boundary
+  visibility: 'everyone' | 'members' | 'specific';
   location: string | null;
   building: string | null;
   room: string | null;
@@ -109,6 +110,8 @@ async function enrichWithAttendees(
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
+    visibility: (e.visibility ?? 'everyone') as CalendarEvent['visibility'],
     location: e.location ?? null,
     building: e.building ?? null,
     room: e.room ?? null,
@@ -148,10 +151,11 @@ export async function getCalendarMonthMarkers(
 
   const { data: events } = await supabase
     .from('events')
-    .select('event_date')
+    .select('event_date, event_end_at')
     .in('id', eventIds)
     .gte('event_date', firstDay)
-    .lte('event_date', lastDay);
+    .lte('event_date', lastDay)
+    .gt('event_end_at', new Date().toISOString());
 
   if (!events) return [];
 
@@ -162,7 +166,6 @@ export async function getCalendarMonthMarkers(
 // Used for the section list on the Calendar tab. The caller runs bucketCalendarEvents
 // on the result so the bucketing always uses the live current date.
 export async function getCalendarEvents(userId: string): Promise<CalendarEvent[]> {
-  const today = todayInAppTz();
 
   const { data: rsvps } = await supabase
     .from('event_rsvps')
@@ -177,12 +180,12 @@ export async function getCalendarEvents(userId: string): Promise<CalendarEvent[]
   const { data: rawEvents } = await supabase
     .from('events')
     .select(`
-      id, title, emoji, event_date, start_time, end_time,
+      id, title, emoji, event_date, start_time, end_time, event_end_at, visibility,
       location, building, room, cover_image_url,
       clubs!inner(id, name, avatar_url)
     `)
     .in('id', eventIds)
-    .gte('event_date', today)
+    .gt('event_end_at', new Date().toISOString())
     .order('event_date', { ascending: true })
     .order('start_time', { ascending: true });
 
@@ -210,12 +213,13 @@ export async function getCalendarDayEvents(
   const { data: rawEvents } = await supabase
     .from('events')
     .select(`
-      id, title, emoji, event_date, start_time, end_time,
+      id, title, emoji, event_date, start_time, end_time, event_end_at, visibility,
       location, building, room, cover_image_url,
       clubs!inner(id, name, avatar_url)
     `)
     .in('id', eventIds)
     .eq('event_date', date)
+    .gt('event_end_at', new Date().toISOString())
     .order('start_time', { ascending: true });
 
   if (!rawEvents) return [];

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { getMyClubs, getDiscoveryClubs, type MyClubs, type CatalogClub } from "../clubs/clubService";
 import { clubRecommendationsKey, type ClubRecommendationBatch } from "./useClubRecommendations";
+import { invalidateEventState } from "./eventSync";
 
 // Club-tab data hooks. The sidebar (my Officer/Member clubs) and the catalog
 // (Suggested/Popular, both from get_discovery_clubs) each get their own query so
@@ -91,7 +92,7 @@ export function useJoinClubFromCatalog(userId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: myClubsKey(userId) });
       void queryClient.invalidateQueries({ queryKey: discoveryClubsKey(userId) });
       void queryClient.invalidateQueries({ queryKey: clubRecommendationsKey(userId) });
-      void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
+      invalidateEventState(queryClient, userId);
       void queryClient.invalidateQueries({ queryKey: ["ownProfile", userId] });
     },
   });

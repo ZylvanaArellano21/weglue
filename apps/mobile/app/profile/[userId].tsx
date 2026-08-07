@@ -38,6 +38,8 @@ import {
   blockSucceededAlert,
   UNAVAILABLE_TITLE,
   UNAVAILABLE_BODY,
+  YOU_BLOCKED_TITLE,
+  YOU_BLOCKED_BODY,
 } from '../../lib/blockPrompts';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -99,7 +101,7 @@ export default function UserProfileScreen() {
   // Blocking. `useDidIBlock` is only meaningful for a profile the viewer can
   // actually see — if the OTHER person did the blocking, this screen never
   // renders, so the query never runs and no direction is ever disclosed.
-  const { data: iBlockedThem } = useDidIBlock(viewerUserId, targetUserId);
+  const { data: iBlockedThem, isLoading: blockStateLoading } = useDidIBlock(viewerUserId, targetUserId);
   const blockMutation = useBlockUser(viewerUserId);
   const unblockMutation = useUnblockUser(viewerUserId);
 
@@ -190,7 +192,10 @@ export default function UserProfileScreen() {
     );
   };
 
-  if (profileLoading) {
+  // Wait for the directional block state too when there is no readable profile,
+  // otherwise the blocker briefly sees the generic unavailable state before the
+  // Unblock affordance appears.
+  if (profileLoading || (!profile && blockStateLoading)) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
         <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
@@ -212,6 +217,55 @@ export default function UserProfileScreen() {
     );
   }
 
+  // OUTCOME B — the viewer CREATED the block. `current_user_blocks` is
+  // directional and true only for the person who blocked, so the blocked party
+  // can never reach this branch. It exists so the blocker keeps a way to undo
+  // their own action when they arrive from a shared context (club member list,
+  // group participant list, an old message) instead of hitting a dead end.
+  // No posts, weekly events, Follow or Message controls are rendered, and RLS
+  // would refuse them anyway.
+  if (!profile && iBlockedThem === true) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
+        {ToastComponent}
+        <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={26} color="#111827" />
+        </TouchableOpacity>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+          <Text style={{ color: '#111827', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
+            {YOU_BLOCKED_TITLE}
+          </Text>
+          <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 6, textAlign: 'center' }}>
+            {YOU_BLOCKED_BODY}
+          </Text>
+          <TouchableOpacity
+            onPress={handleUnblock}
+            disabled={unblockMutation.isPending}
+            activeOpacity={0.85}
+            style={{
+              marginTop: 24,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: '#0FA6A6',
+              paddingHorizontal: 22,
+              paddingVertical: 10,
+              opacity: unblockMutation.isPending ? 0.6 : 1,
+            }}
+          >
+            <Text style={{ color: '#0FA6A6', fontSize: 14, fontWeight: '700' }}>
+              {unblockMutation.isPending ? 'Unblocking…' : 'Unblock'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // OUTCOME A — the viewer WAS blocked, or the account is deleted, or the id
+  // never existed. Deliberately identical copy for all three, so the state
+  // itself cannot disclose which occurred and can never reveal that this
+  // specific person blocked the viewer. No Unblock is offered, because the
+  // viewer has nothing to unblock.
   if (!profile) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>

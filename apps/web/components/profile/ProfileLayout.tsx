@@ -5,6 +5,7 @@ import { Avatar } from "../shared/Avatar";
 import { CalendarIcon, ChevronRightIcon, LocationIcon, PlusIcon } from "../shared/icons";
 import { formatEventDate, formatEventLocation, formatEventTime } from "../../lib/datetime";
 import type { GridPost } from "../../lib/hooks/useOwnProfile";
+import { EventAudienceBadge } from "../home/EventAudienceBadge";
 
 export interface ProfileWeeklyEvent {
   id: string;
@@ -14,6 +15,8 @@ export interface ProfileWeeklyEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
+  visibility: "everyone" | "members" | "specific";
   location?: string | null;
   building?: string | null;
   room?: string | null;
@@ -437,6 +440,7 @@ function EventsPanel({
                   {e.emoji ? `${e.emoji} ` : ""}
                   {e.title}
                 </span>
+                <span className="mt-1 block"><EventAudienceBadge audience={e.visibility} /></span>
                 <span className="mt-0.5 block truncate text-[12px] font-medium text-teal">
                   {e.club.name}
                 </span>

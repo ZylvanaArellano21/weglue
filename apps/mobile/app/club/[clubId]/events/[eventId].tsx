@@ -23,7 +23,8 @@ import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
 import { requestLeaveClub } from '../../../../store/leaveClubStore';
 import { openReportFlow } from '../../../../components/shared/ReportButton';
-import { formatEventLocation, isEventPast } from '../../../../lib/eventDisplay';
+import { formatEventLocation, isEventPastAt } from '../../../../lib/eventDisplay';
+import { EventAudienceBadge } from '../../../../components/events/EventAudienceBadge';
 
 export type ClubEventDetailParams = {
   clubId: string;
@@ -245,6 +246,9 @@ export default function ClubEventDetailScreen() {
           </View>
 
           {/* ── Hero Image ─────────────────────────────────── */}
+          <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+            <EventAudienceBadge visibility={event.visibility} />
+          </View>
           {event.cover_image_url ? (
             <Image
               source={{ uri: event.cover_image_url }}
@@ -421,7 +425,7 @@ export default function ClubEventDetailScreen() {
             {/* ── RSVP Section — ended events are view-only: attendees stay
                 visible above, but no attendance can be changed ── */}
             {(() => {
-              if (isEventPast(event.event_date, event.end_time)) {
+              if (isEventPastAt(event.event_end_at)) {
                 return (
                   <Text
                     style={{

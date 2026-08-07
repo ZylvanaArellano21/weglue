@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { todayInAppTz, isEventPast } from "../datetime";
+import { todayInAppTz, isEventPastAt } from "../datetime";
 import { invalidateEventState, patchCachedEvent } from "./eventSync";
 
 // Web port of apps/mobile/services/eventService.ts (getHomeEventsFeed,
@@ -33,6 +33,7 @@ export interface HomeFeedEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
   location: string | null;
   building: string | null;
   room: string | null;
@@ -45,6 +46,10 @@ export interface HomeFeedEvent {
   is_saved: boolean;
   is_today: boolean;
   user_has_joined_club: boolean;
+  visibility: "everyone" | "members" | "specific";
+  /** False only for the deliberately preview-only club-profile member card. */
+  can_open: boolean;
+  can_view_attendees: boolean;
   tier: EventTier;
 }
 
@@ -96,14 +101,15 @@ async function getHomeEventsFeed(
     .from("events")
     .select(
       `
-      id, title, description, cover_image_url, event_date, start_time, end_time,
+      id, title, description, cover_image_url, event_date, start_time, end_time, event_end_at,
       location, building, room, club_id, created_by, visibility, specific_user_ids,
       clubs!inner(id, name, avatar_url),
       event_interests(interest),
       event_activities(activity)
     `
     )
-    .gte("event_date", today)
+    // Canonical timestamp: a same-day event leaves Home exactly at end_at.
+    .gt("event_end_at", new Date().toISOString())
     .order("event_date", { ascending: true })
     .order("id", { ascending: true })
     .range(offset, offset + EVENTS_PAGE_SIZE - 1);
@@ -164,6 +170,7 @@ async function getHomeEventsFeed(
       event_date: e.event_date,
       start_time: e.start_time,
       end_time: e.end_time,
+      event_end_at: e.event_end_at,
       location: e.location,
       building: e.building,
       room: e.room,
@@ -176,6 +183,9 @@ async function getHomeEventsFeed(
       is_saved: savedSet.has(e.id),
       is_today: e.event_date === today,
       user_has_joined_club: isInJoinedClub,
+      visibility,
+      can_open: true,
+      can_view_attendees: true,
       tier: isInJoinedClub ? "your_clubs" : "recommended",
     };
 
@@ -239,10 +249,10 @@ async function rsvpToEvent(
   const supabase = getSupabaseBrowser();
   const { data: eventRow } = await supabase
     .from("events")
-    .select("event_date, end_time")
+    .select("event_end_at")
     .eq("id", eventId)
     .maybeSingle();
-  if (eventRow && isEventPast((eventRow as any).event_date, (eventRow as any).end_time)) {
+  if (eventRow && isEventPastAt((eventRow as any).event_end_at)) {
     throw new Error("This event has ended");
   }
 
@@ -254,11 +264,13 @@ async function rsvpToEvent(
     .maybeSingle();
 
   if ((existing as any)?.status === status) {
-    await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
+    const { error } = await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
+    if (error) throw error;
   } else {
-    await supabase
+    const { error } = await supabase
       .from("event_rsvps")
       .upsert({ event_id: eventId, user_id: userId, status }, { onConflict: "event_id,user_id" });
+    if (error) throw error;
   }
 }
 
@@ -302,10 +314,12 @@ async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean
     .maybeSingle();
 
   if (existing) {
-    await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
+    const { error } = await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
+    if (error) throw error;
     return false;
   }
-  await supabase.from("saved_events").insert({ user_id: userId, event_id: eventId });
+  const { error } = await supabase.from("saved_events").insert({ user_id: userId, event_id: eventId });
+  if (error) throw error;
   return true;
 }
 

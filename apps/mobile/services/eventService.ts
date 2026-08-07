@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { todayInAppTz } from '../lib/timezone';
-import { isEventPast } from '../lib/eventDisplay';
+import { isEventPastAt } from '../lib/eventDisplay';
 
 export type EventTier = 'your_clubs' | 'recommended';
 
@@ -19,6 +19,8 @@ export interface HomeFeedEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
+  visibility: 'everyone' | 'members' | 'specific';
   location: string | null;
   building: string | null;
   room: string | null;
@@ -54,6 +56,8 @@ export async function getHomeEventsFeed(
   userId: string,
   page: number = 0,
 ): Promise<HomeEventsFeedPage> {
+  // Presentation grouping only; event eligibility/lifecycle comes from
+  // event_end_at in the query above.
   const today = todayInAppTz();
   const offset = page * EVENTS_PAGE_SIZE;
 
@@ -82,13 +86,13 @@ export async function getHomeEventsFeed(
   const { data: rawEvents, error } = await supabase
     .from('events')
     .select(`
-      id, title, description, cover_image_url, event_date, start_time, end_time,
+      id, title, description, cover_image_url, event_date, start_time, end_time, event_end_at,
       location, building, room, club_id, created_by, visibility, specific_user_ids,
       clubs!inner(id, name, avatar_url),
       event_interests(interest),
       event_activities(activity)
     `)
-    .gte('event_date', today)
+    .gt('event_end_at', new Date().toISOString())
     .order('event_date', { ascending: true })
     .order('id', { ascending: true })
     .range(offset, offset + EVENTS_PAGE_SIZE - 1);
@@ -162,6 +166,8 @@ export async function getHomeEventsFeed(
       event_date: e.event_date,
       start_time: e.start_time,
       end_time: e.end_time,
+      event_end_at: e.event_end_at,
+      visibility,
       location: e.location,
       building: e.building,
       room: e.room,
@@ -215,10 +221,10 @@ export async function rsvpToEvent(
   // the backstop.
   const { data: eventRow } = await supabase
     .from('events')
-    .select('event_date, end_time')
+    .select('event_end_at')
     .eq('id', eventId)
     .maybeSingle();
-  if (eventRow && isEventPast(eventRow.event_date, eventRow.end_time)) {
+  if (eventRow && isEventPastAt((eventRow as any).event_end_at)) {
     throw new Error('This event has ended');
   }
 
@@ -356,6 +362,32 @@ export interface EventForEdit {
   room: string | null;
   visibility: 'everyone' | 'members' | 'specific';
   specific_user_ids: string[];
+  specific_members: EventAudienceMember[];
+}
+
+export interface EventAudienceMember {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+}
+
+/**
+ * Canonical selected-event audience search. The database RPC verifies the
+ * caller is an officer and returns only active, unblocked current members of
+ * this club; ordinary app-wide people search intentionally remains elsewhere.
+ */
+export async function searchEventAudienceMembers(
+  clubId: string,
+  query: string,
+): Promise<EventAudienceMember[]> {
+  const { data, error } = await supabase.rpc('search_event_audience_members', {
+    p_club_id: clubId,
+    p_query: query.trim(),
+    p_limit: 50,
+  });
+  if (error) throw error;
+  return (data ?? []) as EventAudienceMember[];
 }
 
 export async function getEventForEdit(eventId: string): Promise<EventForEdit | null> {
@@ -371,6 +403,30 @@ export async function getEventForEdit(eventId: string): Promise<EventForEdit | n
 
   if (error || !data) return null;
   const e = data as any;
+  const ids: string[] = e.specific_user_ids ?? [];
+  let specificMembers: EventAudienceMember[] = [];
+  if (ids.length > 0) {
+    // Existing selected recipients are restored by ID so an officer can make
+    // an unrelated edit after a recipient has left the club. New candidates
+    // still come only from searchEventAudienceMembers above.
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username, full_name, avatar_url')
+      .in('id', ids);
+    const byId = new Map(
+      ((profiles ?? []) as EventAudienceMember[]).map((profile) => [profile.id, profile]),
+    );
+    // A historically selected account can be hidden by a later block or
+    // restriction. Preserve its ID as an unchanged recipient rather than
+    // silently removing it from an otherwise unrelated edit.
+    specificMembers = ids.map((id) => byId.get(id) ?? {
+      id,
+      username: 'selected-member',
+      full_name: 'Selected member',
+      avatar_url: null,
+    });
+  }
+
   return {
     id: e.id,
     club_id: e.club_id,
@@ -386,7 +442,8 @@ export async function getEventForEdit(eventId: string): Promise<EventForEdit | n
     building: e.building,
     room: e.room,
     visibility: (e.visibility ?? 'everyone') as 'everyone' | 'members' | 'specific',
-    specific_user_ids: e.specific_user_ids ?? [],
+    specific_user_ids: ids,
+    specific_members: specificMembers,
   };
 }
 
@@ -468,6 +525,7 @@ export interface EventDetail {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
   location: string | null;
   building: string | null;
   room: string | null;
@@ -490,7 +548,7 @@ export async function getEventDetail(
         .from('events')
         .select(`
           id, club_id, title, emoji, description, cover_image_url,
-          event_date, start_time, end_time, location, building, room, visibility,
+          event_date, start_time, end_time, event_end_at, location, building, room, visibility,
           clubs!inner(id, name, avatar_url)
         `)
         .eq('id', eventId)
@@ -543,6 +601,7 @@ export async function getEventDetail(
     event_date: event.event_date,
     start_time: event.start_time,
     end_time: event.end_time,
+    event_end_at: (event as any).event_end_at,
     location: event.location,
     building: (event as any).building,
     room: (event as any).room,

@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { CalendarEvent } from '../../services/calendarService';
+import { EventAudienceBadge } from '../events/EventAudienceBadge';
 import {
   calendarColors,
   calendarSizes,
@@ -50,6 +51,7 @@ export function CalendarEventCard({ event, isToday, onPress }: CalendarEventCard
         <Text style={calendarTypography.eventClub} numberOfLines={1}>
           {event.club.name}
         </Text>
+        <EventAudienceBadge visibility={event.visibility} />
         <Text style={metaStyle} numberOfLines={1}>
           {formatCardDate(event.event_date)}
         </Text>

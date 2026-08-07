@@ -19,6 +19,7 @@ export function ClubHomeTab({
   onOpenEvent,
   onOpenClub,
   onOpenAttendees,
+  onRestricted,
   onCreateEvent,
   onCreatePost,
 }: {
@@ -31,6 +32,7 @@ export function ClubHomeTab({
   onOpenEvent: (eventId: string) => void;
   onOpenClub: (clubId: string) => void;
   onOpenAttendees: (eventId: string) => void;
+  onRestricted?: () => void;
   /** Officer-only event creation. */
   onCreateEvent?: () => void;
   /** Member (incl. officer) post creation. */
@@ -88,6 +90,7 @@ export function ClubHomeTab({
                 onOpenEvent={onOpenEvent}
                 onOpenClub={onOpenClub}
                 onOpenAttendees={onOpenAttendees}
+                onRestricted={onRestricted}
               />
             ))}
           </div>
@@ -109,6 +112,7 @@ export function ClubHomeTab({
                 onOpenEvent={onOpenEvent}
                 onOpenClub={onOpenClub}
                 onOpenAttendees={onOpenAttendees}
+                onRestricted={onRestricted}
               />
             ))}
           </div>

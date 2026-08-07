@@ -60,11 +60,15 @@ import { openReportFlow } from '../../../components/shared/ReportButton';
 import { useDidIBlock, useBlockUser, useUnblockUser } from '../../../hooks/useBlocking';
 import { confirmBlock, confirmUnblock, blockFailedAlert, blockSucceededAlert } from '../../../lib/blockPrompts';
 import { getClubPoll, type ClubPoll } from '../../../services/clubPollService';
-import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../../lib/chatAttachments';
+import {
+  resolveAttachmentUrl,
+  openAttachmentExternally,
+  formatFileSize,
+  fileTypeLabel,
+} from '../../../lib/chatAttachments';
 import { displayNameOrFallback, isPlaceholderUsername } from '../../../lib/displayName';
 import { uploadImageToBucket } from '../../../lib/imageUpload';
 import { useAndroidKeyboardHeight } from '../../../lib/useAndroidKeyboardHeight';
-import { Linking } from 'react-native';
 import {
   chatColors,
   chatFonts,
@@ -534,9 +538,9 @@ export default function ChatInfo() {
         key={f.id}
         style={styles.fileRow}
         activeOpacity={0.75}
-        onPress={async () => {
-          const url = await resolveAttachmentUrl(f.attachment_url);
-          if (url) void Linking.openURL(url);
+        onPress={() => {
+          // Authenticated fetch: current authorization decides, every time.
+          void openAttachmentExternally(f.attachment_url);
         }}
       >
         <View style={styles.fileIconWrap}>

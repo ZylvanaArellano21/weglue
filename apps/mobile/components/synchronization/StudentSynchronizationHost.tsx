@@ -4,7 +4,7 @@ import { usePathname } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { subscribeBroadcast } from '../../lib/realtime';
-import { invalidateStudentContentQueries, shouldRecoverOnMobileForeground } from '../../lib/studentSynchronization';
+import { refreshPermissionSensitiveStudentContent, shouldRecoverOnMobileForeground } from '../../lib/studentSynchronization';
 
 /**
  * One mounted, student-only convergence point for Day 10E content lifecycle
@@ -15,7 +15,7 @@ export function StudentSynchronizationHost({ userId }: { userId?: string }) {
   const queryClient = useQueryClient();
   const pathname = usePathname();
   const recover = useCallback(
-    () => invalidateStudentContentQueries(queryClient),
+    () => refreshPermissionSensitiveStudentContent(queryClient),
     [queryClient],
   );
 

@@ -134,8 +134,61 @@ function previewForMessage(message: { content: string | null; message_type: stri
   return message.content;
 }
 
-function messageFromRow(row: any): ThreadMessage {
+export interface SharedIdentity {
+  id: string;
+  username: string;
+  full_name: string | null;
+  avatar_url: string | null;
+}
+
+/**
+ * Minimal structural identity for the people in ONE conversation the viewer
+ * already participates in (074). Used only to fill in what the profiles policy
+ * removes: a blocked person is hidden from `profiles` in both directions, so
+ * `profiles!sender_id(...)` embeds as null and their existing messages would
+ * otherwise render with no name and no avatar.
+ *
+ * Not a profile bypass — the RPC returns id/username/full_name/avatar_url for
+ * this conversation's participants and active senders only, refuses
+ * non-participants outright, and discloses nothing about who blocked whom.
+ */
+export async function conversationSharedIdentities(
+  conversationId: string
+): Promise<Map<string, SharedIdentity>> {
+  const { data, error } = await getSupabaseBrowser().rpc("conversation_shared_identities", {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
+  return new Map(
+    ((data ?? []) as any[]).map((row) => [
+      row.id as string,
+      {
+        id: row.id as string,
+        username: (row.username ?? "") as string,
+        full_name: row.full_name ?? null,
+        avatar_url: row.avatar_url ?? null,
+      },
+    ])
+  );
+}
+
+/**
+ * Senders in this conversation whose ATTACHMENT payload the viewer may not
+ * read, because of a block in either direction (074). Symmetric, so it never
+ * reveals the direction. Presentation only: the storage policy refuses the
+ * bytes independently of anything the client believes.
+ */
+export async function conversationRestrictedSenders(conversationId: string): Promise<string[]> {
+  const { data, error } = await getSupabaseBrowser().rpc("conversation_restricted_senders", {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
+  return ((data ?? []) as string[]) ?? [];
+}
+
+function messageFromRow(row: any, identities?: Map<string, SharedIdentity>): ThreadMessage {
   const poll = Array.isArray(row.polls) ? row.polls[0] : row.polls;
+  const shared = row.sender_id ? identities?.get(row.sender_id) : undefined;
   return {
     id: row.id,
     conversation_id: row.conversation_id,
@@ -154,9 +207,9 @@ function messageFromRow(row: any): ThreadMessage {
     created_at: row.created_at,
     sender: {
       id: row.profiles?.id ?? row.sender_id ?? "",
-      username: row.profiles?.username ?? "",
-      full_name: row.profiles?.full_name ?? null,
-      avatar_url: row.profiles?.avatar_url ?? null,
+      username: row.profiles?.username ?? shared?.username ?? "",
+      full_name: row.profiles?.full_name ?? shared?.full_name ?? null,
+      avatar_url: row.profiles?.avatar_url ?? shared?.avatar_url ?? null,
     },
   };
 }
@@ -236,7 +289,12 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
 
 export async function getConversationDetails(conversationId: string, currentUserId: string): Promise<ConversationDetails | null> {
   const supabase = getSupabaseBrowser();
-  const [{ data: conversation, error }, { data: participantRows }] = await Promise.all([
+  // A shared conversation is a legitimate shared context: a blocked person stays
+  // a participant and their name must remain readable in the roster and on their
+  // existing messages. The profiles embed returns null for them (058 hides the
+  // row both ways), so 074's narrow, participant-gated identity RPC fills only
+  // that gap. The normal profile stays unreadable.
+  const [{ data: conversation, error }, { data: participantRows }, identities] = await Promise.all([
     supabase
       .from("conversations")
       .select("id, type, name, avatar_url, club_id, created_by, clubs(id, name, avatar_url)")
@@ -246,10 +304,24 @@ export async function getConversationDetails(conversationId: string, currentUser
       .from("conversation_participants")
       .select("user_id, joined_at, profiles!user_id(username, full_name, avatar_url)")
       .eq("conversation_id", conversationId),
+    conversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
   if (!conversation) return null;
-  const participants = (participantRows ?? []) as any[];
+  const participants = ((participantRows ?? []) as any[]).map((participant) => {
+    if (participant.profiles) return participant;
+    const shared = identities.get(participant.user_id);
+    return shared
+      ? {
+          ...participant,
+          profiles: {
+            username: shared.username,
+            full_name: shared.full_name,
+            avatar_url: shared.avatar_url,
+          },
+        }
+      : participant;
+  });
   const other = participants.find((participant) => participant.user_id !== currentUserId);
   const raw = conversation as any;
   const name = raw.type === "direct"
@@ -341,16 +413,20 @@ export async function getThread(conversationId: string, channelId: string | null
     channelId
   );
   if (cursor) query = query.lt("created_at", cursor);
-  const [{ data, error }, visibility] = await Promise.all([
+  const [{ data, error }, visibility, identities] = await Promise.all([
     query,
     loadThreadVisibility(supabase, conversationId, userId),
+    conversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
   const raw = (data ?? []) as any[];
   const rows = applyThreadVisibility(raw, visibility);
-  // Cursor is derived from the RAW page: a page whose rows were all hidden must
-  // still advance, or the history would appear to end there.
-  return { messages: rows.map(messageFromRow), next_cursor: raw.length === PAGE_SIZE ? raw[raw.length - 1].created_at : null };
+  return {
+    messages: rows.map((row) => messageFromRow(row, identities)),
+    // Cursor is derived from the RAW page: a page whose rows were all hidden
+    // must still advance, or the history would appear to end there.
+    next_cursor: raw.length === PAGE_SIZE ? raw[raw.length - 1].created_at : null,
+  };
 }
 
 /** Product floor for every Suggested section (empty Single, New message, New
@@ -534,12 +610,42 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
   return { path, name: file.name, size: file.size, mime: file.type || "application/octet-stream", type };
 }
 
-export async function signedAttachmentUrl(path: string | null): Promise<string | null> {
+/**
+ * Attachment delivery. AUTHORIZATION IS CHECKED WHEN THE FILE IS FETCHED.
+ *
+ * This used to call `createSignedUrl`. A Supabase signed URL is a
+ * self-contained token: Storage validates the signature and the expiry and
+ * serves the object WITHOUT re-evaluating the bucket's RLS policy. That was
+ * demonstrated, not assumed — a link minted while the viewer was authorized
+ * still returned HTTP 200 with the bytes after the sender blocked them.
+ *
+ * `download()` issues GET /storage/v1/object/authenticated/... carrying the
+ * viewer's own access token, so the `chat-attachments` SELECT policy — and
+ * therefore 074's blocking check — runs on EVERY request. A blocked viewer is
+ * refused immediately, with no window and nothing to replay.
+ *
+ * The returned value is a same-origin blob: URL. It is not a credential and
+ * cannot be handed to anyone else: it only resolves inside this browsing
+ * context, and it dies with the tab. Callers must revoke it (see
+ * `releaseAttachmentUrl`) so the blob is not retained after the message
+ * unmounts or access changes.
+ *
+ * What this does NOT do, and does not claim to do: recall a file the viewer
+ * already downloaded, screenshotted or re-shared before the block. Nothing
+ * server-side can.
+ */
+export async function attachmentObjectUrl(path: string | null): Promise<string | null> {
   if (!path) return null;
   if (/^https?:\/\//.test(path)) return path;
-  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).createSignedUrl(path, 60);
+  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).download(path);
   if (error) throw error;
-  return data.signedUrl;
+  if (!data) return null;
+  return URL.createObjectURL(data);
+}
+
+/** Frees a blob: URL created by `attachmentObjectUrl`. Safe to call with null. */
+export function releaseAttachmentUrl(url: string | null | undefined): void {
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
 export async function markConversationRead(conversationId: string): Promise<void> {
@@ -771,10 +877,39 @@ export async function getSharedMessages(conversationId: string, channelId: strin
     supabase.from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url)").eq("conversation_id", conversationId).eq("message_type", type).order("created_at", { ascending: false }).limit(100),
     channelId
   );
-  const [{ data, error }, visibility] = await Promise.all([
+  const [{ data, error }, visibility, identities] = await Promise.all([
     query,
     loadThreadVisibility(supabase, conversationId, userId),
+    conversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
-  return applyThreadVisibility((data ?? []) as any[], visibility).map(messageFromRow);
+  return applyThreadVisibility((data ?? []) as any[], visibility).map((row) => messageFromRow(row, identities));
+}
+
+/**
+ * Shared-content availability, resolved by the same RLS the rest of the app
+ * uses: a post or event whose author has blocked the viewer (or which was
+ * deleted, or whose audience no longer includes the viewer) simply returns no
+ * row. Mirrors mobile's PostShareCard/EventShareCard, which fetch the target
+ * and fall back to an unavailable card when it resolves to nothing.
+ *
+ * Only the id is selected, so an inaccessible target never puts a caption,
+ * image URL, location or any other payload on the wire.
+ */
+export async function sharedPostIsAvailable(postId: string): Promise<boolean> {
+  const { data } = await getSupabaseBrowser()
+    .from("posts")
+    .select("id")
+    .eq("id", postId)
+    .maybeSingle();
+  return !!data;
+}
+
+export async function sharedEventIsAvailable(eventId: string): Promise<boolean> {
+  const { data } = await getSupabaseBrowser()
+    .from("events")
+    .select("id")
+    .eq("id", eventId)
+    .maybeSingle();
+  return !!data;
 }

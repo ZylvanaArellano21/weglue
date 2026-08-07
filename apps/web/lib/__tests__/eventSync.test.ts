@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { patchCachedEvent } from "../hooks/eventSync";
+import { clearPermissionSensitiveEventState, patchCachedEvent } from "../hooks/eventSync";
 
 describe("patchCachedEvent", () => {
   it("keeps a card and expanded event detail synchronized for RSVP changes", () => {
@@ -26,5 +26,18 @@ describe("patchCachedEvent", () => {
       { id: "event-a", is_saved: true },
       { id: "event-b", is_saved: false },
     ]);
+  });
+
+  it("removes an old selected-event payload before a delayed permission refetch", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["eventDetail", "selected-event", "viewer"], { id: "selected-event", title: "private" });
+    queryClient.setQueryData(["savedEventsUpcoming", "viewer"], [{ id: "selected-event", title: "private" }]);
+    queryClient.setQueryData(["eventAttendees", "selected-event", "viewer"], [{ id: "attendee" }]);
+
+    clearPermissionSensitiveEventState(queryClient);
+
+    expect(queryClient.getQueryData(["eventDetail", "selected-event", "viewer"])).toBeUndefined();
+    expect(queryClient.getQueryData(["savedEventsUpcoming", "viewer"])).toBeUndefined();
+    expect(queryClient.getQueryData(["eventAttendees", "selected-event", "viewer"])).toBeUndefined();
   });
 });

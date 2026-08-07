@@ -36,38 +36,23 @@ export function useOfficerClubs(userId: string | undefined) {
   });
 }
 
-/** Search members of the viewer's campus (for restricted "specific" audiences). */
-export function useMemberSearch(userId: string | undefined, query: string) {
+/** Selected-event recipients are current members of the hosting club only. */
+export function useMemberSearch(userId: string | undefined, clubId: string | undefined, query: string) {
   return useQuery({
-    queryKey: ["memberSearch", userId, query],
+    queryKey: ["eventAudienceMemberSearch", userId, clubId, query],
     queryFn: async () => {
       const supabase = getSupabaseBrowser();
-      // Migration 057 moved people search behind a SECURITY DEFINER RPC. Two
-      // reasons, both load-bearing:
-      //
-      //  1. CORRECTNESS — search_students() excludes blocked students in BOTH
-      //     directions, using auth.uid() rather than anything the browser sends.
-      //  2. PERFORMANCE — ILIKE (texticlike) is not leakproof, so once profiles
-      //     carries a real RLS policy the table becomes a security barrier and
-      //     PostgreSQL can no longer push an ILIKE down to the trigram indexes.
-      //     Measured on a 200k-profile shadow database, a typeahead fragment
-      //     matching nothing cost 81.7 ms as a client-side query (Seq Scan) vs
-      //     2.9 ms through this RPC.
-      //
-      // Same-campus scoping is applied inside the function, so the separate
-      // `profiles.university` lookup this replaced is no longer needed.
-      const { data, error } = await supabase.rpc("search_students", {
+      const { data, error } = await supabase.rpc("search_event_audience_members", {
+        p_club_id: clubId!,
         p_query: query,
-        p_limit: 10,
+        p_limit: 50,
       });
       if (error) throw error;
       return (data ?? []) as { id: string; username: string; full_name: string; avatar_url: string | null }[];
     },
-    // 3 characters, matching the server-side minimum in search_students().
-    // A trigram index cannot serve a shorter pattern, so 1–2 characters would
-    // seq-scan (72 ms at 200k profiles) AND return nothing. Not firing at all
-    // is both faster and less confusing than firing and getting an empty list.
-    enabled: !!userId && query.trim().length >= 3,
+    // Mobile has no minimum query length; the canonical RPC remains club-scoped
+    // and filters blocked, inactive, former, and duplicate candidates.
+    enabled: !!userId && !!clubId,
     staleTime: 30 * 1000,
   });
 }
@@ -183,7 +168,18 @@ export function useEventForEdit(eventId: string | undefined) {
           .from("profiles")
           .select("id, username, full_name, avatar_url")
           .in("id", ids);
-        specific_members = (profs ?? []) as any[];
+        const byId = new Map(
+          ((profs ?? []) as EventForEdit["specific_members"]).map((profile) => [profile.id, profile])
+        );
+        // Keep an unchanged historical recipient in the edit payload even if a
+        // later block/restriction hides their profile row. The database still
+        // rejects any newly injected ineligible recipient.
+        specific_members = ids.map((id) => byId.get(id) ?? {
+          id,
+          username: "selected-member",
+          full_name: "Selected member",
+          avatar_url: null,
+        });
       }
       return {
         id: e.id,

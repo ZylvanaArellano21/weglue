@@ -18,7 +18,8 @@ import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { requestLeaveClub } from '../../store/leaveClubStore';
 import { openReportFlow } from '../../components/shared/ReportButton';
-import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
+import { formatEventLocation, isEventPastAt } from '../../lib/eventDisplay';
+import { EventAudienceBadge } from '../../components/events/EventAudienceBadge';
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00');
@@ -188,6 +189,7 @@ export default function EventDetailScreen() {
 
           {/* Hero Image */}
           <View style={{ paddingHorizontal: 16 }}>
+            <EventAudienceBadge visibility={event.visibility} />
             {event.cover_image_url ? (
               <Image
                 source={{ uri: event.cover_image_url }}
@@ -395,7 +397,7 @@ export default function EventDetailScreen() {
 
             {/* RSVP Section — ended events are view-only: attendee count stays
                 visible above, but attendance can no longer be changed */}
-            {isEventPast(event.event_date, event.end_time) ? (
+            {isEventPastAt(event.event_end_at) ? (
               <Text
                 style={{
                   fontSize: 13,

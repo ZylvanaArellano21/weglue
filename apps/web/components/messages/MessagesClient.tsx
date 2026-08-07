@@ -17,6 +17,8 @@ import { ToastProvider, useToast } from "../shared/Toast";
 import { messageBadgeCounts, useUnreadSummary, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
 import { useMyClubs } from "../../lib/hooks/useClubTab";
+import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
+import { ATTACHMENT_UNAVAILABLE_TEXT } from "../../lib/blocking";
 import {
   canPostInChannel,
   clientTag,
@@ -38,7 +40,8 @@ import {
   setChannelPostPermission,
   setConversationArchived,
   setConversationMuted,
-  signedAttachmentUrl,
+  attachmentObjectUrl,
+  releaseAttachmentUrl,
   unsendMessage,
   uploadAttachment,
   votePoll,
@@ -48,8 +51,7 @@ import {
   type MessageSearchResult,
   type Person,
   type PostingPermission,
-  type ThreadMessage,
-} from "../../lib/messages/service";
+  type ThreadMessage, sharedPostIsAvailable, sharedEventIsAvailable, conversationRestrictedSenders } from "../../lib/messages/service";
 import {
   messageKeys,
   useConversationFlags,
@@ -102,6 +104,7 @@ function useEscapeAndOutside(ref: React.RefObject<HTMLElement>, onDismiss: () =>
 
 export function MessagesClient({ userId }: { userId: string }): JSX.Element {
   useUnreadSummary(userId);
+  useMyClubsRealtime(userId);
   // From `md` up the Message tab is a FIXED-height application shell: the
   // document itself never scrolls, and the only scrollable region is the
   // conversation list inside the Chats column (plus each thread's own message
@@ -557,6 +560,18 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
     void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
   }, [channelId, conversationId, queryClient, userId]);
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages.length]);
+  // Senders whose attachment payload this viewer may not read (a block in
+  // either direction). Keyed under "messages" so the existing access-sync cache
+  // clearing already drops it and it re-resolves after an unblock. Symmetric,
+  // so it never tells the viewer who blocked whom. Storage authorization is the
+  // enforcement point; this only chooses which card renders.
+  const { data: restrictedSenderIds } = useQuery({
+    queryKey: ["messages", "restrictedSenders", conversationId],
+    queryFn: () => conversationRestrictedSenders(conversationId),
+    enabled: !!conversationId,
+    staleTime: 0,
+  });
+  const restrictedSenders = useMemo(() => new Set(restrictedSenderIds ?? []), [restrictedSenderIds]);
   const send = async (text: string, file?: File) => {
     try {
       if (file) {
@@ -567,7 +582,7 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
     } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t send the message."); }
   };
   const emptyLabel = channelName && channelName.startsWith("#") ? `No messages in ${channelName} yet` : "No messages yet";
-  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onChanged={onInvalidate} onError={onError} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={send} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
+  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={send} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
 }
 
 function ThreadShell({ title, subtitle, onOpenHub, onBack, onOpenInfo, children }: { title: string; subtitle: string | null; onOpenHub?: () => void; onBack?: () => void; onOpenInfo?: () => void; children: React.ReactNode }): JSX.Element {
@@ -599,15 +614,29 @@ function Composer({ disabled = false, disabledReason, allowPolls = false, onSend
   </form>{pollOpen && onPoll && <PollComposer onClose={() => setPollOpen(false)} onSubmit={async (poll) => { await onPoll(poll); setPollOpen(false); }} />}</>;
 }
 
-function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onChanged, onError }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onChanged: () => void; onError: (message: string) => void }): JSX.Element {
+function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onChanged, onError, attachmentUnavailable }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean }): JSX.Element {
   const [menu, setMenu] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(false), []);
   useEscapeAndOutside(menuRef, closeMenu);
-  useEffect(() => { let alive = true; if (message.attachment_url) void signedAttachmentUrl(message.attachment_url).then((url) => { if (alive) setAttachment(url); }).catch(() => {}); return () => { alive = false; }; }, [message.attachment_url]);
+  // Never even request a signed URL for a restricted attachment. Storage would
+  // refuse it anyway; not asking keeps the network log clean too.
+  // Authorization is re-checked by Storage on this fetch, so a block takes
+  // effect immediately and there is no previously-issued link to replay. The
+  // blob: URL is revoked on unmount so it is not retained after access changes.
+  useEffect(() => {
+    let alive = true;
+    let created: string | null = null;
+    if (message.attachment_url && !attachmentUnavailable) {
+      void attachmentObjectUrl(message.attachment_url)
+        .then((url) => { if (alive) { created = url; setAttachment(url); } else { releaseAttachmentUrl(url); } })
+        .catch(() => {});
+    }
+    return () => { alive = false; releaseAttachmentUrl(created); setAttachment(null); };
+  }, [message.attachment_url, attachmentUnavailable]);
   const mutate = async (action: () => Promise<void>) => { setMenu(false); try { await action(); onChanged(); } catch { onError("Couldn’t update the message."); } };
-  return <div className={`mb-3 flex gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>{!isOwn && <button type="button" onClick={() => onOpenProfile(message.sender_id!)} aria-label={`Open ${message.sender.username}'s profile`} className="self-end"><Avatar uri={message.sender.avatar_url} size={28} name={message.sender.full_name ?? message.sender.username} /></button>}<div className={`group relative max-w-[78%] rounded-2xl px-3 py-2 shadow-[0_2px_4px_rgba(0,0,0,0.15)] ${isOwn ? "bg-teal text-white" : "bg-white text-teal"}`}>{showSender && !isOwn && <button type="button" onClick={() => onOpenProfile(message.sender_id!)} className="mb-0.5 block text-left text-xs font-bold">{message.sender.full_name || `@${message.sender.username}`}</button>}{message.message_type === "poll" && message.poll_id ? <PollCard pollId={message.poll_id} userId={userId} onChanged={onChanged} onError={onError} /> : message.message_type === "shared_event" ? <EventMessage eventId={message.shared_event_id} /> : message.message_type === "shared_post" ? <PostMessage postId={message.shared_post_id} /> : <>{message.content && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}{attachment && (message.message_type === "image" ? <a href={attachment} target="_blank" rel="noreferrer"><img src={attachment} alt={message.attachment_name ?? "Shared image"} className="mt-2 max-h-64 rounded-lg object-cover" /></a> : message.message_type === "video" ? <video controls src={attachment} className="mt-2 max-h-64 rounded-lg" /> : <a href={attachment} target="_blank" rel="noreferrer" className="mt-2 block rounded-lg bg-black/10 px-3 py-2 text-sm underline">📎 {message.attachment_name ?? "Download file"}</a>)}</>}<div className={`mt-1 flex items-center gap-2 text-[10px] ${isOwn ? "text-white/75" : "text-gray-400"}`}><time>{shortTime(message.created_at)}</time><button type="button" aria-label="Message actions" onClick={() => setMenu((open) => !open)} className="rounded px-1 opacity-70 hover:bg-black/10">•••</button></div>{menu && <div ref={menuRef} role="menu" className="absolute bottom-1 right-1 z-20 w-40 rounded-lg border bg-white p-1 text-left text-sm text-gray-800 shadow-lg"><button type="button" role="menuitem" onClick={() => { if (message.content) void navigator.clipboard?.writeText(message.content); setMenu(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Copy</button><button type="button" role="menuitem" onClick={() => mutate(() => hideMessage(message.id, userId))} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Delete for me</button>{isOwn && <button type="button" role="menuitem" onClick={() => mutate(() => unsendMessage(message.id))} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Unsend for everyone</button>}{!isOwn && <button type="button" role="menuitem" onClick={() => { const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) void mutate(() => reportMessage(message.id, reason)); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>}</div>}</div></div>;
+  return <div className={`mb-3 flex gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>{!isOwn && <button type="button" onClick={() => onOpenProfile(message.sender_id!)} aria-label={`Open ${message.sender.username}'s profile`} className="self-end"><Avatar uri={message.sender.avatar_url} size={28} name={message.sender.full_name ?? message.sender.username} /></button>}<div className={`group relative max-w-[78%] rounded-2xl px-3 py-2 shadow-[0_2px_4px_rgba(0,0,0,0.15)] ${isOwn ? "bg-teal text-white" : "bg-white text-teal"}`}>{showSender && !isOwn && <button type="button" onClick={() => onOpenProfile(message.sender_id!)} className="mb-0.5 block text-left text-xs font-bold">{message.sender.full_name || `@${message.sender.username}`}</button>}{message.message_type === "poll" && message.poll_id ? <PollCard pollId={message.poll_id} userId={userId} onChanged={onChanged} onError={onError} /> : message.message_type === "shared_event" ? <EventMessage eventId={message.shared_event_id} /> : message.message_type === "shared_post" ? <PostMessage postId={message.shared_post_id} /> : <>{message.content && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}{attachmentUnavailable && message.attachment_url ? <p className="mt-2 rounded-lg bg-black/10 px-3 py-2 text-sm opacity-80">{ATTACHMENT_UNAVAILABLE_TEXT}</p> : null}{attachment && (message.message_type === "image" ? <a href={attachment} target="_blank" rel="noreferrer"><img src={attachment} alt={message.attachment_name ?? "Shared image"} className="mt-2 max-h-64 rounded-lg object-cover" /></a> : message.message_type === "video" ? <video controls src={attachment} className="mt-2 max-h-64 rounded-lg" /> : <a href={attachment} target="_blank" rel="noreferrer" className="mt-2 block rounded-lg bg-black/10 px-3 py-2 text-sm underline">📎 {message.attachment_name ?? "Download file"}</a>)}</>}<div className={`mt-1 flex items-center gap-2 text-[10px] ${isOwn ? "text-white/75" : "text-gray-400"}`}><time>{shortTime(message.created_at)}</time><button type="button" aria-label="Message actions" onClick={() => setMenu((open) => !open)} className="rounded px-1 opacity-70 hover:bg-black/10">•••</button></div>{menu && <div ref={menuRef} role="menu" className="absolute bottom-1 right-1 z-20 w-40 rounded-lg border bg-white p-1 text-left text-sm text-gray-800 shadow-lg"><button type="button" role="menuitem" onClick={() => { if (message.content) void navigator.clipboard?.writeText(message.content); setMenu(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Copy</button><button type="button" role="menuitem" onClick={() => mutate(() => hideMessage(message.id, userId))} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Delete for me</button>{isOwn && <button type="button" role="menuitem" onClick={() => mutate(() => unsendMessage(message.id))} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Unsend for everyone</button>}{!isOwn && <button type="button" role="menuitem" onClick={() => { const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) void mutate(() => reportMessage(message.id, reason)); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>}</div>}</div></div>;
 }
 
 function PollCard({ pollId, userId, onChanged, onError }: { pollId: string; userId: string; onChanged: () => void; onError: (message: string) => void }): JSX.Element {
@@ -622,7 +651,17 @@ function EventMessage({ eventId }: { eventId: string | null }): JSX.Element {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  // RLS decides availability (blocking, deletion, audience). Keyed under
+  // "messages" so the existing permission-sensitive cache clearing already
+  // drops it on an access change, and it re-resolves after an unblock.
+  const { data: available } = useQuery({
+    queryKey: ["messages", "sharedEventAvailable", eventId],
+    queryFn: () => sharedEventIsAvailable(eventId!),
+    enabled: !!eventId,
+    staleTime: 0,
+  });
   if (!eventId) return <p className="text-sm">Shared an event</p>;
+  if (available === false) return <p className="text-sm opacity-80">This event is no longer available.</p>;
   return <button type="button" onClick={() => { const next = new URLSearchParams(params.toString()); next.set("event", eventId); router.push(`${pathname}?${next.toString()}`, { scroll: false }); }} className="rounded-lg bg-black/10 px-3 py-2 text-left text-sm font-semibold underline">📅 View shared event</button>;
 }
 
@@ -630,7 +669,14 @@ function PostMessage({ postId }: { postId: string | null }): JSX.Element {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const { data: available } = useQuery({
+    queryKey: ["messages", "sharedPostAvailable", postId],
+    queryFn: () => sharedPostIsAvailable(postId!),
+    enabled: !!postId,
+    staleTime: 0,
+  });
   if (!postId) return <p className="text-sm">Shared a post</p>;
+  if (available === false) return <p className="text-sm opacity-80">This post is no longer available.</p>;
   return <button type="button" onClick={() => { const next = new URLSearchParams(params.toString()); next.set("post", postId); router.push(`${pathname}?${next.toString()}`, { scroll: false }); }} className="rounded-lg bg-black/10 px-3 py-2 text-left text-sm font-semibold underline">🖼️ View shared post</button>;
 }
 
@@ -798,6 +844,16 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
     : `${details.participants.length} participants`;
   const initials = channel ? (channel.kind === "main" ? "MA" : `#${channel.name.slice(0, 1).toUpperCase()}`) : details.name.slice(0, 1).toUpperCase();
 
+  // Same restriction as the thread: a blocked pair's attachments are withheld
+  // from the shared Media/Files panels too. Storage refuses the bytes anyway.
+  const { data: restrictedSenderIds } = useQuery({
+    queryKey: ["messages", "restrictedSenders", conversationId],
+    queryFn: () => conversationRestrictedSenders(conversationId),
+    enabled: !!conversationId,
+    staleTime: 0,
+  });
+  const restrictedSenders = useMemo(() => new Set(restrictedSenderIds ?? []), [restrictedSenderIds]);
+
   const toggleMute = async () => {
     try {
       if (channelId) await setChannelMuted(channelId, !muted);
@@ -874,9 +930,9 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
       {query.trim().length >= 3 ? <div className="space-y-2">{searchLoading ? <p className="py-4 text-sm text-gray-500">Searching this conversation…</p> : matches.length ? matches.map((result) => <MessageSearchRow key={result.message_id} result={result} onClick={() => onOpenMessage(result)} />) : <EmptyPanel label="No messages match that search" />}</div> : <>
         {activeTab === "polls" && <SharedPolls messages={polls} userId={userId} onError={onError} />}
-        {activeTab === "media" && <SharedMedia messages={[...media, ...videos]} />}
+        {activeTab === "media" && <SharedMedia messages={[...media, ...videos]} restrictedSenders={restrictedSenders} />}
         {activeTab === "events" && <div className="space-y-2">{events.length ? events.map((event) => <button key={event.event_id} type="button" onClick={() => onOpenEvent(event.event_id)} className="flex w-full gap-3 rounded-xl border bg-white p-2 text-left hover:bg-teal/[0.03]">{event.cover_image_url && <img src={event.cover_image_url} alt="" className="h-14 w-14 rounded-lg object-cover" />}<span className="min-w-0"><span className="block truncate text-sm font-bold">{event.emoji ? `${event.emoji} ` : ""}{event.title}</span><span className="block text-xs text-gray-500">{event.event_date}{event.start_time ? ` · ${event.start_time}` : ""}</span></span></button>) : <EmptyPanel label="No shared events yet" />}</div>}
-        {activeTab === "files" && <SharedFiles messages={files} />}
+        {activeTab === "files" && <SharedFiles messages={files} restrictedSenders={restrictedSenders} />}
 
         {/* People + count, exactly where mobile puts it: the conversation-level
             info and custom groups, never a channel thread. */}
@@ -994,10 +1050,10 @@ function ConfirmSheet({ title, message, confirmLabel, onConfirm, onCancel }: { t
 }
 function EmptyPanel({ label }: { label: string }): JSX.Element { return <p className="py-10 text-center text-sm text-gray-400">{label}</p>; }
 function SharedPolls({ messages, userId, onError }: { messages: ThreadMessage[]; userId: string; onError: (message: string) => void }): JSX.Element { return messages.length ? <div className="space-y-3">{messages.map((message) => message.poll_id && <div key={message.id} className="rounded-xl border bg-white p-3"><PollCard pollId={message.poll_id} userId={userId} onChanged={() => {}} onError={onError} /></div>)}</div> : <EmptyPanel label="No polls yet" />; }
-function SharedMedia({ messages }: { messages: ThreadMessage[] }): JSX.Element { return messages.length ? <div className="grid grid-cols-3 gap-2">{messages.map((message) => <SignedMedia key={message.id} message={message} />)}</div> : <EmptyPanel label="No photos or videos yet" />; }
-function SignedMedia({ message }: { message: ThreadMessage }): JSX.Element { const [url, setUrl] = useState<string | null>(null); useEffect(() => { if (message.attachment_url) void signedAttachmentUrl(message.attachment_url).then(setUrl).catch(() => {}); }, [message.attachment_url]); return url ? <a href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg bg-black/5">{message.message_type === "video" ? <video src={url} className="h-full w-full object-cover" /> : <img src={url} alt={message.attachment_name ?? "Shared media"} className="h-full w-full object-cover" />}</a> : <div className="aspect-square animate-pulse rounded-lg bg-black/5" />; }
-function SharedFiles({ messages }: { messages: ThreadMessage[] }): JSX.Element { return messages.length ? <div className="space-y-2">{messages.map((message) => <SignedFile key={message.id} message={message} />)}</div> : <EmptyPanel label="No files yet" />; }
-function SignedFile({ message }: { message: ThreadMessage }): JSX.Element { const [url, setUrl] = useState<string | null>(null); useEffect(() => { if (message.attachment_url) void signedAttachmentUrl(message.attachment_url).then(setUrl).catch(() => {}); }, [message.attachment_url]); return <a href={url ?? undefined} target="_blank" rel="noreferrer" className="block rounded-lg border bg-white px-3 py-2 text-sm font-medium text-teal underline">📎 {message.attachment_name ?? "Download file"}</a>; }
+function SharedMedia({ messages, restrictedSenders }: { messages: ThreadMessage[]; restrictedSenders?: Set<string> }): JSX.Element { const visible = messages.filter((message) => !(message.sender_id && restrictedSenders?.has(message.sender_id))); return visible.length ? <div className="grid grid-cols-3 gap-2">{visible.map((message) => <SignedMedia key={message.id} message={message} />)}</div> : <EmptyPanel label="No photos or videos yet" />; }
+function SignedMedia({ message }: { message: ThreadMessage }): JSX.Element { const [url, setUrl] = useState<string | null>(null); useEffect(() => { let alive = true; let created: string | null = null; if (message.attachment_url) void attachmentObjectUrl(message.attachment_url).then((u) => { if (alive) { created = u; setUrl(u); } else { releaseAttachmentUrl(u); } }).catch(() => {}); return () => { alive = false; releaseAttachmentUrl(created); }; }, [message.attachment_url]); return url ? <a href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg bg-black/5">{message.message_type === "video" ? <video src={url} className="h-full w-full object-cover" /> : <img src={url} alt={message.attachment_name ?? "Shared media"} className="h-full w-full object-cover" />}</a> : <div className="aspect-square animate-pulse rounded-lg bg-black/5" />; }
+function SharedFiles({ messages, restrictedSenders }: { messages: ThreadMessage[]; restrictedSenders?: Set<string> }): JSX.Element { const visible = messages.filter((message) => !(message.sender_id && restrictedSenders?.has(message.sender_id))); return visible.length ? <div className="space-y-2">{visible.map((message) => <SignedFile key={message.id} message={message} />)}</div> : <EmptyPanel label="No files yet" />; }
+function SignedFile({ message }: { message: ThreadMessage }): JSX.Element { const [url, setUrl] = useState<string | null>(null); useEffect(() => { let alive = true; let created: string | null = null; if (message.attachment_url) void attachmentObjectUrl(message.attachment_url).then((u) => { if (alive) { created = u; setUrl(u); } else { releaseAttachmentUrl(u); } }).catch(() => {}); return () => { alive = false; releaseAttachmentUrl(created); }; }, [message.attachment_url]); return <a href={url ?? undefined} download={message.attachment_name ?? undefined} target="_blank" rel="noreferrer" className="block rounded-lg border bg-white px-3 py-2 text-sm font-medium text-teal underline">📎 {message.attachment_name ?? "Download file"}</a>; }
 
 function compareConversation(a: ConversationPreview, b: ConversationPreview): number { return new Date(b.last_message_at ?? 0).getTime() - new Date(a.last_message_at ?? 0).getTime(); }
 function previewForSearch(type: string): string { if (type === "poll") return "Poll"; if (type === "shared_event") return "Shared an event"; if (type === "shared_post") return "Shared a post"; if (type === "image") return "Photo"; if (type === "video") return "Video"; if (type === "file") return "File"; return "Message"; }
