@@ -10,14 +10,35 @@ import { subscribeBroadcast } from "../realtime";
 // exact same shared backend records.
 //
 // Product meaning (from mobile, do NOT invent new rules from the screenshots):
-//   unread_notifications → notification activity  (Home icon + sidebar entry)
-//   unread_threads       → unread conversations   (Messages icon)
+//   unread_notifications   → notification activity (Home icon + sidebar entry)
+//   unread_threads         → unread THREAD count; still the source of the iOS
+//                            app-icon badge on mobile. Left untouched.
+//   unread_direct_messages → unread MESSAGES in one-to-one conversations
+//   unread_group_messages  → unread MESSAGES in custom groups + club member
+//                            chats + club officer chats
 // Mobile has NO club-activity badge count, so the web Clubs icon shows none.
+//
+// The Message tab's three badges — Single, Groups, and the header Messages
+// icon — all derive from the last two keys, so the icon count is always
+// exactly Single + Groups by construction (migration 076).
 
 export type UnreadSummary = {
   unread_notifications: number;
   unread_threads: number;
+  unread_direct_messages: number;
+  unread_group_messages: number;
 };
+
+/** The single message-tab badge contract: total = Single + Groups. */
+export function messageBadgeCounts(summary: UnreadSummary | undefined): {
+  single: number;
+  groups: number;
+  total: number;
+} {
+  const single = Math.max(0, summary?.unread_direct_messages ?? 0);
+  const groups = Math.max(0, summary?.unread_group_messages ?? 0);
+  return { single, groups, total: single + groups };
+}
 
 async function fetchUnreadSummary(): Promise<UnreadSummary> {
   const supabase = getSupabaseBrowser();
@@ -27,6 +48,8 @@ async function fetchUnreadSummary(): Promise<UnreadSummary> {
   return {
     unread_notifications: Math.max(0, summary.unread_notifications ?? 0),
     unread_threads: Math.max(0, summary.unread_threads ?? 0),
+    unread_direct_messages: Math.max(0, summary.unread_direct_messages ?? 0),
+    unread_group_messages: Math.max(0, summary.unread_group_messages ?? 0),
   };
 }
 

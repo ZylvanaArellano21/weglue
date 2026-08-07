@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
 import { useRealtimeNotifications } from "../../hooks/useNotifications";
 import { useClubRealtimeSync } from "../../hooks/useClubRealtimeSync";
-import { useUnreadSummaryValue } from "../../hooks/useUnreadSummary";
+import { messageBadgeCounts, useUnreadSummaryValue } from "../../hooks/useUnreadSummary";
 import { CountBadge } from "../../components/shared/CountBadge";
 
 export default function TabsLayout() {
@@ -22,10 +22,11 @@ export default function TabsLayout() {
   // screen and device without a manual refresh.
   useClubRealtimeSync(session?.user.id);
 
-  // Messages tab badge: unread THREADS (a conversation/channel with 20 unread
-  // messages counts once). Kept live by PushNotificationsHost's subscription.
+  // Messages tab badge: unread MESSAGES, split Single + Groups by the same RPC
+  // that feeds the two controls on the Message tab, so this number always
+  // equals Single + Groups. Kept live by PushNotificationsHost's subscription.
   const { data: unreadSummary } = useUnreadSummaryValue(session?.user.id);
-  const unreadThreads = unreadSummary?.unread_threads ?? 0;
+  const unreadMessages = messageBadgeCounts(unreadSummary).total;
 
   if (isLoading) {
     return (
@@ -111,7 +112,7 @@ export default function TabsLayout() {
             <View style={{ width: 38, height: 32, alignItems: "center", justifyContent: "center" }}>
               <Ionicons name={focused ? "chatbubble" : "chatbubble-outline"} size={27} color={color} />
               <CountBadge
-                count={unreadThreads}
+                count={unreadMessages}
                 style={{ position: "absolute", top: 0, right: 0 }}
               />
             </View>

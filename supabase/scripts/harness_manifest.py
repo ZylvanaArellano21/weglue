@@ -145,6 +145,13 @@ MANIFEST = [
          chain=None, pg="17.6", setup_role="postgres", assert_role="service_role claims",
          criterion="raise",
          note="Header names the exact docker exec psql command."),
+    dict(file="test_076_message_tab_categories.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres", assert_role="authenticated claims + service-role read",
+         criterion="raise",
+         note="Header names the exact docker exec psql command. Seeds its own "
+              "users/conversations/channels and ROLLBACKs. `ok` is nullable and "
+              "NULL fails, so a pre-076 database reports named failures rather "
+              "than passing vacuously."),
 
     # ---- shadow-clone family: needs auth.users + the signup trigger, and
     #      performs destructive DELETE FROM auth.users, so it gets its own

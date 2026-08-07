@@ -605,11 +605,18 @@ export async function searchChats(
   return { people: peopleResults, chats: chatResults };
 }
 
-/** Six bounded, cross-campus suggestions from the shared secure RPC. The
- * database excludes blocked, restricted, and deleted accounts before any
- * profile data reaches the device. */
+/** Product floor for every Suggested section (empty Single, New message, New
+ * group chat). The server returns fewer only when fewer accounts are eligible.
+ * Web uses the same constant (apps/web/lib/messages/service.ts). */
+export const MESSAGE_SUGGESTION_LIMIT = 10;
+
+/** Bounded, cross-campus suggestions from the shared secure RPC. The database
+ * excludes blocked, restricted, and deleted accounts before any profile data
+ * reaches the device. */
 export async function getSuggestedPeople(_userId: string): Promise<PeopleResult[]> {
-  const { data, error } = await supabase.rpc('get_message_suggestions', { p_limit: 6 });
+  const { data, error } = await supabase.rpc('get_message_suggestions', {
+    p_limit: MESSAGE_SUGGESTION_LIMIT,
+  });
   if (error) throw error;
   return ((data ?? []) as any[]).map((p) => ({
     user_id: p.user_id,

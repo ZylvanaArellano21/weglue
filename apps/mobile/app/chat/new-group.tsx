@@ -43,7 +43,8 @@ export default function NewGroupScreen() {
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
 
   const isTyping = query.trim().length > 0;
-  const { data: suggested, isLoading: suggestLoading } = useSuggestedPeople(isTyping ? undefined : userId);
+  const { data: suggested, isLoading: suggestLoading, isError: suggestFailed } =
+    useSuggestedPeople(isTyping ? undefined : userId);
   const { data: searchResults, isLoading: searchLoading } = useChatSearch(userId, query);
 
   const people = useMemo(
@@ -173,7 +174,14 @@ export default function NewGroupScreen() {
               );
             }}
             ListEmptyComponent={
-              <Text style={styles.hint}>{isTyping ? 'No people found.' : 'No suggestions yet.'}</Text>
+              !isTyping && suggestFailed ? (
+                // A failed lookup must never read as "there is nobody to suggest".
+                <Text style={styles.error}>
+                  Couldn’t load suggestions. Check your connection and try again.
+                </Text>
+              ) : (
+                <Text style={styles.hint}>{isTyping ? 'No people found.' : 'No suggestions yet.'}</Text>
+              )
             }
           />
         )}
@@ -308,5 +316,13 @@ const styles = StyleSheet.create({
     color: chatColors.textMuted,
     paddingHorizontal: 18,
     paddingTop: 16,
+  },
+  error: {
+    fontFamily: chatFonts.regular,
+    fontSize: 13,
+    color: '#DC2626',
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    lineHeight: 18,
   },
 });
