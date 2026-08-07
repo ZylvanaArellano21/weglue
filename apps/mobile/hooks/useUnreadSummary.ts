@@ -11,8 +11,28 @@ import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from '../lib
 
 export type UnreadSummary = {
   unread_notifications: number;
+  /** Unread THREAD count. Still the app-icon badge source — do not repurpose. */
   unread_threads: number;
+  /** Unread MESSAGES in one-to-one conversations (the Single control). */
+  unread_direct_messages: number;
+  /** Unread MESSAGES in custom groups + club member/officer chats (Groups). */
+  unread_group_messages: number;
 };
+
+/**
+ * The single message-tab badge contract, shared with web
+ * (apps/web/lib/hooks/useUnreadSummary.ts): the Messages tab icon is always
+ * exactly Single + Groups because all three read these same two keys.
+ */
+export function messageBadgeCounts(summary: UnreadSummary | undefined): {
+  single: number;
+  groups: number;
+  total: number;
+} {
+  const single = Math.max(0, summary?.unread_direct_messages ?? 0);
+  const groups = Math.max(0, summary?.unread_group_messages ?? 0);
+  return { single, groups, total: single + groups };
+}
 
 async function fetchUnreadSummary(): Promise<UnreadSummary> {
   const { data, error } = await supabase.rpc('get_unread_summary');
@@ -21,6 +41,8 @@ async function fetchUnreadSummary(): Promise<UnreadSummary> {
   return {
     unread_notifications: Math.max(0, summary.unread_notifications ?? 0),
     unread_threads: Math.max(0, summary.unread_threads ?? 0),
+    unread_direct_messages: Math.max(0, summary.unread_direct_messages ?? 0),
+    unread_group_messages: Math.max(0, summary.unread_group_messages ?? 0),
   };
 }
 
@@ -91,6 +113,9 @@ export function useUnreadSummary(userId: string | undefined) {
   }, [userId, queryClient]);
 
   // App icon badge mirrors total unread; clears when everything is read.
+  // Intentionally still THREAD-based: this is the same number the push worker
+  // stamps on each notification via get_unread_summary_for, and 076 left that
+  // key untouched so no delivered push changes meaning.
   useEffect(() => {
     if (!query.data) return;
     const total = query.data.unread_notifications + query.data.unread_threads;

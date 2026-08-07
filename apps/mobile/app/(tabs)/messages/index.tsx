@@ -5,6 +5,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -16,6 +17,8 @@ import { useAuthStore } from '@weglue/shared';
 import { openChat } from '../../../lib/chatNavigation';
 import { navigateToDiscover } from '../../../lib/discoverNavigation';
 import { useMyChats, useChatSearch, useSuggestedPeople } from '../../../hooks/useChats';
+import { messageBadgeCounts, useUnreadSummaryValue } from '../../../hooks/useUnreadSummary';
+import { MESSAGE_SUGGESTION_LIMIT } from '../../../services/chatService';
 import { ChatListItem, SuggestedPersonRow } from '../../../components/chat/ChatListItem';
 import { ChatSearchBar } from '../../../components/chat/ChatSearchBar';
 import { FilterPills, type ChatFilter } from '../../../components/chat/FilterPills';
@@ -63,10 +66,16 @@ export default function MessagesIndex() {
   );
 
   const filteredChats = filter === 'single' ? directChats : groupChats;
-  const { data: suggestedPeople = [], isLoading: suggestedLoading } = useSuggestedPeople(
-    userId,
-    filter === 'single' && directChats.length === 0 && !searching,
-  );
+  const {
+    data: suggestedPeople = [],
+    isLoading: suggestedLoading,
+    isError: suggestedFailed,
+  } = useSuggestedPeople(userId, filter === 'single' && directChats.length === 0 && !searching);
+
+  // Category badges come from the SAME canonical RPC as the Messages tab icon
+  // (get_unread_summary), so the tab number always equals Single + Groups.
+  const { data: unreadSummary } = useUnreadSummaryValue(userId);
+  const { single: singleUnread, groups: groupUnread } = messageBadgeCounts(unreadSummary);
 
   const handlePressChat = useCallback(
     (
@@ -183,13 +192,23 @@ export default function MessagesIndex() {
   }
 
   function renderSingleEmpty() {
+    // Ten suggestions no longer fit a short screen, so this region scrolls.
     return (
-      <View style={styles.suggestedWrap}>
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.suggestedWrap}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.suggestedHeader}>Suggested</Text>
         {suggestedLoading ? (
           <ActivityIndicator style={styles.suggestedLoading} color={chatColors.teal} />
+        ) : suggestedFailed ? (
+          // A failed lookup must never read as "there is nobody to suggest".
+          <Text style={styles.suggestedError}>
+            Couldn’t load suggestions. Check your connection and try again.
+          </Text>
         ) : suggestedPeople.length > 0 ? (
-          suggestedPeople.slice(0, 6).map((person) => (
+          suggestedPeople.slice(0, MESSAGE_SUGGESTION_LIMIT).map((person) => (
             <SuggestedPersonRow
               key={person.user_id}
               username={person.username}
@@ -203,7 +222,7 @@ export default function MessagesIndex() {
             Search above to find people, or browse clubs to meet members.
           </Text>
         )}
-      </View>
+      </ScrollView>
     );
   }
 
@@ -289,7 +308,12 @@ export default function MessagesIndex() {
         />
 
         <View style={styles.toolbar}>
-          <FilterPills value={filter} onChange={setFilter} />
+          <FilterPills
+            value={filter}
+            onChange={setFilter}
+            singleUnread={singleUnread}
+            groupUnread={groupUnread}
+          />
           <TouchableOpacity
             style={styles.newChatBtn}
             onPress={() => router.push('/chat/new-message' as any)}
@@ -312,6 +336,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: chatColors.bg,
   },
+  flex: { flex: 1 },
   topSection: {
     paddingTop: 8,
     gap: 12,
@@ -357,6 +382,7 @@ const styles = StyleSheet.create({
   },
   suggestedWrap: {
     paddingTop: 16,
+    paddingBottom: 24,
   },
   suggestedHeader: {
     ...chatTypography.sectionHeader,
@@ -372,6 +398,13 @@ const styles = StyleSheet.create({
   },
   suggestedLoading: {
     marginTop: 16,
+  },
+  suggestedError: {
+    fontFamily: chatFonts.regular,
+    fontSize: 13,
+    color: '#DC2626',
+    paddingHorizontal: 23,
+    lineHeight: 18,
   },
   emptyBody: {
     fontFamily: chatFonts.regular,
