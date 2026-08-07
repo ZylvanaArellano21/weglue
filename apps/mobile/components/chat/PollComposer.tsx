@@ -13,7 +13,10 @@ import {
   Keyboard,
   Platform,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// SafeAreaView is used ONLY for the picker sheet's bottom edge (the same way
+// Create Event uses it). The composer's own top padding still comes from the
+// insets hook — see the note on the component for why.
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
@@ -388,7 +391,7 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
             )}
 
             <View style={styles.toggleRow}>
-              <Text style={styles.label}>Multiple options</Text>
+              <Text style={styles.label}>Allow multiple answers</Text>
               <View style={styles.switchWrap}>
                 <Switch
                   value={allowMultiple}
@@ -463,22 +466,56 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
           </ScrollView>
         </KeyboardAvoidingView>
 
-        {picker && (
-          <View style={[styles.pickerWrap, { paddingBottom: insets.bottom }]}>
-            {Platform.OS === 'ios' && (
-              // Android's dialog brings its own OK/Cancel; only iOS's inline
-              // spinner needs us to supply them.
+        {/* ANDROID — the platform dialog, rendered bare exactly as Create Event
+            does. It supplies its own OK / Cancel and its own theming. */}
+        {picker && Platform.OS === 'android' && (
+          <DateTimePicker
+            value={picker.temp}
+            mode={picker.mode}
+            is24Hour={false}
+            minimumDate={picker.min}
+            onChange={onPickerChange}
+          />
+        )}
+      </View>
+
+      {/* ─── iOS date / time pickers ────────────────────────────────────────
+          These now use the SAME presentation as Create Event
+          (app/home/new-event.tsx): a white bottom-sheet Modal with a
+          Cancel / Done header, `display="inline"` for dates (the calendar) and
+          `display="spinner"` for times (the clock), and — critically —
+          `themeVariant="light"` + `accentColor`.
+
+          THE BUG THIS FIXES: the app declares `userInterfaceStyle: "automatic"`
+          (app.json), so on a device in Dark Mode iOS renders UIDatePicker's
+          text WHITE. The picker used to be mounted on a hardcoded light cream
+          panel with no themeVariant, producing white-on-cream — the control was
+          fully laid out and interactive but effectively invisible. Pinning
+          `themeVariant="light"` makes the picker's own colours match the light
+          surface it is drawn on, on every device appearance. Create Event has
+          always done this, which is why its pickers were never affected. */}
+      {picker && Platform.OS === 'ios' && (
+        <Modal transparent animationType="slide" onRequestClose={cancelPicker}>
+          <View style={styles.iosPickerBackdrop}>
+            <SafeAreaView style={styles.iosPickerSheet} edges={['bottom']}>
               <View style={styles.iosPickerHeader}>
                 <TouchableOpacity
                   onPress={cancelPicker}
+                  activeOpacity={0.7}
                   hitSlop={12}
                   accessibilityRole="button"
                   accessibilityLabel="Cancel, keep the previous value"
                 >
                   <Text style={styles.iosPickerCancel}>Cancel</Text>
                 </TouchableOpacity>
+                <Text style={styles.iosPickerTitle}>
+                  {picker.field === 'start'
+                    ? picker.mode === 'date' ? 'Start Date' : 'Start Time'
+                    : picker.mode === 'date' ? 'End Date' : 'End Time'}
+                </Text>
                 <TouchableOpacity
                   onPress={commitPicker}
+                  activeOpacity={0.7}
                   hitSlop={12}
                   accessibilityRole="button"
                   accessibilityLabel="Done, save this date and time"
@@ -486,21 +523,25 @@ export function PollComposer({ visible, onClose, onSubmit }: Props) {
                   <Text style={styles.iosPickerDone}>Done</Text>
                 </TouchableOpacity>
               </View>
-            )}
-            <DateTimePicker
-              // Driven by the working value, not the saved one, so the wheel
-              // reflects what Done is about to commit.
-              value={picker.temp}
-              mode={picker.mode}
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              // Never let the wheel land on a past instant: start ≥ now, end ≥
-              // start (or now). Date mode only meaningfully bounds the day.
-              minimumDate={picker.min}
-              onChange={onPickerChange}
-            />
+              <DateTimePicker
+                // Driven by the working value, not the saved one, so the picker
+                // reflects what Done is about to commit.
+                value={picker.temp}
+                mode={picker.mode}
+                display={picker.mode === 'date' ? 'inline' : 'spinner'}
+                is24Hour={false}
+                // Never let the picker land on a past instant: start ≥ now,
+                // end ≥ start (or now).
+                minimumDate={picker.min}
+                onChange={onPickerChange}
+                style={styles.iosPicker}
+                themeVariant="light"
+                accentColor={chatColors.teal}
+              />
+            </SafeAreaView>
           </View>
-        )}
-      </View>
+        </Modal>
+      )}
     </Modal>
   );
 }
@@ -706,27 +747,41 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  pickerWrap: {
-    backgroundColor: chatColors.bg,
-    borderTopWidth: 1,
-    borderTopColor: chatColors.border,
+  // iOS picker sheet — the same shell Create Event uses, so both screens present
+  // dates and times identically.
+  iosPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  iosPickerSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
   iosPickerHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    minHeight: 44,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  iosPickerTitle: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 16,
+    color: '#111827',
   },
   iosPickerCancel: {
     fontFamily: chatFonts.medium,
-    fontSize: 14,
-    color: chatColors.textMuted,
+    fontSize: 16,
+    color: '#6B7280',
   },
   iosPickerDone: {
     fontFamily: chatFonts.semiBold,
-    fontSize: 14,
+    fontSize: 16,
     color: chatColors.teal,
   },
+  iosPicker: { alignSelf: 'center' },
 });

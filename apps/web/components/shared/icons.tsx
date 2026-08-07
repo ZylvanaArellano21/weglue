@@ -190,3 +190,167 @@ export function StarOutlineIcon(p: IconProps): JSX.Element {
     </svg>
   );
 }
+
+// ─── Messaging icons ────────────────────────────────────────────────────────
+// Each of these is the web equivalent of the exact Ionicon the mobile chat
+// screens use, so an action means the same thing and looks the same on both
+// platforms. The mobile name is noted on every icon; changing one without the
+// other is what produced the mismatched glyphs these replace.
+
+/** Ionicons `attach` / `attach-outline` — composer attach + Files tab. */
+export function PaperclipIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M20 11.5 12.4 19a4.5 4.5 0 0 1-6.4-6.4l7.9-7.8a3 3 0 0 1 4.3 4.3l-7.9 7.8a1.5 1.5 0 0 1-2.1-2.1L15.6 8" />
+    </svg>
+  );
+}
+
+/** Ionicons `list` — the composer's poll button on mobile. */
+export function ListIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M8 6h12M8 12h12M8 18h12" />
+      <path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth={2.4} />
+    </svg>
+  );
+}
+
+/** Ionicons `checkbox-outline` — the Polls tab in chat details. */
+export function CheckboxIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+      <path d="m8 12 2.8 2.8L16.5 9" />
+    </svg>
+  );
+}
+
+/** Ionicons `notifications-off-outline` (outline) / `notifications-off` (on). */
+export function BellOffIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)} fill={p.filled ? "currentColor" : "none"}>
+      <path d="M18 8.5a6 6 0 0 0-9.3-5" />
+      <path d="M6 8.5c0 6-2 7.5-2 7.5h13" />
+      <path d="M10.3 20a2 2 0 0 0 3.4 0" />
+      <path d="m3 3 18 18" />
+    </svg>
+  );
+}
+
+/** Ionicons `archive-outline` (outline) / `archive` (on). */
+export function ArchiveIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)} fill={p.filled ? "currentColor" : "none"}>
+      <rect x="3" y="4" width="18" height="4" rx="1" />
+      <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+      <path d="M10 12h4" />
+    </svg>
+  );
+}
+
+/** Ionicons `trash-outline` — direct-chat Delete. */
+export function TrashIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M4 7h16" />
+      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <path d="M6 7v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+/** Ionicons `lock-closed-outline` — officer Permissions. */
+export function LockIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+/** Ionicons `flag-outline` — Report. */
+export function FlagIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M5 21V4" />
+      <path d="M5 4.5h11l-2 4 2 4H5" />
+    </svg>
+  );
+}
+
+/** Ionicons `person-add-outline` — officer Add Person. */
+export function PersonAddIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <circle cx="9.5" cy="8" r="3.6" />
+      <path d="M3 20c0-3.4 2.9-5.6 6.5-5.6 1.3 0 2.5.3 3.5.8" />
+      <path d="M17.5 14v6M14.5 17h6" />
+    </svg>
+  );
+}
+
+/** Ionicons `share-outline` — officer Share / invite. */
+export function ShareIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M12 3v12" />
+      <path d="m8.5 6.5 3.5-3.5 3.5 3.5" />
+      <path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" />
+    </svg>
+  );
+}
+
+/** Ionicons `exit-outline` — Leave (custom group). */
+export function ExitIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4" />
+      <path d="M10 8 6 12l4 4" />
+      <path d="M6 12h9" />
+    </svg>
+  );
+}
+
+/** Ionicons `pricetag-outline` — a custom channel in the channel list. */
+export function TagIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)} fill={p.filled ? "currentColor" : "none"}>
+      <path d="M20 12.5 12.5 20a2 2 0 0 1-2.8 0l-5.7-5.7a2 2 0 0 1 0-2.8L11.5 4H20v8.5Z" />
+      <circle cx="16.3" cy="7.7" r="1.3" fill={p.filled ? "#fff" : "currentColor"} stroke="none" />
+    </svg>
+  );
+}
+
+/** Ionicons `chatbubbles-outline` — the Main chat row in the channel list. */
+export function ChatBubblesIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)} fill={p.filled ? "currentColor" : "none"}>
+      <path d="M4 15.5V7a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2H7L4 15.5Z" />
+      <path d="M9 16.5v.5a2 2 0 0 0 2 2h6l3 2.5V14a2 2 0 0 0-2-2h-1" />
+    </svg>
+  );
+}
+
+/** Ionicons `megaphone-outline` — the officer-only posting notice. */
+export function MegaphoneIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M4 10v4a1 1 0 0 0 1 1h3l7 4V5L8 9H5a1 1 0 0 0-1 1Z" />
+      <path d="M18 9.5a3.5 3.5 0 0 1 0 5" />
+    </svg>
+  );
+}
+
+/** Ionicons `ellipsis-horizontal` — the chat-details overflow menu. */
+export function EllipsisIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)} fill="currentColor" stroke="none">
+      <circle cx="5.5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="18.5" cy="12" r="1.7" />
+    </svg>
+  );
+}

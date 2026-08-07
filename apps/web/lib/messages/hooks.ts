@@ -6,6 +6,7 @@ import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../rea
 import {
   canPostInChannel,
   getChannelMuted,
+  getConversationFlags,
   getConversationMuted,
   getChannels,
   getConversationDetails,
@@ -40,8 +41,10 @@ export function useMessageDetails(conversationId: string | null, userId: string)
   return useQuery({ queryKey: messageKeys.details(conversationId ?? "", userId), queryFn: () => getConversationDetails(conversationId!, userId), enabled: !!conversationId && !!userId, staleTime: 30_000 });
 }
 
-export function useMessageThread(conversationId: string | null, channelId: string | null) {
-  return useQuery({ queryKey: messageKeys.thread(conversationId ?? "", channelId), queryFn: () => getThread(conversationId!, channelId), enabled: !!conversationId, staleTime: 0 });
+// userId is part of the key, not just the fetch: delete-for-me is per viewer,
+// so two accounts must never share a cached thread page.
+export function useMessageThread(conversationId: string | null, channelId: string | null, userId: string) {
+  return useQuery({ queryKey: [...messageKeys.thread(conversationId ?? "", channelId), userId], queryFn: () => getThread(conversationId!, channelId, userId), enabled: !!conversationId && !!userId, staleTime: 0 });
 }
 
 export function useMessageHub(conversationId: string | null, userId: string) {
@@ -74,6 +77,17 @@ export function useMessagePermission(channelId: string | null) {
   return useQuery({ queryKey: ["messages", "canPost", channelId], queryFn: () => canPostInChannel(channelId!), enabled: !!channelId, staleTime: 10_000 });
 }
 
+/** Conversation-level mute + archive for this viewer (mobile's parent-info
+ *  action row reads exactly these two flags). */
+export function useConversationFlags(conversationId: string | null, userId: string) {
+  return useQuery({
+    queryKey: ["messages", "convFlags", conversationId, userId],
+    queryFn: () => getConversationFlags(conversationId!, userId),
+    enabled: !!conversationId && !!userId,
+    staleTime: 30_000,
+  });
+}
+
 export function useMessageMute(conversationId: string | null, channelId: string | null, userId: string) {
   return useQuery({
     queryKey: ["messages", "muted", conversationId, channelId ?? "conversation", userId],
@@ -83,12 +97,12 @@ export function useMessageMute(conversationId: string | null, channelId: string 
   });
 }
 
-export function useMessageShared(conversationId: string | null, channelId: string | null, type: "image" | "video" | "file" | "poll") {
-  return useQuery({ queryKey: messageKeys.shared(conversationId ?? "", channelId, type), queryFn: () => getSharedMessages(conversationId!, channelId, type), enabled: !!conversationId, staleTime: 30_000 });
+export function useMessageShared(conversationId: string | null, channelId: string | null, type: "image" | "video" | "file" | "poll", userId: string) {
+  return useQuery({ queryKey: [...messageKeys.shared(conversationId ?? "", channelId, type), userId], queryFn: () => getSharedMessages(conversationId!, channelId, type, userId), enabled: !!conversationId && !!userId, staleTime: 30_000 });
 }
 
-export function useMessageEvents(conversationId: string | null, channelId: string | null) {
-  return useQuery({ queryKey: messageKeys.shared(conversationId ?? "", channelId, "events"), queryFn: () => getSharedEvents(conversationId!, channelId), enabled: !!conversationId, staleTime: 30_000 });
+export function useMessageEvents(conversationId: string | null, channelId: string | null, userId: string) {
+  return useQuery({ queryKey: [...messageKeys.shared(conversationId ?? "", channelId, "events"), userId], queryFn: () => getSharedEvents(conversationId!, channelId, userId), enabled: !!conversationId && !!userId, staleTime: 30_000 });
 }
 
 /** Scoped, cleanup-safe invalidations for a Messages session. */

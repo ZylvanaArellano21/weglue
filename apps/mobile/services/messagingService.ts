@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { clientUuid } from '../lib/chatAttachments';
+import { applyThreadVisibility, isMessageVisible, loadThreadVisibility } from '@weglue/shared';
 
 // ─── Unified messaging service (all four conversation types) ────────────────
 // direct · group (custom) · club_group · officer_chat
@@ -120,25 +121,10 @@ function mapMessage(m: any, identities?: Map<string, SharedIdentity>): ThreadMes
   };
 }
 
-/** IDs of messages the current user deleted-for-me in this conversation. */
-async function getHiddenMessageIds(conversationId: string): Promise<Set<string>> {
-  const { data } = await supabase
-    .from('message_hides')
-    .select('message_id, messages!inner(conversation_id)')
-    .eq('messages.conversation_id', conversationId);
-  return new Set(((data ?? []) as any[]).map((r) => r.message_id));
-}
-
-/** The viewer's cleared_before watermark (DM delete hides older history). */
-async function getClearedBefore(conversationId: string, userId: string): Promise<string | null> {
-  const { data } = await supabase
-    .from('conversation_participants')
-    .select('cleared_before')
-    .eq('conversation_id', conversationId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  return (data as any)?.cleared_before ?? null;
-}
+// Delete-for-me and the conversation-delete watermark are now resolved by the
+// canonical `@weglue/shared` thread-visibility contract, which the web app uses
+// too. They previously lived only here, which is exactly why the browser showed
+// messages this user had already deleted on their phone.
 
 /**
  * Messages of one thread (conversation, or one channel of a club chat),
@@ -164,23 +150,21 @@ export async function getThreadMessages(
   query = channelId ? query.eq('channel_id', channelId) : query.is('channel_id', null);
   if (cursor) query = query.lt('created_at', cursor);
 
-  const [{ data, error }, hiddenIds, clearedBefore, identities] = await Promise.all([
+  const [{ data, error }, visibility, identities] = await Promise.all([
     query,
-    getHiddenMessageIds(conversationId),
-    getClearedBefore(conversationId, userId),
+    loadThreadVisibility(supabase, conversationId, userId),
     getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
 
-  const rows = ((data ?? []) as any[]).filter((m) => {
-    if (hiddenIds.has(m.id)) return false;
-    if (clearedBefore && new Date(m.created_at) <= new Date(clearedBefore)) return false;
-    return true;
-  });
+  const raw = (data ?? []) as any[];
+  const rows = applyThreadVisibility(raw, visibility);
 
   return {
     messages: rows.map((m) => mapMessage(m, identities)),
-    next_cursor: (data ?? []).length === PAGE_SIZE ? (data as any[])[(data as any[]).length - 1].created_at : null,
+    // Cursor comes from the RAW page, never the filtered one: a page whose rows
+    // were all hidden must still advance, or history would truncate there.
+    next_cursor: raw.length === PAGE_SIZE ? raw[raw.length - 1].created_at : null,
   };
 }
 
@@ -509,16 +493,13 @@ export async function getConversationMedia(
     .is('deleted_at', null)
     .in('message_type', ['image', 'video']);
   if (channelId) q = q.eq('channel_id', channelId);
-  const [{ data, error }, hiddenIds, clearedBefore, identities] = await Promise.all([
+  const [{ data, error }, visibility, identities] = await Promise.all([
     q.order('created_at', { ascending: false }).limit(200),
-    getHiddenMessageIds(conversationId),
-    getClearedBefore(conversationId, userId),
+    loadThreadVisibility(supabase, conversationId, userId),
     getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
-  return ((data ?? []) as any[])
-    .filter((m) => !hiddenIds.has(m.id) && (!clearedBefore || new Date(m.created_at) > new Date(clearedBefore)))
-    .map((m) => mapMessage(m, identities));
+  return applyThreadVisibility((data ?? []) as any[], visibility).map((m) => mapMessage(m, identities));
 }
 
 export async function getConversationFiles(
@@ -533,16 +514,13 @@ export async function getConversationFiles(
     .is('deleted_at', null)
     .eq('message_type', 'file');
   if (channelId) q = q.eq('channel_id', channelId);
-  const [{ data, error }, hiddenIds, clearedBefore, identities] = await Promise.all([
+  const [{ data, error }, visibility, identities] = await Promise.all([
     q.order('created_at', { ascending: false }).limit(200),
-    getHiddenMessageIds(conversationId),
-    getClearedBefore(conversationId, userId),
+    loadThreadVisibility(supabase, conversationId, userId),
     getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
-  return ((data ?? []) as any[])
-    .filter((m) => !hiddenIds.has(m.id) && (!clearedBefore || new Date(m.created_at) > new Date(clearedBefore)))
-    .map((m) => mapMessage(m, identities));
+  return applyThreadVisibility((data ?? []) as any[], visibility).map((m) => mapMessage(m, identities));
 }
 
 export interface SharedCalendarEvent {
@@ -579,18 +557,15 @@ export async function getConversationSharedEvents(
     .eq('message_type', 'shared_event')
     .not('shared_event_id', 'is', null);
   if (channelId) evq = evq.eq('channel_id', channelId);
-  const [{ data, error }, hiddenIds, clearedBefore] = await Promise.all([
+  const [{ data, error }, visibility] = await Promise.all([
     evq.order('created_at', { ascending: false }).limit(200),
-    getHiddenMessageIds(conversationId),
-    getClearedBefore(conversationId, userId),
+    loadThreadVisibility(supabase, conversationId, userId),
   ]);
   if (error) throw error;
 
   const seen = new Set<string>();
   const out: SharedCalendarEvent[] = [];
-  for (const m of (data ?? []) as any[]) {
-    if (hiddenIds.has(m.id)) continue;
-    if (clearedBefore && new Date(m.created_at) <= new Date(clearedBefore)) continue;
+  for (const m of applyThreadVisibility((data ?? []) as any[], visibility)) {
     const ev = m.events;
     if (!ev || seen.has(ev.id)) continue;
     seen.add(ev.id);
@@ -679,7 +654,7 @@ export async function searchConversation(
   if (!q) return [];
   const like = `%${q.replace(/[%_]/g, (ch) => `\\${ch}`)}%`;
 
-  const [content, files, polls, events, posts, hiddenIds, clearedBefore] = await Promise.all([
+  const [content, files, polls, events, posts, visibility] = await Promise.all([
     supabase
       .from('messages')
       .select(MESSAGE_SELECT)
@@ -717,31 +692,29 @@ export async function searchConversation(
       .is('deleted_at', null)
       .ilike('posts.caption', like)
       .limit(25),
-    getHiddenMessageIds(conversationId),
-    getClearedBefore(conversationId, userId),
+    loadThreadVisibility(supabase, conversationId, userId),
   ]);
 
   const hits = new Map<string, ConversationSearchHit>();
-  const visible = (m: any) =>
-    !hiddenIds.has(m.id) && (!clearedBefore || new Date(m.created_at) > new Date(clearedBefore));
+  const visible = (rows: any[]) => applyThreadVisibility(rows, visibility);
 
-  for (const m of ((content.data ?? []) as any[]).filter(visible)) {
+  for (const m of visible((content.data ?? []) as any[])) {
     hits.set(m.id, { message: mapMessage(m), matchField: 'content', matchText: m.content ?? '' });
   }
-  for (const m of ((files.data ?? []) as any[]).filter(visible)) {
+  for (const m of visible((files.data ?? []) as any[])) {
     if (!hits.has(m.id))
       hits.set(m.id, { message: mapMessage(m), matchField: 'file_name', matchText: m.attachment_name ?? '' });
   }
   for (const r of (polls.data ?? []) as any[]) {
     const m = r.messages;
-    if (m && visible(m) && !hits.has(m.id))
+    if (m && isMessageVisible(m, visibility) && !hits.has(m.id))
       hits.set(m.id, { message: mapMessage(m), matchField: 'poll_question', matchText: r.question ?? '' });
   }
-  for (const m of ((events.data ?? []) as any[]).filter(visible)) {
+  for (const m of visible((events.data ?? []) as any[])) {
     if (!hits.has(m.id))
       hits.set(m.id, { message: mapMessage(m), matchField: 'shared_event', matchText: m.events?.title ?? '' });
   }
-  for (const m of ((posts.data ?? []) as any[]).filter(visible)) {
+  for (const m of visible((posts.data ?? []) as any[])) {
     if (!hits.has(m.id))
       hits.set(m.id, { message: mapMessage(m), matchField: 'shared_post', matchText: m.posts?.caption ?? '' });
   }
