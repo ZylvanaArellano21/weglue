@@ -46,7 +46,11 @@ DECLARE
     ['app_config','SELECT'], ['universities','SELECT'], ['notification_types','SELECT'],
     ['channel_posters','SELECT'], ['club_recommendation_batches','SELECT'],
     -- profile + social graph
-    ['profiles','SELECT'], ['profiles','INSERT'], ['profiles','UPDATE'],
+    -- profiles: SELECT + UPDATE only. Creation is SECURITY DEFINER
+    -- (handle_new_user / ensure_profile / complete_oauth_onboarding /
+    -- replace_pending_signup), so a client never inserts. Production has no
+    -- INSERT policy on profiles either.
+    ['profiles','SELECT'], ['profiles','UPDATE'],
     ['user_privacy','SELECT'], ['user_privacy','UPDATE'],
     ['user_interests','SELECT'], ['user_interests','INSERT'],
     ['user_activities','SELECT'], ['user_activities','INSERT'],
@@ -273,6 +277,19 @@ BEGIN
   IF has_table_privilege('service_role', 'public.posts', 'DELETE')
      OR has_table_privilege('service_role', 'public.profiles', 'DELETE') THEN
     RAISE EXCEPTION '075 NEGATIVE: service_role kept a mass-delete capability it never uses';
+  END IF;
+END;
+$$;
+
+-- ── 5e. NEGATIVE: no client INSERT on profiles ────────────────────────────
+-- Every profile-creation path is SECURITY DEFINER and runs as the function
+-- owner. Granting INSERT would be a privilege with no policy behind it in
+-- Production, where `profiles: users insert own` does not exist.
+DO $$
+BEGIN
+  IF has_table_privilege('authenticated', 'public.profiles', 'INSERT')
+     OR has_table_privilege('anon', 'public.profiles', 'INSERT') THEN
+    RAISE EXCEPTION '075 NEGATIVE: a client role may not INSERT into profiles';
   END IF;
 END;
 $$;

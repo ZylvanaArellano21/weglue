@@ -98,7 +98,25 @@ GRANT SELECT ON public.club_recommendation_batches TO authenticated;
 GRANT SELECT ON public.user_blocks                 TO authenticated;
 
 -- Profile and personal settings.
-GRANT SELECT, INSERT, UPDATE         ON public.profiles        TO authenticated;
+--
+-- profiles deliberately gets SELECT and UPDATE only, NOT INSERT. A profile row
+-- is never created by a client: every creation path is SECURITY DEFINER and so
+-- runs as the function owner, not as `authenticated` —
+--   handle_new_user()          AFTER INSERT trigger on auth.users
+--   ensure_profile()           repair/backfill RPC
+--   complete_oauth_onboarding() Microsoft/OAuth signup
+--   replace_pending_signup()   re-signup over an unconfirmed account
+-- A repo-wide audit of every `.insert()`, `.upsert()` and `.update()` against
+-- `profiles` in web and mobile found ONLY updates (full_name, avatar, username,
+-- agreed_to_terms, onboarding_complete, email_changed_at) and not one insert.
+--
+-- This also matters beyond least privilege: Production has no INSERT policy on
+-- profiles at all — 001 creates `profiles: users insert own`, but that policy is
+-- absent in Production, the single policy drift between the shipped chain and
+-- the live database. Granting INSERT there would be a privilege with no policy
+-- behind it, which is exactly what section 5c refuses. The grant is dropped
+-- rather than the drift papered over with a new policy, because no code needs it.
+GRANT SELECT, UPDATE                 ON public.profiles        TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_privacy    TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_interests  TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_activities TO authenticated;
