@@ -8,6 +8,7 @@ import {
   useCalendarDayEvents,
 } from "../../lib/hooks/useCalendar";
 import { formatEventTime, formatEventLocation, todayInAppTz } from "../../lib/datetime";
+import { EventAudienceBadge } from "./EventAudienceBadge";
 
 // The expanded calendar view (spec §20). Larger grid + the selected day's
 // events; clicking an event opens the event-detail overlay. Closing returns to
@@ -89,6 +90,7 @@ export function CalendarModal({
                           {event.emoji ? `${event.emoji} ` : ""}
                           {event.title}
                         </p>
+                        <EventAudienceBadge audience={event.visibility} />
                         <p className="truncate text-xs font-medium" style={{ color: "#0FA6A6" }}>
                           {event.club.name}
                         </p>

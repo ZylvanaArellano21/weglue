@@ -174,11 +174,26 @@ export async function getClubMembers(
     }
   }
 
+  // A club is a legitimate shared context: two students who have blocked each
+  // other stay in it and each still needs to see who the members and officers
+  // are. `profiles!inner` used to DROP a blocked person's row entirely (058
+  // hides the profile row in both directions), so they silently vanished from
+  // the list and `count` under-reported the club.
+  //
+  // Membership rows still come from `club_members` with its unchanged SELECT
+  // rule and unchanged server-side ordering/pagination. Display identity comes
+  // from the narrow, caller-bound `club_shared_identities` RPC (074), which
+  // returns id/username/full_name/avatar_url/role for the CURRENT members of
+  // this one club and nothing else. The normal profile stays unreadable.
+  const identityRows = await supabase.rpc('club_shared_identities', { p_club_id: clubId });
+  if (identityRows.error) throw identityRows.error;
+  const identities = new Map<string, any>(
+    ((identityRows.data ?? []) as any[]).map((row) => [row.id as string, row]),
+  );
+
   let query = supabase
     .from('club_members')
-    .select('user_id, joined_at, role, profiles!inner(id, username, full_name, avatar_url)', {
-      count: 'exact',
-    })
+    .select('user_id, joined_at, role', { count: 'exact' })
     .eq('club_id', clubId)
     .order('joined_at', { ascending: true })
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
@@ -188,7 +203,17 @@ export async function getClubMembers(
   }
 
   if (search) {
-    query = query.ilike('profiles.username', `%${search}%`);
+    // Username search now resolves through the same shared-identity source, so
+    // a blocked member is findable within a club they actually belong to while
+    // remaining absent from GENERAL people search (which is untouched).
+    const needle = search.toLowerCase();
+    const matched = [...identities.values()]
+      .filter((row: any) => (row.username ?? '').toLowerCase().includes(needle))
+      .map((row: any) => row.id as string);
+    if (matched.length === 0) {
+      return { members: [], total: 0 };
+    }
+    query = query.in('user_id', matched);
   }
 
   const { data: memberRows, count } = await query;
@@ -221,21 +246,27 @@ export async function getClubMembers(
     followersSet = new Set((followers ?? []).map((f: any) => f.follower_id));
   }
 
-  const members: MemberWithFollowStatus[] = ((memberRows ?? []) as any[]).map((m) => {
-    const p = m.profiles;
-    const isFollowing = followingSet.has(p.id);
-    const isFollowedBy = followersSet.has(p.id);
-    return {
-      id: p.id,
-      username: p.username,
-      full_name: p.full_name,
-      avatar_url: p.avatar_url,
-      is_following: isFollowing,
-      is_gluemate: isFollowing && isFollowedBy,
-      joined_at: m.joined_at,
-      role: m.role === 'officer' ? 'officer' : 'member',
-    };
-  });
+  const members: MemberWithFollowStatus[] = ((memberRows ?? []) as any[])
+    .map((m) => {
+      const p = identities.get(m.user_id);
+      // A membership row with no shared identity means the account is no longer
+      // an eligible student (suspended, deleted). Those were already excluded by
+      // the old `profiles!inner` join, so this preserves the existing behaviour.
+      if (!p) return null;
+      const isFollowing = followingSet.has(p.id);
+      const isFollowedBy = followersSet.has(p.id);
+      return {
+        id: p.id,
+        username: p.username,
+        full_name: p.full_name,
+        avatar_url: p.avatar_url,
+        is_following: isFollowing,
+        is_gluemate: isFollowing && isFollowedBy,
+        joined_at: m.joined_at,
+        role: m.role === 'officer' ? 'officer' : 'member',
+      } as MemberWithFollowStatus;
+    })
+    .filter((m): m is MemberWithFollowStatus => m !== null);
 
   return { members, total: count ?? 0 };
 }

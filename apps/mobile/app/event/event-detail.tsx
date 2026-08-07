@@ -54,7 +54,8 @@ import { AvatarStack } from '../../components/shared/AvatarStack';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { DotNavigator } from '../../components/calendar/DotNavigator';
 import { useToast } from '../../components/Toast';
-import { formatEventLocation, isEventPast } from '../../lib/eventDisplay';
+import { formatEventLocation, isEventPastAt } from '../../lib/eventDisplay';
+import { EventAudienceBadge } from '../../components/events/EventAudienceBadge';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ export default function CalendarEventDetailScreen() {
   // date-only param, which would lock today's still-running events. The param
   // remains the fallback while event data loads.
   const isPast = event
-    ? isEventPast(event.event_date, event.end_time)
+    ? isEventPastAt(event.event_end_at)
     : params.isPast === 'true';
 
   // ─── Swipe-down handler: advance to next event, cap at last ───────────────
@@ -245,6 +246,9 @@ export default function CalendarEventDetailScreen() {
           </View>
 
           {/* Hero Image */}
+          <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+            <EventAudienceBadge visibility={event.visibility} />
+          </View>
           {event.cover_image_url ? (
             <Image
               source={{ uri: event.cover_image_url }}

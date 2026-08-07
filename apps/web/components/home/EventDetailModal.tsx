@@ -18,7 +18,8 @@ import {
 } from "../../lib/hooks/useEventDetail";
 import { useJoinClubMutation } from "../../lib/hooks/useClubMembership";
 import { useEventRsvpRealtime } from "../../lib/hooks/useClubRealtime";
-import { formatEventTime, formatEventLocation, isEventPast } from "../../lib/datetime";
+import { formatEventTime, formatEventLocation } from "../../lib/datetime";
+import { EventAudienceBadge } from "./EventAudienceBadge";
 
 function formatLongDate(dateStr: string): string {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", {
@@ -139,6 +140,7 @@ export function EventDetailModal({
             {event.emoji ? `${event.emoji} ` : ""}
             {event.title}
           </h2>
+          <div className="mt-2"><EventAudienceBadge audience={event.visibility} /></div>
 
           {/* Date & location card */}
           <div className="mt-4 rounded-xl bg-white p-3.5" style={{ boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>
@@ -165,7 +167,7 @@ export function EventDetailModal({
 
           {/* Attendees */}
           <div className="mt-3 rounded-xl bg-white p-3.5" style={{ boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>
-            {onOpenAttendees ? <AttendanceTrigger eventId={event.id} attendees={event.attendee_preview} count={event.attendee_count} onOpen={onOpenAttendees} className="gap-3" /> : <div className="flex items-center gap-3">{event.attendee_preview.length > 0 && <AvatarStack avatars={event.attendee_preview} size={30} overlap={8} />}<p className="text-sm font-bold text-gray-900">{event.attendee_count} going</p></div>}
+            {event.can_view_attendees ? (onOpenAttendees ? <AttendanceTrigger eventId={event.id} attendees={event.attendee_preview} count={event.attendee_count} onOpen={onOpenAttendees} className="gap-3" /> : <div className="flex items-center gap-3">{event.attendee_preview.length > 0 && <AvatarStack avatars={event.attendee_preview} size={30} overlap={8} />}<p className="text-sm font-bold text-gray-900">{event.attendee_count} going</p></div>) : <p className="text-sm text-gray-500">Join the club to view attendees.</p>}
             <p className="mt-0.5 text-xs text-gray-400">Be part of the community</p>
           </div>
 
@@ -201,8 +203,10 @@ export function EventDetailModal({
           </div>
 
           {/* RSVP */}
-          {isEventPast(event.event_date, event.end_time) ? (
+          {event.is_past ? (
             <p className="mt-5 text-center text-[13px] text-gray-400">This event has ended</p>
+          ) : !event.can_rsvp ? (
+            <p className="mt-5 text-center text-[13px] text-gray-500">This event is for club members only. Join the club to RSVP and view attendees.</p>
           ) : (
             <div className="mt-5">
               <h3 className="mb-3 text-base font-bold text-gray-900 font-zain">Are you coming?</h3>

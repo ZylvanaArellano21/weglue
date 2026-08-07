@@ -100,6 +100,8 @@ function Body({ userId }: { userId: string }): JSX.Element {
           event_date: e.event_date,
           start_time: e.start_time,
           end_time: e.end_time,
+          event_end_at: e.event_end_at,
+          visibility: e.visibility,
           location: e.location,
           building: e.building,
           room: e.room,

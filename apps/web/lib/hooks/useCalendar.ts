@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { todayInAppTz, isEventPast } from "../datetime";
+import { todayInAppTz, isEventPastAt } from "../datetime";
 import { invalidateEventState } from "./eventSync";
 import type { AttendeePreview } from "./useHomeEventsFeed";
 
@@ -18,6 +18,8 @@ export interface CalendarEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
+  visibility: "everyone" | "members" | "specific";
   location: string | null;
   building: string | null;
   room: string | null;
@@ -51,7 +53,7 @@ export interface CalendarSection {
 }
 
 const EVENT_COLS = `
-  id, title, emoji, event_date, start_time, end_time,
+  id, title, emoji, event_date, start_time, end_time, event_end_at, visibility,
   location, building, room, cover_image_url,
   clubs!inner(id, name, avatar_url)
 `;
@@ -94,6 +96,8 @@ async function enrichWithAttendees(rawEvents: any[], userId: string): Promise<Ca
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
+    visibility: (e.visibility ?? "everyone") as CalendarEvent["visibility"],
     location: e.location ?? null,
     building: e.building ?? null,
     room: e.room ?? null,
@@ -150,7 +154,7 @@ export function useCalendarSections(userId: string | undefined) {
         .from("events")
         .select(EVENT_COLS)
         .in("id", ids)
-        .gte("event_date", todayInAppTz())
+        .gt("event_end_at", new Date().toISOString())
         .order("event_date", { ascending: true })
         .order("start_time", { ascending: true });
       return enrichWithAttendees((data ?? []) as any[], userId!);
@@ -218,10 +222,10 @@ async function rsvpToEvent(userId: string, eventId: string, status: "going" | "c
   const supabase = getSupabaseBrowser();
   const { data: eventRow } = await supabase
     .from("events")
-    .select("event_date, end_time")
+    .select("event_end_at")
     .eq("id", eventId)
     .maybeSingle();
-  if (eventRow && isEventPast((eventRow as any).event_date, (eventRow as any).end_time)) {
+  if (eventRow && isEventPastAt((eventRow as any).event_end_at)) {
     throw new Error("This event has ended");
   }
   const { data: existing } = await supabase
@@ -231,11 +235,13 @@ async function rsvpToEvent(userId: string, eventId: string, status: "going" | "c
     .eq("user_id", userId)
     .maybeSingle();
   if ((existing as any)?.status === status) {
-    await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
+    const { error } = await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
+    if (error) throw error;
   } else {
-    await supabase
+    const { error } = await supabase
       .from("event_rsvps")
       .upsert({ event_id: eventId, user_id: userId, status }, { onConflict: "event_id,user_id" });
+    if (error) throw error;
   }
 }
 

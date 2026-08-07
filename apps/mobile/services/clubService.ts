@@ -42,10 +42,13 @@ export interface ClubUpcomingEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
   location: string | null;
   building: string | null;
   room: string | null;
   visibility: 'everyone' | 'members' | 'specific';
+  /** False only for the members-only club-profile preview. */
+  can_open: boolean;
 }
 
 export async function getAllClubs(): Promise<UserClub[]> {
@@ -157,14 +160,9 @@ export async function getClubProfile(
       .from('club_officers')
       .select('id, user_id, display_name, role_title, profiles(avatar_url)')
       .eq('club_id', clubId),
-    // ALL of the club's events — past AND future. Splitting into Upcoming /
-    // Past happens client-side against the real end datetime; filtering here
-    // would silently delete past events from Past Events and the Calendar.
-    supabase
-      .from('events')
-      .select('id, title, emoji, cover_image_url, event_date, start_time, end_time, location, building, room, visibility')
-      .eq('club_id', clubId)
-      .order('event_date', { ascending: true }),
+    // The canonical RPC intentionally returns a card-only preview for a
+    // members-only event to a non-member, while selected events stay hidden.
+    supabase.rpc('get_club_profile_events', { p_club_id: clubId }),
     supabase
       .from('club_photos')
       .select(CLUB_PHOTOS_SELECT)
@@ -193,10 +191,12 @@ export async function getClubProfile(
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
     location: e.location,
     building: e.building,
     room: e.room,
     visibility: e.visibility as 'everyone' | 'members' | 'specific',
+    can_open: e.can_open === true,
   }));
   const { upcoming, past } = splitPastAndUpcoming(allEvents);
 

@@ -63,7 +63,7 @@ export function ComposeEventModal({
   const [members, setMembers] = useState<{ id: string; username: string; full_name: string; avatar_url: string | null }[]>([]);
   const [seeded, setSeeded] = useState(false);
 
-  const { data: results } = useMemberSearch(userId, memberQuery);
+  const { data: results, isLoading: isSearchingMembers, isError: memberSearchError } = useMemberSearch(userId, clubId || undefined, memberQuery);
 
   // Prefill once from the existing event (edit mode); never clobber officer edits
   // on a refetch, and never reset fields the officer hasn't touched.
@@ -186,7 +186,13 @@ export function ComposeEventModal({
         <label className="mb-1 block text-sm font-semibold text-gray-700">Hosting as</label>
         <select
           value={clubId}
-          onChange={(e) => setClubId(e.target.value)}
+          onChange={(e) => {
+            const nextClubId = e.target.value;
+            setClubId(nextClubId);
+            // A recipient is valid only for the currently selected host club.
+            setMembers([]);
+            setMemberQuery("");
+          }}
           disabled={!!presetClubId}
           className={`${inputCls} mb-4 disabled:opacity-70`}
           style={inputStyle}
@@ -311,13 +317,32 @@ export function ComposeEventModal({
                 ))}
               </div>
             )}
-            <input value={memberQuery} onChange={(e) => setMemberQuery(e.target.value)} placeholder="Search people by username…" className={inputCls} style={inputStyle} />
-            {memberQuery.trim() && (results ?? []).length > 0 && (
-              <div className="mt-1 max-h-32 space-y-1 overflow-y-auto">
-                {(results ?? []).map((r) => (
+            <input
+              value={memberQuery}
+              onChange={(e) => setMemberQuery(e.target.value)}
+              placeholder={clubId ? "Search current club members…" : "Choose a host club first"}
+              disabled={!clubId}
+              aria-controls="selected-event-member-results"
+              aria-autocomplete="list"
+              className={inputCls}
+              style={inputStyle}
+            />
+            {!clubId ? (
+              <p className="mt-1 text-xs text-gray-500">Choose a host club to search its current members.</p>
+            ) : isSearchingMembers ? (
+              <p className="mt-1 text-xs text-gray-500" role="status">Searching current club members…</p>
+            ) : memberSearchError ? (
+              <p className="mt-1 text-xs text-red-600" role="alert">We couldn&apos;t search club members. Try again.</p>
+            ) : (results ?? []).filter((r) => !members.some((m) => m.id === r.id)).length === 0 ? (
+              <p className="mt-1 text-xs text-gray-500">No eligible current club members match that search.</p>
+            ) : (
+              <div id="selected-event-member-results" role="listbox" aria-label="Matching current club members" className="mt-1 max-h-40 space-y-1 overflow-y-auto">
+                {(results ?? []).filter((r) => !members.some((m) => m.id === r.id)).map((r) => (
                   <button
                     key={r.id}
                     type="button"
+                    role="option"
+                    aria-selected={false}
                     onClick={() => {
                       if (!members.some((m) => m.id === r.id)) setMembers((prev) => [...prev, r]);
                       setMemberQuery("");
@@ -325,7 +350,10 @@ export function ComposeEventModal({
                     className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-gray-50"
                   >
                     <Avatar uri={r.avatar_url} size={28} name={r.username} />
-                    <span className="text-sm text-gray-900">@{r.username}</span>
+                    <span className="min-w-0 text-left">
+                      <span className="block truncate text-sm text-gray-900">{r.full_name || r.username}</span>
+                      <span className="block truncate text-xs text-gray-500">@{r.username}</span>
+                    </span>
                   </button>
                 ))}
               </div>

@@ -1,5 +1,4 @@
 import { supabase } from '../lib/supabase';
-import { todayInAppTz } from '../lib/timezone';
 
 export type FollowStatus = 'following' | 'pending' | 'not_following';
 
@@ -35,6 +34,7 @@ export interface UserWeeklyEvent {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
   location: string | null;
   club: { id: string; name: string };
 }
@@ -243,7 +243,6 @@ export async function getUserWeeklyEvents(
 ): Promise<UserWeeklyEvent[]> {
   const PAGE_SIZE = 10;
   const offset = page * PAGE_SIZE;
-  const today = todayInAppTz();
 
   const { data: rsvps } = await supabase
     .from('event_rsvps')
@@ -258,11 +257,11 @@ export async function getUserWeeklyEvents(
   const { data } = await supabase
     .from('events')
     .select(`
-      id, title, emoji, cover_image_url, event_date, start_time, end_time, location,
+      id, title, emoji, cover_image_url, event_date, start_time, end_time, event_end_at, location,
       clubs!inner(id, name)
     `)
     .in('id', eventIds)
-    .gte('event_date', today)
+    .gt('event_end_at', new Date().toISOString())
     .order('event_date', { ascending: true })
     .range(offset, offset + PAGE_SIZE - 1);
 
@@ -274,6 +273,7 @@ export async function getUserWeeklyEvents(
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
     location: e.location,
     club: { id: e.clubs.id, name: e.clubs.name },
   }));

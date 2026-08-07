@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { AvatarStack } from '../shared/AvatarStack';
 import { Pill } from '../shared/Pill';
+import { EventAudienceBadge } from '../events/EventAudienceBadge';
 import type { HomeFeedEvent } from '../../services/eventService';
 import { getResizedImageUrl } from '../../lib/imageResize';
 
@@ -148,6 +149,9 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
               color={event.is_saved ? '#0FA6A6' : '#374151'}
             />
           </TouchableOpacity>
+          <View style={{ position: 'absolute', top: 10, left: 10 }}>
+            <EventAudienceBadge visibility={event.visibility} />
+          </View>
         </View>
       </Pressable>
 

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { getClubProfile, type ClubProfileData } from "../clubs/clubProfileService";
 import { myClubsKey, discoveryClubsKey } from "./useClubTab";
+import { invalidateEventState } from "./eventSync";
 
 export const clubProfileKey = (clubId?: string, userId?: string) =>
   ["clubProfile", clubId, userId] as const;
@@ -75,11 +76,23 @@ export function useToggleClubMembership(clubId: string | undefined, userId: stri
     onError: (_err, _vars, context) => {
       if (context?.previous !== undefined) queryClient.setQueryData(key, context.previous);
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
       void queryClient.invalidateQueries({ queryKey: key });
       void queryClient.invalidateQueries({ queryKey: myClubsKey(userId) });
       void queryClient.invalidateQueries({ queryKey: discoveryClubsKey(userId) });
-      void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
+      invalidateEventState(queryClient, userId);
+      void queryClient.invalidateQueries({ queryKey: ["isOfficer", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["officerClubs", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
+      if (!variables.join && !_error) {
+        // Direct event and chat routes should show their unavailable state
+        // immediately after a successful leave, not stale restricted data.
+        queryClient.removeQueries({ queryKey: ["eventDetail"] });
+        queryClient.removeQueries({ queryKey: ["eventAttendees"] });
+        queryClient.removeQueries({ queryKey: ["savedEvents"] });
+        queryClient.removeQueries({ queryKey: ["messages"] });
+      }
       void queryClient.invalidateQueries({ queryKey: ["ownProfile", userId] });
     },
   });

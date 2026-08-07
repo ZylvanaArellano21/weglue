@@ -18,8 +18,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
-import { createEvent, updateEvent, getEventForEdit } from '../../services/eventService';
-import { getUserOfficerClubs, searchAllUsers, AppUser, UserClub } from '../../services/clubService';
+import { createEvent, updateEvent, getEventForEdit, searchEventAudienceMembers, type EventAudienceMember } from '../../services/eventService';
+import { getUserOfficerClubs, UserClub } from '../../services/clubService';
 import { invalidateClubDataEverywhere } from '../../lib/clubCache';
 import { useToast } from '../../components/Toast';
 import { supabase } from '../../lib/supabase';
@@ -104,9 +104,9 @@ export default function NewEventScreen() {
   const [visibility, setVisibility] = useState<Visibility>('everyone');
 
   // Specific users
-  const [specificUsers, setSpecificUsers] = useState<AppUser[]>([]);
+  const [specificUsers, setSpecificUsers] = useState<EventAudienceMember[]>([]);
   const [userSearch, setUserSearch] = useState('');
-  const [userSearchResults, setUserSearchResults] = useState<AppUser[]>([]);
+  const [userSearchResults, setUserSearchResults] = useState<EventAudienceMember[]>([]);
   const [searchingUsers, setSearchingUsers] = useState(false);
   const [userSelectorVisible, setUserSelectorVisible] = useState(false);
 
@@ -148,6 +148,7 @@ export default function NewEventScreen() {
     setStartTime(start);
     setEndTime(end);
     setVisibility(editEvent.visibility);
+    setSpecificUsers(editEvent.specific_members);
     setEditLoaded(true);
   }, [editEvent, editLoaded]);
 
@@ -200,20 +201,25 @@ export default function NewEventScreen() {
     setUserSearch(q);
     setSearchingUsers(true);
     try {
-      const results = await searchAllUsers(q);
-      setUserSearchResults(results.filter((u) => u.id !== userId));
+      if (!selectedClub) {
+        setUserSearchResults([]);
+        return;
+      }
+      const results = await searchEventAudienceMembers(selectedClub.id, q);
+      setUserSearchResults(results);
     } catch {
-      // silent
+      setUserSearchResults([]);
+      show('Could not search current club members. Please try again.', 'error');
     } finally {
       setSearchingUsers(false);
     }
-  }, [userId]);
+  }, [selectedClub, show]);
 
   const openUserSelector = () => {
     setUserSelectorVisible(true);
   };
 
-  const toggleUser = (user: AppUser) => {
+  const toggleUser = (user: EventAudienceMember) => {
     setSpecificUsers((prev) => {
       const exists = prev.some((u) => u.id === user.id);
       return exists ? prev.filter((u) => u.id !== user.id) : [...prev, user];
@@ -924,6 +930,9 @@ export default function NewEventScreen() {
         onSearch={(q) => setClubSearch(q)}
         onSelect={(club) => {
           setSelectedClub(club);
+          // A result is valid only in the club it was searched from.
+          setSpecificUsers([]);
+          setUserSearchResults([]);
           setClubSelectorVisible(false);
         }}
         onClose={() => setClubSelectorVisible(false)}
@@ -952,7 +961,7 @@ export default function NewEventScreen() {
       />
 
       {/* Add People — keyboard-safe bottom sheet, multi-select */}
-      <SearchBottomSheet<AppUser>
+      <SearchBottomSheet<EventAudienceMember>
         visible={userSelectorVisible}
         title="Add People"
         searchPlaceholder="Search by name or username..."
@@ -962,7 +971,7 @@ export default function NewEventScreen() {
         onSelect={toggleUser}
         onClose={() => setUserSelectorVisible(false)}
         loading={searchingUsers}
-        emptyText="No users found."
+        emptyText="No eligible current club members found."
         multiSelect
         selectedItems={specificUsers}
         renderItem={(user, isSelected) => (

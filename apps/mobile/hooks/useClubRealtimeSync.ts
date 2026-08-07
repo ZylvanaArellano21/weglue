@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
 import { refreshOfficerStatus } from '../store/officerStore';
+import { clearPermissionSensitiveStudentContent } from '../lib/studentSynchronization';
 
 // ─── App-wide club/role/channel realtime sync (Bug 19) ──────────────────────
 // Keeps officer status, club-chat access, conversation titles, channel lists
@@ -15,6 +16,7 @@ export function useClubRealtimeSync(userId: string | undefined) {
     if (!userId) return;
 
     const invalidateClubState = () => {
+      clearPermissionSensitiveStudentContent(queryClient);
       queryClient.invalidateQueries({ queryKey: ['myChats'] });
       queryClient.invalidateQueries({ queryKey: ['conversationHub'] });
       queryClient.invalidateQueries({ queryKey: ['clubChannels'] });

@@ -16,7 +16,7 @@ import type { AttendeePreview } from "./useHomeEventsFeed";
 // rows, split into upcoming (bucketed) and past, exactly like mobile.
 
 const EVENT_COLS = `
-  id, title, emoji, event_date, start_time, end_time,
+  id, title, emoji, event_date, start_time, end_time, event_end_at, visibility,
   location, building, room, cover_image_url,
   clubs!inner(id, name, avatar_url)
 `;
@@ -59,6 +59,8 @@ async function enrichSaved(rawEvents: any[], userId: string): Promise<CalendarEv
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
+    visibility: (e.visibility ?? "everyone") as CalendarEvent["visibility"],
     location: e.location ?? null,
     building: e.building ?? null,
     room: e.room ?? null,
@@ -116,16 +118,14 @@ export function useSavedEvents(userId: string | undefined) {
           .from("events")
           .select(EVENT_COLS)
           .in("id", ids)
-          .gte("event_date", today)
-          .order("event_date", { ascending: true })
-          .order("start_time", { ascending: true }),
+          .gt("event_end_at", new Date().toISOString())
+          .order("event_end_at", { ascending: true }),
         supabase
           .from("events")
           .select(EVENT_COLS)
           .in("id", ids)
-          .lt("event_date", today)
-          .order("event_date", { ascending: false })
-          .order("start_time", { ascending: false })
+          .lte("event_end_at", new Date().toISOString())
+          .order("event_end_at", { ascending: false })
           .limit(40),
       ]);
 

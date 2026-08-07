@@ -16,7 +16,7 @@ export function AttendanceListModal({ eventId, onClose }: { eventId: string; onC
             {[0, 1, 2].map((item) => <div key={item} className="h-12 animate-pulse rounded-lg bg-black/5" />)}
           </div>
         ) : isError ? (
-          <p className="mt-6 text-sm text-gray-500">We couldn&apos;t load attendees. Please try again.</p>
+          <p className="mt-6 text-sm text-gray-500">This attendee list is no longer available.</p>
         ) : attendees?.length ? (
           <ul className="mt-4 space-y-1">
             {attendees.map((attendee) => (

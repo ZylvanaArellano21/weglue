@@ -23,6 +23,26 @@ export const UNAVAILABLE_BODY =
 /** Composer replacement in a direct conversation. Identical for BOTH parties. */
 export const DM_UNAVAILABLE_TEXT = 'You can’t reply to this conversation.';
 
+/**
+ * Replacement for an image / video / file attachment whose payload the viewer
+ * may not read. Same wording family as the existing shared post/event cards
+ * ("This post is no longer available."), and identical for BOTH parties, so it
+ * never discloses the direction of a block. The message row itself is kept, as
+ * historical context; only the payload is withheld — and it is withheld by the
+ * storage policy, not by this string.
+ */
+export const ATTACHMENT_UNAVAILABLE_TEXT = 'This attachment is no longer available.';
+
+/**
+ * Profile state shown to the person who CREATED a block, in place of the
+ * generic unavailable state. The blocked person never sees this — they get
+ * UNAVAILABLE_TITLE/UNAVAILABLE_BODY, which is indistinguishable from a deleted
+ * or never-existed account.
+ */
+export const YOU_BLOCKED_TITLE = 'You blocked this student';
+export const YOU_BLOCKED_BODY =
+  'You won’t see their profile, posts or weekly events while they’re blocked. Unblock to see them again.';
+
 export const BLOCKED_EMPTY_TITLE = 'You haven’t blocked anyone';
 export const BLOCKED_EMPTY_BODY =
   'People you block will appear here. They won’t be told, and you can unblock them at any time.';

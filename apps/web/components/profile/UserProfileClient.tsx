@@ -18,6 +18,8 @@ import { personMessageHref } from "../../lib/messages/routes";
 import {
   UNAVAILABLE_TITLE,
   UNAVAILABLE_BODY,
+  YOU_BLOCKED_TITLE,
+  YOU_BLOCKED_BODY,
   blockConfirmMessage,
   unblockConfirmMessage,
 } from "../../lib/blocking";
@@ -53,7 +55,7 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
   const params = useSearchParams();
   const show = useToast();
   const { data: profile, isLoading } = useUserProfile(targetUserId, viewerUserId);
-  const { data: iBlockedThem } = useDidIBlock(viewerUserId, targetUserId);
+  const { data: iBlockedThem, isLoading: blockStateLoading } = useDidIBlock(viewerUserId, targetUserId);
   const { mutate: block, isPending: blocking } = useBlockUser(viewerUserId);
   const { mutate: unblock, isPending: unblocking } = useUnblockUser(viewerUserId);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -74,6 +76,8 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
       event_date: e.event_date,
       start_time: e.start_time,
       end_time: e.end_time,
+      event_end_at: e.event_end_at,
+      visibility: e.visibility,
       location: e.location,
       building: e.building,
       room: e.room,
@@ -81,6 +85,19 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
     })),
     [weekly]
   );
+
+  // ONE unblock path for every entry point. Declared before the early returns so
+  // the blocked-user state can use it too; it calls the same `useUnblockUser`
+  // mutation as the profile menu, so no second implementation exists and the
+  // existing access-sync invalidation applies unchanged.
+  const runUnblock = (username?: string | null) => {
+    setMenuOpen(false);
+    if (!window.confirm(unblockConfirmMessage(username))) return;
+    unblock(targetUserId, {
+      onSuccess: () => show("Unblocked."),
+      onError: () => show("Couldn’t unblock. Please try again.", "error"),
+    });
+  };
 
   const tab: ProfileTab = params.get("tab") === "weekly_events" ? "weekly_events" : "posts";
 
@@ -95,7 +112,10 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
     [params, targetUserId]
   );
 
-  if (isLoading) {
+  // Wait for the directional block state too when there is no readable profile,
+  // otherwise the blocker briefly sees the generic unavailable state before the
+  // Unblock affordance appears.
+  if (isLoading || (!profile && blockStateLoading)) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-10">
         <div className="h-24 animate-pulse rounded-xl bg-black/5" />
@@ -108,6 +128,45 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
   // copy is deliberately identical for all three, so the state itself cannot
   // disclose which occurred. (Before this split, a blocked profile rendered the
   // loading skeleton forever.)
+  // OUTCOME B — the viewer CREATED the block. `current_user_blocks` is
+  // directional and true only for the person who blocked, so this branch can
+  // never be reached by the blocked party. It exists so the blocker keeps a way
+  // to undo their own action from a shared context (club member list, group
+  // participant list, an old message) instead of hitting a dead end.
+  //
+  // The blocked person's normal profile content stays inaccessible: no posts, no
+  // weekly events, no follow or message controls are rendered here, and RLS
+  // would refuse them anyway.
+  if (!profile && iBlockedThem === true) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-16 text-center">
+        <p className="text-base font-semibold text-gray-900">{YOU_BLOCKED_TITLE}</p>
+        <p className="mt-2 text-sm text-gray-500">{YOU_BLOCKED_BODY}</p>
+        <button
+          type="button"
+          onClick={() => runUnblock(null)}
+          disabled={unblocking}
+          className="mt-6 rounded-full border border-[#0FA6A6] px-5 py-2 text-sm font-semibold text-[#0FA6A6] disabled:opacity-60"
+        >
+          {unblocking ? "Unblocking…" : "Unblock"}
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push("/home")}
+          className="mt-3 block w-full text-sm font-semibold text-gray-500"
+        >
+          Back to Home
+        </button>
+      </div>
+    );
+  }
+
+  // OUTCOME A — the viewer WAS blocked, or the account is deleted, or the id
+  // never existed. A blocked account returns ZERO ROWS from RLS and lands here.
+  // The copy is deliberately identical for all three, so the state itself cannot
+  // disclose which occurred, and it must never reveal that this specific person
+  // blocked the viewer. No Unblock is offered, because the viewer has nothing to
+  // unblock.
   if (!profile) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-16 text-center">
@@ -169,14 +228,7 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
     });
   };
 
-  const onUnblock = () => {
-    setMenuOpen(false);
-    if (!window.confirm(unblockConfirmMessage(profile.username))) return;
-    unblock(targetUserId, {
-      onSuccess: () => show("Unblocked."),
-      onError: () => show("Couldn’t unblock. Please try again.", "error"),
-    });
-  };
+  const onUnblock = () => runUnblock(profile.username);
 
   return (
     <ProfileLayout

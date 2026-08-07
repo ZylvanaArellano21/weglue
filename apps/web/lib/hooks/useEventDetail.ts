@@ -2,9 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { isEventPast } from "../datetime";
+import { isEventPastAt } from "../datetime";
 import { invalidateEventState, patchCachedEvent } from "./eventSync";
 import type { AttendeePreview } from "./useHomeEventsFeed";
+import { canManageEvent, canRsvpToEvent, canViewEventAttendees } from "../permissions/eventAccess";
 
 // Web port of apps/mobile/services/eventService.ts::getEventDetail +
 // hooks/useEventDetail.ts. Same rows, same shape — the overlay stays in sync
@@ -20,6 +21,7 @@ export interface EventDetail {
   event_date: string;
   start_time: string;
   end_time: string;
+  event_end_at: string;
   location: string | null;
   building: string | null;
   room: string | null;
@@ -30,8 +32,10 @@ export interface EventDetail {
   user_rsvp_status: "going" | "cant" | null;
   is_saved: boolean;
   user_has_joined_club: boolean;
-  /** Viewer may edit/delete this event: an officer of its club, or its creator.
-      Defence-in-depth only — the events RLS enforces the same rule server-side. */
+  is_past: boolean;
+  can_rsvp: boolean;
+  can_view_attendees: boolean;
+  /** The mobile contract allows management only to current club officers. */
   can_manage: boolean;
 }
 
@@ -42,7 +46,7 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
       .from("events")
       .select(
         `id, club_id, created_by, title, emoji, description, cover_image_url,
-         event_date, start_time, end_time, location, building, room, visibility,
+         event_date, start_time, end_time, event_end_at, location, building, room, visibility,
          clubs!inner(id, name, avatar_url)`
       )
       .eq("id", eventId)
@@ -64,7 +68,18 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
   ]);
 
   const viewerRole = (memberCheck as { role?: string } | null)?.role ?? null;
-  const canManage = e.created_by === userId || viewerRole === "officer";
+  const isPast = isEventPastAt(e.event_end_at);
+  const audienceFacts = {
+    audience: (e.visibility ?? "everyone") as EventDetail["visibility"],
+    isClubMember: !!memberCheck,
+    isClubOfficer: viewerRole === "officer",
+    isCreator: e.created_by === userId,
+    // An inaccessible selected event never reaches this point because events
+    // RLS already denies it. The loaded specific row is therefore selected,
+    // created, or officer-accessible.
+    isSelected: (e.visibility ?? "everyone") === "specific",
+    isPast,
+  };
 
   const previews: AttendeePreview[] = ((goingRsvps ?? []) as any[])
     .slice(0, 4)
@@ -80,6 +95,7 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
     event_date: e.event_date,
     start_time: e.start_time,
     end_time: e.end_time,
+    event_end_at: e.event_end_at,
     location: e.location,
     building: e.building,
     room: e.room,
@@ -90,7 +106,10 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
     user_rsvp_status: ((rsvpRow as any)?.status as "going" | "cant" | null) ?? null,
     is_saved: !!savedRow,
     user_has_joined_club: !!memberCheck,
-    can_manage: canManage,
+    is_past: isPast,
+    can_rsvp: canRsvpToEvent(audienceFacts),
+    can_view_attendees: canViewEventAttendees(audienceFacts),
+    can_manage: canManageEvent(audienceFacts),
   };
 }
 
@@ -107,10 +126,10 @@ async function rsvpToEvent(userId: string, eventId: string, status: "going" | "c
   const supabase = getSupabaseBrowser();
   const { data: eventRow } = await supabase
     .from("events")
-    .select("event_date, end_time")
+    .select("event_end_at")
     .eq("id", eventId)
     .maybeSingle();
-  if (eventRow && isEventPast((eventRow as any).event_date, (eventRow as any).end_time)) {
+  if (eventRow && isEventPastAt((eventRow as any).event_end_at)) {
     throw new Error("This event has ended");
   }
   const { data: existing } = await supabase
@@ -120,11 +139,13 @@ async function rsvpToEvent(userId: string, eventId: string, status: "going" | "c
     .eq("user_id", userId)
     .maybeSingle();
   if ((existing as any)?.status === status) {
-    await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
+    const { error } = await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
+    if (error) throw error;
   } else {
-    await supabase
+    const { error } = await supabase
       .from("event_rsvps")
       .upsert({ event_id: eventId, user_id: userId, status }, { onConflict: "event_id,user_id" });
+    if (error) throw error;
   }
 }
 
@@ -155,10 +176,12 @@ async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean
     .eq("event_id", eventId)
     .maybeSingle();
   if (existing) {
-    await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
+    const { error } = await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
+    if (error) throw error;
     return false;
   }
-  await supabase.from("saved_events").insert({ user_id: userId, event_id: eventId });
+  const { error } = await supabase.from("saved_events").insert({ user_id: userId, event_id: eventId });
+  if (error) throw error;
   return true;
 }
 

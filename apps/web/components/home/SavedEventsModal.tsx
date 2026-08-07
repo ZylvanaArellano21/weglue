@@ -7,6 +7,7 @@ import { useSavedEvents } from "../../lib/hooks/useSavedEvents";
 import { formatEventDate, formatEventTime, formatEventLocation } from "../../lib/datetime";
 import type { CalendarEvent } from "../../lib/hooks/useCalendar";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
+import { EventAudienceBadge } from "./EventAudienceBadge";
 
 // The "Saved" overlay (matches the web screenshot): real saved-event records,
 // upcoming events bucketed by Today / This Week / …, then past. Each row opens
@@ -103,6 +104,7 @@ function SavedRow({
         <button type="button" onClick={onOpen} className="block w-full truncate text-left text-sm font-semibold text-gray-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0FA6A6] focus-visible:ring-offset-2">
           {event.emoji ? `${event.emoji} ` : ""}{event.title}
         </button>
+        <EventAudienceBadge audience={event.visibility} />
         <ClickableClubIdentity clubId={event.club.id} className="block truncate text-xs font-medium text-[#0FA6A6]">
           @{event.club.name}
         </ClickableClubIdentity>

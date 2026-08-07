@@ -6,6 +6,7 @@ import {
   clubRecommendationsKey,
   type ClubRecommendationBatch,
 } from "./useClubRecommendations";
+import { invalidateEventState } from "./eventSync";
 
 // Web port of the join half of apps/mobile/hooks/useClubMembership.ts. Joining
 // is a plain upsert into club_members exactly like mobile — any private-club /
@@ -70,7 +71,7 @@ export function useJoinClubMutation(userId: string | undefined) {
       }
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["homeEventsFeed", userId] });
+      invalidateEventState(queryClient, userId);
       void queryClient.invalidateQueries({ queryKey: ["ownProfile", userId] });
       void queryClient.invalidateQueries({ queryKey: ["ownClubs", userId] });
       void queryClient.invalidateQueries({ queryKey: recommendationsKey });

@@ -1,3 +1,4 @@
+import { Linking, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from './supabase';
 import { compressImageForUpload } from './imageUpload';
@@ -162,12 +163,59 @@ export async function uploadChatAttachment(opts: {
   return { path, mime, size };
 }
 
-// ─── Signed URL resolution + cache ───────────────────────────────────────────
+// ─── Attachment delivery: authorization is checked WHEN THE FILE IS FETCHED ──
+//
+// This used to call `createSignedUrl` and hand the resulting https URL straight
+// to <Image>/<Video>/Linking. A Supabase signed URL is a SELF-CONTAINED TOKEN:
+// Storage validates its signature and expiry and serves the object WITHOUT
+// re-evaluating the bucket's RLS policy. That was demonstrated, not assumed —
+// a link minted while the viewer was authorized still returned HTTP 200 with
+// the bytes after the sender blocked them.
+//
+// Every fetch now goes to /storage/v1/object/authenticated/... carrying the
+// viewer's own access token, so the `chat-attachments` SELECT policy — and
+// therefore migration 074's blocking check — runs on EVERY request. A blocked
+// viewer is refused immediately: nothing is minted, so there is nothing to
+// replay.
+//
+// The bytes are written to an app-private cache file so the existing callers
+// (<Image>, the media viewer, Sharing, external open) keep working with a URI.
+// That cache is OURS and is cleared on any access change, unlike a signed URL.
+//
+// WHAT THIS DOES NOT DO, and does not claim to do: recall a file the viewer
+// already downloaded, screenshotted, or re-shared before the block. No
+// server-side control can, and none is asserted here.
 
-// Deletion removes the object immediately when the interactive endpoint is
-// available; a short TTL also bounds any already-issued URL on older clients.
-const SIGNED_TTL_SECONDS = 60;
-const signedCache = new Map<string, { url: string; expiresAt: number }>();
+const ATTACHMENT_CACHE_DIR = `${FileSystem.cacheDirectory}weglue-attachments/`;
+
+/** storage path -> local file:// URI already fetched in this app session. */
+const localCache = new Map<string, string>();
+
+async function ensureCacheDir(): Promise<void> {
+  const info = (await FileSystem.getInfoAsync(ATTACHMENT_CACHE_DIR)) as { exists: boolean };
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(ATTACHMENT_CACHE_DIR, { intermediates: true });
+  }
+}
+
+function cacheFileFor(storagePath: string): string {
+  // Deterministic, collision-free, filesystem-safe.
+  return ATTACHMENT_CACHE_DIR + storagePath.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+/**
+ * Drop every locally cached attachment. Called whenever access may have changed
+ * (a block, an unblock, a removal from a conversation) so the next view has to
+ * re-fetch and be re-authorized by Storage.
+ */
+export async function clearAttachmentCache(): Promise<void> {
+  localCache.clear();
+  try {
+    await FileSystem.deleteAsync(ATTACHMENT_CACHE_DIR, { idempotent: true });
+  } catch {
+    // A cache wipe is best-effort convergence, never a reason to fail a screen.
+  }
+}
 
 /** True when the stored attachment value is a private-bucket storage path. */
 export function isStoragePath(value: string | null | undefined): boolean {
@@ -176,26 +224,68 @@ export function isStoragePath(value: string | null | undefined): boolean {
 
 /**
  * Resolves a messages.attachment_url value to something an <Image>/player can
- * load: passes through http(s)/local URIs (legacy rows, optimistic sends) and
- * signs private storage paths with an in-memory cache.
+ * load. Passes through http(s)/local URIs (legacy rows, optimistic sends) and
+ * fetches private storage paths through the AUTHENTICATED endpoint, so the
+ * current authorization decides every fetch.
  */
 export async function resolveAttachmentUrl(value: string | null | undefined): Promise<string | null> {
   if (!value) return null;
   if (!isStoragePath(value)) return value;
 
-  const cached = signedCache.get(value);
-  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.url;
+  const cached = localCache.get(value);
+  if (cached) return cached;
 
-  const { data, error } = await supabase.storage
-    .from(CHAT_ATTACHMENTS_BUCKET)
-    .createSignedUrl(value, SIGNED_TTL_SECONDS);
-  if (error || !data) return null;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) return null;
 
-  signedCache.set(value, {
-    url: data.signedUrl,
-    expiresAt: Date.now() + SIGNED_TTL_SECONDS * 1000,
-  });
-  return data.signedUrl;
+  const base = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  if (!base || !anonKey) return null;
+
+  try {
+    await ensureCacheDir();
+    const target = cacheFileFor(value);
+    const result = await FileSystem.downloadAsync(
+      `${base}/storage/v1/object/authenticated/${CHAT_ATTACHMENTS_BUCKET}/${value}`,
+      target,
+      { headers: { apikey: anonKey, Authorization: `Bearer ${accessToken}` } },
+    );
+    // Storage answers 4xx when the policy refuses — a blocked viewer, a removed
+    // participant, a deleted message. downloadAsync still writes the error body,
+    // so the status is what decides, never the file's existence.
+    if (result.status !== 200) {
+      await FileSystem.deleteAsync(target, { idempotent: true });
+      return null;
+    }
+    localCache.set(value, result.uri);
+    return result.uri;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open an attachment in the OS viewer. Kept here so the two call sites do not
+ * each have to know that Android cannot open a bare file:// URI from another
+ * app's sandbox and needs a content:// grant instead.
+ */
+export async function openAttachmentExternally(
+  value: string | null | undefined,
+): Promise<boolean> {
+  const uri = await resolveAttachmentUrl(value);
+  if (!uri) return false;
+  try {
+    if (uri.startsWith('file:') && Platform.OS === 'android') {
+      const contentUri = await FileSystem.getContentUriAsync(uri);
+      await Linking.openURL(contentUri);
+      return true;
+    }
+    await Linking.openURL(uri);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function formatFileSize(bytes: number | null | undefined): string {

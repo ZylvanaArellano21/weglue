@@ -6,6 +6,34 @@ import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../rea
 import { clubProfileKey } from "./useClubProfile";
 import { clubEventsFeedKey } from "./useClubEventsFeed";
 import { myClubsKey, discoveryClubsKey } from "./useClubTab";
+import { refreshPermissionSensitiveEventState } from "./eventSync";
+
+/**
+ * Membership and officer role changes alter several independently cached
+ * capability checks. This intentionally clears (rather than merely marks
+ * stale) private payload caches: React Query otherwise renders a prior result
+ * while a background RLS refetch is in flight after a user leaves a club.
+ */
+function refreshMembershipPermissions(queryClient: ReturnType<typeof useQueryClient>, userId: string): void {
+  refreshPermissionSensitiveEventState(queryClient, userId);
+  for (const key of [
+    ["isOfficer", userId],
+    ["officerClubs", userId],
+    ["eventAudienceMemberSearch", userId],
+    ["notifications", userId],
+    ["unreadSummary", userId],
+  ]) {
+    queryClient.removeQueries({ queryKey: key });
+    void queryClient.invalidateQueries({ queryKey: key });
+  }
+  // Conversation participants are removed by the existing membership triggers.
+  // Drop every messages query so a removed member never briefly reuses local
+  // history while its next RLS query resolves.
+  queryClient.removeQueries({ queryKey: ["messages"] });
+  queryClient.removeQueries({ queryKey: ["conversationHub"] });
+  queryClient.removeQueries({ queryKey: ["clubChannels"] });
+  queryClient.removeQueries({ queryKey: ["chatDetails"] });
+}
 
 // Cross-user realtime for the open Club Profile. Subscribes ONLY to this club's
 // rows (every binding is filtered by club_id / id = this club) and invalidates
@@ -31,6 +59,10 @@ export function useClubRealtime(clubId: string | undefined, userId: string | und
       void queryClient.invalidateQueries({ queryKey: ["clubMemberList", clubId] });
       void queryClient.invalidateQueries({ queryKey: myClubsKey(userId) });
       void queryClient.invalidateQueries({ queryKey: discoveryClubsKey(userId) });
+      // A membership/role row can immediately change Home visibility, direct
+      // event access, RSVP/attendee rights, Saved Events, and Calendar. Do not
+      // leave a member-only result usable until its normal stale timeout.
+      refreshMembershipPermissions(queryClient, userId);
     };
     const invEvents = () => {
       invProfile();
@@ -102,6 +134,7 @@ export function useMyClubsRealtime(userId: string | undefined): void {
     const inv = () => {
       void queryClient.invalidateQueries({ queryKey: myClubsKey(userId) });
       void queryClient.invalidateQueries({ queryKey: discoveryClubsKey(userId) });
+      refreshMembershipPermissions(queryClient, userId);
     };
     const channel = createSafeChannel(`my-clubs:${userId}`, [
       { event: "*", schema: "public", table: "club_members", filter: `user_id=eq.${userId}`, callback: inv },

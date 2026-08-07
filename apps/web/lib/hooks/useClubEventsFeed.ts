@@ -8,8 +8,9 @@ import type { HomeFeedEvent, AttendeePreview } from "./useHomeEventsFeed";
 // Club-scoped events feed for the Club Profile Home tab. Returns the SAME rich
 // HomeFeedEvent shape the Home feed uses (attendees, going count, rsvp, saved,
 // joined-club) so the existing EventCard renders identically, split into
-// upcoming vs past by real end datetime. Applies the same members/specific
-// visibility gate as the events RLS (migration 029) as defence-in-depth.
+// upcoming vs past by canonical event_end_at. The query is a narrow RPC because
+// a club non-member may see a members-only *card* here, but must never receive
+// the detail row or attendance payload that normal events RLS protects.
 
 export interface ClubEventsFeed {
   upcoming: HomeFeedEvent[];
@@ -19,7 +20,7 @@ export interface ClubEventsFeed {
 async function getClubEventsFeed(clubId: string, userId: string): Promise<ClubEventsFeed> {
   const supabase = getSupabaseBrowser();
 
-  const [{ data: membership }, { data: savedEvents }, { data: userRsvps }] = await Promise.all([
+  const [{ data: membership }, { data: savedEvents }, { data: userRsvps }, { data: club }] = await Promise.all([
     supabase
       .from("club_members")
       .select("role")
@@ -28,37 +29,30 @@ async function getClubEventsFeed(clubId: string, userId: string): Promise<ClubEv
       .maybeSingle(),
     supabase.from("saved_events").select("event_id").eq("user_id", userId),
     supabase.from("event_rsvps").select("event_id, status").eq("user_id", userId),
+    supabase.from("clubs").select("id, name, avatar_url").eq("id", clubId).maybeSingle(),
   ]);
 
   const isMember = !!membership;
-  const isOfficer = (membership as { role?: string } | null)?.role === "officer";
   const savedSet = new Set((savedEvents ?? []).map((s: any) => s.event_id));
   const rsvpMap = new Map<string, "going" | "cant">(
     (userRsvps ?? []).map((r: any) => [r.event_id, r.status as "going" | "cant"])
   );
 
-  const { data: rawEvents } = await supabase
-    .from("events")
-    .select(
-      `id, title, description, cover_image_url, event_date, start_time, end_time,
-       location, building, room, club_id, created_by, visibility, specific_user_ids,
-       clubs!inner(id, name, avatar_url),
-       event_interests(interest),
-       event_activities(activity)`
-    )
-    .eq("club_id", clubId)
-    .order("event_date", { ascending: true });
+  const { data: rawEvents, error } = await supabase.rpc("get_club_profile_events", {
+    p_club_id: clubId,
+  });
+  if (error) throw error;
 
   const events = (rawEvents ?? []) as any[];
-  const eventIds = events.map((e) => e.id);
+  const openEventIds = events.filter((e) => e.can_open).map((e) => e.id);
 
   const attendeeCountMap = new Map<string, number>();
   const attendeePreviewMap = new Map<string, AttendeePreview[]>();
-  if (eventIds.length > 0) {
+  if (openEventIds.length > 0) {
     const { data: goingRsvps } = await supabase
       .from("event_rsvps")
       .select("event_id, user_id, profiles!inner(id, username, avatar_url)")
-      .in("event_id", eventIds)
+      .in("event_id", openEventIds)
       .eq("status", "going");
     for (const rsvp of ((goingRsvps as any[]) ?? [])) {
       attendeeCountMap.set(rsvp.event_id, (attendeeCountMap.get(rsvp.event_id) ?? 0) + 1);
@@ -77,11 +71,6 @@ async function getClubEventsFeed(clubId: string, userId: string): Promise<ClubEv
   const mapped: HomeFeedEvent[] = [];
   for (const e of events) {
     const visibility = e.visibility as "everyone" | "members" | "specific";
-    const specificIds: string[] = e.specific_user_ids ?? [];
-    const isCreator = e.created_by === userId;
-    if (visibility === "members" && !isMember && !isOfficer && !isCreator) continue;
-    if (visibility === "specific" && !isCreator && !isOfficer && !specificIds.includes(userId)) continue;
-
     mapped.push({
       id: e.id,
       club_id: e.club_id,
@@ -91,18 +80,22 @@ async function getClubEventsFeed(clubId: string, userId: string): Promise<ClubEv
       event_date: e.event_date,
       start_time: e.start_time,
       end_time: e.end_time,
+      event_end_at: e.event_end_at,
       location: e.location,
       building: e.building,
       room: e.room,
-      activity_tags: (e.event_activities ?? []).map((a: any) => a.activity),
-      interest_tags: (e.event_interests ?? []).map((i: any) => i.interest),
-      club: { id: e.clubs.id, name: e.clubs.name, logo_url: e.clubs.avatar_url },
-      attendee_count: attendeeCountMap.get(e.id) ?? 0,
-      attendee_preview: attendeePreviewMap.get(e.id) ?? [],
+      activity_tags: e.activity_tags ?? [],
+      interest_tags: e.interest_tags ?? [],
+      club: { id: clubId, name: (club as any)?.name ?? "Club", logo_url: (club as any)?.avatar_url ?? null },
+      attendee_count: e.can_open ? attendeeCountMap.get(e.id) ?? 0 : 0,
+      attendee_preview: e.can_open ? attendeePreviewMap.get(e.id) ?? [] : [],
       user_rsvp_status: rsvpMap.get(e.id) ?? null,
       is_saved: savedSet.has(e.id),
       is_today: false,
       user_has_joined_club: isMember,
+      visibility,
+      can_open: !!e.can_open,
+      can_view_attendees: !!e.can_open,
       tier: "your_clubs",
     });
   }

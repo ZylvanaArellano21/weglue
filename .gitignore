@@ -56,3 +56,6 @@ Corrections/
 
 # Founder-provided web screenshots — not shipped
 Screenshots webapp/
+
+# Python bytecode from the harness runners
+__pycache__/
