@@ -719,18 +719,77 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
  * already downloaded, screenshotted or re-shared before the block. Nothing
  * server-side can.
  */
+/**
+ * Bug 8 — one download per attachment, not one per render pass.
+ *
+ * Every caller used to issue its own `storage.download()` and mint its own
+ * blob. In practice that meant the same bytes were fetched over and over: each
+ * message bubble downloaded independently of the info panel's media grid, and
+ * `useObjectUrls` re-ran whenever the message list changed — so simply
+ * RECEIVING a message re-downloaded every image in the conversation. Leaving a
+ * chat and coming back downloaded all of it again.
+ *
+ * Paths are content-addressed (`<conversationId>/<uuid>.<ext>`, never reused),
+ * so a resolved blob is safe to share between callers and across mounts.
+ *
+ * This does NOT weaken 074's authorization property. The bytes are still
+ * fetched with `download()` — an authenticated request the storage policy
+ * evaluates — and the cache is dropped wholesale by
+ * `clearPermissionSensitiveStudentContent`, which is what runs when access may
+ * have changed. That is the same contract mobile already has, where
+ * `clearAttachmentCache()` empties its on-disk attachment cache on exactly the
+ * same signal.
+ */
+const attachmentUrlCache = new Map<string, string>();
+const attachmentUrlInFlight = new Map<string, Promise<string | null>>();
+
 export async function attachmentObjectUrl(path: string | null): Promise<string | null> {
   if (!path) return null;
   if (/^https?:\/\//.test(path)) return path;
-  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).download(path);
-  if (error) throw error;
-  if (!data) return null;
-  return URL.createObjectURL(data);
+
+  const cached = attachmentUrlCache.get(path);
+  if (cached) return cached;
+  // Collapse the stampede: a thread mounting 40 bubbles at once must produce
+  // one request per path, not one per bubble.
+  const existing = attachmentUrlInFlight.get(path);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).download(path);
+    if (error) throw error;
+    if (!data) return null;
+    const url = URL.createObjectURL(data);
+    attachmentUrlCache.set(path, url);
+    return url;
+  })().finally(() => {
+    attachmentUrlInFlight.delete(path);
+  });
+
+  attachmentUrlInFlight.set(path, request);
+  return request;
 }
 
-/** Frees a blob: URL created by `attachmentObjectUrl`. Safe to call with null. */
+/**
+ * Frees a blob: URL created by `attachmentObjectUrl`. Safe to call with null.
+ *
+ * A CACHED url is deliberately not revoked: it is shared by every caller
+ * showing that attachment, so revoking it when one message unmounts would break
+ * the image for all the others and force a re-download. Cached blobs are
+ * released together by `releaseAllAttachmentUrls`. Anything not in the cache —
+ * a composer preview, an already-evicted entry — is revoked as before.
+ */
 export function releaseAttachmentUrl(url: string | null | undefined): void {
-  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+  if (!url || !url.startsWith("blob:")) return;
+  for (const cached of attachmentUrlCache.values()) if (cached === url) return;
+  URL.revokeObjectURL(url);
+}
+
+/** Drops every cached attachment blob. Called when access may have changed, so
+ *  nothing already downloaded keeps rendering after a block or a removal. */
+export function releaseAllAttachmentUrls(): void {
+  for (const url of attachmentUrlCache.values()) URL.revokeObjectURL(url);
+  attachmentUrlCache.clear();
+  attachmentUrlInFlight.clear();
 }
 
 export async function markConversationRead(conversationId: string): Promise<void> {

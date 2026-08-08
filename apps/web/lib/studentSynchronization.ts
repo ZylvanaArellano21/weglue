@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { clearPermissionSensitiveEventState } from "./hooks/eventSync";
+import { releaseAllAttachmentUrls } from "./messages/service";
 
 // The opaque Day 10E broadcast carries no business state. It only tells a
 // client to invalidate the student-facing views that can contain lifecycle
@@ -81,6 +82,11 @@ export function invalidateStudentContentQueries(queryClient: QueryClient): void 
  */
 export function clearPermissionSensitiveStudentContent(queryClient: QueryClient): void {
   clearPermissionSensitiveEventState(queryClient);
+  // Cached attachment blobs are not React Query state. Every fetch is
+  // re-authorized by Storage, but bytes already resolved into a blob: URL would
+  // still render, so they are dropped on an access change too — the same
+  // contract as mobile's clearAttachmentCache().
+  releaseAllAttachmentUrls();
   for (const root of [
     "homePostsFeed",
     "postDetail",
