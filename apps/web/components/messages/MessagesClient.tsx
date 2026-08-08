@@ -50,7 +50,7 @@ import {
   setConversationMuted,
   attachmentObjectUrl,
   releaseAttachmentUrl,
-  unsendMessage,
+  unsendFailureMessage,
   uploadAttachment,
   votePoll,
   type Channel,
@@ -77,6 +77,7 @@ import {
   useMessageSuggestions,
   useMessageThread,
   useMessagesRealtime,
+  useUnsendMessage,
 } from "../../lib/messages/hooks";
 import {
   ChatFileCard,
@@ -305,7 +306,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
     // group chat → channels → chat → details path), not to an empty Messages
     // pane, so the previous context is preserved on desktop too.
     const isOfficial = details.type === "club_group" || details.type === "officer_chat";
-    center = <ConversationThread userId={userId} conversationId={conversationId} channelId={channelId} details={details} channelName={selectedChannel ? channelLabel(selectedChannel) : null} canPost={channelId ? undefined : true} targetMessageId={targetMessageId} searchNonce={searchNonce} onOpenHub={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : undefined} onBack={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : clearSelection} onOpenInfo={() => destination({ filter, conversationId, channelId, info: true, infoTab })} onOpenProfile={(id) => router.push(`/u/${id}`)} onOpenEvent={(id) => router.push(`/event/${id}`)} onOpenPost={(id) => router.push(`/post/${id}`)} onInvalidate={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />;
+    center = <ConversationThread userId={userId} conversationId={conversationId} channelId={channelId} details={details} channelName={selectedChannel ? channelLabel(selectedChannel) : null} canPost={channelId ? undefined : true} targetMessageId={targetMessageId} searchNonce={searchNonce} onOpenHub={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : undefined} onBack={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : clearSelection} onOpenInfo={() => destination({ filter, conversationId, channelId, info: true, infoTab })} onOpenProfile={(id) => router.push(`/u/${id}`)} onOpenEvent={(id) => destination({ filter, conversationId, channelId, info: infoOpen, infoTab, eventId: id })} onOpenPost={(id) => destination({ filter, conversationId, channelId, info: infoOpen, infoTab, postId: id })} onInvalidate={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />;
   } else {
     center = <MessagesLanding noClubs={!clubsLoading && !hasClubs} onJoinClub={() => router.push("/clubs")} />;
   }
@@ -616,6 +617,7 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   const { data: page, isLoading } = useMessageThread(conversationId, channelId, userId);
   const { data: permitted } = useMessagePermission(channelId);
   const queryClient = useQueryClient();
+  const unsend = useUnsendMessage(conversationId, channelId, userId);
   const { outgoing, enqueue, retry } = useOutgoingMessages(conversationId, channelId, userId, onInvalidate, onError);
   const stored = useMemo(() => [...(page?.messages ?? [])].reverse(), [page?.messages]);
   // A pending message is dropped the moment its stored row arrives, matched on
@@ -646,7 +648,7 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   });
   const restrictedSenders = useMemo(() => new Set(restrictedSenderIds ?? []), [restrictedSenderIds]);
   const emptyLabel = channelName && channelName.startsWith("#") ? `No messages in ${channelName} yet` : "No messages yet";
-  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onOpenEvent={onOpenEvent} onOpenPost={onOpenPost} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} isSearchTarget={!!targetMessageId && message.id === targetMessageId} searchNonce={searchNonce} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={enqueue} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
+  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onOpenEvent={onOpenEvent} onOpenPost={onOpenPost} onUnsend={unsend} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} isSearchTarget={!!targetMessageId && message.id === targetMessageId} searchNonce={searchNonce} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={enqueue} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
 }
 
 /**
@@ -802,7 +804,7 @@ function Composer({ disabled = false, disabledReason, allowPolls = false, onSend
  * is the defect Update 3 removes. The timestamp and the actions menu sit under
  * whatever was rendered, so their placement does not depend on the payload.
  */
-function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOpenEvent, onOpenPost, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
+function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOpenEvent, onOpenPost, onUnsend, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onUnsend: (messageId: string) => Promise<void>; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(false), []);
@@ -895,7 +897,20 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
             )}
             <button type="button" role="menuitem" onClick={() => void mutate(() => hideMessage(message.id, userId), "Couldn’t remove that message from your view.")} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Delete for me</button>
             {isOwn && (
-              <button type="button" role="menuitem" onClick={() => void mutate(() => unsendMessage(message.id), "Couldn’t unsend that message.")} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Unsend for everyone</button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  // Not routed through `mutate`: the message is already gone
+                  // from view by the time this resolves, and the hook owns both
+                  // the rollback and the post-success convergence.
+                  setMenu(false);
+                  void onUnsend(message.id).catch((error) => onError(unsendFailureMessage(error)));
+                }}
+                className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50"
+              >
+                Unsend for everyone
+              </button>
             )}
             {!isOwn && (
               <button type="button" role="menuitem" onClick={() => { const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) void mutate(() => reportMessage(message.id, reason), "Couldn’t send that report."); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>

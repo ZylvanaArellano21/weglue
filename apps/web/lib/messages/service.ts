@@ -895,11 +895,72 @@ export async function setChannelPostPermission(channelId: string, permission: Po
   if (error) throw error;
 }
 
+/**
+ * Why an unsend can fail, in terms the person can act on.
+ *
+ * `functions.invoke` rejects with a FunctionsHttpError whose `message` is the
+ * fixed string "Edge Function returned a non-2xx status code" — it carries no
+ * indication of WHICH failure occurred. Every distinct cause therefore used to
+ * arrive at the UI identical, which is exactly why the only copy that could be
+ * written for it was generic. The real status lives on `error.context`, the
+ * undrained `Response`, so it is read here and turned into a cause the caller
+ * can explain honestly.
+ */
+export type UnsendFailure = "not_permitted" | "already_gone" | "offline" | "unknown";
+
+export class UnsendError extends Error {
+  readonly cause_kind: UnsendFailure;
+  constructor(kind: UnsendFailure) {
+    super(`unsend_failed:${kind}`);
+    this.name = "UnsendError";
+    this.cause_kind = kind;
+  }
+}
+
+/**
+ * What the person is told when an unsend genuinely did not happen.
+ *
+ * The message has just reappeared in the thread, so the copy has to explain
+ * that specific situation: the content is still there, and why. It deliberately
+ * avoids technical vocabulary (status codes, "request", "server", "database")
+ * and the generic "Something went wrong. Try again.", which tells someone
+ * nothing about whether their message is still visible to other people.
+ */
+export function unsendFailureMessage(error: unknown): string {
+  const kind: UnsendFailure = error instanceof UnsendError ? error.cause_kind : "unknown";
+  switch (kind) {
+    case "not_permitted":
+      return "You can only unsend your own messages, so this one is still in the chat.";
+    case "already_gone":
+      return "This message had already been removed, so there was nothing left to unsend.";
+    case "offline":
+      return "You’re not connected right now, so this message is still in the chat. Reconnect and unsend it again.";
+    default:
+      return "This message couldn’t be unsent, so everyone in this chat can still see it. Give it a moment and try again.";
+  }
+}
+
 export async function unsendMessage(messageId: string): Promise<void> {
   const { error } = await getSupabaseBrowser().functions.invoke("delete-message", {
     body: { messageId, idempotencyKey: crypto.randomUUID() },
   });
-  if (error) throw error;
+  if (!error) return;
+
+  const response = (error as { context?: unknown }).context;
+  const status =
+    response && typeof response === "object" && "status" in response
+      ? Number((response as { status: unknown }).status)
+      : null;
+
+  // 404 means the row is already unavailable — the message is gone, which is
+  // the outcome the person asked for, so it is NOT surfaced as a failure.
+  if (status === 404) return;
+  if (status === 401 || status === 403) throw new UnsendError("not_permitted");
+  if (status === 409) throw new UnsendError("already_gone");
+  if (status !== null) throw new UnsendError("unknown");
+  // No response at all: the request never completed (offline, DNS, CORS, an
+  // aborted navigation). The message was NOT deleted.
+  throw new UnsendError("offline");
 }
 
 export async function hideMessage(messageId: string, userId: string): Promise<void> {

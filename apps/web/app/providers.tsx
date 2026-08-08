@@ -7,7 +7,11 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
 import { subscribeBroadcast } from "../lib/realtime";
-import { refreshPermissionSensitiveStudentContent, subscribeBrowserCanonicalRecovery } from "../lib/studentSynchronization";
+import {
+  invalidateStudentContentQueries,
+  refreshPermissionSensitiveStudentContent,
+  subscribeBrowserCanonicalRecovery,
+} from "../lib/studentSynchronization";
 
 function useApplicationAccessGate(queryClient: QueryClient): void {
   const pathname = usePathname();
@@ -160,23 +164,52 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
   const firstPathRef = useRef(true);
   useEffect(() => {
     // A route TRANSITION can reveal an inactive cached query. Mark all relevant
-    // surfaces stale first so it cannot render an earlier lifecycle state.
+    // surfaces stale so it cannot keep serving an earlier lifecycle state.
+    //
+    // INVALIDATE, not reset (Bug 8). Both mark the surface stale and both
+    // refetch every active observer under current RLS, so the guarantee that
+    // matters — nothing stays on screen that the database no longer returns —
+    // is identical. The difference is what happens DURING the refetch:
+    // `resetQueries` first discards the cached payload, which puts every
+    // observer back into `status: "pending"`, and `isLoading` is what the
+    // Messages, Home and profile surfaces render their full-page skeletons
+    // from. Navigating between tabs therefore blanked content the viewer was
+    // still entitled to see and re-fetched it from scratch.
+    //
+    // Clearing is retained where it is actually a privacy control: the opaque
+    // university broadcast above, which is the signal that permissions may have
+    // genuinely changed. A route change is not that signal.
     //
     // The first run is deliberately skipped. `Providers` mounts once per
     // document load with a brand-new QueryClient, so on that pass there is no
-    // cached query to reveal — only the queries the page just started. Clearing
-    // them is not a stale-data guard, it is a guaranteed double fetch of every
-    // student surface on every page load, and it is what made a freshly opened
-    // conversation take a second round trip to appear.
+    // cached query to reveal — only the queries the page just started. Marking
+    // them stale is not a stale-data guard, it is a guaranteed double fetch of
+    // every student surface on every page load, and it is what made a freshly
+    // opened conversation take a second round trip to appear.
     if (firstPathRef.current) {
       firstPathRef.current = false;
       return;
     }
-    refreshPermissionSensitiveStudentContent(queryClient);
+    invalidateStudentContentQueries(queryClient);
   }, [pathname, queryClient]);
 
   useEffect(() => {
-    const recover = () => refreshPermissionSensitiveStudentContent(queryClient);
+    // Returning to the tab must REFRESH, never blank (Bug 8, and the direct
+    // cause of Bug 4).
+    //
+    // This fires on window focus, `online`, and visibilitychange→visible. It
+    // used to clear every student payload first, so simply switching back to an
+    // already-open We Glue tab replaced the whole of Messages with skeletons and
+    // refetched it. It also fired mid-send: opening the native file picker blurs
+    // the window and dismissing it focuses the window again, which reset the
+    // messages cache underneath the composer — the attachment appeared to
+    // "reload the screen and then send nothing".
+    //
+    // A refocus is not evidence that anything changed, so recovery is a
+    // background invalidation: cached content keeps rendering, every active
+    // query refetches under current RLS, and anything the database no longer
+    // returns disappears when that refetch lands.
+    const recover = () => invalidateStudentContentQueries(queryClient);
     return subscribeBrowserCanonicalRecovery(recover);
   }, [queryClient]);
 }
@@ -227,7 +260,17 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
         defaultOptions: {
           queries: {
             staleTime: 60 * 1000,
+            // Cached pages survive long enough that leaving a conversation,
+            // a profile or a post and coming straight back renders from cache
+            // instead of re-running the whole query chain (Bug 8).
+            gcTime: 10 * 60 * 1000,
             retry: 1,
+            // Focus refresh is owned by `subscribeBrowserCanonicalRecovery`
+            // above, which is also wired to `online` and visibilitychange.
+            // Leaving React Query's own focus refetch on as well meant every
+            // return to the tab fired TWO refetch passes over every active
+            // query — the duplicate Supabase requests behind Bug 8.
+            refetchOnWindowFocus: false,
           },
         },
       })

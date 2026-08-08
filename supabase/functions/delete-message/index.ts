@@ -93,6 +93,24 @@ async function processCleanup(admin: SupabaseClient, job: CleanupJob): Promise<b
   }
 }
 
+/**
+ * Keep a promise running after the response has been written.
+ *
+ * Supabase's edge runtime exposes `EdgeRuntime.waitUntil` for exactly this: it
+ * holds the isolate open until the promise settles, instead of tearing it down
+ * the moment the handler returns. If it is ever unavailable the work is still
+ * started — it simply loses the guarantee of finishing, which is safe here
+ * because the cleanup job stays leased in the queue and the scheduled
+ * reconciler retries anything left behind.
+ */
+function runInBackground(work: Promise<unknown>): void {
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
+  const settled = work.catch(() => {
+    // Never surface cleanup detail; the queue and the reconciler own retries.
+  });
+  if (typeof runtime?.waitUntil === "function") runtime.waitUntil(settled);
+}
+
 Deno.serve(async (request) => {
   const preflight = handlePreflight(request);
   if (preflight) return preflight;
@@ -132,21 +150,51 @@ Deno.serve(async (request) => {
   const state = typeof (data as any)?.state === "string" ? (data as any).state : "unavailable";
   if (state === "unavailable") return json({ state: "unavailable" }, 404, cors);
 
-  // Do not leave a remembered signed URL usable until the next scheduled run.
-  // This service-role call learns the path only inside the server, and its
-  // response is never returned to the student client.
-  const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data: claimed, error: claimError } = await admin.rpc("claim_message_attachment_cleanup_for_message", {
-    p_worker_id: `delete-message:${crypto.randomUUID()}`,
-    p_message_id: messageId,
-  });
-  if (!claimError && Array.isArray(claimed) && claimed.length > 0) {
-    const complete = await processCleanup(admin, claimed[0] as CleanupJob);
-    return json({ state: "deleted", attachmentCleanup: complete ? "complete" : "pending" }, complete ? 200 : 202, cors);
+  // ── Bug 1: the response is no longer gated on storage I/O ──────────────────
+  //
+  // `begin_message_deletion` has COMMITTED by this point. That transaction is
+  // what actually unsends the message: the row is redacted and RLS stops
+  // returning it to every participant on both platforms. Nothing below changes
+  // whether the message is gone — it only removes the stored bytes.
+  //
+  // Previously all of that ran before the response was written, so the caller
+  // waited on, in order: a cleanup-claim RPC, a full download of the original
+  // object, an optional re-upload of an evidence copy into a second bucket, a
+  // remove, and then ANOTHER download purely to prove the object 404s. On a
+  // photo or a video that is seconds of transfer, which is exactly why unsend
+  // felt slow and why attachments felt far slower than text.
+  //
+  // A message with no attachment now does no storage work at all, and one with
+  // an attachment hands the cleanup to `EdgeRuntime.waitUntil` — the isolate is
+  // kept alive to finish it, so physical removal still begins immediately
+  // rather than waiting for the next scheduled run. `reconcile-deleted-messages`
+  // remains the safety net: the lease/complete/fail protocol is unchanged and
+  // idempotent, so a cold start, a redeploy or a failure mid-cleanup is still
+  // picked up and retried.
+  if (state === "deleted") {
+    // The RPC returns `deleted` only when the message had no attachment_url, so
+    // there is provably nothing to clean up. The helper stays the single place
+    // that decides when "complete" may be claimed.
+    const outcome = attachmentCleanupOutcomeWithoutLease(state, false);
+    return json({ state: "deleted", attachmentCleanup: outcome.attachmentCleanup }, outcome.status, cors);
   }
-  // A failed claim is not proof that cleanup occurred. A missing lease is only
-  // complete when the canonical deletion RPC proved the message had no
-  // attachment; retries and concurrent workers remain coarse pending states.
-  const outcome = attachmentCleanupOutcomeWithoutLease(state, Boolean(claimError));
-  return json({ state: "deleted", attachmentCleanup: outcome.attachmentCleanup }, outcome.status, cors);
+
+  const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  const cleanup = (async () => {
+    const { data: claimed, error: claimError } = await admin.rpc("claim_message_attachment_cleanup_for_message", {
+      p_worker_id: `delete-message:${crypto.randomUUID()}`,
+      p_message_id: messageId,
+    });
+    // A failed or empty claim is never treated as success — the job stays in the
+    // queue for the reconciler. This mirrors the previous no-lease reasoning.
+    if (claimError || !Array.isArray(claimed) || claimed.length === 0) return;
+    await processCleanup(admin, claimed[0] as CleanupJob);
+  })();
+
+  runInBackground(cleanup);
+
+  // 202: the unsend itself is done and durable; only the byte cleanup is still
+  // in flight. The student client does not read this body — it treats any
+  // non-error response as "the message is gone", which it now is.
+  return json({ state: "deleted", attachmentCleanup: "pending" }, 202, cors);
 });
