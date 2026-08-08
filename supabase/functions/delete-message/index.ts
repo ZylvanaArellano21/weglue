@@ -6,13 +6,17 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
+import { corsHeaders, handlePreflight } from "../_shared/cors.ts";
 import { attachmentCleanupOutcomeWithoutLease } from "./cleanupOutcome.ts";
 import { parseDeleteMessageRequest } from "./requestValidation.ts";
 
-function json(body: Record<string, unknown>, status = 200): Response {
+// Set per request so every response — including the error paths — carries the
+// CORS headers. A response the browser cannot read is indistinguishable from a
+// failure to the caller, which is how the web unsend appeared broken.
+function json(body: Record<string, unknown>, status = 200, cors: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store, private" },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store, private", ...cors },
   });
 }
 
@@ -90,13 +94,17 @@ async function processCleanup(admin: SupabaseClient, job: CleanupJob): Promise<b
 }
 
 Deno.serve(async (request) => {
-  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const preflight = handlePreflight(request);
+  if (preflight) return preflight;
+  const cors = corsHeaders(request.headers.get("Origin"));
+
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, cors);
 
   const url = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const auth = request.headers.get("Authorization") ?? "";
-  if (!url || !anonKey || !serviceKey || !auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+  if (!url || !anonKey || !serviceKey || !auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401, cors);
 
   const token = auth.slice("Bearer ".length);
   const client = createClient(url, anonKey, {
@@ -104,10 +112,10 @@ Deno.serve(async (request) => {
     global: { headers: { Authorization: auth } },
   });
   const { data: userData } = await client.auth.getUser(token);
-  if (!userData.user) return json({ error: "Unauthorized" }, 401);
+  if (!userData.user) return json({ error: "Unauthorized" }, 401, cors);
 
   const deletionRequest = parseDeleteMessageRequest(await request.json().catch(() => null));
-  if (!deletionRequest) return json({ error: "Invalid request" }, 400);
+  if (!deletionRequest) return json({ error: "Invalid request" }, 400, cors);
   const { messageId, idempotencyKey } = deletionRequest;
 
   const { data, error } = await client.rpc("begin_message_deletion", {
@@ -118,11 +126,11 @@ Deno.serve(async (request) => {
     // Deliberately do not pass Postgres messages through; they can distinguish
     // deleted, nonexistent, or unauthorized IDs and occasionally include SQL.
     const status = error.code === "42501" ? 403 : error.code === "28000" ? 401 : 409;
-    return json({ error: status === 403 ? "Not permitted" : "Message is unavailable" }, status);
+    return json({ error: status === 403 ? "Not permitted" : "Message is unavailable" }, status, cors);
   }
 
   const state = typeof (data as any)?.state === "string" ? (data as any).state : "unavailable";
-  if (state === "unavailable") return json({ state: "unavailable" }, 404);
+  if (state === "unavailable") return json({ state: "unavailable" }, 404, cors);
 
   // Do not leave a remembered signed URL usable until the next scheduled run.
   // This service-role call learns the path only inside the server, and its
@@ -134,11 +142,11 @@ Deno.serve(async (request) => {
   });
   if (!claimError && Array.isArray(claimed) && claimed.length > 0) {
     const complete = await processCleanup(admin, claimed[0] as CleanupJob);
-    return json({ state: "deleted", attachmentCleanup: complete ? "complete" : "pending" }, complete ? 200 : 202);
+    return json({ state: "deleted", attachmentCleanup: complete ? "complete" : "pending" }, complete ? 200 : 202, cors);
   }
   // A failed claim is not proof that cleanup occurred. A missing lease is only
   // complete when the canonical deletion RPC proved the message had no
   // attachment; retries and concurrent workers remain coarse pending states.
   const outcome = attachmentCleanupOutcomeWithoutLease(state, Boolean(claimError));
-  return json({ state: "deleted", attachmentCleanup: outcome.attachmentCleanup }, outcome.status);
+  return json({ state: "deleted", attachmentCleanup: outcome.attachmentCleanup }, outcome.status, cors);
 });

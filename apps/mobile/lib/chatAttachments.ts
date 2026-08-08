@@ -288,20 +288,7 @@ export async function openAttachmentExternally(
   }
 }
 
-export function formatFileSize(bytes: number | null | undefined): string {
-  if (!bytes || bytes <= 0) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function fileTypeLabel(name?: string | null, mime?: string | null): string {
-  const ext = name?.includes('.') ? name.split('.').pop()?.toUpperCase() : undefined;
-  if (ext && ext.length <= 5) return ext;
-  if (mime?.includes('pdf')) return 'PDF';
-  if (mime?.includes('word')) return 'DOCX';
-  if (mime?.includes('presentation')) return 'PPTX';
-  if (mime?.includes('sheet') || mime?.includes('excel')) return 'XLSX';
-  if (mime?.startsWith('text/')) return 'TXT';
-  return 'FILE';
-}
+// Re-exported from the shared package so the web file card and the mobile file
+// card cannot describe the same attachment differently. Mobile's behaviour is
+// unchanged: these are the same rules, moved to where both platforms read them.
+export { formatFileSize, fileTypeLabel } from '@weglue/shared';

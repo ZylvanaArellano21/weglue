@@ -57,16 +57,41 @@ describe("Day 10E web content synchronization", () => {
   });
 
   it("clears selected-event and message payloads before canonical recovery", () => {
-    const removeQueries = vi.fn();
-    const queryClient = { removeQueries } as unknown as QueryClient;
+    const resetQueries = vi.fn();
+    const queryClient = { resetQueries } as unknown as QueryClient;
 
     clearPermissionSensitiveStudentContent(queryClient);
 
-    const keys = removeQueries.mock.calls.map(([arg]) => arg.queryKey);
+    const keys = resetQueries.mock.calls.map(([arg]) => arg.queryKey);
     expect(keys).toContainEqual(["eventDetail"]);
     expect(keys).toContainEqual(["savedEventsUpcoming"]);
     expect(keys).toContainEqual(["eventAttendees"]);
     expect(keys).toContainEqual(["messages"]);
+  });
+
+  /**
+   * Regression: this MUST be `resetQueries`, never `removeQueries`.
+   *
+   * Both discard the cached payload — the privacy requirement — but
+   * `removeQueries` destroys a query that still has observers, so an in-flight
+   * fetch resolves onto a discarded object and the component is stranded in
+   * `pending`/`idle` forever. That was a real, reproduced defect: entering
+   * /messages removed the in-flight message queries, leaving the conversation
+   * list on its skeleton and the thread pane showing "This conversation isn't
+   * available" for a conversation the viewer was a participant of.
+   *
+   * `resetQueries` clears the data AND refetches active observers.
+   */
+  it("resets rather than removes, so mounted screens refetch instead of stranding", () => {
+    const resetQueries = vi.fn();
+    const removeQueries = vi.fn();
+    const queryClient = { resetQueries, removeQueries } as unknown as QueryClient;
+
+    clearPermissionSensitiveStudentContent(queryClient);
+
+    expect(removeQueries).not.toHaveBeenCalled();
+    expect(resetQueries).toHaveBeenCalled();
+    expect(resetQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(["messages"]);
   });
 
   // Parity with mobile's STUDENT_CONTENT_QUERY_ROOTS. A block, restriction or

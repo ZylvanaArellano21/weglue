@@ -2,6 +2,7 @@
 
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
+import { ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { EmptyState } from "./EmptyState";
 import { useToast } from "../shared/Toast";
 import { timeAgo } from "../../lib/datetime";
@@ -215,9 +216,15 @@ function NotificationRow({
   );
 }
 
+/**
+ * Update 1 — a notification's ACTOR is a real person, so their picture opens
+ * their profile like every other person identity in the app. The `entity` and
+ * `system` visuals are deliberately left alone: a club avatar or the We Glue
+ * mark is not a person and must not resolve to a user profile.
+ */
 function NotificationVisual({ visual }: { visual: ReturnType<typeof resolveNotificationVisual> }): JSX.Element {
-  if (visual.kind === "actors") return <span className="flex h-[46px] w-[90px] shrink-0 items-center pl-1"><span className="flex min-w-[86px] -space-x-3">{visual.actors.slice(0, 3).map((actor) => <Avatar key={actor.id} uri={actor.avatar_url} size={38} name={actor.username} />)}</span></span>;
-  if (visual.kind === "actor") return <Avatar uri={visual.actor.avatar_url} size={46} name={visual.actor.username} />;
+  if (visual.kind === "actors") return <span className="flex h-[46px] w-[90px] shrink-0 items-center pl-1"><span className="flex min-w-[86px] -space-x-3">{visual.actors.slice(0, 3).map((actor) => <ClickableUserIdentity key={actor.id} userId={actor.id} ariaLabel={`Open ${actor.username}'s profile`}><Avatar uri={actor.avatar_url} size={38} name={actor.username} /></ClickableUserIdentity>)}</span></span>;
+  if (visual.kind === "actor") return <ClickableUserIdentity userId={visual.actor.id} ariaLabel={`Open ${visual.actor.username}'s profile`}><Avatar uri={visual.actor.avatar_url} size={46} name={visual.actor.username} /></ClickableUserIdentity>;
   if (visual.kind === "entity") return <Avatar uri={visual.entity.avatar_url} size={46} name={visual.entity.name} />;
   if (visual.kind === "system") return <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-[#0FA6A6] text-xl text-white">W</span>;
   return <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-gray-200 text-xl text-gray-500">•••</span>;

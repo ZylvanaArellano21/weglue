@@ -63,6 +63,22 @@ export async function getHiddenMessageIds(
   return new Set(((data ?? []) as Array<{ message_id: string }>).map((row) => row.message_id));
 }
 
+/**
+ * Every message id this viewer has deleted-for-me, across all conversations.
+ *
+ * The conversation LIST needs this: its preview is "the newest message still
+ * visible to me", and resolving that per conversation would mean one query per
+ * row. RLS on `message_hides` already restricts the result to `auth.uid()`, so
+ * this returns only the caller's own hides and nothing about anyone else's.
+ *
+ * Without it, deleting the newest message for yourself left the conversation
+ * list still advertising it — "📷 Photo" for a photo you had just removed.
+ */
+export async function getMyHiddenMessageIds(client: QueryClientLike): Promise<Set<string>> {
+  const { data } = await client.from("message_hides").select("message_id");
+  return new Set(((data ?? []) as Array<{ message_id: string }>).map((row) => row.message_id));
+}
+
 /** This viewer's conversation-delete watermark, or null if they never cleared. */
 export async function getClearedBefore(
   client: QueryClientLike,

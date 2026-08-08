@@ -1,6 +1,6 @@
 "use client";
 
-import { applyThreadVisibility, loadThreadVisibility } from "@weglue/shared";
+import { applyThreadVisibility, getMyHiddenMessageIds, loadThreadVisibility } from "@weglue/shared";
 import { getSupabaseBrowser } from "../supabase-browser";
 
 /**
@@ -94,6 +94,19 @@ export interface ThreadMessage {
   client_tag: string | null;
   created_at: string;
   sender: { id: string; username: string; full_name: string | null; avatar_url: string | null };
+  /**
+   * Present only on a LOCAL, not-yet-stored message (Bug 6). A stored row never
+   * carries these, so the thread can tell an optimistic message apart from a
+   * canonical one without a parallel list.
+   *   "sending" — shown immediately, upload/insert still in flight
+   *   "failed"  — the send did not succeed and must offer a retry rather than
+   *               silently vanishing
+   */
+  pending_state?: "sending" | "failed";
+  onRetry?: () => void;
+  /** Retained on a pending message so a failed send can be retried with the
+   *  original file rather than asking the person to pick it again. */
+  pendingFile?: File;
 }
 
 export interface ThreadPage {
@@ -218,8 +231,23 @@ function threadFilter<T>(query: T & { eq: Function; is: Function }, channelId: s
   return channelId ? query.eq("channel_id", channelId) : query.is("channel_id", null);
 }
 
+/**
+ * Bug 5 — the conversation-list preview must be the newest message STILL
+ * VISIBLE TO THIS VIEWER.
+ *
+ * Three things can remove a message, and the list previously honoured only one:
+ *   • unsend-for-everyone → RLS already excludes the row (067). Honoured.
+ *   • conversation delete → `cleared_before`. Honoured.
+ *   • DELETE FOR ME       → `message_hides`. NOT honoured, so the list kept
+ *     showing "📷 Photo" for a photo the viewer had just removed, and kept
+ *     counting it toward unread.
+ *
+ * The hides are loaded once for the whole inbox rather than per conversation,
+ * so this stays a single extra query no matter how many chats exist.
+ */
 export async function getMyConversations(userId: string, limit = 30): Promise<ConversationPreview[]> {
   const supabase = getSupabaseBrowser();
+  const hiddenIds = await getMyHiddenMessageIds(supabase);
   const { data, error } = await supabase
     .from("conversation_participants")
     .select(
@@ -242,10 +270,16 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
     .filter((row) => !row.hidden_at && !row.conversations?.deleted_at)
     .flatMap((row) => {
       const conversation = row.conversations;
-      const messages = (conversation.messages ?? []).filter((message: any) => {
-        return !row.cleared_before || new Date(message.created_at) > new Date(row.cleared_before);
-      });
-      if (conversation.type === "direct" && messages.length === 0) return [];
+      const afterWatermark = (conversation.messages ?? []).filter(
+        (message: any) => !row.cleared_before || new Date(message.created_at) > new Date(row.cleared_before)
+      );
+      const messages = afterWatermark.filter((message: any) => !hiddenIds.has(message.id));
+      // A direct chat that was never actually used stays out of the list — that
+      // is the existing rule for the empty rows `get_or_create_direct_chat`
+      // leaves behind. It is tested against the pre-hide set on purpose: hiding
+      // your own copy of every message must NOT make an active conversation
+      // silently disappear, it must fall back to the empty preview below.
+      if (conversation.type === "direct" && afterWatermark.length === 0) return [];
       messages.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       const last = messages[0] ?? null;
       const participants = conversation.conversation_participants ?? [];
@@ -695,6 +729,114 @@ export async function deleteDirectConversationForMe(conversationId: string, user
   if (error) throw error;
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Custom-group management.
+ *
+ * Every one of these is the SAME canonical contract mobile already drives, so
+ * the web is not inventing a second, weaker permission model:
+ *
+ *   add_group_participants / remove_group_participant / leave_group_chat /
+ *   delete_group_conversation  — SECURITY DEFINER RPCs that decide authority
+ *   themselves, and refuse a caller who is not entitled.
+ *
+ *   Group name and image are a plain UPDATE on `conversations`, gated by the
+ *   policy "conversations: group admin updates meta":
+ *       USING/WITH CHECK (type = 'group' AND created_by = auth.uid())
+ *   i.e. ONLY the creator, which is exactly the product rule. The client shows
+ *   or hides the control from that same fact; it does not enforce it, and a
+ *   non-creator who bypassed the UI would still be refused by the database.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export async function addGroupParticipants(conversationId: string, userIds: string[]): Promise<void> {
+  const { error } = await getSupabaseBrowser().rpc("add_group_participants", {
+    p_conversation_id: conversationId,
+    p_user_ids: userIds,
+  });
+  if (error) throw error;
+}
+
+export async function removeGroupParticipant(conversationId: string, userId: string): Promise<void> {
+  const { error } = await getSupabaseBrowser().rpc("remove_group_participant", {
+    p_conversation_id: conversationId,
+    p_user_id: userId,
+  });
+  if (error) throw error;
+}
+
+export async function leaveGroupChat(conversationId: string, transferTo?: string | null): Promise<unknown> {
+  const { data, error } = await getSupabaseBrowser().rpc("leave_group_chat", {
+    p_conversation_id: conversationId,
+    p_transfer_to: transferTo ?? null,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/** "Delete for everyone" on a whole custom group. The RPC is the authority on
+ *  who may do this; the web only offers it where mobile offers it. */
+export async function deleteGroupConversation(conversationId: string): Promise<void> {
+  const { error } = await getSupabaseBrowser().rpc("delete_group_conversation", {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
+}
+
+export async function updateGroupMeta(
+  conversationId: string,
+  updates: { name?: string | null; avatar_url?: string | null }
+): Promise<void> {
+  // `.select()` matters. The policy's USING clause means a caller who is not
+  // the creator matches ZERO rows, and PostgREST reports that as success with
+  // no error — so without checking that a row actually came back, an
+  // unauthorised edit would render as a silent, convincing false success.
+  // Requiring the returned row makes the refusal visible instead.
+  const { data, error } = await getSupabaseBrowser()
+    .from("conversations")
+    .update(updates)
+    .eq("id", conversationId)
+    .eq("type", "group")
+    .select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("not_authorized");
+}
+
+/** Officer-authorised club channel identity. `rename_conversation_channel`
+ *  refuses `kind = 'main'` with `cannot_rename_main`, which is why the rename
+ *  control is offered only on a custom channel while the avatar is offered on
+ *  both — that asymmetry is the backend's rule, not a UI choice. */
+export async function setChannelAvatar(channelId: string, avatarUrl: string | null): Promise<void> {
+  const { error } = await getSupabaseBrowser().rpc("set_channel_avatar", {
+    p_channel_id: channelId,
+    p_avatar_url: avatarUrl,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Group image upload — byte-for-byte the destination mobile already uses
+ * (`avatars` bucket, `<userId>/group-<conversationId>.jpg`, see
+ * `apps/mobile/app/chat/[chatId]/info.tsx`). Same bucket, same path convention
+ * and the same `upsert`, so a group picture set on the phone and one set in the
+ * browser are the same object and the existing `avatars` storage policy — which
+ * keys write access off the leading user-id folder — governs both.
+ */
+export async function uploadGroupAvatar(conversationId: string, file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("Choose an image file.");
+  if (file.size > 5 * 1024 * 1024) throw new Error("That image is larger than 5 MB.");
+  const userId = await requireUserId();
+  const path = `${userId}/group-${conversationId}.jpg`;
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.storage.from("avatars").upload(path, file, {
+    contentType: file.type,
+    upsert: true,
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  // A cache-busting suffix: the path is stable across re-uploads, so without it
+  // every client would keep rendering the previous picture from cache.
+  return `${data.publicUrl}?v=${Date.now()}`;
+}
+
 export async function setChannelMuted(channelId: string, muted: boolean): Promise<void> {
   const { error } = await getSupabaseBrowser().rpc("set_channel_muted", { p_channel_id: channelId, p_muted: muted });
   if (error) throw error;
@@ -912,4 +1054,80 @@ export async function sharedEventIsAvailable(eventId: string): Promise<boolean> 
     .eq("id", eventId)
     .maybeSingle();
   return !!data;
+}
+
+export interface SharedEventPreview {
+  id: string;
+  title: string;
+  emoji: string | null;
+  cover_image_url: string | null;
+  event_date: string;
+  start_time: string | null;
+  club_name: string | null;
+}
+
+export interface SharedPostPreview {
+  id: string;
+  image_url: string | null;
+  caption: string | null;
+  author_username: string | null;
+  author_full_name: string | null;
+  author_avatar_url: string | null;
+  author_id: string | null;
+}
+
+/**
+ * The payload the mobile share cards render, resolved through the SAME RLS the
+ * rest of the app uses.
+ *
+ * These deliberately return `null` — not an error — for a target the viewer may
+ * not see. A deleted event, an audience that no longer includes the viewer, and
+ * an author who has blocked them all produce no row, and the card falls back to
+ * the canonical "no longer available" state exactly as mobile's does.
+ *
+ * The privacy property of the previous id-only probe is preserved in the case
+ * that matters: when the row is not readable, nothing about it is returned.
+ * When it IS readable, these are the same fields the event and post screens
+ * already serve to this viewer.
+ */
+export async function getSharedEventPreview(eventId: string): Promise<SharedEventPreview | null> {
+  const { data, error } = await getSupabaseBrowser()
+    .from("events")
+    .select("id, title, emoji, cover_image_url, event_date, start_time, clubs!club_id(name)")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as any;
+  const club = Array.isArray(row.clubs) ? row.clubs[0] : row.clubs;
+  return {
+    id: row.id,
+    title: row.title,
+    emoji: row.emoji ?? null,
+    cover_image_url: row.cover_image_url ?? null,
+    event_date: row.event_date,
+    start_time: row.start_time ?? null,
+    club_name: club?.name ?? null,
+  };
+}
+
+export async function getSharedPostPreview(postId: string): Promise<SharedPostPreview | null> {
+  const { data, error } = await getSupabaseBrowser()
+    .from("posts")
+    .select("id, image_url, caption, author_id, profiles!author_id(id, username, full_name, avatar_url)")
+    .eq("id", postId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as any;
+  const author = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  return {
+    id: row.id,
+    image_url: row.image_url ?? null,
+    caption: row.caption ?? null,
+    author_username: author?.username ?? null,
+    author_full_name: author?.full_name ?? null,
+    author_avatar_url: author?.avatar_url ?? null,
+    author_id: author?.id ?? row.author_id ?? null,
+  };
 }

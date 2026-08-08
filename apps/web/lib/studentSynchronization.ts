@@ -61,6 +61,23 @@ export function invalidateStudentContentQueries(queryClient: QueryClient): void 
  * The opaque campus signal can mean content was deleted or an event audience
  * narrowed. Clear affected payloads first, then use normal RLS-backed loaders
  * for convergence; never adopt broadcast data as application state.
+ *
+ * `resetQueries`, NOT `removeQueries`. Both discard the cached payload, which
+ * is the privacy requirement, but they treat a query that currently has
+ * observers very differently:
+ *
+ *   • `removeQueries` DESTROYS the query object. An observer mounted against it
+ *     keeps its subscription to a cache entry that no longer exists, and an
+ *     in-flight fetch resolves onto the discarded object — so the component is
+ *     left in `status: "pending" / fetchStatus: "idle"` and never refetches.
+ *     That is a permanent, silent loading state, not a stale-data guard.
+ *   • `resetQueries` returns the query to its initial state AND refetches every
+ *     ACTIVE observer, so the surface reloads under current RLS immediately.
+ *
+ * This was a real, reproducible defect: entering /messages removed the
+ * in-flight `messages` queries, so the conversation list stayed on its skeleton
+ * and the thread pane rendered "This conversation isn't available" for a
+ * conversation the viewer was a participant of.
  */
 export function clearPermissionSensitiveStudentContent(queryClient: QueryClient): void {
   clearPermissionSensitiveEventState(queryClient);
@@ -81,7 +98,7 @@ export function clearPermissionSensitiveStudentContent(queryClient: QueryClient)
     "clubChannels",
     "chatDetails",
   ]) {
-    queryClient.removeQueries({ queryKey: [root] });
+    void queryClient.resetQueries({ queryKey: [root] });
   }
 }
 
