@@ -84,7 +84,19 @@ export function clearPermissionSensitiveStudentContent(queryClient: QueryClient)
     'messages',
     'clubMembers',
   ]) {
-    queryClient.removeQueries({ queryKey: [root] });
+    // `resetQueries`, NOT `removeQueries` — parity with the web client, which
+    // already had this corrected.
+    //
+    // Both discard the cached payload, which is the privacy requirement. They
+    // differ for a query that currently has OBSERVERS: `removeQueries` destroys
+    // the query object, so a mounted screen keeps a subscription to a cache
+    // entry that no longer exists and an in-flight fetch resolves onto the
+    // discarded object — leaving it in `status: "pending" / fetchStatus: "idle"`
+    // with nothing to retry it. That is a permanent, silent loading state, and
+    // it is a plausible cause of the app occasionally never becoming usable.
+    // `resetQueries` clears the data AND refetches every active observer, so the
+    // screen reloads under current RLS instead of hanging.
+    queryClient.resetQueries({ queryKey: [root] });
   }
 }
 

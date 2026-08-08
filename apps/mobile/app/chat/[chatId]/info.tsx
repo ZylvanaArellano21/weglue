@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -121,20 +121,47 @@ export default function ChatInfo() {
   const isParentInfo = isOfficialChat && !channelId;
   const isThreadInfo = isOfficialChat && !!channelId;
 
-  const [channelMeta, setChannelMeta] = useState<ChannelMeta | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (!channelId) {
-      setChannelMeta(null);
-      return;
-    }
-    getChannelMeta(channelId).then((m) => {
-      if (!cancelled) setChannelMeta(m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [channelId]);
+  /**
+   * Bug 6 — the channel's own metadata, keyed by channel.
+   *
+   * This was `useState` + an effect that fetched on channelId change. Two
+   * separate defects came out of that, both visible in the correction
+   * screenshots:
+   *
+   *   • STALE IDENTITY. The state was never cleared when `channelId` changed,
+   *     so moving between two channels kept rendering the PREVIOUS channel's
+   *     name, picture, permission and rename target until the new fetch
+   *     resolved. Keying the query by channelId makes that structurally
+   *     impossible: a new key has no data, it never has the old channel's.
+   *   • REPEATED LOADING. Nothing was cached, so returning to a channel's
+   *     information always refetched from scratch.
+   *
+   * `channelMetaReady` is what the identity block waits on. Without it the
+   * screen fell back to `displayName` — the PARENT conversation's name — so
+   * opening #event first painted "Business Club · Officers" with the club's
+   * initials and then swapped. That is the flash in the screenshots, and it is
+   * exactly the "never render another conversation's name/image, even briefly"
+   * rule.
+   */
+  const { data: channelMetaData, isPending: channelMetaPending } = useQuery({
+    queryKey: ['channelMeta', channelId],
+    queryFn: () => getChannelMeta(channelId!),
+    enabled: !!channelId,
+    staleTime: 60_000,
+  });
+  const channelMeta = channelId ? channelMetaData ?? null : null;
+  const channelMetaReady = !channelId || (!channelMetaPending && !!channelMetaData);
+  // Local, optimistic edits to the cached row (rename, picture, permission) so
+  // an officer's change shows at once without a refetch.
+  const patchChannelMeta = useCallback(
+    (patch: Partial<ChannelMeta>) => {
+      if (!channelId) return;
+      queryClient.setQueryData<ChannelMeta | null>(['channelMeta', channelId], (current) =>
+        current ? { ...current, ...patch } : current,
+      );
+    },
+    [channelId, queryClient],
+  );
 
   const [activeTab, setActiveTab] = useState<ContentTab>('media');
   const [confirm, setConfirm] = useState<
@@ -330,7 +357,7 @@ export default function ChatInfo() {
     try {
       const url = await uploadImageToBucket('avatars', `${userId}/channel-${channelId}.jpg`, localUri, 512);
       await setChannelAvatar(channelId, url);
-      setChannelMeta((m) => (m ? { ...m, avatar_url: url } : m));
+      patchChannelMeta({ avatar_url: url });
       invalidateAll();
     } catch {
       Alert.alert('Could not update the channel picture.');
@@ -343,7 +370,7 @@ export default function ChatInfo() {
     try {
       await renameChannel(channelId, channelRenameValue.trim());
       setChannelRenameOpen(false);
-      setChannelMeta((m) => (m ? { ...m, name: channelRenameValue.trim().toLowerCase().replace(/\s+/g, '-') } : m));
+      patchChannelMeta({ name: channelRenameValue.trim().toLowerCase().replace(/\s+/g, '-') });
       invalidateAll();
     } catch (e: any) {
       Alert.alert('Could not rename channel', e?.message?.includes('cannot_rename_main') ? 'The Main chat cannot be renamed.' : 'Please try again.');
@@ -733,6 +760,18 @@ export default function ChatInfo() {
               <Text style={styles.profileName}>{displayName}</Text>
             </TouchableOpacity>
           </View>
+        ) : isThreadInfo && !channelMetaReady ? (
+          // Bug 6 — a channel's identity is NEVER approximated from its parent.
+          //
+          // Falling through to the block below would render `threadTitle ||
+          // displayName`, and while this channel's own row is still loading
+          // that is the parent conversation's name and initials: opening
+          // #event briefly showed "Business Club · Officers". A loading state
+          // is the honest answer until the correct data exists.
+          <View style={styles.profileSection}>
+            <View style={styles.identityPlaceholder} />
+            <ActivityIndicator color={chatColors.teal} />
+          </View>
         ) : (
           <View style={styles.profileSection}>
             <TouchableOpacity onPress={isThreadInfo ? onChannelPicturePress : onGroupPicturePress} activeOpacity={0.8}>
@@ -1017,7 +1056,7 @@ export default function ChatInfo() {
           currentPermission={channelMeta?.post_permission ?? 'everyone'}
           onClose={() => setPermOpen(false)}
           onSaved={(perm) => {
-            setChannelMeta((m) => (m ? { ...m, post_permission: perm } : m));
+            patchChannelMeta({ post_permission: perm });
             invalidateAll();
             setPermOpen(false);
           }}
@@ -1306,6 +1345,9 @@ const styles = StyleSheet.create({
   overflowBtn: { padding: 4 },
   scroll: { paddingBottom: 32 },
   profileSection: { alignItems: 'center', paddingVertical: 12, paddingHorizontal: 32 },
+  // Reserves exactly the avatar's footprint while a channel's own identity
+  // loads, so the block does not resize when the real picture arrives.
+  identityPlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0,0,0,0.05)', marginBottom: 12 },
   profileName: { ...chatTypography.chatTitle, marginTop: 10, textAlign: 'center' },
   profileUsername: { fontFamily: chatFonts.regular, fontSize: 13, color: chatColors.textMuted, marginTop: 2, textAlign: 'center' },
   editBadge: {
