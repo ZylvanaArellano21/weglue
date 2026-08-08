@@ -50,11 +50,15 @@ export function ClubMediaOverlay({
   const prev = () => setIndex((i) => (i - 1 + photos.length) % photos.length);
   const next = () => setIndex((i) => (i + 1) % photos.length);
 
-  if (!photo) {
-    // The collection emptied (e.g. last item removed) — close.
-    onClose();
-    return <></>;
-  }
+  // The collection emptied (e.g. the last item was removed) — close. This runs
+  // as an EFFECT, not during render: calling the parent's onClose while
+  // rendering sets state on another component mid-render, which React reports
+  // as an error rather than performing the close.
+  useEffect(() => {
+    if (!photo) onClose();
+  }, [photo, onClose]);
+
+  if (!photo) return <></>;
 
   return (
     <Modal
@@ -182,6 +186,14 @@ function PostPanel({
   const [editing, setEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
   const [comment, setComment] = useState("");
+  // MUST be declared with the other hooks, ABOVE the `!post` early return.
+  // It used to sit further down, after that return: on the first render the
+  // post is still loading, so the early return ran and React recorded one
+  // fewer hook. When the query resolved this extra useState appeared and React
+  // threw "Rendered more hooks than during the previous render" — which is why
+  // clicking a club photo produced "Application error: a client-side exception
+  // has occurred" instead of opening the post.
+  const [shareOpen, setShareOpen] = useState(false);
   const commentsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -199,8 +211,6 @@ function PostPanel({
 
   const isAuthor = post.author.id === userId;
   const isFollowing = post.author.is_following;
-
-  const [shareOpen, setShareOpen] = useState(false);
 
   const doReport = () => {
     setMenuOpen(false);

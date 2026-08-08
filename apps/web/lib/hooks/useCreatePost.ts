@@ -15,8 +15,10 @@ export interface TagClub {
   avatar_url: string | null;
 }
 
-/** All active clubs (for the optional "tag a club" picker). */
-export function useAllClubs() {
+/** All active clubs, for the optional "tag a club" picker. Pass `false` when the
+ *  caller already knows the club (posting from inside a Club Profile) so that
+ *  flow never fetches a list it cannot use. */
+export function useAllClubs(enabled = true) {
   return useQuery({
     queryKey: ["allClubs"],
     queryFn: async (): Promise<TagClub[]> => {
@@ -28,6 +30,7 @@ export function useAllClubs() {
         .order("name");
       return (data ?? []) as TagClub[];
     },
+    enabled,
     staleTime: 5 * 60 * 1000,
   });
 }

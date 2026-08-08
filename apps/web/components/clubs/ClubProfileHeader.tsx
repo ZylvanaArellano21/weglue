@@ -27,6 +27,7 @@ export function ClubProfileHeader({
   onEdit,
   onOfficerChat,
   onGroupChat,
+  onOpenPeople,
 }: {
   club: ClubProfileData;
   activeTab: ClubTab;
@@ -36,6 +37,8 @@ export function ClubProfileHeader({
   onEdit: () => void;
   onOfficerChat: () => void;
   onGroupChat: () => void;
+  /** Opens the Members / Gluemates list. Available to officers AND members. */
+  onOpenPeople: (filter: "members" | "gluemates") => void;
 }): JSX.Element {
   return (
     <section className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
@@ -79,8 +82,8 @@ export function ClubProfileHeader({
             (any member, which includes officers). */}
         <div className="flex min-h-[56px] flex-wrap items-start justify-end gap-x-8 gap-y-3 pt-1">
           <div className="flex items-center gap-8">
-            <Stat value={club.member_count} label="Members" />
-            <Stat value={club.gluemates_count} label="Gluemates" />
+            <Stat value={club.member_count} label="Members" onClick={() => onOpenPeople("members")} />
+            <Stat value={club.gluemates_count} label="Gluemates" onClick={() => onOpenPeople("gluemates")} />
           </div>
           {(club.is_officer || club.is_member) && (
             <div className="flex w-[150px] flex-col items-stretch gap-2">
@@ -181,11 +184,26 @@ function ChatPill({
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }): JSX.Element {
+// Both counts open their list (mobile parity). Not gated on club role: an
+// officer and an ordinary member get the same people list.
+function Stat({
+  value,
+  label,
+  onClick,
+}: {
+  value: number;
+  label: string;
+  onClick: () => void;
+}): JSX.Element {
   return (
-    <div className="text-center">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`View ${label}`}
+      className="rounded-lg px-2 py-1 text-center transition hover:bg-black/[0.04] focus:outline-none focus-visible:ring-2"
+    >
       <p className="text-xl font-bold text-gray-900">{value}</p>
       <p className="text-[13px] text-gray-600">{label}</p>
-    </div>
+    </button>
   );
 }

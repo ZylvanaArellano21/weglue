@@ -66,12 +66,18 @@ function Section({
   emptyText,
   isEmpty,
   headerRight,
+  headerAction,
   children,
 }: {
   title: string;
   emptyText: string;
   isEmpty: boolean;
+  /** Controls that only make sense with content (e.g. "See all"). */
   headerRight?: ReactNode;
+  /** Controls that must stay reachable even when the section is empty —
+   *  an officer needs the club's "+ Post" action precisely when there are no
+   *  photos yet. */
+  headerAction?: ReactNode;
   children?: ReactNode;
 }) {
   return (
@@ -87,7 +93,10 @@ function Section({
         <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
           {title}
         </Text>
-        {!isEmpty && headerRight}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          {headerAction}
+          {!isEmpty && headerRight}
+        </View>
       </View>
       {isEmpty ? (
         <Text style={{ fontSize: 13, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
@@ -1002,6 +1011,32 @@ export default function ClubProfileScreen() {
           title="Photos that Glue"
           emptyText="No photos yet"
           isEmpty={club.photos.length === 0}
+          // Officer-only club-profile posting. Opens the SHARED New Post screen
+          // with this club locked on, so the officer gets camera OR gallery plus
+          // a caption and the club is attached permanently. The resulting post
+          // lands in Home → Posts AND in this club profile — one post, not two.
+          // A regular member has no button here and posts from Home, tagging
+          // this club there. `headerAction` (not `headerRight`) so a club with
+          // no photos yet still gives its officers a way to add the first one.
+          headerAction={
+            isOfficer ? (
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({
+                    pathname: '/home/new-post',
+                    params: { lockedClubId: clubId!, lockedClubName: club?.name ?? '' },
+                  } as any)
+                }
+                activeOpacity={0.7}
+                hitSlop={8}
+                accessibilityLabel="Add a photo post to this club"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
+              >
+                <Ionicons name="add" size={16} color={TEAL} />
+                <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_500Medium' }}>Post</Text>
+              </TouchableOpacity>
+            ) : undefined
+          }
           headerRight={
             <TouchableOpacity
               onPress={() =>

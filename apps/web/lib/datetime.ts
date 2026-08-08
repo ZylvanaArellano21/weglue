@@ -179,6 +179,113 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+// ─── Current Monday–Sunday week ──────────────────────────────────────────────
+// One definition of "this week" for the whole web app, anchored to
+// America/Chicago exactly like every other date rule here. Used by the Club-tab
+// sidebar (schedule vs. this-week event) and by the Club Profile's Upcoming
+// Events colours, so those two can never disagree about which week it is.
+
+export interface WeekRange {
+  /** Monday, YYYY-MM-DD */
+  start: string;
+  /** Sunday, YYYY-MM-DD */
+  end: string;
+}
+
+export function currentWeekRange(now: Date = new Date()): WeekRange {
+  const today = dateInAppTz(now);
+  // Noon-UTC anchored so the weekday can never shift by a timezone hour.
+  const weekday = new Date(today + "T12:00:00Z").getUTCDay(); // 0 = Sunday
+  const sinceMonday = (weekday + 6) % 7;
+  const start = addDaysToDateString(today, -sinceMonday);
+  return { start, end: addDaysToDateString(start, 6) };
+}
+
+/** True when a YYYY-MM-DD date falls inside the current Monday–Sunday week. */
+export function isInCurrentWeek(dateStr: string, now: Date = new Date()): boolean {
+  const { start, end } = currentWeekRange(now);
+  return dateStr >= start && dateStr <= end;
+}
+
+// ─── Recurring meeting schedule ──────────────────────────────────────────────
+// Web counterpart of apps/mobile/lib/meetingSchedule.ts. Same parsing rules
+// (clubs.meeting_schedule jsonb, legacy single-day columns as the fallback) and
+// the same "days that share a time collapse onto one line" grouping, rendered
+// in the web's lowercase am/pm style: "Monday, 3:00 pm - 4:00 pm" and
+// "Monday, Wednesday, 3:00 pm - 4:00 pm".
+
+export interface MeetingSlot {
+  day: string;
+  /** 'HH:MM' or 'HH:MM:SS' */
+  start: string | null;
+  end: string | null;
+}
+
+export const WEEK_DAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+] as const;
+
+const DAY_ORDER = new Map<string, number>(WEEK_DAYS.map((d, i) => [d, i]));
+
+/** Parses clubs.meeting_schedule (jsonb) with the legacy single-day fallback. */
+export function parseMeetingSchedule(
+  meetingSchedule: unknown,
+  legacyDay: string | null | undefined,
+  legacyStart: string | null | undefined,
+  legacyEnd: string | null | undefined
+): MeetingSlot[] {
+  let slots: MeetingSlot[] = [];
+
+  if (Array.isArray(meetingSchedule)) {
+    slots = (meetingSchedule as unknown[])
+      .filter(
+        (s): s is { day: string; start?: string | null; end?: string | null } =>
+          !!s && typeof s === "object" && typeof (s as { day?: unknown }).day === "string"
+      )
+      .map((s) => ({ day: s.day, start: s.start ?? null, end: s.end ?? null }))
+      .filter((s) => DAY_ORDER.has(s.day));
+  }
+
+  if (slots.length === 0 && legacyDay && DAY_ORDER.has(legacyDay)) {
+    slots = [{ day: legacyDay, start: legacyStart ?? null, end: legacyEnd ?? null }];
+  }
+
+  // One slot per day, in week order.
+  const byDay = new Map<string, MeetingSlot>();
+  for (const slot of slots) if (!byDay.has(slot.day)) byDay.set(slot.day, slot);
+  return [...byDay.values()].sort((a, b) => (DAY_ORDER.get(a.day) ?? 0) - (DAY_ORDER.get(b.day) ?? 0));
+}
+
+/**
+ * Display lines for a recurring schedule. Days sharing the same start+end
+ * collapse into one line; different times get their own line.
+ *   [{Monday 15:00-16:00}]                     → ["Monday, 3:00 pm - 4:00 pm"]
+ *   [{Monday 15:00-16:00},{Wednesday 15:00-16:00}]
+ *                                              → ["Monday, Wednesday, 3:00 pm - 4:00 pm"]
+ * A day with no time set renders as just the day name.
+ */
+export function formatMeetingSchedule(slots: MeetingSlot[]): string[] {
+  const byTime = new Map<string, { days: string[]; time: string }>();
+  for (const slot of slots) {
+    const key = `${slot.start ?? ""}|${slot.end ?? ""}`;
+    const start = slot.start ? formatEventTime(slot.start) : "";
+    const end = slot.end ? formatEventTime(slot.end) : "";
+    const time = start && end ? `${start} - ${end}` : start || end || "";
+    const entry = byTime.get(key) ?? { days: [], time };
+    entry.days.push(slot.day);
+    byTime.set(key, entry);
+  }
+  return [...byTime.values()]
+    .sort((a, b) => (DAY_ORDER.get(a.days[0]!) ?? 0) - (DAY_ORDER.get(b.days[0]!) ?? 0))
+    .map((group) => (group.time ? `${group.days.join(", ")}, ${group.time}` : group.days.join(", ")));
+}
+
 /** "Building F, Room 219" with free-text location fallback (mirrors mobile). */
 export function formatEventLocation(
   building: string | null | undefined,

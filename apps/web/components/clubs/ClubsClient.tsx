@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ToastProvider } from "../shared/Toast";
+import { ToastProvider, useToast } from "../shared/Toast";
 import { AppHeader } from "../home/AppHeader";
 import { ClubSidebar } from "./ClubSidebar";
 import { ClubCatalog } from "./ClubCatalog";
+import { LeaveClubDialog } from "./LeaveClubDialog";
 import { useMyClubs, useDiscoveryClubs, useJoinClubFromCatalog } from "../../lib/hooks/useClubTab";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications } from "../../lib/hooks/useNotifications";
@@ -16,15 +17,26 @@ import type { SidebarClub, CatalogClub } from "../../lib/clubs/clubService";
 // clubs stay exactly where they are, non-matches disappear, empty sections hide.
 // Suggested excludes joined clubs; Popular keeps them (shows "Joined").
 export function ClubsClient({ userId, scrollToSuggested }: { userId: string; scrollToSuggested?: boolean }): JSX.Element {
+  return (
+    <ToastProvider>
+      <Body userId={userId} scrollToSuggested={scrollToSuggested} />
+    </ToastProvider>
+  );
+}
+
+function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested?: boolean }): JSX.Element {
   useUnreadSummary(userId); // live header badges
   useRealtimeNotifications(userId);
   useMyClubsRealtime(userId); // cross-device join/leave reconcile
 
+  const show = useToast();
   const { data: mine } = useMyClubs(userId);
   const { data: catalog } = useDiscoveryClubs(userId);
   const join = useJoinClubFromCatalog(userId);
 
   const [query, setQuery] = useState("");
+  // The club whose Unjoin confirmation is open, if any.
+  const [leaving, setLeaving] = useState<{ id: string; name: string } | null>(null);
   const q = query.trim().toLowerCase();
 
   const matchesSidebar = (c: SidebarClub) =>
@@ -57,12 +69,22 @@ export function ClubsClient({ userId, scrollToSuggested }: { userId: string; scr
   }, [catalog, q]);
 
   return (
-    <ToastProvider>
-      <div className="min-h-screen bg-cream">
-        <AppHeader userId={userId} />
-        <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-            <div className="hidden lg:block">
+    <>
+      {/* From `lg` up the Clubs tab is a FIXED-height shell: the document itself
+          never scrolls. The club sidebar and the catalog are each their own
+          `overflow-y-auto` region, so a wheel over one moves only that one and
+          the page never drags both together. `min-h-0` is required on every
+          descendant in the chain — without it a flex/grid child refuses to
+          shrink and the scroll silently falls back to the document.
+          Below `lg` the sidebar is not rendered at all, so normal document flow
+          is kept for tablet and phone widths. */}
+      <div className="flex min-h-screen flex-col bg-cream lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
+        <div className="shrink-0">
+          <AppHeader userId={userId} />
+        </div>
+        <main className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:pb-0">
+          <div className="grid grid-cols-1 gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
+            <div className="hidden lg:block lg:min-h-0 lg:overflow-y-auto lg:pb-6">
               <ClubSidebar
                 officerClubs={officerClubs}
                 memberClubs={memberClubs}
@@ -70,11 +92,17 @@ export function ClubsClient({ userId, scrollToSuggested }: { userId: string; scr
                 onQueryChange={setQuery}
               />
             </div>
-            <div>
+            <div className="lg:min-h-0 lg:overflow-y-auto lg:pb-6">
               <ClubCatalog
                 suggested={suggested}
                 popular={popular}
-                onJoin={(id) => join.mutate(id)}
+                onJoin={(club) =>
+                  join.mutate(club.id, {
+                    onSuccess: () => show("Joined club! 🎉"),
+                    onError: () => show("Something went wrong. Try again.", "error"),
+                  })
+                }
+                onLeave={(club) => setLeaving(club)}
                 joiningId={join.isPending ? (join.variables ?? null) : null}
                 hasQuery={q.length > 0}
                 scrollToSuggested={scrollToSuggested}
@@ -83,6 +111,22 @@ export function ClubsClient({ userId, scrollToSuggested }: { userId: string; scr
           </div>
         </main>
       </div>
-    </ToastProvider>
+
+      {/* Unjoining from the catalog runs the SAME dialog the Club Profile uses,
+          which runs the SAME useToggleClubMembership / leave_club RPC. There is
+          one membership implementation, one confirmation copy and one
+          only-officer guard; the shared query invalidation keeps the sidebar,
+          the catalog, Home and the Club Profile in step afterwards. */}
+      {leaving && (
+        <LeaveClubDialog
+          clubId={leaving.id}
+          clubName={leaving.name}
+          userId={userId}
+          onClose={() => setLeaving(null)}
+          onLeft={() => show("You left the club.")}
+          onError={(message) => show(message, "error")}
+        />
+      )}
+    </>
   );
 }
