@@ -49,6 +49,8 @@ import {
   setConversationArchived,
   setConversationMuted,
   attachmentObjectUrl,
+  permissionSelectValue,
+  postingPermissionOptions,
   releaseAttachmentUrl,
   unsendFailureMessage,
   uploadAttachment,
@@ -601,7 +603,12 @@ function ChannelHub({ conversationId, conversationName, userId, participants, is
           `kind === "channel"`: Main chat is a permanent, structural thread and
           must never pick up a custom channel's destructive actions. */}
       {isOfficer && <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3 text-xs" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
-        <label className="font-semibold text-gray-600">Posting <select value={channel.post_permission} aria-label={`Who can post in ${channelLabel(channel)}`} onChange={(event) => { const permission = event.target.value as PostingPermission; if (permission === "certain") { setConfiguring(channel); } else void onSetPermission(channel.id, permission, []); }} className="ml-1 rounded border bg-white px-1 py-1"><option value="everyone">{isOfficersChat ? "All officers" : "Everyone"}</option><option value="officers">Only officers</option><option value="certain">Certain people</option></select></label>
+        {/* Bug 7 — an Officers conversation offers only "Everyone in this chat"
+            and "Certain people". Everyone inside it is already an officer, so
+            "Only officers" selected exactly the same people and meant nothing.
+            A channel still stored as 'officers' displays as the everyone option
+            (see permissionSelectValue) rather than showing a blank select. */}
+        <label className="font-semibold text-gray-600">Posting <select value={permissionSelectValue(channel.post_permission, isOfficersChat)} aria-label={`Who can post in ${channelLabel(channel)}`} onChange={(event) => { const permission = event.target.value as PostingPermission; if (permission === "certain") { setConfiguring(channel); } else void onSetPermission(channel.id, permission, []); }} className="ml-1 rounded border bg-white px-1 py-1">{postingPermissionOptions(isOfficersChat).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {channel.kind === "channel" && <>
           <button type="button" onClick={() => { const next = window.prompt("New channel name", channel.name); if (next?.trim()) void onRenameChannel(channel.id, next.trim()); }} className="rounded border px-2 py-1 font-semibold text-teal hover:bg-teal/5">Rename</button>
           <button type="button" onClick={() => { if (window.confirm(`Delete #${channel.name}? This also removes its messages.`)) void onDeleteChannel(channel.id); }} className="rounded border border-red-200 px-2 py-1 font-semibold text-red-600 hover:bg-red-50">Delete</button>
@@ -1579,13 +1586,21 @@ function InfoTabButton({ tab, active, onClick }: { tab: InfoTab; active: boolean
 }
 
 /**
- * "Who can post" — the exact three options mobile offers, with mobile's own
- * context-dependent wording (an officers-only conversation says "All officers"
- * where a members conversation says "Everyone"). This does not invent a
- * permission model; it drives the same `set_channel_post_permission` RPC.
+ * "Who can post" — the same options mobile offers, from the one shared
+ * definition in `postingPermissionOptions` so the two platforms cannot drift.
+ *
+ * Bug 7: an Officers conversation offers "Everyone in this chat" and "Certain
+ * people" only. This does not invent a permission model; it drives the same
+ * `set_channel_post_permission` RPC with the same stored values.
+ *
+ * "Certain people" lists `participants` — the roster of THIS conversation — so
+ * it never searches the wider We Glue user base, and one or several people may
+ * be selected. Posting access also cannot outlive membership: 041's
+ * `cleanup_channel_posters_on_leave` trigger deletes a person's `channel_posters`
+ * rows when they leave the conversation.
  */
 function PermissionsSheet({ channel, participants, isOfficersChat, onClose, onSave }: { channel: Channel; participants: Array<Person & { role: string }>; isOfficersChat: boolean; onClose: () => void; onSave: (permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
-  const [permission, setPermission] = useState<PostingPermission>(channel.post_permission);
+  const [permission, setPermission] = useState<PostingPermission>(permissionSelectValue(channel.post_permission, isOfficersChat));
   const [allowed, setAllowed] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1599,12 +1614,7 @@ function PermissionsSheet({ channel, participants, isOfficersChat, onClose, onSa
     void getChannelPosters(channel.id).then((ids) => { if (alive) setAllowed(ids); }).catch(() => {});
     return () => { alive = false; };
   }, [channel.id, channel.post_permission]);
-  const everyoneLabel = isOfficersChat ? "All officers" : "Everyone";
-  const options: Array<[PostingPermission, string, string]> = [
-    ["everyone", everyoneLabel, "Every member of this conversation can post."],
-    ["officers", "Only officers", "Members can read; only officers can post."],
-    ["certain", "Certain people", "Only the people you select can post."],
-  ];
+  const options = postingPermissionOptions(isOfficersChat);
   const save = async () => {
     setSaving(true);
     try { await onSave(permission, allowed); onClose(); }

@@ -24,6 +24,46 @@ export type ConversationType = "direct" | "group" | "club_group" | "officer_chat
 export type MessageType = "text" | "image" | "video" | "file" | "poll" | "shared_event" | "shared_post";
 export type PostingPermission = "everyone" | "officers" | "certain";
 
+/**
+ * Bug 7 — who may post, per conversation kind.
+ *
+ * Officers chat: "Everyone in this chat" (the default) and "Certain people".
+ * Everyone inside an Officers conversation is already an officer, so the old
+ * "All officers" / "Only officers" pair selected an identical set of people and
+ * the distinction meant nothing.
+ *
+ * Members chat: the existing role-based model is deliberately UNCHANGED. There
+ * the officer/member distinction is real, so "Everyone", "Only officers" and
+ * "Certain people" all stay.
+ *
+ * No migration is needed. The stored values remain the existing
+ * ('everyone' | 'officers' | 'certain') set — an Officers conversation simply
+ * stops offering 'officers', and `permissionSelectValue` displays a channel
+ * still stored that way as the everyone option. `can_post_in_channel` is
+ * untouched, and because every participant of an Officers conversation is an
+ * officer, 'officers' and 'everyone' authorise the same people there: nobody's
+ * ability to post changes.
+ */
+export function postingPermissionOptions(isOfficersChat: boolean): Array<[PostingPermission, string, string]> {
+  return isOfficersChat
+    ? [
+        ["everyone", "Everyone in this chat", "Everyone currently in this chat can post."],
+        ["certain", "Certain people", "Only the people you select from this chat can post."],
+      ]
+    : [
+        ["everyone", "Everyone", "Every member of this conversation can post."],
+        ["officers", "Only officers", "Members can read; only officers can post."],
+        ["certain", "Certain people", "Only the people you select can post."],
+      ];
+}
+
+/** The option a stored permission should appear as. In an Officers chat a row
+ *  still stored as 'officers' shows as "Everyone in this chat" rather than
+ *  leaving the control with no matching option. */
+export function permissionSelectValue(stored: PostingPermission, isOfficersChat: boolean): PostingPermission {
+  return isOfficersChat && stored === "officers" ? "everyone" : stored;
+}
+
 export interface Person {
   user_id: string;
   username: string;

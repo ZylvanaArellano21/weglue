@@ -1131,15 +1131,46 @@ function PermissionEditor({
 
   useEffect(() => {
     if (!visible) return;
-    setPerm(currentPermission);
+    // Bug 7 — an Officers conversation has no "only officers" state.
+    //
+    // Everyone inside it is already an officer, so 'officers' and 'everyone'
+    // select exactly the same people there. Rows already stored as 'officers'
+    // (every officers channel seeded by 041's #announcements rule, and anything
+    // an officer chose before this change) are shown as "Everyone in this chat"
+    // and normalise to 'everyone' the next time the sheet is saved. Nothing is
+    // rewritten behind the officer's back, and no one's ability to post changes.
+    setPerm(isOfficersChat && currentPermission === 'officers' ? 'everyone' : currentPermission);
     if (currentPermission === 'certain') {
       getChannelPosters(channelId).then((ids) => setSelected(new Set(ids)));
     } else {
       setSelected(new Set());
     }
-  }, [visible, currentPermission, channelId]);
+  }, [visible, currentPermission, channelId, isOfficersChat]);
 
-  const everyoneLabel = isOfficersChat ? 'All officers' : 'Everyone';
+  /**
+   * Bug 7 — the option set differs by conversation kind.
+   *
+   * Officers chat: "Everyone in this chat" (default) and "Certain people".
+   * Members chat: the existing role-based model is deliberately unchanged —
+   * "Everyone", "Only officers", "Certain people" — because there the officer/
+   * member distinction is real and load-bearing.
+   *
+   * "Certain people" already draws from `participants`, which is THIS
+   * conversation's roster, so it never searches the wider We Glue user base;
+   * and `cleanup_channel_posters_on_leave` (041) deletes a person's
+   * channel_posters rows when they leave the conversation, so posting access
+   * cannot outlive membership of the Officers chat.
+   */
+  const permissionOptions: Array<[PostPermission, string, string]> = isOfficersChat
+    ? [
+        ['everyone', 'Everyone in this chat', 'Everyone currently in this chat can post.'],
+        ['certain', 'Certain people', 'Only the people you select from this chat can post.'],
+      ]
+    : [
+        ['everyone', 'Everyone', 'Every member of this conversation can post.'],
+        ['officers', 'Only officers', 'Members can read; only officers can post.'],
+        ['certain', 'Certain people', 'Only the people you select can post.'],
+      ];
 
   async function save() {
     setSaving(true);
@@ -1159,11 +1190,7 @@ function PermissionEditor({
         <View style={styles.sheetCard}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>Who can post</Text>
-          {([
-            ['everyone', everyoneLabel, 'Every member of this conversation can post.'],
-            ['officers', 'Only officers', 'Members can read; only officers can post.'],
-            ['certain', 'Certain people', 'Only the people you select can post.'],
-          ] as Array<[PostPermission, string, string]>).map(([value, label, desc]) => (
+          {permissionOptions.map(([value, label, desc]) => (
             <TouchableOpacity key={value} style={styles.permRow} onPress={() => setPerm(value)} activeOpacity={0.7}>
               <Ionicons name={perm === value ? 'radio-button-on' : 'radio-button-off'} size={20} color={perm === value ? chatColors.teal : chatColors.textMuted} />
               <View style={styles.permText}>
