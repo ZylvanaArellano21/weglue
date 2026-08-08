@@ -13,7 +13,6 @@ export const calendarColors = {
   gridBorder: '#E5E7EB',
   trailingDayBg: '#F0F4FF',
   trailingDayText: '#9CA3AF',
-  linkBtnBorder: '#D1D5DB',
 } as const;
 
 export const calendarFonts = {
@@ -54,7 +53,6 @@ export const calendarSizes = {
   eventCardRadius: 12,
   eventCardBorderWidth: 4,
   searchPillRadius: 24,
-  linkBtnRadius: 28,
   dotSize: 8,
   dotGap: 6,
 } as const;
@@ -110,10 +108,5 @@ export const calendarTypography = {
     fontFamily: calendarFonts.semiBold,
     fontSize: 15,
     color: calendarColors.teal,
-  },
-  linkBtn: {
-    fontFamily: calendarFonts.semiBold,
-    fontSize: 14,
-    color: calendarColors.textDark,
   },
 } satisfies Record<string, TextStyle>;

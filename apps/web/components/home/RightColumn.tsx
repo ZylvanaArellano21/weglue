@@ -7,8 +7,8 @@ import { CalendarModal } from "./CalendarModal";
 
 // Right column: Upcoming Events + the small calendar, plus the expanded
 // calendar overlay. Opening an event (from either) routes through onOpenEvent
-// so the shared event-detail overlay handles it. Note: the mobile design's
-// "Link to my calendar" button is intentionally NOT built here (spec §20).
+// so the shared event-detail overlay handles it. External-calendar linking is
+// not a We Glue feature on any platform — the calendar is filled by RSVP/Going.
 export function RightColumn({
   userId,
   onOpenEvent,

@@ -139,3 +139,28 @@ export function invalidateRsvpQueries(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: ['calendarDayEvents'] });
   queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
 }
+
+/**
+ * The save/unsave counterpart of invalidateRsvpQueries: ONE place listing every
+ * cache a bookmark changes, so the Saved Events screen and every bookmark icon
+ * refresh together. Mirrors the web's invalidateEventState.
+ *
+ * Saving used to invalidate only the Home feed. Because savedEventsUpcoming
+ * carries a 2-minute staleTime, an already-cached (empty) Saved Events list was
+ * served straight from cache after a save — the row was in the database, the
+ * bookmark icon was filled, and Saved Events still said "No upcoming saved
+ * events". It only appeared to be a persistence bug.
+ */
+export function invalidateSaveQueries(queryClient: QueryClient): void {
+  queryClient.invalidateQueries({ queryKey: ['savedEventsUpcoming'] });
+  queryClient.invalidateQueries({ queryKey: ['savedEventsPast'] });
+  queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
+  queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
+  // Every other surface that renders an is_saved bookmark icon.
+  queryClient.invalidateQueries({ queryKey: ['calendarEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['calendarDayEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['discoveryEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['discoverySearch'] });
+}

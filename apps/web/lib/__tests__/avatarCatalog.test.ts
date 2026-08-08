@@ -112,7 +112,9 @@ describe("cross-platform preset avatar integration", () => {
       "apps/web/components/home/EventDetailModal.tsx",
       "apps/web/app/admin/users/[id]/page.tsx",
       "apps/mobile/components/home/PostCard.tsx",
-      "apps/mobile/components/home/CommentsSheet.tsx",
+      // Comments is the transparent-modal route; the old CommentsSheet
+      // component was an unused duplicate and has been removed.
+      "apps/mobile/app/comments/[postId].tsx",
       "apps/mobile/components/chat/ChatListItem.tsx",
       "apps/mobile/app/chat/[chatId]/index.tsx",
       "apps/mobile/app/chat/new-message.tsx",

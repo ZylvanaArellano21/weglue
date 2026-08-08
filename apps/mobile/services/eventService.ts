@@ -249,25 +249,36 @@ export async function rsvpToEvent(
   }
 }
 
+// Returns the resulting saved state. Every step throws on error: a save that
+// the database rejected must NOT report success, or the bookmark fills in while
+// nothing was written and Saved Events legitimately comes back empty.
 export async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean> {
-  const { data: existing } = await supabase
+  const { data: existing, error: readError } = await supabase
     .from('saved_events')
     .select('id')
     .eq('user_id', userId)
     .eq('event_id', eventId)
     .maybeSingle();
+  if (readError) throw readError;
 
   if (existing) {
-    await supabase
+    const { error } = await supabase
       .from('saved_events')
       .delete()
       .eq('user_id', userId)
       .eq('event_id', eventId);
+    if (error) throw error;
     return false;
-  } else {
-    await supabase.from('saved_events').insert({ user_id: userId, event_id: eventId });
-    return true;
   }
+
+  // upsert, not insert: a double-tap (or a row hidden from the read above)
+  // would otherwise trip the UNIQUE(user_id, event_id) constraint and surface
+  // as a failed save even though the event is saved.
+  const { error } = await supabase
+    .from('saved_events')
+    .upsert({ user_id: userId, event_id: eventId }, { onConflict: 'user_id,event_id' });
+  if (error) throw error;
+  return true;
 }
 
 export interface CreateEventInput {

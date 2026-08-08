@@ -4,6 +4,7 @@ import {
   getSavedEventsPast,
 } from '../services/savedEventsService';
 import { toggleSaveEvent } from '../services/eventService';
+import { invalidateSaveQueries } from './useEventRsvp';
 import type { CalendarEvent, CalendarSection } from '../services/calendarService';
 
 export function useSavedEventsUpcoming(userId: string | undefined) {
@@ -84,14 +85,8 @@ export function useUnsaveEvent(userId: string | undefined) {
         queryClient.setQueryData(['savedEventsPast', userId], snapshot.prevPast);
       }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['savedEventsUpcoming', userId] });
-      queryClient.invalidateQueries({ queryKey: ['savedEventsPast', userId] });
-      // Also refresh home feed, calendar, and any open event detail so save
-      // badges stay in sync everywhere.
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-      queryClient.invalidateQueries({ queryKey: ['calendarEvents', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
-    },
+    // The single canonical list of caches a save/unsave touches, shared with
+    // the feed and event-detail bookmark buttons.
+    onSettled: () => invalidateSaveQueries(queryClient),
   });
 }

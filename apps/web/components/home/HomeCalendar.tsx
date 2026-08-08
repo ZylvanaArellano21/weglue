@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CalendarGrid } from "./CalendarGrid";
-import { useCalendarMonthMarkers } from "../../lib/hooks/useCalendar";
+import { useCalendarMonthMarkers, useCalendarSections } from "../../lib/hooks/useCalendar";
 import { todayInAppTz } from "../../lib/datetime";
 
 // Small Home calendar. Defaults to the current month, supports prev/next, marks
@@ -19,6 +19,11 @@ export function HomeCalendar({
   const [y, m] = today.split("-").map(Number);
   const [cursor, setCursor] = useState({ year: y!, month: m! });
   const { data: markers } = useCalendarMonthMarkers(userId, cursor.year, cursor.month);
+  // Shares the Upcoming Events query, so this costs no extra request. Only a
+  // genuinely empty calendar (no upcoming going-RSVPs at all) gets the hint —
+  // it disappears for good once the user has anything on the calendar.
+  const { data: sections, isSuccess } = useCalendarSections(userId);
+  const calendarIsEmpty = isSuccess && (sections?.length ?? 0) === 0;
 
   const shift = (delta: number) => {
     setCursor((c) => {
@@ -43,6 +48,11 @@ export function HomeCalendar({
         onNext={() => shift(1)}
         size="sm"
       />
+      {calendarIsEmpty && (
+        <p className="mt-3 text-center text-xs text-gray-400">
+          RSVP or tap Going to add events here.
+        </p>
+      )}
       <button
         type="button"
         onClick={() => onExpand(null)}

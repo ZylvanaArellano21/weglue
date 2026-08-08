@@ -13,8 +13,8 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
 import { CalendarGrid } from '../../../components/calendar/CalendarGrid';
 import { CalendarEventCard } from '../../../components/calendar/CalendarEventCard';
-import { LinkCalendarButton } from '../../../components/calendar/LinkCalendarButton';
-import { SearchEventsPill } from '../../../components/calendar/SearchEventsPill';
+import { CalendarEmptyState } from '../../../components/calendar/CalendarEmptyState';
+import { CalendarDayEmptyNotice } from '../../../components/calendar/CalendarDayEmptyNotice';
 import { calendarColors, calendarTypography } from '../../../components/calendar/calendarTheme';
 import {
   useCalendarSections,
@@ -60,7 +60,14 @@ export default function CalendarScreen() {
 
   const today = todayInAppTz();
 
+  // Date the user tapped that turned out to have no events. Cleared as soon as
+  // they open a day that does have events, or navigate months.
+  const [emptyDayDate, setEmptyDayDate] = useState<string | null>(null);
+
+  // Month navigation is unchanged; it only also drops the tapped-day notice,
+  // whose date is no longer on screen.
   const handlePrevMonth = useCallback(() => {
+    setEmptyDayDate(null);
     if (displayMonth === 1) {
       setDisplayYear((y) => y - 1);
       setDisplayMonth(12);
@@ -70,6 +77,7 @@ export default function CalendarScreen() {
   }, [displayMonth]);
 
   const handleNextMonth = useCallback(() => {
+    setEmptyDayDate(null);
     if (displayMonth === 12) {
       setDisplayYear((y) => y + 1);
       setDisplayMonth(1);
@@ -85,7 +93,11 @@ export default function CalendarScreen() {
         .filter((e) => e.event_date === date)
         .sort((a, b) => a.start_time.localeCompare(b.start_time));
 
-      if (dayEvents.length === 0) return;
+      if (dayEvents.length === 0) {
+        setEmptyDayDate(date);
+        return;
+      }
+      setEmptyDayDate(null);
 
       const isPast = date < today;
 
@@ -116,16 +128,23 @@ export default function CalendarScreen() {
     [today, router],
   );
 
-  const handleSearchPress = useCallback(() => {
-    // "Search for upcoming events" lands on Home → Events (the events feed),
-    // not Home → Posts.
+  const handleFindEvents = useCallback(() => {
+    // Event discovery is unchanged: Home → Events (the events feed), not
+    // Home → Posts. Both calendar CTAs use this same existing destination.
     useHomeTabStore.getState().setActiveTab('events');
     router.push('/(tabs)');
   }, [router]);
 
   const isEmpty = !isLoading && sections.length === 0;
 
-  const listFooter = <LinkCalendarButton />;
+  // Same formatting the web expanded calendar uses for its selected day.
+  const emptyDayLabel = emptyDayDate
+    ? new Date(`${emptyDayDate}T00:00:00`).toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+      })
+    : null;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -151,9 +170,9 @@ export default function CalendarScreen() {
           </TouchableOpacity>
         </View>
       ) : isEmpty ? (
-        <View style={styles.emptyWrap}>
-          <SearchEventsPill onPress={handleSearchPress} />
-        </View>
+        // Nothing in the calendar at all — the onboarding block already
+        // explains RSVP/Going, so the per-day notice would just repeat it.
+        <CalendarEmptyState onFindEvents={handleFindEvents} />
       ) : (
         <SectionList<CalendarEvent, CalendarSection>
           sections={sections}
@@ -172,7 +191,14 @@ export default function CalendarScreen() {
               onPress={() => handleEventPress(item)}
             />
           )}
-          ListFooterComponent={listFooter}
+          ListHeaderComponent={
+            emptyDayLabel ? (
+              <CalendarDayEmptyNotice
+                label={emptyDayLabel}
+                onFindEvents={handleFindEvents}
+              />
+            ) : null
+          }
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           stickySectionHeadersEnabled={false}
@@ -227,10 +253,5 @@ const styles = StyleSheet.create({
     color: calendarColors.white,
     fontSize: 14,
     fontFamily: calendarTypography.eventTitle.fontFamily,
-  },
-  emptyWrap: {
-    flex: 1,
-    alignItems: 'center',
-    paddingTop: 24,
   },
 });

@@ -96,9 +96,8 @@ export default async function AuthConfirmPage({ searchParams }: PageProps): Prom
               </div>
 
               <p className="text-sm text-gray-600 leading-relaxed">
-                You can go back to We Glue now and click the{" "}
-                <span className="text-[#0FA6A6] font-semibold">&ldquo;Next&rdquo;</span>{" "}
-                button.
+                You can go back to We Glue now and click{" "}
+                <span className="text-[#0FA6A6] font-semibold">Login</span>.
               </p>
 
               {/* Only appears when this browser started a WEB signup. */}
@@ -148,8 +147,8 @@ export default async function AuthConfirmPage({ searchParams }: PageProps): Prom
 
               <p className="text-xs text-gray-400 leading-relaxed mt-4">
                 Already tapped a link before? Your email may be verified
-                already — go back to We Glue and tap{" "}
-                <span className="font-semibold">&ldquo;Next&rdquo;</span>.
+                already — go back to We Glue and click{" "}
+                <span className="font-semibold">Login</span>.
               </p>
             </>
           )}
