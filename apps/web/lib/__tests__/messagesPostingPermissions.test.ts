@@ -21,7 +21,7 @@ describe("posting permission options", () => {
   });
 
   it("defaults an Officers chat to Everyone in this chat", () => {
-    expect(officers[0][0]).toBe("everyone");
+    expect(values(officers)[0]).toBe("everyone");
   });
 
   it("never offers a redundant officers-only option inside an Officers chat", () => {

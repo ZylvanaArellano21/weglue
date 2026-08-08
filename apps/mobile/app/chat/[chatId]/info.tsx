@@ -80,9 +80,13 @@ import {
 // ─── Chat Information ────────────────────────────────────────────────────────
 // Three distinct screens behind one route, selected by conversation type and
 // the presence of a channelId:
-//   • Parent Conversation Info (official chat, no channelId) — Bug 3/5/6/7:
-//     NO picture, NO content, NO Leave/Delete. Add Person/Share (Members,
-//     officers) + Mute + Archive + people list + 3-dot Report.
+//   • Club Chat Information (official chat, no channelId) — Bug 3/5/6/7 and
+//     Bug 2: the club picture and name, which OPEN THE REAL CLUB PROFILE.
+//     NO content, NO Leave/Delete. Add Person/Share (Members, officers) +
+//     Mute + Archive + people list + 3-dot Report.
+//     The picture here is a link, not an editor: the Club Profile image is
+//     editable only through the Club Profile edit flow, and the per-chat and
+//     per-channel pictures are edited on their own info screens below.
 //   • Main chat / Hashtag Channel Info (official chat, channelId) — Bug 10/11:
 //     own picture, Search, Mute, channel-scoped shared content; officers get
 //     Edit Permissions and (hashtags only) Rename/Delete. NO people/Leave.
@@ -461,6 +465,18 @@ export default function ChatInfo() {
       setRenameOpen(true);
     }
   }
+
+  /**
+   * Bug 2 — the club identity on Club Chat Information opens the REAL Club
+   * Profile.
+   *
+   * It pushes the canonical `/club/[clubId]` route that the rest of the app
+   * uses, so this is the same screen reached from Home, search and a club card
+   * — deliberately NOT a second, chat-local rendering of a club.
+   */
+  function openClubProfile() {
+    if (clubId) router.push(`/club/${clubId}` as any);
+  }
   async function onGroupPicturePress() {
     if (!isGroupAdmin) {
       onIdentityPress();
@@ -692,9 +708,30 @@ export default function ChatInfo() {
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* ─── Identity block ─── */}
         {isParentInfo ? (
-          // Parent conversation: NO picture (Bug 2).
+          // Bug 2 — Club Chat Information carries the club picture and name,
+          // and BOTH open the real Club Profile. They are two taps on the same
+          // destination so "tap the picture" and "tap the name" can never
+          // resolve differently. No camera badge: this image is changed only
+          // through the Club Profile edit flow.
           <View style={styles.profileSection}>
-            <Text style={styles.profileName}>{displayName}</Text>
+            <TouchableOpacity
+              onPress={openClubProfile}
+              activeOpacity={0.8}
+              disabled={!clubId}
+              accessibilityRole="button"
+              accessibilityLabel={`Open the ${displayName} club profile`}
+            >
+              <Avatar uri={chatDetails.avatar_url} size={80} username={displayName} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={openClubProfile}
+              activeOpacity={0.7}
+              disabled={!clubId}
+              accessibilityRole="button"
+              accessibilityLabel={`Open the ${displayName} club profile`}
+            >
+              <Text style={styles.profileName}>{displayName}</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.profileSection}>

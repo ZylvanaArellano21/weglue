@@ -278,7 +278,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
       await queryClient.invalidateQueries({ queryKey: messageKeys.hub(conversationId, userId) });
       await queryClient.invalidateQueries({ queryKey: messageKeys.channels(conversationId) });
     };
-    center = <ChannelHub conversationId={conversationId} conversationName={details.name} userId={userId} participants={details.participants} isOfficer={viewerIsOfficer} isOfficersChat={details.type === "officer_chat"} onOpenChannel={(channel) => destination({ filter: "groups", conversationId, channelId: channel.id })} onBack={clearSelection} onCreateChannel={async (name) => {
+    center = <ChannelHub conversationId={conversationId} conversationName={details.name} conversationAvatarUrl={details.avatar_url} userId={userId} participants={details.participants} isOfficer={viewerIsOfficer} isOfficersChat={details.type === "officer_chat"} onOpenChannel={(channel) => destination({ filter: "groups", conversationId, channelId: channel.id })} onOpenInfo={() => destination({ filter: "groups", conversationId, hub: true, info: true, infoTab })} onBack={clearSelection} onCreateChannel={async (name) => {
       try {
         const channel = await createChannel(conversationId, name);
         show("Channel created");
@@ -327,8 +327,13 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
               render. It must compare against "none". */}
           <MessagesSidebar userId={userId} filter={filter} loading={conversationsLoading} conversations={filter === "single" ? directConversations : groupConversations} suggestionsEnabled={filter === "single" && directConversations.length === 0 && composerMode === "none" && !conversationId && !isDraft} activeConversationId={conversationId} onFilter={setFilter} onOpen={openConversation} onNew={() => setComposerMode("new-message")} onOpenPerson={openPerson} onOpenMessage={openSearchResult} />
           <section className="relative flex min-w-0 flex-col bg-[#fffdf4] md:min-h-0 md:overflow-y-auto">{center}</section>
+          {/* `hub` is carried through every destination below (Bug 2). Club
+              Chat Information is opened FROM the channel list, so closing it,
+              switching its tab or opening a shared event from it must all
+              return to that channel list rather than dropping the person into
+              an empty Messages pane. */}
           {infoOpen && conversationId && details && (
-            <InfoPanel userId={userId} conversationId={conversationId} channelId={channelId} channel={selectedChannel} details={details} isOfficer={viewerIsOfficer} infoTab={infoTab} onClose={() => destination({ filter, conversationId, channelId })} onTab={(tab) => destination({ filter, conversationId, channelId, info: true, infoTab: tab })} onOpenEvent={(eventId) => destination({ filter, conversationId, channelId, info: true, infoTab, eventId })} onOpenMessage={(result) => openSearchResult(result, true)} onOpenProfile={(id) => router.push(`/u/${id}`)} onChanged={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />
+            <InfoPanel userId={userId} conversationId={conversationId} channelId={channelId} channel={selectedChannel} details={details} isOfficer={viewerIsOfficer} infoTab={infoTab} onClose={() => destination({ filter, conversationId, channelId, hub: hubOpen })} onTab={(tab) => destination({ filter, conversationId, channelId, hub: hubOpen, info: true, infoTab: tab })} onOpenEvent={(eventId) => destination({ filter, conversationId, channelId, hub: hubOpen, info: true, infoTab, eventId })} onOpenMessage={(result) => openSearchResult(result, true)} onOpenProfile={(id) => router.push(`/u/${id}`)} onChanged={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />
           )}
         </div>
       </div>
@@ -572,7 +577,7 @@ function DraftThread({ userId, draftPerson, groupName, groupIds, onMaterialized,
   return <ThreadShell title={label} subtitle={draftPerson ? draftPerson.full_name : null}><EmptyThread label="Start the conversation" /><Composer onSend={send} /></ThreadShell>;
 }
 
-function ChannelHub({ conversationId, conversationName, userId, participants, isOfficer, isOfficersChat, onOpenChannel, onBack, onCreateChannel, onRenameChannel, onDeleteChannel, onSetPermission }: { conversationId: string; conversationName: string; userId: string; participants: Array<Person & { joined_at: string; role: string }>; isOfficer: boolean; isOfficersChat: boolean; onOpenChannel: (channel: ChannelPreview) => void; onBack: () => void; onCreateChannel: (name: string) => Promise<void>; onRenameChannel: (channelId: string, name: string) => Promise<void>; onDeleteChannel: (channelId: string) => Promise<void>; onSetPermission: (channelId: string, permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
+function ChannelHub({ conversationId, conversationName, conversationAvatarUrl, userId, participants, isOfficer, isOfficersChat, onOpenChannel, onOpenInfo, onBack, onCreateChannel, onRenameChannel, onDeleteChannel, onSetPermission }: { conversationId: string; conversationName: string; conversationAvatarUrl: string | null; userId: string; participants: Array<Person & { joined_at: string; role: string }>; isOfficer: boolean; isOfficersChat: boolean; onOpenChannel: (channel: ChannelPreview) => void; onOpenInfo: () => void; onBack: () => void; onCreateChannel: (name: string) => Promise<void>; onRenameChannel: (channelId: string, name: string) => Promise<void>; onDeleteChannel: (channelId: string) => Promise<void>; onSetPermission: (channelId: string, permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
   const { data: channels = [], isLoading } = useMessageHub(conversationId, userId);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -580,7 +585,20 @@ function ChannelHub({ conversationId, conversationName, userId, participants, is
   return <div className="mx-auto max-w-2xl px-5 py-6">
     <div className="flex items-center gap-3">
       <button type="button" onClick={onBack} aria-label="Back to messages" className="rounded-full p-2 text-lg text-gray-950 hover:bg-black/5">‹</button>
-      <div className="min-w-0"><h2 className="truncate text-xl font-bold text-gray-900">{conversationName}</h2><p className="text-sm text-gray-500">Choose a chat</p></div>
+      {/* Bug 2 — the club picture and name at the top of the channel list are
+          the entry point to Club Chat Information, matching mobile:
+            channel list → club picture/name → Club Chat Information
+                         → club picture/name → the real Club Profile
+          The web had no way in at all: this header was plain text. */}
+      <button
+        type="button"
+        onClick={onOpenInfo}
+        className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-1 text-left transition hover:bg-black/[0.03] focus:outline-none focus:ring-2 focus:ring-teal"
+        aria-label={`${conversationName} information`}
+      >
+        <Avatar uri={conversationAvatarUrl} size={40} name={conversationName} />
+        <span className="min-w-0"><span className="block truncate text-xl font-bold text-gray-900">{conversationName}<span className="ml-2 text-teal">›</span></span><span className="block text-sm text-gray-500">Choose a chat</span></span>
+      </button>
       {/* Add Channel is officer-only. A member never sees this control, exactly
           as on mobile, where the CHANNELS header carries no action for them. */}
       {isOfficer && !adding && <button type="button" onClick={() => setAdding(true)} className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-teal px-4 py-2 text-sm font-semibold text-teal hover:bg-teal/5"><PlusIcon size={15} />Add Channel</button>}
@@ -1195,6 +1213,21 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
     : isMembersChat || isOfficersChat || isDirect ? null
     : `${details.participants.length} participants`;
   const initials = channel ? (channel.kind === "main" ? "MA" : `#${channel.name.slice(0, 1).toUpperCase()}`) : details.name.slice(0, 1).toUpperCase();
+  // Bug 5 — a channel's own picture is authoritative; the conversation's is the
+  // fallback for one that has never had its own (rows predating migration 078).
+  const identityAvatarUrl = channel ? channel.avatar_url ?? details.avatar_url : details.avatar_url;
+  /**
+   * Bug 2 — where the club identity leads.
+   *
+   * Only on Club Chat Information (the club conversation itself), and only to
+   * the app's canonical `/club/[clubId]` route — the SAME Club Profile reached
+   * from Home, search and a club card. There is deliberately no chat-local
+   * rendering of a club anywhere in Messages.
+   *
+   * A channel's info panel is excluded: its title is the channel, not the club,
+   * so linking it to a club profile would be a mismatched destination.
+   */
+  const clubProfileHref = isParentInfo && details.club_id ? `/club/${details.club_id}` : null;
 
   // Same restriction as the thread: a blocked pair's attachments are withheld
   // from the shared Media/Files panels too. Storage refuses the bytes anyway.
@@ -1383,9 +1416,20 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
       {/* Update 4 / Bug 7 — the group image, with mobile's camera badge shown
           ONLY to a viewer the backend would actually accept an edit from. */}
       <div className="relative mx-auto w-20">
-        {details.avatar_url
-          ? <Avatar uri={details.avatar_url} size={80} name={title} className="mx-auto" />
+        {/* Bug 5 — a channel shows ITS OWN picture, falling back to the
+            conversation's only when it has never had one. Reading
+            `details.avatar_url` unconditionally meant every channel of a club
+            rendered the same image and an officer's per-channel picture was
+            invisible. */}
+        {identityAvatarUrl
+          ? <Avatar uri={identityAvatarUrl} size={80} name={title} className="mx-auto" />
           : <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal text-2xl font-bold text-white">{initials}</div>}
+        {/* Bug 2 — on Club Chat Information the picture opens the REAL Club
+            Profile. It is a transparent overlay button rather than a wrapper so
+            the officer's camera badge below stays independently clickable. */}
+        {clubProfileHref && (
+          <a href={clubProfileHref} aria-label={`Open the ${details.name} club profile`} className="absolute inset-0 rounded-full focus:outline-none focus:ring-2 focus:ring-teal" />
+        )}
         {canEditIdentity && <>
           <button type="button" onClick={() => avatarInputRef.current?.click()} aria-label="Change group picture" className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#fffdf4] bg-teal text-white shadow focus:outline-none focus:ring-2 focus:ring-teal">
             <CameraIcon size={14} />
@@ -1402,7 +1446,13 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
         </form>
       ) : (
         <div className="mt-3 flex items-center justify-center gap-1.5">
-          <h2 className="truncate text-2xl font-bold text-gray-950">{title}</h2>
+          {/* Bug 2 — the name is the same destination as the picture above, so
+              "click the picture" and "click the name" can never resolve
+              differently. A real anchor, so middle-click and open-in-new-tab
+              behave as they do everywhere else in the product. */}
+          {clubProfileHref
+            ? <a href={clubProfileHref} className="truncate rounded text-2xl font-bold text-gray-950 hover:underline focus:outline-none focus:ring-2 focus:ring-teal" aria-label={`Open the ${details.name} club profile`}>{title}</a>
+            : <h2 className="truncate text-2xl font-bold text-gray-950">{title}</h2>}
           {canEditIdentity && <button type="button" onClick={() => { setNameDraft(details.name === "Group chat" ? "" : details.name); setRenaming(true); }} aria-label="Edit group name" className="shrink-0 rounded-full p-1 text-gray-500 hover:bg-black/5"><PencilIcon size={16} /></button>}
         </div>
       )}
