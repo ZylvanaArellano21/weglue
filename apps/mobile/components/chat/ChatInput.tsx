@@ -9,6 +9,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { AttachmentSheet } from './AttachmentSheet';
 import type { AttachmentDraft } from '../../hooks/useConversation';
+import { useComposerBottomInset } from '../../lib/useComposerBottomInset';
 import { chatColors, chatFonts, chatShadow, chatSizes } from './chatTheme';
 
 interface Props {
@@ -51,6 +52,10 @@ export function ChatInput({
   const [text, setText] = useState('');
   const [attachOpen, setAttachOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  // Keeps the composer off the home indicator when the keyboard is closed and
+  // off the keyboard when it is open. The bar is opaque, so this padding is
+  // painted in the chat surface colour rather than exposing anything behind.
+  const bottomInset = useComposerBottomInset();
 
   const effectiveCanPost = canPost !== undefined ? canPost : isRestricted ? isOfficer : true;
   const showPoll = mode === 'group' && !!onOpenPoll;
@@ -58,7 +63,7 @@ export function ChatInput({
 
   if (!effectiveCanPost) {
     return (
-      <View style={styles.restrictedBanner}>
+      <View style={[styles.restrictedBanner, { paddingBottom: 14 + bottomInset }]}>
         <Ionicons name="megaphone-outline" size={16} color={chatColors.textMuted} />
         <Text style={styles.restrictedText}>{blockedReason ?? 'Officers only'}</Text>
       </View>
@@ -75,7 +80,7 @@ export function ChatInput({
 
   return (
     <>
-      <View style={styles.bar}>
+      <View style={[styles.bar, { paddingBottom: 10 + bottomInset }]}>
         <TextInput
           ref={inputRef}
           style={styles.input}

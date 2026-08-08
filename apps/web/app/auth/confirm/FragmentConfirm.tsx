@@ -53,9 +53,8 @@ export default function FragmentConfirm(): JSX.Element | null {
         </div>
 
         <p className="text-sm text-gray-600 leading-relaxed">
-          You can go back to We Glue now and click the{" "}
-          <span className="text-[#0FA6A6] font-semibold">&ldquo;Next&rdquo;</span>{" "}
-          button.
+          You can go back to We Glue now and click{" "}
+          <span className="text-[#0FA6A6] font-semibold">Login</span>.
         </p>
 
         {/* Only appears when this browser started a WEB signup. */}

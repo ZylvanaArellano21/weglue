@@ -39,6 +39,7 @@ import { displayNameOrFallback } from '../../lib/displayName';
 import { markConversationRead } from '../../services/chatService';
 import { setActiveThread, clearActiveThread } from '../../lib/notifications/activeThread';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
+import { useKeyboardVisible } from '../../lib/useComposerBottomInset';
 import { chatColors, chatFonts } from './chatTheme';
 
 // ─── Shared conversation thread ──────────────────────────────────────────────
@@ -95,6 +96,7 @@ export function ConversationThread({
   // Android: edge-to-edge defeats adjustResize, so lift the list + composer
   // above the keyboard ourselves (iOS keeps KeyboardAvoidingView below).
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
+  const keyboardVisible = useKeyboardVisible();
 
   const { data: page } = useThread(conversationId, channelId, currentUserId);
   // Senders whose attachment payload this viewer may not read (a block in
@@ -169,14 +171,16 @@ export function ConversationThread({
     }
   }, [rows.length]);
 
-  // Keep the latest message visible when the Android keyboard opens and the
-  // list resizes underneath the composer.
+  // Keep the latest message visible when the keyboard opens and the list
+  // resizes underneath the composer. Both platforms need this: the viewport
+  // shrinks from the bottom while the scroll offset stays put, so without it
+  // the newest messages end up below the fold.
   useEffect(() => {
-    if (androidKeyboardHeight > 0 && rows.length > 0) {
+    if (keyboardVisible && rows.length > 0) {
       const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
       return () => clearTimeout(t);
     }
-  }, [androidKeyboardHeight, rows.length]);
+  }, [keyboardVisible, rows.length]);
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   useEffect(() => {

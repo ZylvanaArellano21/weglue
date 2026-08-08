@@ -74,7 +74,14 @@ export function CalendarModal({
               {isLoading ? (
                 <div className="h-14 animate-pulse rounded-lg bg-black/5" />
               ) : !dayEvents || dayEvents.length === 0 ? (
-                <p className="text-sm text-gray-400">No events on this day.</p>
+                // An empty day is also the moment to explain how days get
+                // filled — the calendar is driven by RSVP/Going, nothing else.
+                <>
+                  <p className="text-sm text-gray-400">No events on this day.</p>
+                  <p className="mt-1 text-sm text-gray-400">
+                    RSVP or tap Going on an event to add it to your calendar.
+                  </p>
+                </>
               ) : (
                 <div className="space-y-2">
                   {dayEvents.map((event) => (

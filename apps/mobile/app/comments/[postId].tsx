@@ -23,12 +23,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { Avatar } from '../../components/shared/Avatar';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
+import { useComposerBottomInset } from '../../lib/useComposerBottomInset';
 import { usePostComments, useAddComment, usePostDetail } from '../../hooks/useHomePostsFeed';
 import { timeAgo } from '../../components/home/PostCard';
 import type { PostComment } from '../../services/postService';
@@ -41,6 +41,8 @@ export default function CommentsScreen() {
 
   // Android: lift the sheet + composer above the keyboard (iOS keeps KAV).
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
+  // Bottom breathing room, painted INSIDE the opaque sheet in both states.
+  const composerBottomInset = useComposerBottomInset();
   const [draft, setDraft] = useState('');
   const { data: post, isLoading: isPostLoading } = usePostDetail(postId, viewerUserId);
   const { data: comments = [], isLoading } = usePostComments(postId);
@@ -67,23 +69,34 @@ export default function CommentsScreen() {
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
       <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} onPress={close} />
 
+      {/* flex:1 gives the sheet's `maxHeight: '85%'` a DEFINITE height to
+          resolve against. Without it the KAV was content-sized, the percentage
+          could not resolve, and the composer rendered outside the cream box —
+          which is what exposed the feed behind the sheet. box-none keeps
+          backdrop taps reaching the Pressable underneath. */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={Platform.OS === 'android' ? { marginBottom: androidKeyboardHeight } : undefined}
+        pointerEvents="box-none"
+        style={[
+          { flex: 1, justifyContent: 'flex-end' },
+          Platform.OS === 'android' ? { marginBottom: androidKeyboardHeight } : null,
+        ]}
       >
-        <SafeAreaView
+        <View
           style={{
             backgroundColor: '#FEFCF0',
             borderTopLeftRadius: 20,
             borderTopRightRadius: 20,
             maxHeight: '85%',
+            // No composer (deleted post) → the sheet itself carries the inset
+            // so it still reaches the bottom edge opaquely.
+            paddingBottom: post ? 0 : composerBottomInset,
             shadowColor: '#000',
             shadowOffset: { width: 0, height: -4 },
             shadowOpacity: 0.12,
             shadowRadius: 16,
             elevation: 24,
           }}
-          edges={androidKeyboardHeight > 0 ? [] : ['bottom']}
         >
           <View style={{ alignItems: 'center', paddingTop: 8, marginBottom: 2 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB' }} />
@@ -119,7 +132,9 @@ export default function CommentsScreen() {
               keyExtractor={(c) => c.id}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}
-              style={{ minHeight: 120 }}
+              // flexShrink lets the list yield height to the composer instead
+              // of pushing it off the sheet on long comment lists.
+              style={{ minHeight: 120, flexGrow: 0, flexShrink: 1 }}
               ItemSeparatorComponent={() => <View style={{ height: 14 }} />}
               ListEmptyComponent={
                 <Text
@@ -164,7 +179,7 @@ export default function CommentsScreen() {
               gap: 8,
               paddingHorizontal: 16,
               paddingTop: 8,
-              paddingBottom: 16,
+              paddingBottom: composerBottomInset,
               borderTopWidth: 1,
               borderTopColor: '#E5E7EB',
             }}
@@ -210,7 +225,7 @@ export default function CommentsScreen() {
               )}
             </TouchableOpacity>
           </View> : null}
-        </SafeAreaView>
+        </View>
       </KeyboardAvoidingView>
     </View>
   );

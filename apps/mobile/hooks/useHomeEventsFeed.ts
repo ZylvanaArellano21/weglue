@@ -9,6 +9,7 @@ import {
   applyOptimisticRsvp,
   getCurrentRsvpStatus,
   invalidateRsvpQueries,
+  invalidateSaveQueries,
   nextRsvpStatus,
   restoreRsvpSnapshot,
   snapshotRsvpQueries,
@@ -79,8 +80,7 @@ export function useToggleSaveEvent() {
   return useMutation({
     mutationFn: ({ userId, eventId }: { userId: string; eventId: string }) =>
       toggleSaveEvent(userId, eventId),
-    onSuccess: (_data, { userId }) => {
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-    },
+    // Refresh Saved Events too — not just the feed the bookmark was tapped in.
+    onSettled: () => invalidateSaveQueries(queryClient),
   });
 }

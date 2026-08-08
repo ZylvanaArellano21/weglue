@@ -4,6 +4,7 @@ import {
   applyOptimisticRsvp,
   getCurrentRsvpStatus,
   invalidateRsvpQueries,
+  invalidateSaveQueries,
   nextRsvpStatus,
   restoreRsvpSnapshot,
   snapshotRsvpQueries,
@@ -43,9 +44,7 @@ export function useSaveEventMutation(userId: string | undefined, eventId: string
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => toggleSaveEvent(userId!, eventId!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['eventDetail', eventId, userId] });
-      queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
-    },
+    // Refresh Saved Events too — not just this detail screen and the feed.
+    onSettled: () => invalidateSaveQueries(queryClient),
   });
 }
