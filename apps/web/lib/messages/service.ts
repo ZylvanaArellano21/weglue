@@ -299,7 +299,16 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
         id: conversation.id,
         type: conversation.type as ConversationType,
         name,
-        avatar_url: conversation.type === "direct" ? other?.profiles?.avatar_url ?? null : club?.avatar_url ?? conversation.avatar_url ?? null,
+        // Bug 5 — the conversation's OWN picture wins over the club's.
+        //
+        // This was `club?.avatar_url ?? conversation.avatar_url`, i.e. a club
+        // chat rendered the live Club Profile image and ignored whatever
+        // picture the chat actually had. That makes the two permanently
+        // coupled: an officer setting a chat picture would see no change, and
+        // changing the Club Profile would silently restyle every existing chat.
+        // The club image is now only the FALLBACK, for rows created before the
+        // picture was seeded.
+        avatar_url: conversation.type === "direct" ? other?.profiles?.avatar_url ?? null : conversation.avatar_url ?? club?.avatar_url ?? null,
         club_id: conversation.club_id ?? null,
         club_handle: club?.handle ?? null,
         other_user_id: other?.user_id ?? null,
@@ -371,7 +380,9 @@ export async function getConversationDetails(conversationId: string, currentUser
     id: raw.id,
     type: raw.type,
     name,
-    avatar_url: raw.type === "direct" ? other?.profiles?.avatar_url ?? null : raw.clubs?.avatar_url ?? raw.avatar_url ?? null,
+    // Bug 5 — as above: the chat's own picture is authoritative, the club's is
+    // only the fallback for a chat that has never had one.
+    avatar_url: raw.type === "direct" ? other?.profiles?.avatar_url ?? null : raw.avatar_url ?? raw.clubs?.avatar_url ?? null,
     club_id: raw.club_id ?? null,
     created_by: raw.created_by ?? null,
     participants: participants.map((participant) => ({

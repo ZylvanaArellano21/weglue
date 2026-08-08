@@ -90,8 +90,12 @@ describe('Messages people search and suggestions', () => {
             name: 'Stored club name',
             type: 'club_group',
             club_id: 'club-1',
-            avatar_url: 'stale-avatar',
-            clubs: { name: 'Robotics', avatar_url: 'current-avatar' },
+            // Bug 5 — this is the chat's OWN picture, not a stale copy of the
+            // club's. Once seeded at creation (078) the two are independent:
+            // an officer may set a different image per chat and per channel,
+            // and a later Club Profile change must not reach back into them.
+            avatar_url: 'chat-picture',
+            clubs: { name: 'Robotics', avatar_url: 'club-profile-picture' },
           },
         },
       ],
@@ -113,7 +117,10 @@ describe('Messages people search and suggestions', () => {
         name: 'Robotics · Members',
         type: 'club_group',
         club_id: 'club-1',
-        avatar_url: 'current-avatar',
+        // The NAME still resolves live from the club ("Robotics · Members"),
+        // because renaming a club must retitle its chats. Only the PICTURE is
+        // an independent copy.
+        avatar_url: 'chat-picture',
       }],
     });
 
@@ -123,6 +130,50 @@ describe('Messages people search and suggestions', () => {
     expect(inTypes).toHaveBeenCalledWith('conversations.type', ['club_group', 'officer_chat', 'group']);
     expect(ilike).toHaveBeenCalledWith('conversations.name', '%robo%');
     expect(limit).toHaveBeenCalledWith(20);
+  });
+
+  /**
+   * Bug 5 — a club chat falls back to the club picture ONLY when it has never
+   * had one of its own.
+   *
+   * This is the pre-078 case: rows created before the picture was seeded still
+   * carry NULL, and they must keep showing the club image rather than
+   * collapsing to initials. It is the counterpart to the assertion above, and
+   * together the two pin the precedence in both directions so neither can be
+   * flipped back by accident.
+   */
+  it('falls back to the club picture only when the chat has none of its own', async () => {
+    const limit = vi.fn().mockResolvedValue({
+      data: [
+        {
+          conversations: {
+            id: 'club-chat-2',
+            name: 'Stored club name',
+            type: 'officer_chat',
+            club_id: 'club-1',
+            avatar_url: null,
+            clubs: { name: 'Robotics', avatar_url: 'club-profile-picture' },
+          },
+        },
+      ],
+    });
+    const ilike = vi.fn().mockReturnValue({ limit });
+    const inTypes = vi.fn().mockReturnValue({ ilike });
+    const eq = vi.fn().mockReturnValue({ in: inTypes });
+    const select = vi.fn().mockReturnValue({ eq });
+    from.mockReturnValue({ select });
+    rpc.mockResolvedValue({ data: [], error: null });
+
+    const { chats } = await searchChats('viewer-1', 'robo');
+    expect(chats).toEqual([
+      {
+        id: 'club-chat-2',
+        name: 'Robotics · Officers',
+        type: 'officer_chat',
+        club_id: 'club-1',
+        avatar_url: 'club-profile-picture',
+      },
+    ]);
   });
 
   it('does not issue a directory request for a blank search and propagates RPC errors', async () => {
