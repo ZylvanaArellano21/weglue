@@ -354,3 +354,34 @@ export function EllipsisIcon(p: IconProps): JSX.Element {
     </svg>
   );
 }
+
+/** Ionicons `ban-outline` — Block, in the member-row action menu. */
+export function BlockIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M5.6 5.6l12.8 12.8" />
+    </svg>
+  );
+}
+
+/** Ionicons `person-remove-outline` — Remove from group. */
+export function PersonRemoveIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <circle cx="10" cy="8" r="3.6" />
+      <path d="M3.5 20c0-3.3 2.9-5.6 6.5-5.6s6.5 2.3 6.5 5.6" />
+      <path d="M17.5 9.5h4" />
+    </svg>
+  );
+}
+
+/** Ionicons `pencil-outline` — edit the group name (creator only). */
+export function PencilIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+      <path d="M14.5 6.5l3 3" />
+    </svg>
+  );
+}

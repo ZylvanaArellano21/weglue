@@ -16,9 +16,29 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+import { corsHeaders, handlePreflight } from "../_shared/cors.ts";
+
 const DEFAULT_SUPPORT_EMAIL = "zylvana.arellano.campos@gmail.com";
 
+/**
+ * The web reports content by calling this function directly from the browser
+ * (`apps/web/lib/hooks/useReport.ts`), so it needs the same CORS preflight
+ * handling as `delete-message`. Without it the browser never sent the POST and
+ * every web report failed. Wrapping the handler — rather than threading the
+ * headers through each of its ten `json()` call sites — guarantees no response
+ * path can be missed, and keeps the CORS headers per request rather than in
+ * shared mutable state.
+ */
 Deno.serve(async (req) => {
+  const preflight = handlePreflight(req);
+  if (preflight) return preflight;
+  const response = await handleReportEmail(req);
+  const cors = corsHeaders(req.headers.get("Origin"));
+  for (const [key, value] of Object.entries(cors)) response.headers.set(key, value);
+  return response;
+});
+
+async function handleReportEmail(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
   }
@@ -145,7 +165,7 @@ Deno.serve(async (req) => {
     await recordEmailError(admin, reportId, "resend_request_failed");
     return json({ sent: false, reason: "email_failed" }, 200);
   }
-});
+}
 
 async function recordEmailError(
   admin: ReturnType<typeof createClient>,

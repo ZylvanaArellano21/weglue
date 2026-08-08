@@ -157,9 +157,21 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
     };
   }, [queryClient]);
 
+  const firstPathRef = useRef(true);
   useEffect(() => {
-    // A route transition can reveal an inactive cached query. Mark all relevant
+    // A route TRANSITION can reveal an inactive cached query. Mark all relevant
     // surfaces stale first so it cannot render an earlier lifecycle state.
+    //
+    // The first run is deliberately skipped. `Providers` mounts once per
+    // document load with a brand-new QueryClient, so on that pass there is no
+    // cached query to reveal — only the queries the page just started. Clearing
+    // them is not a stale-data guard, it is a guaranteed double fetch of every
+    // student surface on every page load, and it is what made a freshly opened
+    // conversation take a second round trip to appear.
+    if (firstPathRef.current) {
+      firstPathRef.current = false;
+      return;
+    }
     refreshPermissionSensitiveStudentContent(queryClient);
   }, [pathname, queryClient]);
 

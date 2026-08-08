@@ -8,3 +8,4 @@ export * from "./legal/termsAndConditions";
 export * from "./avatarCatalog";
 export * from "./notificationVisuals";
 export * from "./messaging/threadVisibility";
+export * from "./messaging/attachmentPresentation";

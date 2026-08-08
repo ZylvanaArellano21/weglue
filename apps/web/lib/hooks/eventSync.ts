@@ -60,6 +60,13 @@ export function invalidateEventState(
  * Drop event payloads before the next RLS-backed fetch when a capability is
  * lost. Invalidating alone leaves React Query's old successful value renderable
  * while a delayed refetch is in flight.
+ *
+ * `resetQueries`, NOT `removeQueries`: both discard the payload, but
+ * `removeQueries` destroys a query that still has observers, so an in-flight
+ * fetch resolves onto a discarded object and the screen is stranded in a
+ * permanent loading state instead of refetching. That was reproduced on the
+ * Messages route and is the same hazard here — these roots are cleared on every
+ * client route transition, when the screens using them are mounted.
  */
 export function clearPermissionSensitiveEventState(queryClient: QueryClient): void {
   for (const key of [
@@ -79,7 +86,7 @@ export function clearPermissionSensitiveEventState(queryClient: QueryClient): vo
     ["userWeeklyEvents"],
     ["eventAudienceMemberSearch"],
   ]) {
-    queryClient.removeQueries({ queryKey: key });
+    void queryClient.resetQueries({ queryKey: key });
   }
 }
 

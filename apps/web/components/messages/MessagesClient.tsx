@@ -6,11 +6,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
 import { PageOverlays } from "../shared/PageOverlays";
 import { Avatar } from "../shared/Avatar";
+import { ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { CountBadge } from "../shared/CountBadge";
 import {
-  ArchiveIcon, BellOffIcon, CalendarIcon, ChatBubblesIcon, CheckboxIcon, CloseCircleIcon, CloseIcon,
-  EllipsisIcon, ExitIcon, FlagIcon, ImageIcon, ListIcon, LockIcon, MegaphoneIcon, PaperclipIcon,
-  PeopleIcon, PersonAddIcon, PlusIcon, SearchIcon, ShareIcon, TagIcon, TrashIcon,
+  ArchiveIcon, BellOffIcon, BlockIcon, CalendarIcon, CameraIcon, ChatBubbleOutlineIcon, ChatBubblesIcon,
+  CheckboxIcon, CloseCircleIcon, CloseIcon, EllipsisIcon, ExitIcon, FlagIcon, ImageIcon, ListIcon,
+  LockIcon, MegaphoneIcon, PaperclipIcon, PencilIcon, PeopleIcon, PersonAddIcon, PersonRemoveIcon,
+  PlusIcon, SearchIcon, ShareIcon, TagIcon, TrashIcon,
 } from "../shared/icons";
 import { REPORT_RECEIVED_MESSAGE, useReport } from "../../lib/hooks/useReport";
 import { ToastProvider, useToast } from "../shared/Toast";
@@ -18,11 +20,17 @@ import { messageBadgeCounts, useUnreadSummary, useUnreadSummaryValue } from "../
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
 import { useMyClubs } from "../../lib/hooks/useClubTab";
 import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
-import { ATTACHMENT_UNAVAILABLE_TEXT } from "../../lib/blocking";
+import { ATTACHMENT_UNAVAILABLE_TEXT, blockConfirmMessage, blockUser } from "../../lib/blocking";
 import {
+  addGroupParticipants,
   canPostInChannel,
   clientTag,
   createChannel,
+  deleteGroupConversation,
+  leaveGroupChat,
+  removeGroupParticipant,
+  updateGroupMeta,
+  uploadGroupAvatar,
   deleteChannel,
   createGroupConversation,
   createPoll,
@@ -70,6 +78,16 @@ import {
   useMessageThread,
   useMessagesRealtime,
 } from "../../lib/messages/hooks";
+import {
+  ChatFileCard,
+  ChatImage,
+  ChatVideo,
+  EventShareCard,
+  PersonIdentity,
+  PostShareCard,
+  useAttachmentUrl,
+  useSearchHighlight,
+} from "./RichMessage";
 
 type Filter = "single" | "groups";
 type InfoTab = "polls" | "media" | "events" | "files";
@@ -142,11 +160,13 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
     ? (params.get("infoTab") as InfoTab)
     : "polls";
   const [composerMode, setComposerMode] = useState<"none" | "new-message" | "new-group">("none");
+  const targetMessageId = isMessageUuid(params.get("message")) ? params.get("message") : null;
+  const [searchNonce, setSearchNonce] = useState(0);
 
   const { data: conversations = [], isLoading: conversationsLoading } = useMessageConversations(userId);
   const { data: myClubs, isLoading: clubsLoading } = useMyClubs(userId);
   const { data: details, isLoading: detailsLoading } = useMessageDetails(conversationId, userId);
-  const { data: channels = [] } = useMessageChannels(conversationId);
+  const { data: channels = [], isLoading: channelsLoading } = useMessageChannels(conversationId);
   const { data: draftPerson } = useMessagePerson(draftUserId);
   useMessagesRealtime(conversationId, userId);
 
@@ -161,7 +181,14 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
   // It is NOT inferred from chat participation: being in an officers chat and
   // being a current officer are separate facts.
   const viewerIsOfficer = !!details?.participants.some((participant) => participant.user_id === userId && participant.role === "Officer");
-  const hasValidDestination = isDraft || (!conversationId ? true : !!details && (!channelId || !!selectedChannel));
+  // A conversation is "unavailable" ONLY once resolution has actually finished
+  // and produced nothing. While `details` is still loading it is simply unknown,
+  // and the channel list is equally unknown until `channelsLoading` settles —
+  // treating either as invalid is what rendered "This conversation isn't
+  // available" over a conversation the viewer is a participant of.
+  const resolving = !!conversationId && (detailsLoading || (!!channelId && channelsLoading));
+  const hasValidDestination =
+    isDraft || !conversationId || resolving || (!!details && (!channelId || !!selectedChannel));
 
   const destination = useCallback(
     (next: MessagesDestination, replace = false) => {
@@ -202,15 +229,26 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
     destination({ filter: conversation.type === "direct" ? "single" : "groups", conversationId: conversation.id });
   }, [destination]);
 
-  const openSearchResult = useCallback((result: MessageSearchResult) => {
+  // Bug 2. Two separate defects lived here:
+  //   1. `messageId` was written into the URL but nothing ever read it, so the
+  //      thread never scrolled to or marked the selected message.
+  //   2. `info` was dropped, which CLOSED the details panel the search field
+  //      lives in — the "loses the search context" half of the report.
+  // `keepInfo` preserves the panel and its active tab, so results can be
+  // selected one after another without reopening Search.
+  const openSearchResult = useCallback((result: MessageSearchResult, keepInfo = false) => {
     const conversation = conversations.find((item) => item.id === result.conversation_id);
     destination({
       filter: conversation?.type === "direct" ? "single" : "groups",
       conversationId: result.conversation_id,
       channelId: result.channel_id,
       messageId: result.message_id,
+      ...(keepInfo ? { info: true, infoTab } : {}),
     });
-  }, [conversations, destination]);
+    // Selecting the SAME result again must re-trigger the scroll and highlight;
+    // the URL alone would not change, so a nonce drives the effect.
+    setSearchNonce((value) => value + 1);
+  }, [conversations, destination, infoTab]);
 
   const clearSelection = useCallback(() => destination({ filter }), [destination, filter]);
   const setFilter = useCallback((next: Filter) => {
@@ -228,6 +266,10 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
   let center: JSX.Element;
   if (!hasValidDestination || (conversationId && !detailsLoading && !details)) {
     center = <Unavailable onBack={clearSelection} />;
+  } else if (resolving) {
+    // The shell renders immediately so a legitimate load never shows a
+    // not-found, a blank pane, or the "Select a conversation" landing state.
+    center = <ThreadSkeleton />;
   } else if (hubOpen && conversationId && details) {
     const refreshHub = async () => {
       await queryClient.invalidateQueries({ queryKey: messageKeys.hub(conversationId, userId) });
@@ -263,7 +305,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
     // group chat → channels → chat → details path), not to an empty Messages
     // pane, so the previous context is preserved on desktop too.
     const isOfficial = details.type === "club_group" || details.type === "officer_chat";
-    center = <ConversationThread userId={userId} conversationId={conversationId} channelId={channelId} details={details} channelName={selectedChannel ? channelLabel(selectedChannel) : null} canPost={channelId ? undefined : true} onOpenHub={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : undefined} onBack={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : clearSelection} onOpenInfo={() => destination({ filter, conversationId, channelId, info: true, infoTab })} onOpenProfile={(id) => router.push(`/u/${id}`)} onInvalidate={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />;
+    center = <ConversationThread userId={userId} conversationId={conversationId} channelId={channelId} details={details} channelName={selectedChannel ? channelLabel(selectedChannel) : null} canPost={channelId ? undefined : true} targetMessageId={targetMessageId} searchNonce={searchNonce} onOpenHub={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : undefined} onBack={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : clearSelection} onOpenInfo={() => destination({ filter, conversationId, channelId, info: true, infoTab })} onOpenProfile={(id) => router.push(`/u/${id}`)} onOpenEvent={(id) => router.push(`/event/${id}`)} onOpenPost={(id) => router.push(`/post/${id}`)} onInvalidate={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />;
   } else {
     center = <MessagesLanding noClubs={!clubsLoading && !hasClubs} onJoinClub={() => router.push("/clubs")} />;
   }
@@ -283,7 +325,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
           <MessagesSidebar userId={userId} filter={filter} loading={conversationsLoading} conversations={filter === "single" ? directConversations : groupConversations} suggestionsEnabled={filter === "single" && directConversations.length === 0 && composerMode === "none" && !conversationId && !isDraft} activeConversationId={conversationId} onFilter={setFilter} onOpen={openConversation} onNew={() => setComposerMode("new-message")} onOpenPerson={openPerson} onOpenMessage={openSearchResult} />
           <section className="relative flex min-w-0 flex-col bg-[#fffdf4] md:min-h-0 md:overflow-y-auto">{center}</section>
           {infoOpen && conversationId && details && (
-            <InfoPanel userId={userId} conversationId={conversationId} channelId={channelId} channel={selectedChannel} details={details} isOfficer={viewerIsOfficer} infoTab={infoTab} onClose={() => destination({ filter, conversationId, channelId })} onTab={(tab) => destination({ filter, conversationId, channelId, info: true, infoTab: tab })} onOpenEvent={(eventId) => destination({ filter, conversationId, channelId, info: true, infoTab, eventId })} onOpenMessage={openSearchResult} onOpenProfile={(id) => router.push(`/u/${id}`)} onChanged={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />
+            <InfoPanel userId={userId} conversationId={conversationId} channelId={channelId} channel={selectedChannel} details={details} isOfficer={viewerIsOfficer} infoTab={infoTab} onClose={() => destination({ filter, conversationId, channelId })} onTab={(tab) => destination({ filter, conversationId, channelId, info: true, infoTab: tab })} onOpenEvent={(eventId) => destination({ filter, conversationId, channelId, info: true, infoTab, eventId })} onOpenMessage={(result) => openSearchResult(result, true)} onOpenProfile={(id) => router.push(`/u/${id}`)} onChanged={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />
           )}
         </div>
       </div>
@@ -404,6 +446,29 @@ function SidebarSkeleton(): JSX.Element { return <div className="space-y-2 px-1"
 
 function MessagesLanding({ noClubs, onJoinClub }: { noClubs: boolean; onJoinClub: () => void }): JSX.Element {
   return <div className="flex min-h-[480px] items-start justify-center px-6 pt-40">{noClubs ? <button type="button" onClick={onJoinClub} className="w-full max-w-sm rounded-full bg-teal px-8 py-4 text-lg font-semibold text-white shadow-[0_3px_5px_rgba(0,0,0,0.22)] transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-2">Join a Club</button> : <div className="text-center"><p className="text-2xl font-bold text-gray-900 font-zain">Messages</p><p className="mt-2 text-sm text-gray-500">Select a conversation or start a new one.</p></div>}</div>;
+}
+
+/** The conversation shell, shown while a valid destination is still resolving.
+ *  It occupies the thread's real layout (header bar, message area, composer
+ *  strip) so the pane never collapses, flashes the landing state, or claims the
+ *  conversation is missing before resolution has finished. */
+function ThreadSkeleton(): JSX.Element {
+  return (
+    <div className="flex min-h-[calc(100vh-88px)] flex-col md:h-full md:min-h-0" aria-busy="true" aria-live="polite">
+      <header className="flex min-h-[76px] shrink-0 items-center justify-center border-b px-5" style={{ borderColor: "rgba(0,0,0,0.16)" }}>
+        <div className="h-6 w-40 animate-pulse rounded-full bg-black/5" />
+      </header>
+      <div className="min-h-0 flex-1 space-y-3 overflow-hidden px-5 py-5">
+        <div className="h-10 w-1/2 animate-pulse rounded-2xl bg-black/5" />
+        <div className="ml-auto h-10 w-2/5 animate-pulse rounded-2xl bg-black/5" />
+        <div className="h-10 w-1/3 animate-pulse rounded-2xl bg-black/5" />
+      </div>
+      <div className="shrink-0 border-t px-5 py-3" style={{ borderColor: "rgba(0,0,0,0.16)" }}>
+        <div className="h-10 w-full animate-pulse rounded-full bg-black/5" />
+      </div>
+      <span className="sr-only">Loading conversation…</span>
+    </div>
+  );
 }
 
 function Unavailable({ onBack }: { onBack: () => void }): JSX.Element { return <div className="flex min-h-[480px] flex-col items-center justify-center px-6 text-center"><p className="text-xl font-bold text-gray-900">This conversation isn’t available</p><p className="mt-2 text-sm text-gray-500">It may have been removed, or you may no longer have access.</p><button type="button" onClick={onBack} className="mt-5 rounded-full bg-teal px-5 py-2 text-sm font-semibold text-white">Back to Messages</button></div>; }
@@ -547,11 +612,19 @@ function ChannelHub({ conversationId, conversationName, userId, participants, is
   </div>;
 }
 
-function ConversationThread({ userId, conversationId, channelId, details, channelName, canPost: fallbackCanPost, onOpenHub, onBack, onOpenInfo, onOpenProfile, onInvalidate, onError }: { userId: string; conversationId: string; channelId: string | null; details: NonNullable<ReturnType<typeof useMessageDetails>["data"]>; channelName: string | null; canPost?: boolean; onOpenHub?: () => void; onBack?: () => void; onOpenInfo: () => void; onOpenProfile: (id: string) => void; onInvalidate: () => void; onError: (message: string) => void }): JSX.Element {
+function ConversationThread({ userId, conversationId, channelId, details, channelName, canPost: fallbackCanPost, targetMessageId, searchNonce, onOpenHub, onBack, onOpenInfo, onOpenProfile, onOpenEvent, onOpenPost, onInvalidate, onError }: { userId: string; conversationId: string; channelId: string | null; details: NonNullable<ReturnType<typeof useMessageDetails>["data"]>; channelName: string | null; canPost?: boolean; targetMessageId?: string | null; searchNonce?: number; onOpenHub?: () => void; onBack?: () => void; onOpenInfo: () => void; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onInvalidate: () => void; onError: (message: string) => void }): JSX.Element {
   const { data: page, isLoading } = useMessageThread(conversationId, channelId, userId);
   const { data: permitted } = useMessagePermission(channelId);
   const queryClient = useQueryClient();
-  const messages = useMemo(() => [...(page?.messages ?? [])].reverse(), [page?.messages]);
+  const { outgoing, enqueue, retry } = useOutgoingMessages(conversationId, channelId, userId, onInvalidate, onError);
+  const stored = useMemo(() => [...(page?.messages ?? [])].reverse(), [page?.messages]);
+  // A pending message is dropped the moment its stored row arrives, matched on
+  // `client_tag` — the same idempotency key the insert carries — so a send can
+  // never render twice.
+  const messages = useMemo(() => {
+    const storedTags = new Set(stored.map((message) => message.client_tag).filter(Boolean));
+    return [...stored, ...outgoing.filter((message) => !storedTags.has(message.client_tag))];
+  }, [outgoing, stored]);
   const actualCanPost = channelId ? permitted === true : fallbackCanPost !== false;
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -572,18 +645,124 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
     staleTime: 0,
   });
   const restrictedSenders = useMemo(() => new Set(restrictedSenderIds ?? []), [restrictedSenderIds]);
-  const send = async (text: string, file?: File) => {
+  const emptyLabel = channelName && channelName.startsWith("#") ? `No messages in ${channelName} yet` : "No messages yet";
+  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onOpenEvent={onOpenEvent} onOpenPost={onOpenPost} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} isSearchTarget={!!targetMessageId && message.id === targetMessageId} searchNonce={searchNonce} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={enqueue} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
+}
+
+/**
+ * Bug 6 — immediate send.
+ *
+ * The composer previously awaited the WHOLE round trip (for an attachment: the
+ * full upload, then the insert, then a refetch) before anything appeared, so a
+ * photo could be missing from the conversation for as long as the upload took
+ * and then appear with no explanation.
+ *
+ * A local message is now appended the instant the send is requested:
+ *   • text  — appears immediately, replaced by its stored row on success
+ *   • media — the file is turned into a local object URL and rendered at once,
+ *             so the photo is visible while its bytes are still uploading
+ *
+ * Nothing here weakens the write path. The same `sendMessage` insert runs with
+ * the same `client_tag`, so the unique (sender_id, client_tag) index still makes
+ * a retry idempotent, and the message the viewer ends up with is always the
+ * stored row, never the local stand-in.
+ */
+function useOutgoingMessages(
+  conversationId: string,
+  channelId: string | null,
+  userId: string,
+  onSettled: () => void,
+  onError: (message: string) => void
+): { outgoing: ThreadMessage[]; enqueue: (text: string, file?: File) => Promise<void>; retry: (tag: string) => void } {
+  const [outgoing, setOutgoing] = useState<ThreadMessage[]>([]);
+  const previews = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    // Clear pending state when the viewer moves to another thread, and release
+    // every local preview so the blobs are not retained.
+    setOutgoing([]);
+    const urls = previews.current;
+    return () => {
+      urls.forEach((url) => releaseAttachmentUrl(url));
+      urls.clear();
+    };
+  }, [channelId, conversationId]);
+
+  const settle = useCallback((tag: string) => {
+    const preview = previews.current.get(tag);
+    if (preview) {
+      releaseAttachmentUrl(preview);
+      previews.current.delete(tag);
+    }
+    setOutgoing((current) => current.filter((message) => message.client_tag !== tag));
+  }, []);
+
+  const perform = useCallback(async (tag: string, text: string, file?: File) => {
     try {
       if (file) {
         const attachment = await uploadAttachment(conversationId, file);
-        await sendMessage({ conversationId, channelId, content: text, messageType: attachment.type, attachment });
-      } else await sendMessage({ conversationId, channelId, content: text });
-      onInvalidate();
-    } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t send the message."); }
-  };
-  const emptyLabel = channelName && channelName.startsWith("#") ? `No messages in ${channelName} yet` : "No messages yet";
-  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={send} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
+        await sendMessage({ conversationId, channelId, content: text, messageType: attachment.type, attachment, tag });
+      } else {
+        await sendMessage({ conversationId, channelId, content: text, tag });
+      }
+      onSettled();
+      // The stored row is matched on client_tag by the thread, but the local
+      // copy is dropped here too so a slow refetch cannot leave a duplicate.
+      settle(tag);
+    } catch (error) {
+      // A failed send becomes a visible, retryable message rather than silently
+      // disappearing, which is what the old catch produced.
+      setOutgoing((current) =>
+        current.map((message) => (message.client_tag === tag ? { ...message, pending_state: "failed" as const } : message))
+      );
+      onError(error instanceof Error ? error.message : "Couldn’t send the message.");
+    }
+  }, [channelId, conversationId, onError, onSettled, settle]);
+
+  const retry = useCallback((tag: string) => {
+    const message = outgoing.find((item) => item.client_tag === tag);
+    if (!message) return;
+    setOutgoing((current) => current.map((item) => (item.client_tag === tag ? { ...item, pending_state: "sending" as const } : item)));
+    void perform(tag, message.content ?? "", message.pendingFile);
+  }, [outgoing, perform]);
+
+  const enqueue = useCallback(async (text: string, file?: File) => {
+    const tag = clientTag();
+    const preview = file && file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    if (preview) previews.current.set(tag, preview);
+    const type: MessageTypeLocal = file ? (file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file") : "text";
+    setOutgoing((current) => [...current, {
+      id: `pending:${tag}`,
+      conversation_id: conversationId,
+      channel_id: channelId,
+      sender_id: userId,
+      content: text.trim() || null,
+      attachment_url: preview,
+      attachment_name: file?.name ?? null,
+      attachment_size: file?.size ?? null,
+      attachment_mime: file?.type ?? null,
+      message_type: type,
+      shared_event_id: null,
+      shared_post_id: null,
+      poll_id: null,
+      client_tag: tag,
+      created_at: new Date().toISOString(),
+      sender: { id: userId, username: "", full_name: null, avatar_url: null },
+      pending_state: "sending",
+      pendingFile: file,
+    }]);
+    await perform(tag, text, file);
+  }, [channelId, conversationId, perform, userId]);
+
+  const withRetry = useMemo(
+    () => outgoing.map((message) => ({ ...message, onRetry: () => retry(message.client_tag!) })),
+    [outgoing, retry]
+  );
+
+  return { outgoing: withRetry, enqueue, retry };
 }
+
+type MessageTypeLocal = ThreadMessage["message_type"];
 
 function ThreadShell({ title, subtitle, onOpenHub, onBack, onOpenInfo, children }: { title: string; subtitle: string | null; onOpenHub?: () => void; onBack?: () => void; onOpenInfo?: () => void; children: React.ReactNode }): JSX.Element {
   // `md:h-full` (not a viewport min-height) keeps the thread exactly as tall as
@@ -614,70 +793,212 @@ function Composer({ disabled = false, disabledReason, allowPolls = false, onSend
   </form>{pollOpen && onPoll && <PollComposer onClose={() => setPollOpen(false)} onSubmit={async (poll) => { await onPoll(poll); setPollOpen(false); }} />}</>;
 }
 
-function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onChanged, onError, attachmentUnavailable }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean }): JSX.Element {
+/**
+ * One message.
+ *
+ * ONLY a text message wears the coloured bubble. Images, files, polls, shared
+ * events and shared posts render bare, exactly as they do on mobile — the
+ * oversized teal wrapper around a photo or a file in the correction screenshots
+ * is the defect Update 3 removes. The timestamp and the actions menu sit under
+ * whatever was rendered, so their placement does not depend on the payload.
+ */
+function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOpenEvent, onOpenPost, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
   const [menu, setMenu] = useState(false);
-  const [attachment, setAttachment] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(false), []);
   useEscapeAndOutside(menuRef, closeMenu);
-  // Never even request a signed URL for a restricted attachment. Storage would
-  // refuse it anyway; not asking keeps the network log clean too.
-  // Authorization is re-checked by Storage on this fetch, so a block takes
-  // effect immediately and there is no previously-issued link to replay. The
-  // blob: URL is revoked on unmount so it is not retained after access changes.
-  useEffect(() => {
-    let alive = true;
-    let created: string | null = null;
-    if (message.attachment_url && !attachmentUnavailable) {
-      void attachmentObjectUrl(message.attachment_url)
-        .then((url) => { if (alive) { created = url; setAttachment(url); } else { releaseAttachmentUrl(url); } })
-        .catch(() => {});
+  // Never even request the bytes for a restricted attachment: Storage would
+  // refuse them anyway, and not asking keeps the network log clean too.
+  const attachment = useAttachmentUrl(message.attachment_url, attachmentUnavailable);
+  const { ref: highlightRef, highlighted } = useSearchHighlight(!!isSearchTarget, searchNonce ?? 0);
+
+  const pending = message.pending_state === "sending";
+  const failed = message.pending_state === "failed";
+
+  const mutate = async (action: () => Promise<void>, failureMessage: string) => {
+    setMenu(false);
+    try {
+      await action();
+      onChanged();
+    } catch (error) {
+      // Surface the real, actionable reason when the backend gave one rather
+      // than flattening every distinct failure into one opaque sentence.
+      onError(messageActionError(error, failureMessage));
     }
-    return () => { alive = false; releaseAttachmentUrl(created); setAttachment(null); };
-  }, [message.attachment_url, attachmentUnavailable]);
-  const mutate = async (action: () => Promise<void>) => { setMenu(false); try { await action(); onChanged(); } catch { onError("Couldn’t update the message."); } };
-  return <div className={`mb-3 flex gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>{!isOwn && <button type="button" onClick={() => onOpenProfile(message.sender_id!)} aria-label={`Open ${message.sender.username}'s profile`} className="self-end"><Avatar uri={message.sender.avatar_url} size={28} name={message.sender.full_name ?? message.sender.username} /></button>}<div className={`group relative max-w-[78%] rounded-2xl px-3 py-2 shadow-[0_2px_4px_rgba(0,0,0,0.15)] ${isOwn ? "bg-teal text-white" : "bg-white text-teal"}`}>{showSender && !isOwn && <button type="button" onClick={() => onOpenProfile(message.sender_id!)} className="mb-0.5 block text-left text-xs font-bold">{message.sender.full_name || `@${message.sender.username}`}</button>}{message.message_type === "poll" && message.poll_id ? <PollCard pollId={message.poll_id} userId={userId} onChanged={onChanged} onError={onError} /> : message.message_type === "shared_event" ? <EventMessage eventId={message.shared_event_id} /> : message.message_type === "shared_post" ? <PostMessage postId={message.shared_post_id} /> : <>{message.content && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}{attachmentUnavailable && message.attachment_url ? <p className="mt-2 rounded-lg bg-black/10 px-3 py-2 text-sm opacity-80">{ATTACHMENT_UNAVAILABLE_TEXT}</p> : null}{attachment && (message.message_type === "image" ? <a href={attachment} target="_blank" rel="noreferrer"><img src={attachment} alt={message.attachment_name ?? "Shared image"} className="mt-2 max-h-64 rounded-lg object-cover" /></a> : message.message_type === "video" ? <video controls src={attachment} className="mt-2 max-h-64 rounded-lg" /> : <a href={attachment} target="_blank" rel="noreferrer" className="mt-2 block rounded-lg bg-black/10 px-3 py-2 text-sm underline">📎 {message.attachment_name ?? "Download file"}</a>)}</>}<div className={`mt-1 flex items-center gap-2 text-[10px] ${isOwn ? "text-white/75" : "text-gray-400"}`}><time>{shortTime(message.created_at)}</time><button type="button" aria-label="Message actions" onClick={() => setMenu((open) => !open)} className="rounded px-1 opacity-70 hover:bg-black/10">•••</button></div>{menu && <div ref={menuRef} role="menu" className="absolute bottom-1 right-1 z-20 w-40 rounded-lg border bg-white p-1 text-left text-sm text-gray-800 shadow-lg"><button type="button" role="menuitem" onClick={() => { if (message.content) void navigator.clipboard?.writeText(message.content); setMenu(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Copy</button><button type="button" role="menuitem" onClick={() => mutate(() => hideMessage(message.id, userId))} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Delete for me</button>{isOwn && <button type="button" role="menuitem" onClick={() => mutate(() => unsendMessage(message.id))} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Unsend for everyone</button>}{!isOwn && <button type="button" role="menuitem" onClick={() => { const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) void mutate(() => reportMessage(message.id, reason)); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>}</div>}</div></div>;
+  };
+
+  const isText = message.message_type === "text" || (!message.attachment_url && !message.poll_id && !message.shared_event_id && !message.shared_post_id && message.message_type !== "poll" && message.message_type !== "shared_event" && message.message_type !== "shared_post");
+  const blockedAttachment = attachmentUnavailable && !!message.attachment_url;
+
+  let body: JSX.Element | null = null;
+  if (message.message_type === "poll" && message.poll_id) {
+    body = <PollCard pollId={message.poll_id} userId={userId} onChanged={onChanged} onError={onError} />;
+  } else if (message.message_type === "shared_event") {
+    body = <EventShareCard eventId={message.shared_event_id} onOpenEvent={onOpenEvent} />;
+  } else if (message.message_type === "shared_post") {
+    body = <PostShareCard postId={message.shared_post_id} onOpenPost={onOpenPost} onOpenProfile={onOpenProfile} />;
+  } else if (blockedAttachment) {
+    body = <p className="max-w-[300px] rounded-2xl border bg-white px-3 py-2 text-sm text-gray-500" style={{ borderColor: "rgba(0,0,0,0.10)" }}>{ATTACHMENT_UNAVAILABLE_TEXT}</p>;
+  } else if (message.message_type === "image") {
+    body = <ChatImage message={message} objectUrl={attachment} onOpen={attachment ? () => window.open(attachment, "_blank", "noreferrer") : undefined} />;
+  } else if (message.message_type === "video") {
+    body = <ChatVideo objectUrl={attachment} />;
+  } else if (message.message_type === "file") {
+    body = <ChatFileCard message={message} objectUrl={attachment} pending={pending} />;
+  }
+
+  return (
+    <div ref={highlightRef} className={`mb-3 flex gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+      {/* Update 1 — the sender's avatar and, below, their name are both the
+          canonical profile link, resolving to the same person. */}
+      {!isOwn && message.sender_id && (
+        <ClickableUserIdentity userId={message.sender_id} ariaLabel={`Open ${message.sender.full_name || message.sender.username || "this person"}'s profile`} className="self-end">
+          <Avatar uri={message.sender.avatar_url} size={28} name={message.sender.full_name ?? message.sender.username} />
+        </ClickableUserIdentity>
+      )}
+      <div className={`group relative flex max-w-[78%] flex-col ${isOwn ? "items-end" : "items-start"} rounded-2xl transition-colors ${highlighted ? "bg-teal/15 ring-2 ring-teal" : ""} ${pending ? "opacity-60" : ""}`} style={highlighted ? { padding: 6, margin: -6 } : undefined}>
+        {showSender && !isOwn && message.sender_id && (
+          <ClickableUserIdentity userId={message.sender_id} className="mb-0.5 block max-w-full truncate text-xs font-bold text-teal">
+            {message.sender.full_name || `@${message.sender.username}`}
+          </ClickableUserIdentity>
+        )}
+
+        {isText ? (
+          <div className={`rounded-2xl px-3 py-2 shadow-[0_2px_4px_rgba(0,0,0,0.15)] ${isOwn ? "bg-teal text-white" : "bg-white text-teal"} ${failed ? "ring-1 ring-red-400" : ""}`}>
+            {message.content && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}
+          </div>
+        ) : (
+          <>
+            {body}
+            {/* A caption travels with its media rather than becoming a second
+                message, matching mobile's mediaCaption. */}
+            {message.content && message.message_type !== "file" && (
+              <p className="mt-1 max-w-[300px] whitespace-pre-wrap break-words text-sm text-gray-700">{message.content}</p>
+            )}
+          </>
+        )}
+
+        <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-400">
+          <time dateTime={message.created_at}>{pending ? "Sending…" : failed ? "Not sent" : shortTime(message.created_at)}</time>
+          {failed && message.onRetry && (
+            <button type="button" onClick={message.onRetry} className="rounded px-1 font-semibold text-red-600 hover:bg-red-50">Retry</button>
+          )}
+          {!pending && !failed && (
+            <button type="button" aria-label="Message actions" aria-expanded={menu} onClick={() => setMenu((open) => !open)} className="rounded px-1 opacity-70 hover:bg-black/10">•••</button>
+          )}
+        </div>
+
+        {menu && (
+          <div ref={menuRef} role="menu" className={`absolute bottom-6 z-20 w-44 rounded-lg border bg-white p-1 text-left text-sm text-gray-800 shadow-lg ${isOwn ? "right-0" : "left-0"}`}>
+            {message.content && (
+              <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(message.content!); setMenu(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Copy</button>
+            )}
+            <button type="button" role="menuitem" onClick={() => void mutate(() => hideMessage(message.id, userId), "Couldn’t remove that message from your view.")} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Delete for me</button>
+            {isOwn && (
+              <button type="button" role="menuitem" onClick={() => void mutate(() => unsendMessage(message.id), "Couldn’t unsend that message.")} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Unsend for everyone</button>
+            )}
+            {!isOwn && (
+              <button type="button" role="menuitem" onClick={() => { const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) void mutate(() => reportMessage(message.id, reason), "Couldn’t send that report."); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
+/** Keeps a real backend refusal readable instead of collapsing every distinct
+ *  cause into one sentence the person cannot act on. */
+function messageActionError(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (/not_authorized|42501/i.test(raw)) return "You can’t do that to this message.";
+  if (/account_restricted/i.test(raw)) return "Your account can’t do that right now.";
+  if (/Failed to (send|fetch)|NetworkError|Load failed/i.test(raw)) return "Couldn’t reach the server. Check your connection and try again.";
+  return fallback;
+}
+
+/**
+ * Bug 9 — the poll card, on the mobile card surface.
+ *
+ * The vote failure reported in the correction screenshots was NOT a broken
+ * mutation. `cast_poll_vote` refuses a poll whose `start_at` is still in the
+ * future ("Poll has not started yet", SQLSTATE P0001) — verified against a
+ * production poll created 2026-08-07 with `start_at` 2026-08-14 — and this card
+ * only ever looked at `end_at`. It therefore offered enabled vote buttons for a
+ * poll that could not accept a vote, and reported the database's real, specific
+ * refusal as "Couldn't record that vote."
+ *
+ * The window is now respected the way mobile respects it: a poll that has not
+ * opened says so and cannot be voted in, and a genuine refusal is shown in the
+ * words the backend used.
+ */
 function PollCard({ pollId, userId, onChanged, onError }: { pollId: string; userId: string; onChanged: () => void; onError: (message: string) => void }): JSX.Element {
-  const { data: poll } = useQuery({ queryKey: ["messages", "poll", pollId, userId], queryFn: () => getPoll(pollId, userId), staleTime: 0 });
+  const { data: poll, isLoading } = useQuery({ queryKey: ["messages", "poll", pollId, userId], queryFn: () => getPoll(pollId, userId), staleTime: 0 });
   const queryClient = useQueryClient();
-  if (!poll) return <p className="text-sm">Loading poll…</p>;
-  const closed = !!poll.end_at && new Date(poll.end_at) < new Date();
-  return <div className="min-w-[200px] text-sm"><p className="font-bold">{poll.question}</p><div className="mt-2 space-y-1">{poll.options.map((option) => <button key={option.id} disabled={closed} onClick={async () => { try { await votePoll(pollId, option.id); await queryClient.invalidateQueries({ queryKey: ["messages", "poll", pollId] }); onChanged(); } catch { onError("Couldn’t record that vote."); } }} className={`flex w-full items-center justify-between rounded-lg border px-2 py-1.5 text-left disabled:opacity-60 ${option.selected ? "border-teal bg-teal/10" : "border-black/10 bg-white/70"}`}><span>{option.selected ? "✓ " : ""}{option.option_text}</span><span className="text-xs text-gray-500">{option.votes}</span></button>)}</div>{closed && <p className="mt-2 text-xs text-gray-500">Poll closed</p>}</div>;
+  const [voting, setVoting] = useState(false);
+  if (isLoading) return <div className="w-full max-w-[300px] rounded-2xl border bg-white p-3 text-sm text-gray-500 shadow-[0_2px_6px_rgba(0,0,0,0.10)]" style={{ borderColor: "rgba(0,0,0,0.10)" }}>Loading poll…</div>;
+  if (!poll) return <div className="w-full max-w-[300px] rounded-2xl border bg-white p-3 text-sm text-gray-500 shadow-[0_2px_6px_rgba(0,0,0,0.10)]" style={{ borderColor: "rgba(0,0,0,0.10)" }}>This poll is no longer available.</div>;
+
+  const now = Date.now();
+  const notStarted = !!poll.start_at && new Date(poll.start_at).getTime() > now;
+  const closed = !!poll.end_at && new Date(poll.end_at).getTime() < now;
+  const locked = notStarted || closed || voting;
+  const totalVotes = poll.options.reduce((sum, option) => sum + option.votes, 0);
+  const status = notStarted ? "Poll not started" : closed ? "Poll closed" : null;
+
+  const vote = async (optionId: string) => {
+    setVoting(true);
+    try {
+      await votePoll(pollId, optionId);
+      await queryClient.invalidateQueries({ queryKey: ["messages", "poll", pollId] });
+      onChanged();
+    } catch (error) {
+      onError(pollVoteError(error));
+    } finally {
+      setVoting(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-[300px] rounded-2xl border bg-white p-3 text-sm shadow-[0_2px_6px_rgba(0,0,0,0.10)]" style={{ borderColor: "rgba(0,0,0,0.10)" }}>
+      <p className="font-bold text-gray-950">{poll.question}</p>
+      {status && <p className="mt-0.5 text-xs text-gray-500">{status}</p>}
+      <div className="mt-2 space-y-1.5">
+        {poll.options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            disabled={locked}
+            aria-pressed={option.selected}
+            onClick={() => void vote(option.id)}
+            className={`flex w-full items-center justify-between gap-2 rounded-full border px-3 py-1.5 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${option.selected ? "border-teal bg-teal/10 font-semibold text-teal" : "border-black/10 bg-white text-teal hover:bg-teal/[0.04]"}`}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span aria-hidden className={`inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 ${option.selected ? "border-teal bg-teal" : "border-gray-400"}`} />
+              <span className="truncate">{option.option_text}</span>
+            </span>
+            <span className="shrink-0 text-xs text-gray-500">{option.votes}</span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-right text-xs text-gray-500">
+        {totalVotes} {totalVotes === 1 ? "vote" : "votes"} · {poll.allow_multiple ? "Multiple choice" : "Single choice"}
+      </p>
+    </div>
+  );
 }
 
-function EventMessage({ eventId }: { eventId: string | null }): JSX.Element {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  // RLS decides availability (blocking, deletion, audience). Keyed under
-  // "messages" so the existing permission-sensitive cache clearing already
-  // drops it on an access change, and it re-resolves after an unblock.
-  const { data: available } = useQuery({
-    queryKey: ["messages", "sharedEventAvailable", eventId],
-    queryFn: () => sharedEventIsAvailable(eventId!),
-    enabled: !!eventId,
-    staleTime: 0,
-  });
-  if (!eventId) return <p className="text-sm">Shared an event</p>;
-  if (available === false) return <p className="text-sm opacity-80">This event is no longer available.</p>;
-  return <button type="button" onClick={() => { const next = new URLSearchParams(params.toString()); next.set("event", eventId); router.push(`${pathname}?${next.toString()}`, { scroll: false }); }} className="rounded-lg bg-black/10 px-3 py-2 text-left text-sm font-semibold underline">📅 View shared event</button>;
-}
-
-function PostMessage({ postId }: { postId: string | null }): JSX.Element {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const { data: available } = useQuery({
-    queryKey: ["messages", "sharedPostAvailable", postId],
-    queryFn: () => sharedPostIsAvailable(postId!),
-    enabled: !!postId,
-    staleTime: 0,
-  });
-  if (!postId) return <p className="text-sm">Shared a post</p>;
-  if (available === false) return <p className="text-sm opacity-80">This post is no longer available.</p>;
-  return <button type="button" onClick={() => { const next = new URLSearchParams(params.toString()); next.set("post", postId); router.push(`${pathname}?${next.toString()}`, { scroll: false }); }} className="rounded-lg bg-black/10 px-3 py-2 text-left text-sm font-semibold underline">🖼️ View shared post</button>;
+/** The database refuses a vote for specific, stated reasons. Passing those
+ *  through is the difference between "try later, it opens on Thursday" and an
+ *  unactionable "Couldn't record that vote." */
+function pollVoteError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (/has not started/i.test(raw)) return "This poll hasn’t started yet.";
+  if (/has ended/i.test(raw)) return "This poll has closed.";
+  if (/Not a member/i.test(raw)) return "You’re not a member of this chat.";
+  if (/Poll not found/i.test(raw)) return "This poll is no longer available.";
+  if (/account_restricted/i.test(raw)) return "Your account can’t vote right now.";
+  return "Couldn’t record that vote.";
 }
 
 export interface PollDraft { question: string; options: string[]; allowMultiple: boolean; startAt: string | null; endAt: string | null }
@@ -821,6 +1142,13 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
   const [shareOpen, setShareOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [overflow, setOverflow] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<(Person & { role: string }) | null>(null);
+  const [confirmBlock, setConfirmBlock] = useState<(Person & { role: string }) | null>(null);
+  const [confirmDeleteEveryone, setConfirmDeleteEveryone] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
   const report = useReport();
   const { data: matches = [], isLoading: searchLoading } = useMessageContentSearch(query, conversationId);
@@ -838,9 +1166,11 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
   // The panel previously showed the literal words "Channel" / "Members chat",
   // which told the viewer nothing about which chat they were looking at.
   const title = channel ? channelLabel(channel) : details.name;
+  // Bug 1 — "2 participants" is meaningless on a one-to-one chat, so a direct
+  // conversation carries no participant-count subtitle at all. Groups keep it.
   const subtitle = channel
     ? details.name
-    : isMembersChat || isOfficersChat ? null
+    : isMembersChat || isOfficersChat || isDirect ? null
     : `${details.participants.length} participants`;
   const initials = channel ? (channel.kind === "main" ? "MA" : `#${channel.name.slice(0, 1).toUpperCase()}`) : details.name.slice(0, 1).toUpperCase();
 
@@ -876,72 +1206,226 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
     catch { onError("Could not delete the conversation. Please try again."); }
   };
 
+  /* ── Permissions, read from the canonical backend contract ────────────────
+   *
+   * Bug 7. A custom group's name and image are writable ONLY by its creator —
+   * that is literally the `conversations: group admin updates meta` policy
+   * (`type = 'group' AND created_by = auth.uid()`). The client derives the
+   * control's visibility from the same fact the database enforces, so there is
+   * no second, weaker client rule: a non-creator who forced the request would
+   * still be refused, and would see the refusal rather than a false success.
+   *
+   * A club conversation's identity is not editable through `conversations` at
+   * all (no UPDATE policy exists for `club_group`/`officer_chat`); its channels
+   * are edited by officers through `rename_conversation_channel` /
+   * `set_channel_avatar`, which do their own officer check.
+   *
+   * Bug 8. Member management and whole-group deletion are gated on the same
+   * creator fact and executed through `remove_group_participant` /
+   * `delete_group_conversation`, both of which decide authority server-side.
+   */
+  const isGroupCreator = isCustomGroup && !!details.created_by && details.created_by === userId;
+  const canEditIdentity = isGroupCreator;
+  const canManageMembers = isGroupCreator;
+  const canAddPeople = isCustomGroup || (isParentInfo && isMembersChat && isOfficer);
+  const showPeople = !isDirect && (isCustomGroup || isParentInfo);
+
+  const saveName = async () => {
+    try {
+      await updateGroupMeta(conversationId, { name: nameDraft.trim() || null });
+      setRenaming(false);
+      onChanged();
+      await queryClient.invalidateQueries({ queryKey: messageKeys.details(conversationId, userId) });
+    } catch (error) {
+      onError(error instanceof Error && error.message === "not_authorized"
+        ? "Only the person who created this group can rename it."
+        : "Couldn’t update the group name.");
+    }
+  };
+  const saveAvatar = async (file: File) => {
+    try {
+      const url = await uploadGroupAvatar(conversationId, file);
+      await updateGroupMeta(conversationId, { avatar_url: url });
+      onChanged();
+      await queryClient.invalidateQueries({ queryKey: messageKeys.details(conversationId, userId) });
+    } catch (error) {
+      onError(error instanceof Error && error.message === "not_authorized"
+        ? "Only the person who created this group can change its picture."
+        : error instanceof Error ? error.message : "Couldn’t update the group picture.");
+    }
+  };
+  const removeMember = async (person: Person) => {
+    setConfirmRemove(null);
+    try {
+      await removeGroupParticipant(conversationId, person.user_id);
+      onChanged();
+      await queryClient.invalidateQueries({ queryKey: messageKeys.details(conversationId, userId) });
+    } catch { onError("Couldn’t remove that person from the group."); }
+  };
+  const blockMember = async (person: Person) => {
+    setConfirmBlock(null);
+    try {
+      await blockUser(person.user_id);
+      onChanged();
+    } catch { onError("Couldn’t block that person."); }
+  };
+  const leaveGroup = async () => {
+    setConfirmDelete(false);
+    try { await leaveGroupChat(conversationId); onChanged(); onClose(); }
+    catch { onError("Couldn’t leave the group."); }
+  };
+  const deleteForEveryone = async () => {
+    setConfirmDeleteEveryone(false);
+    try { await deleteGroupConversation(conversationId); onChanged(); onClose(); }
+    catch { onError("Couldn’t delete the group."); }
+  };
+
+  type OverflowAction = { label: string; icon: JSX.Element; destructive?: boolean; run: () => void };
+  const overflowActions: OverflowAction[] = [];
+  if (isGroupCreator) {
+    // Bug 8 — mobile's creator overflow is exactly one destructive entry.
+    overflowActions.push({ label: "Delete for everyone", icon: <TrashIcon size={16} />, destructive: true, run: () => setConfirmDeleteEveryone(true) });
+  }
+  if (isOfficialChat && details.club_id) {
+    overflowActions.push({
+      label: "Report",
+      icon: <FlagIcon size={16} />,
+      run: () => {
+        const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`);
+        if (reason && REPORT_REASONS.includes(reason)) {
+          report.mutate({ entityType: "club", entityId: details.club_id!, entityName: details.name, clubId: details.club_id, reason }, { onSuccess: () => onError(REPORT_RECEIVED_MESSAGE), onError: () => onError("Couldn’t send that report.") });
+        }
+      },
+    });
+  }
+
   const tabs: InfoTab[] = isDirect ? ["media", "events", "files"] : ["polls", "media", "events", "files"];
   // A direct chat has no Polls tab on mobile; if a stale URL still asks for it,
   // fall back rather than rendering an empty, unreachable tab.
   const activeTab: InfoTab = tabs.includes(infoTab) ? infoTab : "media";
 
+  const peopleSection = showPeople && (
+    <div className={isDirect ? "hidden" : "px-4 pb-4"}>
+      <div className="flex items-baseline justify-between px-1">
+        <p className="text-base font-bold text-gray-950">{isOfficersChat ? "Officers" : "People"}</p>
+        <span className="text-sm text-gray-500">{details.participants.length}</span>
+      </div>
+      <div className="mt-2 space-y-0.5">
+        {details.participants.map((person) => (
+          <MemberRow
+            key={person.user_id}
+            person={person}
+            isSelf={person.user_id === userId}
+            canRemove={canManageMembers && person.user_id !== userId}
+            onOpenProfile={onOpenProfile}
+            onMessage={() => onOpenProfile(person.user_id)}
+            onReport={() => {
+              const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`);
+              if (reason && REPORT_REASONS.includes(reason)) {
+                report.mutate(
+                  { entityType: "user", entityId: person.user_id, entityName: person.full_name ?? person.username, clubId: details.club_id ?? undefined, reason },
+                  { onSuccess: () => onError(REPORT_RECEIVED_MESSAGE), onError: () => onError("Couldn’t send that report.") }
+                );
+              }
+            }}
+            onBlock={() => setConfirmBlock(person)}
+            onRemove={() => setConfirmRemove(person)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
   return <aside className="relative flex min-h-0 flex-col border-l bg-[#fffdf4] shadow-xl lg:overflow-hidden lg:shadow-none" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
     <div className="flex shrink-0 items-center justify-between p-4">
       <button type="button" onClick={onClose} aria-label="Close information panel" className="rounded-full p-2 text-xl text-gray-950 hover:bg-black/5">‹</button>
-      <div className="relative">
-        <button type="button" onClick={() => setOverflow((open) => !open)} aria-label="More chat options" aria-expanded={overflow} className="rounded-full p-2 text-gray-950 hover:bg-black/5"><EllipsisIcon size={20} /></button>
-        {overflow && <div ref={overflowRef} role="menu" className="absolute right-0 z-30 mt-1 w-44 rounded-xl border bg-white p-1 text-sm shadow-lg">
-          {/* Mobile's chat overflow offers exactly one entry to a non-admin:
-              Report, and only on an OFFICIAL chat, where it reports the club.
-              Anything more here would be inventing an action mobile lacks. */}
-          {isOfficialChat && details.club_id
-            ? <button type="button" role="menuitem" onClick={() => { setOverflow(false); const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) { report.mutate({ entityType: "club", entityId: details.club_id!, entityName: details.name, clubId: details.club_id, reason }, { onSuccess: () => onError(REPORT_RECEIVED_MESSAGE), onError: () => onError("Couldn’t send that report.") }); } }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left hover:bg-gray-50"><FlagIcon size={16} />Report</button>
-            : <p className="px-3 py-2 text-gray-400">No actions available</p>}
-        </div>}
-      </div>
+      {/* Bug 1 — a one-to-one chat is not a group, so it gets NO top-right
+          overflow at all. The menu only exists where it has a real action:
+          reporting an official club chat, or the custom-group creator's
+          "Delete for everyone". Message-level action menus are untouched. */}
+      {overflowActions.length > 0 && (
+        <div className="relative">
+          <button type="button" onClick={() => setOverflow((open) => !open)} aria-label="More chat options" aria-expanded={overflow} className="rounded-full p-2 text-gray-950 hover:bg-black/5"><EllipsisIcon size={20} /></button>
+          {overflow && <div ref={overflowRef} role="menu" className="absolute right-0 z-30 mt-1 w-52 rounded-xl border bg-white p-1 text-sm shadow-lg">
+            {overflowActions.map((action) => (
+              <button key={action.label} type="button" role="menuitem" onClick={() => { setOverflow(false); action.run(); }} className={`flex w-full items-center gap-2 rounded px-3 py-2 text-left ${action.destructive ? "text-red-600 hover:bg-red-50" : "hover:bg-gray-50"}`}>
+                {action.icon}{action.label}
+              </button>
+            ))}
+          </div>}
+        </div>
+      )}
     </div>
 
     <div className="shrink-0 px-5 pb-4 text-center">
-      <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal text-2xl font-bold text-white">{initials}</div>
-      <h2 className="mt-3 truncate text-2xl font-bold text-gray-950">{title}</h2>
+      {/* Update 4 / Bug 7 — the group image, with mobile's camera badge shown
+          ONLY to a viewer the backend would actually accept an edit from. */}
+      <div className="relative mx-auto w-20">
+        {details.avatar_url
+          ? <Avatar uri={details.avatar_url} size={80} name={title} className="mx-auto" />
+          : <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal text-2xl font-bold text-white">{initials}</div>}
+        {canEditIdentity && <>
+          <button type="button" onClick={() => avatarInputRef.current?.click()} aria-label="Change group picture" className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#fffdf4] bg-teal text-white shadow focus:outline-none focus:ring-2 focus:ring-teal">
+            <CameraIcon size={14} />
+          </button>
+          <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void saveAvatar(file); event.target.value = ""; }} />
+        </>}
+      </div>
+
+      {renaming ? (
+        <form onSubmit={(event) => { event.preventDefault(); void saveName(); }} className="mt-3 flex items-center gap-2">
+          <input autoFocus value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength={60} aria-label="Group name" className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal" style={{ borderColor: "rgba(0,0,0,0.2)" }} />
+          <button className="rounded-full bg-teal px-4 py-2 text-sm font-semibold text-white">Save</button>
+          <button type="button" onClick={() => setRenaming(false)} className="rounded-full px-2 py-2 text-sm font-semibold text-gray-600">Cancel</button>
+        </form>
+      ) : (
+        <div className="mt-3 flex items-center justify-center gap-1.5">
+          <h2 className="truncate text-2xl font-bold text-gray-950">{title}</h2>
+          {canEditIdentity && <button type="button" onClick={() => { setNameDraft(details.name === "Group chat" ? "" : details.name); setRenaming(true); }} aria-label="Edit group name" className="shrink-0 rounded-full p-1 text-gray-500 hover:bg-black/5"><PencilIcon size={16} /></button>}
+        </div>
+      )}
       {subtitle && <p className="truncate text-sm text-gray-500">{subtitle}</p>}
 
+      {/* Update 4 — mobile's action order is exactly Add, Search, Leave. */}
       <div className="mt-4 flex flex-wrap justify-center gap-6">
-        {isParentInfo && isMembersChat && isOfficer && <InfoAction icon={<PersonAddIcon size={22} />} label="Add Person" onClick={() => setShareOpen(true)} />}
+        {canAddPeople && <InfoAction icon={<PersonAddIcon size={22} />} label="Add" onClick={() => setAddOpen(true)} />}
         {isParentInfo && isMembersChat && isOfficer && <InfoAction icon={<ShareIcon size={22} />} label="Share" onClick={() => setShareOpen(true)} />}
+        <InfoAction icon={<SearchIcon size={22} />} label="Search" onClick={() => setSearchOpen((open) => !open)} />
+        {isThreadInfo && <InfoAction icon={<BellOffIcon size={22} filled={muted} />} label={muted ? "Unmute" : "Mute"} onClick={() => void toggleMute()} />}
+        {isThreadInfo && isOfficer && <InfoAction icon={<LockIcon size={22} />} label="Permissions" onClick={() => setPermOpen(true)} />}
         {isParentInfo && <>
           <InfoAction icon={<BellOffIcon size={22} filled={!!convFlags?.muted} />} label={convFlags?.muted ? "Unmute" : "Mute"} onClick={() => void toggleMute()} />
           <InfoAction icon={<ArchiveIcon size={22} filled={!!convFlags?.archived} />} label={convFlags?.archived ? "Unarchive" : "Archive"} onClick={() => void toggleArchive()} />
         </>}
-        {isThreadInfo && <>
-          <InfoAction icon={<SearchIcon size={22} />} label="Search" onClick={() => setSearchOpen((open) => !open)} />
-          <InfoAction icon={<BellOffIcon size={22} filled={muted} />} label={muted ? "Unmute" : "Mute"} onClick={() => void toggleMute()} />
-          {isOfficer && <InfoAction icon={<LockIcon size={22} />} label="Permissions" onClick={() => setPermOpen(true)} />}
-        </>}
-        {!isOfficialChat && <>
-          <InfoAction icon={<SearchIcon size={22} />} label="Search" onClick={() => setSearchOpen((open) => !open)} />
-          <InfoAction icon={isDirect ? <TrashIcon size={22} /> : <ExitIcon size={22} />} label={isDirect ? "Delete" : "Leave"} onClick={() => setConfirmDelete(true)} />
-        </>}
+        {!isOfficialChat && <InfoAction icon={isDirect ? <TrashIcon size={22} /> : <ExitIcon size={22} />} label={isDirect ? "Delete" : "Leave"} onClick={() => setConfirmDelete(true)} />}
       </div>
 
       {searchOpen && <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search this chat" aria-label="Search this chat" className="mt-4 h-10 w-full rounded-full border bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-teal" style={{ borderColor: "rgba(0,0,0,0.2)" }} />}
     </div>
 
-    <div role="tablist" aria-label="Chat content" className={`grid shrink-0 border-y grid-cols-${tabs.length}`} style={{ borderColor: "rgba(0,0,0,0.1)", gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
-      {tabs.map((tab) => <InfoTabButton key={tab} tab={tab} active={activeTab === tab} onClick={() => onTab(tab)} />)}
-    </div>
-
-    <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      {query.trim().length >= 3 ? <div className="space-y-2">{searchLoading ? <p className="py-4 text-sm text-gray-500">Searching this conversation…</p> : matches.length ? matches.map((result) => <MessageSearchRow key={result.message_id} result={result} onClick={() => onOpenMessage(result)} />) : <EmptyPanel label="No messages match that search" />}</div> : <>
-        {activeTab === "polls" && <SharedPolls messages={polls} userId={userId} onError={onError} />}
-        {activeTab === "media" && <SharedMedia messages={[...media, ...videos]} restrictedSenders={restrictedSenders} />}
-        {activeTab === "events" && <div className="space-y-2">{events.length ? events.map((event) => <button key={event.event_id} type="button" onClick={() => onOpenEvent(event.event_id)} className="flex w-full gap-3 rounded-xl border bg-white p-2 text-left hover:bg-teal/[0.03]">{event.cover_image_url && <img src={event.cover_image_url} alt="" className="h-14 w-14 rounded-lg object-cover" />}<span className="min-w-0"><span className="block truncate text-sm font-bold">{event.emoji ? `${event.emoji} ` : ""}{event.title}</span><span className="block text-xs text-gray-500">{event.event_date}{event.start_time ? ` · ${event.start_time}` : ""}</span></span></button>) : <EmptyPanel label="No shared events yet" />}</div>}
-        {activeTab === "files" && <SharedFiles messages={files} restrictedSenders={restrictedSenders} />}
-
-        {/* People + count, exactly where mobile puts it: the conversation-level
-            info and custom groups, never a channel thread. */}
-        {(isParentInfo || (isCustomGroup && !isDirect)) && <div className="mt-6 border-t pt-4" style={{ borderColor: "rgba(0,0,0,0.1)" }}>
-          <div className="flex items-baseline justify-between"><p className="text-base font-bold text-gray-950">{isOfficersChat ? "Officers" : "People"}</p><span className="text-sm text-gray-500">{details.participants.length}</span></div>
-          <div className="mt-2 space-y-1">{details.participants.slice(0, 4).map((person) => <button key={person.user_id} type="button" onClick={() => onOpenProfile(person.user_id)} className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left hover:bg-black/[0.035]"><Avatar uri={person.avatar_url} size={36} name={person.full_name ?? person.username} /><span className="min-w-0 flex-1"><span className="block text-xs text-gray-500">{person.role}</span><span className="block truncate text-sm font-semibold text-gray-900">{person.full_name?.trim() || person.username}</span></span></button>)}</div>
-          {details.participants.length > 4 && <p className="mt-2 px-1 text-sm font-semibold text-teal">See all {details.participants.length} people</p>}
-        </div>}
-      </>}
+    {/* Update 4 — People sits ABOVE the tab band, as it does on mobile, and the
+        whole People + tabs + tab-content stack is one scrolling region so a
+        long roster cannot push the tabs off screen. An in-conversation search
+        replaces the content but leaves the panel (and the field) open — Bug 2. */}
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      {query.trim().length >= 3 ? (
+        <div className="space-y-2 p-4">
+          {searchLoading ? <p className="py-4 text-sm text-gray-500">Searching this conversation…</p> : matches.length ? matches.map((result) => <MessageSearchRow key={result.message_id} result={result} onClick={() => onOpenMessage(result)} />) : <EmptyPanel label="No messages match that search" />}
+        </div>
+      ) : (
+        <>
+          {peopleSection}
+          <div role="tablist" aria-label="Chat content" className="sticky top-0 z-10 grid border-y bg-[#fffdf4]" style={{ borderColor: "rgba(0,0,0,0.1)", gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+            {tabs.map((tab) => <InfoTabButton key={tab} tab={tab} active={activeTab === tab} onClick={() => onTab(tab)} />)}
+          </div>
+          <div className="p-4">
+            {activeTab === "polls" && <SharedPolls messages={polls} userId={userId} onError={onError} />}
+            {activeTab === "media" && <SharedMedia messages={[...media, ...videos]} restrictedSenders={restrictedSenders} />}
+            {activeTab === "events" && <div className="space-y-2">{events.length ? events.map((event) => <button key={event.event_id} type="button" onClick={() => onOpenEvent(event.event_id)} className="flex w-full gap-3 rounded-xl border bg-white p-2 text-left hover:bg-teal/[0.03]">{event.cover_image_url && <img src={event.cover_image_url} alt="" className="h-14 w-14 rounded-lg object-cover" />}<span className="min-w-0"><span className="block truncate text-sm font-bold">{event.emoji ? `${event.emoji} ` : ""}{event.title}</span><span className="block text-xs text-gray-500">{event.event_date}{event.start_time ? ` · ${event.start_time}` : ""}</span></span></button>) : <EmptyPanel label="No shared events yet" />}</div>}
+            {activeTab === "files" && <SharedFiles messages={files} restrictedSenders={restrictedSenders} />}
+          </div>
+        </>
+      )}
     </div>
 
     {permOpen && channel && <PermissionsSheet channel={channel} participants={details.participants} isOfficersChat={isOfficersChat} onClose={() => setPermOpen(false)} onSave={async (permission, userIds) => {
@@ -955,13 +1439,116 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
       } catch { onError("Couldn’t update posting permissions."); }
     }} />}
     {shareOpen && <ShareInvitePanel conversationName={details.name} onClose={() => setShareOpen(false)} />}
+    {addOpen && <AddPeoplePanel
+      existingIds={new Set(details.participants.map((person) => person.user_id))}
+      onClose={() => setAddOpen(false)}
+      onAdd={async (ids) => {
+        try {
+          await addGroupParticipants(conversationId, ids);
+          setAddOpen(false);
+          onChanged();
+          await queryClient.invalidateQueries({ queryKey: messageKeys.details(conversationId, userId) });
+        } catch { onError("Couldn’t add those people to the group."); }
+      }} />}
     {confirmDelete && <ConfirmSheet
       title={isDirect ? "Delete conversation?" : "Leave group?"}
       message={isDirect ? `This removes the conversation from your messages only. ${details.name} keeps their copy. If either of you messages again, the conversation comes back.` : `You'll leave ${details.name}. This has no effect on any club.`}
       confirmLabel={isDirect ? "Delete" : "Leave group"}
-      onConfirm={() => { if (isDirect) void deleteDirect(); else { setConfirmDelete(false); onError("Leaving a group chat is available on mobile."); } }}
+      // Leaving is a real, authorised backend operation (`leave_group_chat`),
+      // not something that only exists on the phone — the panel used to tell
+      // the person to go and use another device.
+      onConfirm={() => { if (isDirect) void deleteDirect(); else void leaveGroup(); }}
       onCancel={() => setConfirmDelete(false)} />}
+    {confirmDeleteEveryone && <ConfirmSheet
+      title="Delete for everyone?"
+      message={`This deletes ${details.name} and its messages for every member. This can't be undone.`}
+      confirmLabel="Delete for everyone"
+      onConfirm={() => void deleteForEveryone()}
+      onCancel={() => setConfirmDeleteEveryone(false)} />}
+    {confirmRemove && <ConfirmSheet
+      title="Remove from group?"
+      message={`${confirmRemove.full_name?.trim() || confirmRemove.username} will be removed from ${details.name}.`}
+      confirmLabel="Remove"
+      onConfirm={() => void removeMember(confirmRemove)}
+      onCancel={() => setConfirmRemove(null)} />}
+    {confirmBlock && <ConfirmSheet
+      title="Block this student?"
+      message={blockConfirmMessage(confirmBlock.username)}
+      confirmLabel="Block"
+      onConfirm={() => void blockMember(confirmBlock)}
+      onCancel={() => setConfirmBlock(null)} />}
   </aside>;
+}
+
+/**
+ * Bug 8 / Update 1 — one person in the People list.
+ *
+ * The row is the mobile row: avatar, name over @username, a message shortcut,
+ * and a three-dot menu carrying Report, Block and Remove from group — with
+ * Remove present ONLY for a viewer the backend would accept it from. Report and
+ * Block reuse We Glue's existing report and blocking flows rather than
+ * messaging-specific copies.
+ *
+ * Avatar and name are the shared `PersonIdentity` control, so both open the
+ * same profile (Update 1).
+ */
+function MemberRow({ person, isSelf, canRemove, onOpenProfile, onMessage, onReport, onBlock, onRemove }: { person: Person & { role: string }; isSelf: boolean; canRemove: boolean; onOpenProfile: (id: string) => void; onMessage: () => void; onReport: () => void; onBlock: () => void; onRemove: () => void }): JSX.Element {
+  const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEscapeAndOutside(menuRef, useCallback(() => setMenu(false), []));
+  const display = person.full_name?.trim() || person.username;
+  return (
+    <div className="relative flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-black/[0.035]">
+      <PersonIdentity userId={person.user_id} username={person.username} fullName={person.full_name} avatarUrl={person.avatar_url} onOpenProfile={onOpenProfile} size={36} className="flex-1" />
+      {!isSelf && (
+        <>
+          <button type="button" onClick={onMessage} aria-label={`Message ${display}`} className="shrink-0 rounded-full p-1.5 text-gray-500 hover:bg-black/5"><ChatBubbleOutlineIcon size={18} /></button>
+          <button type="button" onClick={() => setMenu((open) => !open)} aria-label={`Actions for ${display}`} aria-expanded={menu} className="shrink-0 rounded-full p-1.5 text-gray-500 hover:bg-black/5"><EllipsisIcon size={16} /></button>
+        </>
+      )}
+      {menu && (
+        <div ref={menuRef} role="menu" className="absolute right-0 top-9 z-30 w-60 rounded-xl border bg-white p-1 text-sm shadow-lg">
+          <button type="button" role="menuitem" onClick={() => { setMenu(false); onReport(); }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left hover:bg-gray-50"><FlagIcon size={16} />Report {display}</button>
+          <button type="button" role="menuitem" onClick={() => { setMenu(false); onBlock(); }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-red-600 hover:bg-red-50"><BlockIcon size={16} />Block {display}</button>
+          {canRemove && <button type="button" role="menuitem" onClick={() => { setMenu(false); onRemove(); }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-red-600 hover:bg-red-50"><PersonRemoveIcon size={16} />Remove from group</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Update 4 — "Add", using the same people search the composer uses, so the
+ *  group roster and a new conversation find people the same way. */
+function AddPeoplePanel({ existingIds, onClose, onAdd }: { existingIds: Set<string>; onClose: () => void; onAdd: (ids: string[]) => Promise<void> }): JSX.Element {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Person[]>([]);
+  const [saving, setSaving] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEscapeAndOutside(ref, onClose);
+  const searching = query.trim().length >= 3;
+  const { data: people = [], isLoading } = useMessagePeopleSearch(query);
+  const { data: suggestions = [], isLoading: suggestionsLoading, isError: suggestionsFailed } = useMessageSuggestions(!searching);
+  const candidates = (searching ? people : suggestions).filter((person) => !existingIds.has(person.user_id));
+  const selectedIds = new Set(selected.map((person) => person.user_id));
+  const toggle = (person: Person) =>
+    setSelected((current) => current.some((item) => item.user_id === person.user_id) ? current.filter((item) => item.user_id !== person.user_id) : [...current, person]);
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div ref={ref} role="dialog" aria-modal="true" aria-label="Add people to this group" className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-cream p-5 shadow-2xl">
+      <h3 className="text-lg font-bold text-gray-950">Add people</h3>
+      <ComposerSearchField value={query} onChange={setQuery} />
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+        {searching && isLoading ? <p className="py-4 text-sm text-gray-500">Searching…</p>
+          : !searching && suggestionsLoading ? <p className="py-4 text-sm text-gray-500">Loading suggestions…</p>
+          : !searching && suggestionsFailed ? <p className="py-4 text-sm text-red-600">Couldn’t load suggestions.</p>
+          : candidates.length ? candidates.map((person) => <PersonRow key={person.user_id} person={person} selected={selectedIds.has(person.user_id)} onClick={() => toggle(person)} />)
+          : <p className="py-4 text-sm text-gray-500">{searching ? "No people found." : "Search above to find people."}</p>}
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-full px-4 py-2 text-sm font-semibold text-gray-600">Cancel</button>
+        <button type="button" disabled={!selected.length || saving} onClick={() => { setSaving(true); void onAdd(selected.map((person) => person.user_id)).finally(() => setSaving(false)); }} className="rounded-full bg-teal px-5 py-2 text-sm font-semibold text-white disabled:opacity-45">{saving ? "Adding…" : `Add${selected.length ? ` ${selected.length}` : ""}`}</button>
+      </div>
+    </div>
+  </div>;
 }
 
 function InfoAction({ icon, label, onClick }: { icon: JSX.Element; label: string; onClick: () => void }): JSX.Element {
