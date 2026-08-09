@@ -1,6 +1,6 @@
 -- =============================================================================
 -- We Glue — Club chat and channel initial pictures
--- Migration: 078_club_chat_initial_pictures.sql
+-- Migration: 079_club_chat_initial_pictures.sql
 --
 -- Bug 5. A club's Members chat, Officers chat and every sub-channel must START
 -- as a COPY of the club's profile picture, and be completely independent from
@@ -204,19 +204,19 @@ BEGIN
   -- genuine seeding regression is still caught.
   BEGIN
     INSERT INTO clubs (name, handle, description, avatar_url, university_id)
-    SELECT '__mig078_probe__',
-           '__mig078_probe__',
+    SELECT '__mig079_probe__',
+           '__mig079_probe__',
            'migration self-check',
            'https://example.invalid/probe.jpg',
            (SELECT id FROM universities LIMIT 1)
     RETURNING id INTO v_club_id;
   EXCEPTION WHEN OTHERS THEN
-    RAISE NOTICE '078: could not create a probe club (%), skipping creation self-check', SQLERRM;
+    RAISE NOTICE '079: could not create a probe club (%), skipping creation self-check', SQLERRM;
     RETURN;
   END;
 
   IF v_club_id IS NULL THEN
-    RAISE NOTICE '078: probe club not created, skipping creation self-check';
+    RAISE NOTICE '079: probe club not created, skipping creation self-check';
     RETURN;
   END IF;
 
@@ -226,7 +226,7 @@ BEGIN
 
   IF (SELECT avatar_url FROM conversations WHERE id = v_member_conv)
      IS DISTINCT FROM 'https://example.invalid/probe.jpg' THEN
-    RAISE EXCEPTION '078 self-check failed: members conversation did not copy the club picture';
+    RAISE EXCEPTION '079 self-check failed: members conversation did not copy the club picture';
   END IF;
 
   SELECT count(*), count(*) FILTER (
@@ -237,10 +237,10 @@ BEGIN
    WHERE conversation_id IN (SELECT id FROM conversations WHERE club_id = v_club_id);
 
   IF v_channels = 0 THEN
-    RAISE EXCEPTION '078 self-check failed: no channels were seeded';
+    RAISE EXCEPTION '079 self-check failed: no channels were seeded';
   END IF;
   IF v_uncopied > 0 THEN
-    RAISE EXCEPTION '078 self-check failed: % of % seeded channels did not copy the club picture',
+    RAISE EXCEPTION '079 self-check failed: % of % seeded channels did not copy the club picture',
       v_uncopied, v_channels;
   END IF;
 
@@ -251,7 +251,7 @@ BEGIN
      WHERE conversation_id IN (SELECT id FROM conversations WHERE club_id = v_club_id)
        AND avatar_url = 'https://example.invalid/changed.jpg'
   ) THEN
-    RAISE EXCEPTION '078 self-check failed: a club picture change propagated into an existing channel';
+    RAISE EXCEPTION '079 self-check failed: a club picture change propagated into an existing channel';
   END IF;
 
   -- Undo the probe. Dependents first: conversation rows reference the club.

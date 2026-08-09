@@ -52,7 +52,6 @@ import {
   permissionSelectValue,
   postingPermissionOptions,
   releaseAttachmentUrl,
-  unsendFailureMessage,
   uploadAttachment,
   votePoll,
   type Channel,
@@ -642,7 +641,7 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   const { data: page, isLoading } = useMessageThread(conversationId, channelId, userId);
   const { data: permitted } = useMessagePermission(channelId);
   const queryClient = useQueryClient();
-  const unsend = useUnsendMessage(conversationId, channelId, userId);
+  const unsend = useUnsendMessage(conversationId, channelId, userId, onError);
   const { outgoing, enqueue, retry } = useOutgoingMessages(conversationId, channelId, userId, onInvalidate, onError);
   const stored = useMemo(() => [...(page?.messages ?? [])].reverse(), [page?.messages]);
   // A pending message is dropped the moment its stored row arrives, matched on
@@ -930,7 +929,7 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
                   // from view by the time this resolves, and the hook owns both
                   // the rollback and the post-success convergence.
                   setMenu(false);
-                  void onUnsend(message.id).catch((error) => onError(unsendFailureMessage(error)));
+                  void onUnsend(message.id);
                 }}
                 className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50"
               >
@@ -1214,7 +1213,7 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
     : `${details.participants.length} participants`;
   const initials = channel ? (channel.kind === "main" ? "MA" : `#${channel.name.slice(0, 1).toUpperCase()}`) : details.name.slice(0, 1).toUpperCase();
   // Bug 5 — a channel's own picture is authoritative; the conversation's is the
-  // fallback for one that has never had its own (rows predating migration 078).
+  // fallback for one that has never had its own (rows predating migration 079).
   const identityAvatarUrl = channel ? channel.avatar_url ?? details.avatar_url : details.avatar_url;
   /**
    * Bug 2 — where the club identity leads.

@@ -6,6 +6,7 @@ import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../rea
 import type { ThreadMessage, ThreadPage } from "./service";
 import {
   canPostInChannel,
+  unsendFailureMessage,
   unsendMessage,
   getChannelMuted,
   getConversationFlags,
@@ -139,7 +140,8 @@ export function useMessageEvents(conversationId: string | null, channelId: strin
 export function useUnsendMessage(
   conversationId: string,
   channelId: string | null,
-  userId: string
+  userId: string,
+  onError: (message: string) => void
 ): (messageId: string) => Promise<void> {
   const queryClient = useQueryClient();
   return useCallback(
@@ -172,7 +174,17 @@ export function useUnsendMessage(
         // conversation it is still sitting in.
         if (previousThread) queryClient.setQueryData(threadKey, previousThread);
         for (const [key, list] of previousShared) queryClient.setQueryData(key, list);
-        throw error;
+        // Reporting the failure is done HERE, not by the caller.
+        //
+        // Found in QA: the explanation used to be attached as `.catch()` on this
+        // promise inside the message's own component — but that component is
+        // unmounted the moment the optimistic removal takes effect, so the
+        // rejection had nowhere to surface. The message reappeared with no word
+        // of why, which is precisely the "never leave them guessing" rule this
+        // was written for. This hook is owned by the conversation, which stays
+        // mounted for the whole operation.
+        onError(unsendFailureMessage(error));
+        return;
       }
 
       void queryClient.invalidateQueries({ queryKey: ["messages", "thread", conversationId] });
@@ -180,7 +192,7 @@ export function useUnsendMessage(
       void queryClient.invalidateQueries({ queryKey: messageKeys.conversations(userId) });
       void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
     },
-    [channelId, conversationId, queryClient, userId]
+    [channelId, conversationId, onError, queryClient, userId]
   );
 }
 

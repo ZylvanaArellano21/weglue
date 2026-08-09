@@ -91,7 +91,7 @@ describe('Messages people search and suggestions', () => {
             type: 'club_group',
             club_id: 'club-1',
             // Bug 5 — this is the chat's OWN picture, not a stale copy of the
-            // club's. Once seeded at creation (078) the two are independent:
+            // club's. Once seeded at creation (079) the two are independent:
             // an officer may set a different image per chat and per channel,
             // and a later Club Profile change must not reach back into them.
             avatar_url: 'chat-picture',
@@ -136,7 +136,7 @@ describe('Messages people search and suggestions', () => {
    * Bug 5 — a club chat falls back to the club picture ONLY when it has never
    * had one of its own.
    *
-   * This is the pre-078 case: rows created before the picture was seeded still
+   * This is the pre-079 case: rows created before the picture was seeded still
    * carry NULL, and they must keep showing the club image rather than
    * collapsing to initials. It is the counterpart to the assertion above, and
    * together the two pin the precedence in both directions so neither can be

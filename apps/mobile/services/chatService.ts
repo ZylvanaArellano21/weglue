@@ -129,7 +129,7 @@ function resolveConversationIdentity(
       // ignored entirely. That coupled the two permanently: an officer setting
       // a chat picture saw nothing change, and editing the Club Profile
       // silently restyled every existing chat. The club image is now only the
-      // fallback, for a chat created before its picture was seeded (078).
+      // fallback, for a chat created before its picture was seeded (079).
       // Club profile picture — never the banner.
       avatar_url: storedAvatar ?? club?.avatar_url ?? null,
       other_user_id: null,
