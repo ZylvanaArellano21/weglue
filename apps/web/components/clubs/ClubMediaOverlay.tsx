@@ -12,6 +12,7 @@ import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
 import { usePostComments, useAddComment, useUpdatePostCaption } from "../../lib/hooks/usePostActions";
 import { usePostInteractionsRealtime } from "../../lib/hooks/useClubRealtime";
 import { useReport, REPORT_RECEIVED_MESSAGE } from "../../lib/hooks/useReport";
+import { ClubPhotoRemovalDialog } from "./ClubPhotoRemoval";
 import type { ClubPhoto } from "../../lib/clubs/clubProfileService";
 
 // Dedicated Club Media overlay (spec §19) matching officer club media big post:
@@ -26,10 +27,10 @@ export function ClubMediaOverlay({
   initialIndex,
   userId,
   clubId,
+  clubName,
   isOfficer,
   onClose,
   onOpenAuthor,
-  onHide,
   onRemovePost,
   onDeleteUpload,
 }: {
@@ -37,10 +38,11 @@ export function ClubMediaOverlay({
   initialIndex: number;
   userId: string;
   clubId: string;
+  clubName: string;
   isOfficer: boolean;
   onClose: () => void;
   onOpenAuthor: (userId: string) => void;
-  onHide: (photoId: string) => void;
+  /** Detach a tagged post from THIS club. Never deletes the post. */
   onRemovePost: (postId: string) => void;
   onDeleteUpload: (photoId: string) => void;
 }): JSX.Element {
@@ -87,18 +89,20 @@ export function ClubMediaOverlay({
             <PostPanel
               key={photo.post_id}
               postId={photo.post_id}
-              photoId={photo.id}
               userId={userId}
               clubId={clubId}
+              clubName={clubName}
               isOfficer={isOfficer}
               onOpenAuthor={onOpenAuthor}
-              onHide={() => onHide(photo.id)}
               onRemovePost={() => onRemovePost(photo.post_id!)}
+              photo={photo}
             />
           ) : (
             <UploadPanel
               caption={photo.caption}
+              clubName={clubName}
               isOfficer={isOfficer}
+              photo={photo}
               onDelete={() => onDeleteUpload(photo.id)}
             />
           )}
@@ -111,11 +115,15 @@ export function ClubMediaOverlay({
 // ─── Officer-uploaded photo (no post behind it) ──────────────────────────────
 function UploadPanel({
   caption,
+  clubName,
   isOfficer,
+  photo,
   onDelete,
 }: {
   caption: string | null;
+  clubName: string;
   isOfficer: boolean;
+  photo: ClubPhoto;
   onDelete: () => void;
 }): JSX.Element {
   const [confirming, setConfirming] = useState(false);
@@ -126,26 +134,27 @@ function UploadPanel({
       <div className="flex-1" />
       {isOfficer && (
         <div className="flex justify-end border-t pt-3" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
-          {confirming ? (
-            <span className="flex items-center gap-2">
-              <button type="button" onClick={onDelete} className="rounded-full bg-[#F02719] px-4 py-1.5 text-xs font-semibold text-white">
-                Confirm delete
-              </button>
-              <button type="button" onClick={() => setConfirming(false)} className="text-xs font-semibold text-gray-500 hover:underline">
-                Cancel
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirming(true)}
-              className="rounded-full border-[1.5px] px-4 py-1.5 text-xs font-semibold text-[#F02719]"
-              style={{ borderColor: "rgba(240,39,25,0.4)" }}
-            >
-              Delete photo
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="rounded-full border-[1.5px] px-4 py-1.5 text-xs font-semibold text-[#F02719]"
+            style={{ borderColor: "rgba(240,39,25,0.4)" }}
+          >
+            Remove photo
+          </button>
         </div>
+      )}
+      {confirming && (
+        <ClubPhotoRemovalDialog
+          photo={photo}
+          clubName={clubName}
+          pending={false}
+          onConfirm={() => {
+            setConfirming(false);
+            onDelete();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
       )}
     </div>
   );
@@ -154,21 +163,21 @@ function UploadPanel({
 // ─── Tagged post (full social) ───────────────────────────────────────────────
 function PostPanel({
   postId,
-  photoId,
   userId,
   clubId,
+  clubName,
   isOfficer,
+  photo,
   onOpenAuthor,
-  onHide,
   onRemovePost,
 }: {
   postId: string;
-  photoId: string;
   userId: string;
   clubId: string;
+  clubName: string;
   isOfficer: boolean;
+  photo: ClubPhoto;
   onOpenAuthor: (userId: string) => void;
-  onHide: () => void;
   onRemovePost: () => void;
 }): JSX.Element {
   const show = useToast();
@@ -194,6 +203,7 @@ function PostPanel({
   // clicking a club photo produced "Application error: a client-side exception
   // has occurred" instead of opening the post.
   const [shareOpen, setShareOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const commentsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -286,13 +296,33 @@ function PostPanel({
                 />
               )}
               <MenuItem label="Report post" onClick={doReport} danger />
-              {isOfficer && <MenuItem label="Hide from this club" onClick={() => { setMenuOpen(false); onHide(); }} />}
-              {isOfficer && <MenuItem label="Remove from club" onClick={() => { setMenuOpen(false); onRemovePost(); }} danger />}
+              {/* The ONLY officer action on a member's tagged post, matching
+                  mobile: detach it from this club. It confirms first, and it
+                  never deletes the post. */}
+              {isOfficer && (
+                <MenuItem
+                  label="Remove from club"
+                  onClick={() => { setMenuOpen(false); setConfirmRemove(true); }}
+                  danger
+                />
+              )}
             </div>
           )}
         </div>
       </div>
       {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "post", id: postId }} title="Share post" onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
+      {confirmRemove && (
+        <ClubPhotoRemovalDialog
+          photo={photo}
+          clubName={clubName}
+          pending={false}
+          onConfirm={() => {
+            setConfirmRemove(false);
+            onRemovePost();
+          }}
+          onCancel={() => setConfirmRemove(false)}
+        />
+      )}
 
       {/* Caption + comments (scroll) */}
       <div className="flex-1 overflow-y-auto px-4 pt-3">

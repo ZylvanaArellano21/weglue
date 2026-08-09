@@ -291,34 +291,29 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           initialIndex={overlay.index}
           userId={userId}
           clubId={clubId}
+          clubName={club.name}
           isOfficer={club.is_officer}
           onClose={() => setOverlay(null)}
           onOpenAuthor={(id) => router.push(`/u/${id}`)}
-          onHide={(photoId) =>
-            photoManage.hide.mutate(photoId, {
-              onSuccess: () => {
-                show("Photo hidden from this club");
-                setOverlay(null);
-              },
-              onError: () => show("Could not hide photo.", "error"),
-            })
-          }
+          // Detaches the post from THIS club only — the post itself is never
+          // deleted, so it stays in Home and on the creator's profile. Toast
+          // copy is mobile's.
           onRemovePost={(postId) =>
             photoManage.removePost.mutate(postId, {
               onSuccess: () => {
-                show("Post removed from this club");
+                show(`Post removed from ${club.name}.`);
                 setOverlay(null);
               },
-              onError: () => show("Could not remove post.", "error"),
+              onError: () => show("Could not remove the post from this club. Try again.", "error"),
             })
           }
           onDeleteUpload={(photoId) =>
             photoManage.deleteUpload.mutate(photoId, {
               onSuccess: () => {
-                show("Photo deleted");
+                show("Photo removed.");
                 setOverlay(null);
               },
-              onError: () => show("Could not delete photo.", "error"),
+              onError: () => show("Could not remove the photo. Try again.", "error"),
             })
           }
         />
