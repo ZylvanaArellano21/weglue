@@ -23,6 +23,7 @@ import {
   writeOnboardingState,
 } from "../../../lib/onboardingState";
 import { recordSignupConsent } from "../../actions/auth";
+import { LegalModal } from "../../../components/legal/LegalModal";
 
 const inputClass = (invalid: boolean, valid?: boolean) =>
   `w-full bg-[#FEFCF0] border rounded-[10px] h-[53px] px-4 text-sm font-semibold text-black placeholder:text-black/30 outline-none focus:border-[#0FA6A6] shadow-[0px_4px_4px_rgba(0,0,0,0.25)] transition-colors ${
@@ -36,8 +37,7 @@ export default function SignupPage(): JSX.Element | null {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [isOfAge, setIsOfAge] = useState(false);
+  const [legalModalOpen, setLegalModalOpen] = useState(false);
   const [matchCount, setMatchCount] = useState(2);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [emailExistsVerified, setEmailExistsVerified] = useState(false);
@@ -55,9 +55,7 @@ export default function SignupPage(): JSX.Element | null {
     const state = readOnboardingState();
     setUsername(state.pendingUsername);
     setEmail(state.pendingEmail);
-    setAgreedToTerms(state.agreedToTerms);
-    setIsOfAge(state.isOfAge);
-    // In-memory only — survives the Terms round-trip, never a full reload.
+    // In-memory only — never survives a full reload.
     setPassword(getTransientPassword());
     // The heading may never claim fewer than two matches; the server tops the
     // real batch up to at least two whenever eligible clubs exist.
@@ -67,17 +65,6 @@ export default function SignupPage(): JSX.Element | null {
       setEmailFeedback({ valid: result.valid, reason: result.reason });
     }
   }, []);
-
-  function requireLegalConfirmations(): boolean {
-    const errs: Record<string, string> = {};
-    if (!agreedToTerms) errs.terms = "You must agree to the Terms and Conditions.";
-    if (!isOfAge) errs.age = "You must confirm you are 13 years of age or older.";
-    if (Object.keys(errs).length > 0) {
-      setErrors((prev) => ({ ...prev, ...errs }));
-      return false;
-    }
-    return true;
-  }
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
@@ -90,8 +77,6 @@ export default function SignupPage(): JSX.Element | null {
     }
     const pwError = passwordError(password);
     if (pwError) errs.password = pwError;
-    if (!agreedToTerms) errs.terms = "You must agree to the Terms and Conditions.";
-    if (!isOfAge) errs.age = "You must confirm you are 13 years of age or older.";
     setErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -422,30 +407,6 @@ export default function SignupPage(): JSX.Element | null {
               </span>
             </div>
 
-            <LegalCheckboxes
-              agreedToTerms={agreedToTerms}
-              isOfAge={isOfAge}
-              errors={errors}
-              onTermsChange={(v) => {
-                setAgreedToTerms(v);
-                writeOnboardingState({ agreedToTerms: v });
-                setErrors((prev) => {
-                  const next = { ...prev };
-                  delete next.terms;
-                  return next;
-                });
-              }}
-              onAgeChange={(v) => {
-                setIsOfAge(v);
-                writeOnboardingState({ isOfAge: v });
-                setErrors((prev) => {
-                  const next = { ...prev };
-                  delete next.age;
-                  return next;
-                });
-              }}
-            />
-
             {generalError && (
               <p aria-live="assertive" className="text-[13px] text-[#F02719] mt-4">
                 {generalError}
@@ -476,74 +437,34 @@ export default function SignupPage(): JSX.Element | null {
                 Log in
               </Link>
             </p>
+
+            {/* Clicking either link opens the same in-app document (Terms &
+                Conditions, with the Privacy Policy as a section inside it) as
+                a modal, so closing it always returns to this exact page with
+                everything already typed still here. */}
+            <p className="text-center text-xs text-black mt-4 leading-relaxed">
+              By clicking Next, you agree to our{" "}
+              <button
+                type="button"
+                onClick={() => setLegalModalOpen(true)}
+                className="text-[#0FA6A6] font-semibold hover:underline"
+              >
+                Terms and Conditions
+              </button>{" "}
+              and{" "}
+              <button
+                type="button"
+                onClick={() => setLegalModalOpen(true)}
+                className="text-[#0FA6A6] font-semibold hover:underline"
+              >
+                Privacy Policy
+              </button>
+              .
+            </p>
         </form>
       </div>
+
+      {legalModalOpen && <LegalModal onClose={() => setLegalModalOpen(false)} />}
     </main>
-  );
-}
-
-function LegalCheckboxes({
-  agreedToTerms,
-  isOfAge,
-  errors,
-  onTermsChange,
-  onAgeChange,
-}: {
-  agreedToTerms: boolean;
-  isOfAge: boolean;
-  errors: Record<string, string>;
-  onTermsChange: (v: boolean) => void;
-  onAgeChange: (v: boolean) => void;
-}): JSX.Element {
-  return (
-    <div className="flex flex-col gap-2.5 mt-5">
-      <div>
-        <label className="flex items-start gap-2.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={agreedToTerms}
-            onChange={(e) => onTermsChange(e.target.checked)}
-            className="mt-0.5 accent-[#0FA6A6] w-4 h-4 shrink-0"
-            aria-invalid={!!errors.terms}
-            aria-describedby={errors.terms ? "terms-error" : undefined}
-          />
-          <span className="text-xs text-black leading-relaxed">
-            I agree to the{" "}
-            {/* Same-tab internal route; the form state survives the round-trip
-                via sessionStorage. */}
-            <Link href="/terms" className="text-[#0FA6A6] font-semibold underline">
-              Terms and Conditions
-            </Link>
-            .
-          </span>
-        </label>
-        {errors.terms && (
-          <p id="terms-error" className="text-xs text-[#F02719] mt-1 ml-[26px]">
-            {errors.terms}
-          </p>
-        )}
-      </div>
-
-      <div>
-        <label className="flex items-start gap-2.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isOfAge}
-            onChange={(e) => onAgeChange(e.target.checked)}
-            className="mt-0.5 accent-[#0FA6A6] w-4 h-4 shrink-0"
-            aria-invalid={!!errors.age}
-            aria-describedby={errors.age ? "age-error" : undefined}
-          />
-          <span className="text-xs text-black leading-relaxed">
-            I confirm I am 13 years of age or older.
-          </span>
-        </label>
-        {errors.age && (
-          <p id="age-error" className="text-xs text-[#F02719] mt-1 ml-[26px]">
-            {errors.age}
-          </p>
-        )}
-      </div>
-    </div>
   );
 }

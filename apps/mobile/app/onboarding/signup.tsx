@@ -15,6 +15,7 @@ import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
+import { LegalModal } from "../../components/shared/LegalModal";
 import {
   CONFIRM_EMAIL_REDIRECT,
   checkSignupStatus,
@@ -48,6 +49,7 @@ export default function OnboardingSignupScreen() {
   const [emailExistsVerified, setEmailExistsVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [emailFeedback, setEmailFeedback] = useState<{ valid: boolean; reason?: string } | null>(null);
+  const [legalModalOpen, setLegalModalOpen] = useState(false);
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
@@ -337,9 +339,26 @@ export default function OnboardingSignupScreen() {
                 <Text style={styles.tealLink}>Log in</Text>
               </Text>
             </TouchableOpacity>
+
+            {/* Legal notice — clicking either link opens the same in-app
+                document (Terms & Conditions, with the Privacy Policy as a
+                section inside it) as a modal, so closing it always returns to
+                this exact screen with everything already typed still here. */}
+            <Text style={styles.legalText}>
+              By clicking Next, you agree to our{" "}
+              <Text style={styles.tealLink} onPress={() => setLegalModalOpen(true)}>
+                Terms and Conditions
+              </Text>{" "}
+              and{" "}
+              <Text style={styles.tealLink} onPress={() => setLegalModalOpen(true)}>
+                Privacy Policy
+              </Text>
+              .
+            </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <LegalModal visible={legalModalOpen} onClose={() => setLegalModalOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -422,4 +441,11 @@ const styles = StyleSheet.create({
   hintGreen: { color: "#0FA6A6" },
   tealLink: { fontSize: 12, color: "#0FA6A6", fontWeight: "600" },
   footerText: { fontSize: 12, color: "#5F5D5D" },
+  legalText: {
+    fontSize: 12,
+    color: "#000",
+    textAlign: "center",
+    marginTop: 16,
+    lineHeight: 18,
+  },
 });
