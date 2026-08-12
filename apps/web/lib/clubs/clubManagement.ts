@@ -195,12 +195,17 @@ export async function removeMember(clubId: string, userId: string): Promise<void
 
 // ─── Media management (officers) ─────────────────────────────────────────────
 
-export async function hideClubPhoto(photoId: string): Promise<void> {
-  const supabase = getSupabaseBrowser();
-  const { error } = await supabase.from("club_photos").update({ is_visible: false }).eq("id", photoId);
-  if (error) throw error;
-}
-
+/**
+ * Detaches a tagged post from ONE club. The officer-checked SECURITY DEFINER
+ * RPC clears posts.club_id, deletes the post_club_tags row and deletes the
+ * club_photos row for this club only — it never deletes the post, so the post
+ * stays in Home, on the creator's profile, and anywhere it was shared.
+ *
+ * (There is deliberately no `hideClubPhoto` beside this. A web-only "hide" used
+ * to flip club_photos.is_visible while leaving the club tag intact, which is a
+ * different data relationship from mobile's and left the post attributed to a
+ * club it had been removed from.)
+ */
 export async function removePostFromClub(postId: string, clubId: string): Promise<void> {
   const supabase = getSupabaseBrowser();
   const { error } = await supabase.rpc("remove_post_from_club", { p_post_id: postId, p_club_id: clubId });

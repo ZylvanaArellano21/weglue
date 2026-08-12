@@ -17,6 +17,7 @@ import { ClubOfficersTab } from "./ClubOfficersTab";
 import { ClubMediaTab } from "./ClubMediaTab";
 import { AttendanceListModal } from "../home/AttendanceListModal";
 import { LeaveClubDialog } from "./LeaveClubDialog";
+import { ClubMembersModal } from "./ClubMembersModal";
 import { EditClubModal } from "./EditClubModal";
 import { ManageClubModal } from "./ManageClubModal";
 import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
@@ -80,6 +81,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const [editEventId, setEditEventId] = useState<string | null>(null);
   const [attendanceEventId, setAttendanceEventId] = useState<string | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [people, setPeople] = useState<"members" | "gluemates" | null>(null);
 
   const invalidateClubContent = () => {
     void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
@@ -190,6 +192,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onEdit={() => setEditing(true)}
             onOfficerChat={() => void openClubChat("officer_chat")}
             onGroupChat={() => void openClubChat("club_group")}
+            onOpenPeople={setPeople}
           />
 
           {activeTab === "home" && (
@@ -205,7 +208,11 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               onOpenAttendees={setAttendanceEventId}
               onRestricted={() => show(eventRestrictionMessage("members_only", club.name) ?? "", "error")}
               onCreateEvent={club.is_officer ? () => setCompose("event") : undefined}
-              onCreatePost={club.is_member ? () => setCompose("post") : undefined}
+              // Posting from INSIDE a club profile is officer-only (fix 6). A
+              // regular member still posts from Home and tags this club there,
+              // and that tagged post appears here — same post, same rows, no
+              // duplicate. Only the club-profile shortcut is officer-gated.
+              onCreatePost={club.is_officer ? () => setCompose("post") : undefined}
             />
           )}
           {activeTab === "calendar" && (
@@ -265,6 +272,17 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
       )}
 
       {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} onClose={() => setAttendanceEventId(null)} />}
+
+      {people && (
+        <ClubMembersModal
+          clubId={clubId}
+          viewerId={userId}
+          filter={people}
+          onClose={() => setPeople(null)}
+          onOpenProfile={(id) => router.push(`/u/${id}`)}
+          onMessage={(id) => router.push(personMessageHref(id))}
+        />
+      )}
       {leaveOpen && <LeaveClubDialog clubId={clubId} clubName={club.name} userId={userId} onClose={() => setLeaveOpen(false)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
 
       {overlay?.kind === "media" && (
@@ -273,34 +291,29 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           initialIndex={overlay.index}
           userId={userId}
           clubId={clubId}
+          clubName={club.name}
           isOfficer={club.is_officer}
           onClose={() => setOverlay(null)}
           onOpenAuthor={(id) => router.push(`/u/${id}`)}
-          onHide={(photoId) =>
-            photoManage.hide.mutate(photoId, {
-              onSuccess: () => {
-                show("Photo hidden from this club");
-                setOverlay(null);
-              },
-              onError: () => show("Could not hide photo.", "error"),
-            })
-          }
+          // Detaches the post from THIS club only — the post itself is never
+          // deleted, so it stays in Home and on the creator's profile. Toast
+          // copy is mobile's.
           onRemovePost={(postId) =>
             photoManage.removePost.mutate(postId, {
               onSuccess: () => {
-                show("Post removed from this club");
+                show(`Post removed from ${club.name}.`);
                 setOverlay(null);
               },
-              onError: () => show("Could not remove post.", "error"),
+              onError: () => show("Could not remove the post from this club. Try again.", "error"),
             })
           }
           onDeleteUpload={(photoId) =>
             photoManage.deleteUpload.mutate(photoId, {
               onSuccess: () => {
-                show("Photo deleted");
+                show("Photo removed.");
                 setOverlay(null);
               },
-              onError: () => show("Could not delete photo.", "error"),
+              onError: () => show("Could not remove the photo. Try again.", "error"),
             })
           }
         />
@@ -324,10 +337,12 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           }}
         />
       )}
-      {compose === "post" && club.is_member && (
+      {compose === "post" && club.is_officer && (
         <ComposePostModal
           userId={userId}
-          presetClubId={clubId}
+          // `lockedClub` permanently attaches THIS club to the post: no club
+          // search, no way to remove or change the tag (fix 7).
+          lockedClub={{ id: clubId, name: club.name }}
           onClose={() => setCompose(null)}
           onCreated={() => {
             setCompose(null);

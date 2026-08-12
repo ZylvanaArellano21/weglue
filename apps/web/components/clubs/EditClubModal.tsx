@@ -5,9 +5,11 @@ import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
 import { PlusIcon, CloseIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
-import { useUpdateClub } from "../../lib/hooks/useClubManagement";
+import { useUpdateClub, useManageClubPhoto } from "../../lib/hooks/useClubManagement";
+import { ClubPhotoRemovalDialog } from "./ClubPhotoRemoval";
+import type { ClubPhotoRemovalPlan } from "../../lib/clubs/clubPhotoRemoval";
 import { uploadToBucket } from "../../lib/imageUpload";
-import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
+import type { ClubProfileData, ClubPhoto } from "../../lib/clubs/clubProfileService";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -34,6 +36,14 @@ export function EditClubModal({
 }): JSX.Element {
   const show = useToast();
   const update = useUpdateClub(club.id, userId);
+  const photoManage = useManageClubPhoto(club.id, userId);
+
+  // The photo whose removal confirmation is open, if any.
+  const [removing, setRemoving] = useState<ClubPhoto | null>(null);
+  // Rows already removed in this session, so the grid updates the moment the
+  // server call succeeds rather than waiting for the club profile to refetch.
+  const [removedIds, setRemovedIds] = useState<string[]>([]);
+  const photos = club.photos.filter((p) => !removedIds.includes(p.id));
 
   const [name, setName] = useState(club.name);
   const [description, setDescription] = useState(club.description ?? "");
@@ -72,6 +82,25 @@ export function EditClubModal({
       show(`Could not upload ${kind}. Try again.`, "error");
     } finally {
       setUploading(null);
+    }
+  };
+
+  // Both branches report through the SAME wording mobile uses, so an officer
+  // sees identical copy on either platform.
+  const confirmRemoval = (photo: ClubPhoto, plan: ClubPhotoRemovalPlan) => {
+    const done = () => {
+      setRemovedIds((prev) => [...prev, photo.id]);
+      setRemoving(null);
+      show(plan.successMessage);
+    };
+    const failed = () => {
+      setRemoving(null);
+      show(plan.errorMessage, "error");
+    };
+    if (plan.kind === "remove_post_from_club") {
+      photoManage.removePost.mutate(photo.post_id!, { onSuccess: done, onError: failed });
+    } else {
+      photoManage.deleteUpload.mutate(photo.id, { onSuccess: done, onError: failed });
     }
   };
 
@@ -210,6 +239,49 @@ export function EditClubModal({
           </div>
         </Field>
 
+        {/* Photos that Glue — the mobile Edit Club removal surface (see
+            apps/mobile/app/club/[clubId]/edit.tsx). Removing a TAGGED POST here
+            detaches it from this club only: the post stays in Home, on the
+            creator's profile and anywhere it was shared. Removing an
+            officer-uploaded photo deletes just that club photo. The wording for
+            each case comes from lib/clubs/clubPhotoRemoval so it cannot drift
+            from mobile. Removal takes effect immediately and is independent of
+            "Save changes" — exactly like mobile, where each removal is its own
+            server call. */}
+        {photos.length > 0 && (
+          <Field label="Photos that Glue">
+            <div className="mt-1 grid grid-cols-4 gap-2 sm:grid-cols-5">
+              {photos.map((photo) => (
+                <div key={photo.id} className="relative aspect-square overflow-hidden rounded-lg bg-gray-200">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={photo.url} alt={photo.caption ?? ""} className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setRemoving(photo)}
+                    aria-label={
+                      photo.source === "tagged_post" && photo.post_id
+                        ? `Remove this post from ${club.name}`
+                        : "Remove this photo"
+                    }
+                    title={
+                      photo.source === "tagged_post" && photo.post_id
+                        ? "Remove from club"
+                        : "Remove photo"
+                    }
+                    className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white transition hover:bg-black/75"
+                  >
+                    <CloseIcon size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              Removing a member&apos;s tagged post takes it out of this club only — their post stays on
+              their profile and in Home.
+            </p>
+          </Field>
+        )}
+
         <div className="mt-6 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="rounded-full px-5 py-2 text-sm font-semibold text-gray-600 hover:bg-black/5">
             Cancel
@@ -224,6 +296,16 @@ export function EditClubModal({
           </button>
         </div>
       </div>
+
+      {removing && (
+        <ClubPhotoRemovalDialog
+          photo={removing}
+          clubName={club.name}
+          pending={photoManage.removePost.isPending || photoManage.deleteUpload.isPending}
+          onConfirm={(plan) => confirmRemoval(removing, plan)}
+          onCancel={() => setRemoving(null)}
+        />
+      )}
     </Modal>
   );
 }

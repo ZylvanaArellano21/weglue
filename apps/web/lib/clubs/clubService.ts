@@ -1,7 +1,14 @@
 "use client";
 
 import { getSupabaseBrowser } from "../supabase-browser";
-import { todayInAppTz } from "../datetime";
+import {
+  currentWeekRange,
+  isEventPast,
+  isEventPastAt,
+  parseMeetingSchedule,
+  todayInAppTz,
+  type MeetingSlot,
+} from "../datetime";
 
 // Web port of apps/mobile/services/clubTabService.ts + clubService.ts +
 // searchService.ts. Every query reads the SAME tables/RPCs mobile reads so web
@@ -18,23 +25,16 @@ export interface SidebarNextEvent {
   start_time: string;
 }
 
-export interface SidebarMeetingSchedule {
-  day: string;
-  time_start: string | null;
-  time_end: string | null;
-  location: string | null;
-  building: string | null;
-  room: string | null;
-}
-
 export interface SidebarClub {
   id: string;
   name: string;
   handle: string;
   avatar_url: string | null;
   officer_role: string | null;
+  /** The next event still to come THIS Monday–Sunday week, if there is one. */
   next_event: SidebarNextEvent | null;
-  meeting_schedule: SidebarMeetingSchedule | null;
+  /** The club's recurring meeting slots — shown when next_event is null. */
+  meeting_schedule: MeetingSlot[];
 }
 
 export interface MyClubs {
@@ -49,7 +49,7 @@ export async function getMyClubs(userId: string): Promise<MyClubs> {
   const { data: memberships } = await supabase
     .from("club_members")
     .select(
-      "club_id, role, joined_at, clubs!inner(id, name, handle, avatar_url, meeting_day, meeting_time_start, meeting_time_end, meeting_location, meeting_building, meeting_room, is_active)"
+      "club_id, role, joined_at, clubs!inner(id, name, handle, avatar_url, meeting_schedule, meeting_day, meeting_time_start, meeting_time_end, is_active)"
     )
     .eq("user_id", userId)
     .eq("clubs.is_active", true)
@@ -58,31 +58,38 @@ export async function getMyClubs(userId: string): Promise<MyClubs> {
 
   const clubIds = ((memberships ?? []) as any[]).map((m) => m.club_id);
 
+  // The sidebar's event line is scoped to the CURRENT Monday–Sunday week — not
+  // a rolling "next 7 days", which used to spill next week's events into this
+  // week's row. Within that window we take the next event that has not ended
+  // yet, so once an event finishes the following one takes over automatically.
   const nextEvents: Record<string, SidebarNextEvent> = {};
   if (clubIds.length > 0) {
-    const today = todayInAppTz();
-    const weekEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
+    const now = new Date();
+    const today = todayInAppTz(); // events earlier in the week are already over
+    const { end: weekEnd } = currentWeekRange(now);
 
     const { data: events } = await supabase
       .from("events")
-      .select("id, club_id, title, emoji, event_date, start_time")
+      .select("id, club_id, title, emoji, event_date, start_time, end_time, event_end_at")
       .in("club_id", clubIds)
       .gte("event_date", today)
       .lte("event_date", weekEnd)
-      .order("event_date", { ascending: true });
+      .order("event_date", { ascending: true })
+      .order("start_time", { ascending: true });
 
     (events ?? []).forEach((e: any) => {
-      if (!nextEvents[e.club_id]) {
-        nextEvents[e.club_id] = {
-          id: e.id,
-          title: e.title,
-          emoji: e.emoji,
-          event_date: e.event_date,
-          start_time: e.start_time,
-        };
-      }
+      if (nextEvents[e.club_id]) return;
+      const hasEnded = e.event_end_at
+        ? isEventPastAt(e.event_end_at, now)
+        : isEventPast(e.event_date, e.end_time, now);
+      if (hasEnded) return;
+      nextEvents[e.club_id] = {
+        id: e.id,
+        title: e.title,
+        emoji: e.emoji,
+        event_date: e.event_date,
+        start_time: e.start_time,
+      };
     });
   }
 
@@ -115,16 +122,14 @@ export async function getMyClubs(userId: string): Promise<MyClubs> {
       avatar_url: c.avatar_url,
       officer_role: null,
       next_event: nextEvents[m.club_id] ?? null,
-      meeting_schedule: c.meeting_day
-        ? {
-            day: c.meeting_day,
-            time_start: c.meeting_time_start,
-            time_end: c.meeting_time_end,
-            location: c.meeting_location,
-            building: c.meeting_building,
-            room: c.meeting_room,
-          }
-        : null,
+      // Multi-day clubs live in the meeting_schedule jsonb (033); the legacy
+      // single-day columns remain the fallback for clubs never migrated.
+      meeting_schedule: parseMeetingSchedule(
+        c.meeting_schedule,
+        c.meeting_day,
+        c.meeting_time_start,
+        c.meeting_time_end
+      ),
     };
 
     if (m.role === "officer") {

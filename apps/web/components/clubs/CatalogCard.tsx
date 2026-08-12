@@ -7,14 +7,22 @@ import { formatEventTime, formatEventLocation } from "../../lib/datetime";
 // A single catalog club card (Suggested for you / Popular at your school),
 // matching the web screenshots: cover image, club name, meeting day / time /
 // room, and a Join · Joined pill. Clicking the card body opens the canonical
-// Club Profile; the pill joins in place without navigating.
+// Club Profile; the pill joins or unjoins in place without navigating.
+//
+// The pill is the SAME control as the Club Profile header's: teal fill to join,
+// teal outline "Joined" to leave. Leaving hands off to the shared
+// LeaveClubDialog (owned by ClubsClient), which runs the existing preflight,
+// the only-officer guard, the red destructive confirmation and the leave_club
+// RPC. There is no second membership implementation here.
 export function CatalogCard({
   club,
   onJoin,
+  onLeave,
   joining,
 }: {
   club: CatalogClub;
-  onJoin: (clubId: string) => void;
+  onJoin: (club: CatalogClub) => void;
+  onLeave: (club: CatalogClub) => void;
   joining: boolean;
 }): JSX.Element {
   const router = useRouter();
@@ -70,17 +78,22 @@ export function CatalogCard({
 
         <div className="mt-3 flex justify-end">
           {club.is_member ? (
-            <span
-              className="rounded-full border px-4 py-1 text-[13px] font-semibold text-teal"
+            <button
+              type="button"
+              onClick={() => onLeave(club)}
+              aria-label={`Leave ${club.name}`}
+              title={`Leave ${club.name}`}
+              className="rounded-full border px-4 py-1 text-[13px] font-semibold text-teal transition hover:bg-teal/5"
               style={{ borderColor: "#0FA6A6", background: "#fff" }}
             >
               Joined
-            </span>
+            </button>
           ) : (
             <button
               type="button"
-              onClick={() => onJoin(club.id)}
+              onClick={() => onJoin(club)}
               disabled={joining}
+              aria-label={`Join ${club.name}`}
               className="rounded-full bg-teal px-5 py-1 text-[13px] font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
             >
               {joining ? "…" : "Join"}

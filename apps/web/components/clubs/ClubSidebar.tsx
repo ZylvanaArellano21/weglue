@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Avatar } from "../shared/Avatar";
 import { SearchIcon, CloseIcon } from "../shared/icons";
-import { formatEventDate } from "../../lib/datetime";
+import { formatMeetingSchedule } from "../../lib/datetime";
 import type { SidebarClub } from "../../lib/clubs/clubService";
 
 // Left column of the Club tab (spec §4/§5): "Clubs" heading, the CLUB-SPECIFIC
@@ -79,8 +79,15 @@ export function ClubSidebar({
   );
 }
 
+// Each row's third line answers "what is happening with this club?":
+//   • an event still to come THIS Monday–Sunday week → that event's title, red;
+//   • otherwise the recurring meeting schedule, e.g. "Monday, 3:00 pm - 4:00 pm"
+//     or "Monday, Wednesday, 3:00 pm - 4:00 pm".
+// The week window and the schedule grouping both come from lib/datetime, so
+// this row, the Club Profile and mobile all read the same rules.
 function SidebarRow({ club, showRole }: { club: SidebarClub; showRole?: boolean }): JSX.Element {
   const router = useRouter();
+  const scheduleLines = formatMeetingSchedule(club.meeting_schedule);
   return (
     <li>
       <button
@@ -98,15 +105,16 @@ function SidebarRow({ club, showRole }: { club: SidebarClub; showRole?: boolean 
           )}
           <p className="truncate text-[15px] font-bold text-gray-900">{club.name}</p>
           {club.next_event ? (
-            <p className="text-[12px] font-semibold text-[#F02719]">
+            <p className="truncate text-[12px] font-semibold text-[#F02719]">
               {club.next_event.emoji ? `${club.next_event.emoji} ` : ""}
               {club.next_event.title}
-              <span className="ml-1 font-normal text-gray-500">
-                {formatEventDate(club.next_event.event_date)}
-              </span>
             </p>
-          ) : club.meeting_schedule?.day ? (
-            <p className="truncate text-[12px] italic text-gray-500">{club.meeting_schedule.day}</p>
+          ) : scheduleLines.length > 0 ? (
+            scheduleLines.map((line) => (
+              <p key={line} className="truncate text-[12px] italic text-gray-500">
+                {line}
+              </p>
+            ))
           ) : null}
         </div>
       </button>

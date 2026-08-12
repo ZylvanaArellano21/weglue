@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
 import { ToastProvider, useToast } from "../shared/Toast";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
@@ -39,14 +39,15 @@ type Step = "interests" | "activities" | "congrats";
 
 function Body({ userId }: { userId: string }): JSX.Element {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const show = useToast();
 
-  // Context-aware return (spec §10): launched from the Club tab → back to Clubs,
-  // scrolled to the freshly refreshed Suggested for you. Launched from Home /
-  // the Home sidebar → the established Home → Events behavior.
-  const fromClubs = searchParams.get("from") === "clubs";
-  const seeMatchesHref = fromClubs ? "/clubs?matches=1" : "/home?tab=events";
+  // "See my matches" ALWAYS lands on Home → Events, where the club
+  // recommendation strip ("We found N clubs you'll love") renders. It used to
+  // branch on `?from=clubs` and send Club-tab entrants back to /clubs, which is
+  // the catalog — NOT the matches area — so the survey appeared to dump the
+  // user somewhere unrelated. Home is now the single destination no matter
+  // where the survey was launched from (Home, Clubs, Interests, anywhere).
+  const seeMatchesHref = "/home?tab=events";
   const { data: profile } = useOwnProfile(userId);
   const rerun = useInterestsRerun(userId);
 

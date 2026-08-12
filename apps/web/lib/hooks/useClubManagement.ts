@@ -9,7 +9,6 @@ import {
   removeMember,
   getClubMemberList,
   searchUniversityUsers,
-  hideClubPhoto,
   removePostFromClub,
   deleteClubPhotoEverywhere,
   type UpdateClubInput,
@@ -83,15 +82,33 @@ export function useUniversityUserSearch(viewerId: string, query: string, enabled
   });
 }
 
+/**
+ * Removing something from a club's Photos that Glue. Exactly the two operations
+ * mobile has — see lib/clubs/clubPhotoRemoval.ts for why there is no third.
+ *
+ *   removePost   detaches a tagged post from THIS club only (the post itself
+ *                is never touched, so Home and the creator's profile keep it);
+ *   deleteUpload deletes an officer-uploaded club photo row.
+ */
 export function useManageClubPhoto(clubId: string, userId: string) {
   const invalidate = useClubInvalidation(clubId, userId);
   const queryClient = useQueryClient();
+
+  // Mirrors mobile's invalidatePhotoQueries: detaching a club tag changes what
+  // renders on the club profile AND on every surface that draws the post, since
+  // the post's club attribution disappears from all of them at once.
   const afterChange = () => {
     invalidate();
     void queryClient.invalidateQueries({ queryKey: ["clubPhotoFeed", clubId] });
+    void queryClient.invalidateQueries({ queryKey: ["homePostsFeed"] });
+    void queryClient.invalidateQueries({ queryKey: ["ownPosts"] });
+    void queryClient.invalidateQueries({ queryKey: ["userPosts"] });
+    // Post detail + shared-message cards resolve the same post by id — the
+    // removed club tag must disappear from every rendering.
+    void queryClient.invalidateQueries({ queryKey: ["postDetail"] });
   };
+
   return {
-    hide: useMutation({ mutationFn: (photoId: string) => hideClubPhoto(photoId), onSuccess: afterChange }),
     removePost: useMutation({
       mutationFn: (postId: string) => removePostFromClub(postId, clubId),
       onSuccess: afterChange,

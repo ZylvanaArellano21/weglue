@@ -14,13 +14,15 @@ export function ClubCatalog({
   suggested,
   popular,
   onJoin,
+  onLeave,
   joiningId,
   hasQuery,
   scrollToSuggested,
 }: {
   suggested: CatalogClub[];
   popular: CatalogClub[];
-  onJoin: (clubId: string) => void;
+  onJoin: (club: CatalogClub) => void;
+  onLeave: (club: CatalogClub) => void;
   joiningId: string | null;
   hasQuery: boolean;
   scrollToSuggested?: boolean;
@@ -47,7 +49,7 @@ export function ClubCatalog({
             Doesn&apos;t match your interests?{" "}
             <button
               type="button"
-              onClick={() => router.push("/interests?from=clubs")}
+              onClick={() => router.push("/interests")}
               className="font-semibold text-teal hover:underline"
             >
               Click here
@@ -55,7 +57,7 @@ export function ClubCatalog({
           </p>
           <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {suggested.map((club) => (
-              <CatalogCard key={`s-${club.id}`} club={club} onJoin={onJoin} joining={joiningId === club.id} />
+              <CatalogCard key={`s-${club.id}`} club={club} onJoin={onJoin} onLeave={onLeave} joining={joiningId === club.id} />
             ))}
           </div>
         </section>
@@ -70,7 +72,7 @@ export function ClubCatalog({
           <h2 className="text-2xl font-bold text-gray-900">Popular at your school</h2>
           <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {popular.map((club) => (
-              <CatalogCard key={`p-${club.id}`} club={club} onJoin={onJoin} joining={joiningId === club.id} />
+              <CatalogCard key={`p-${club.id}`} club={club} onJoin={onJoin} onLeave={onLeave} joining={joiningId === club.id} />
             ))}
           </div>
         </section>
