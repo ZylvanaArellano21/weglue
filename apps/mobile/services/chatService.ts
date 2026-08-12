@@ -122,8 +122,16 @@ function resolveConversationIdentity(
   if (type === 'club_group' || type === 'officer_chat') {
     return {
       name: clubConversationTitle(club?.name, type, storedName),
+      // Bug 5 — the chat's OWN picture is authoritative.
+      //
+      // This read `club?.avatar_url` alone, so a Members or Officers chat
+      // always rendered the live Club Profile image and `storedAvatar` was
+      // ignored entirely. That coupled the two permanently: an officer setting
+      // a chat picture saw nothing change, and editing the Club Profile
+      // silently restyled every existing chat. The club image is now only the
+      // fallback, for a chat created before its picture was seeded (079).
       // Club profile picture — never the banner.
-      avatar_url: club?.avatar_url ?? null,
+      avatar_url: storedAvatar ?? club?.avatar_url ?? null,
       other_user_id: null,
     };
   }
@@ -597,8 +605,8 @@ export async function searchChats(
       name: clubConversationTitle(c.clubs?.name, c.type, c.name),
       type: c.type,
       club_id: c.club_id,
-      // Club profile picture — never the banner, never a stale snapshot.
-      avatar_url: c.clubs?.avatar_url ?? c.avatar_url,
+      // Bug 5 — the chat's own picture first, the club's only as a fallback.
+      avatar_url: c.avatar_url ?? c.clubs?.avatar_url ?? null,
     };
   });
 
@@ -651,7 +659,8 @@ export async function getMyGroupChats(userId: string): Promise<ChatResult[]> {
       name: clubConversationTitle(c.clubs?.name, c.type, c.name),
       type: c.type,
       club_id: c.club_id,
-      avatar_url: c.clubs?.avatar_url ?? c.avatar_url,
+      // Bug 5 — the chat's own picture first, the club's only as a fallback.
+      avatar_url: c.avatar_url ?? c.clubs?.avatar_url ?? null,
     }));
 }
 
@@ -849,6 +858,8 @@ export async function getClubChatTarget(
     channelId: defaultChannel?.id ?? null,
     // Live club identity for the header (club profile picture, never banner).
     name: clubConversationTitle((data as any).clubs?.name, type, (data as any).name),
-    avatarUrl: (data as any).clubs?.avatar_url ?? null,
+    // Bug 5 — the chat's own picture first, the club's only as a fallback.
+    // The NAME above stays live club identity; only the image is a copy.
+    avatarUrl: (data as any).avatar_url ?? (data as any).clubs?.avatar_url ?? null,
   };
 }

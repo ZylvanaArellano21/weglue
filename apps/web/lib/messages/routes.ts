@@ -11,7 +11,18 @@ export type MessagesDestination = {
   messageId?: string | null;
   info?: boolean;
   infoTab?: "polls" | "media" | "events" | "files";
+  /**
+   * Bug 3 — shared content opens ON TOP of Messages, never instead of it.
+   *
+   * `eventId`/`postId` become the `?event=` / `?post=` params that the app-wide
+   * `PageOverlays` already reads on Profile and the weekly-events surfaces. They
+   * are carried in the SAME query string as `conversation`/`channel`/`info`, so
+   * the underlying chat stays mounted behind the overlay and dismissing it (or
+   * pressing Back) restores the exact conversation, channel, info panel and
+   * info tab the person opened it from.
+   */
   eventId?: string | null;
+  postId?: string | null;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,6 +52,7 @@ export function messagesHref(destination: MessagesDestination = {}): string {
   if (destination.info) params.set("info", "1");
   if (destination.infoTab) params.set("infoTab", destination.infoTab);
   if (isMessageUuid(destination.eventId)) params.set("event", destination.eventId);
+  if (isMessageUuid(destination.postId)) params.set("post", destination.postId);
   const query = params.toString();
   return query ? `/messages?${query}` : "/messages";
 }

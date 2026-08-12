@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../realtime";
+import type { ThreadMessage, ThreadPage } from "./service";
 import {
   canPostInChannel,
+  unsendFailureMessage,
+  unsendMessage,
   getChannelMuted,
   getConversationFlags,
   getConversationMuted,
@@ -43,8 +46,15 @@ export function useMessageDetails(conversationId: string | null, userId: string)
 
 // userId is part of the key, not just the fetch: delete-for-me is per viewer,
 // so two accounts must never share a cached thread page.
+//
+// `staleTime` is short rather than 0 (Bug 8). Thread freshness does NOT depend
+// on it: `useMessagesRealtime` invalidates this exact key on every message
+// lifecycle event for the open conversation, so a new, edited or unsent message
+// still lands immediately. With 0, re-entering a conversation the viewer left
+// seconds ago always refetched a full page of messages before rendering
+// anything, which is what made "chat → back → chat" reload every time.
 export function useMessageThread(conversationId: string | null, channelId: string | null, userId: string) {
-  return useQuery({ queryKey: [...messageKeys.thread(conversationId ?? "", channelId), userId], queryFn: () => getThread(conversationId!, channelId, userId), enabled: !!conversationId && !!userId, staleTime: 0 });
+  return useQuery({ queryKey: [...messageKeys.thread(conversationId ?? "", channelId), userId], queryFn: () => getThread(conversationId!, channelId, userId), enabled: !!conversationId && !!userId, staleTime: 30_000 });
 }
 
 export function useMessageHub(conversationId: string | null, userId: string) {
@@ -103,6 +113,87 @@ export function useMessageShared(conversationId: string | null, channelId: strin
 
 export function useMessageEvents(conversationId: string | null, channelId: string | null, userId: string) {
   return useQuery({ queryKey: [...messageKeys.shared(conversationId ?? "", channelId, "events"), userId], queryFn: () => getSharedEvents(conversationId!, channelId, userId), enabled: !!conversationId && !!userId, staleTime: 30_000 });
+}
+
+/**
+ * Bug 1 — unsend has to feel immediate, in every web chat.
+ *
+ * Two separate things made it slow, and both are fixed rather than hidden:
+ *
+ *   1. The UI waited for the ENTIRE round trip before the message moved. For an
+ *      attachment that round trip included storage work (see the edge function),
+ *      so a photo could sit visibly in the thread for seconds after the person
+ *      confirmed they wanted it gone.
+ *   2. On success the whole thread was then refetched, so the message's
+ *      disappearance was gated on a second round trip as well.
+ *
+ * The item is now dropped from every cache that renders it — the thread, and
+ * the info panel's photos / videos / files / polls tabs — in the same tick the
+ * person confirms. The real deletion still runs immediately afterwards and is
+ * still the authority: if it genuinely fails, every snapshot is put back
+ * exactly as it was, so the person is never told something was deleted when it
+ * was not.
+ *
+ * Convergence only happens AFTER the server confirms. Invalidating earlier
+ * would race the delete and pull the message straight back into view.
+ */
+export function useUnsendMessage(
+  conversationId: string,
+  channelId: string | null,
+  userId: string,
+  onError: (message: string) => void
+): (messageId: string) => Promise<void> {
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (messageId: string) => {
+      const threadKey = [...messageKeys.thread(conversationId, channelId), userId];
+      const previousThread = queryClient.getQueryData<ThreadPage>(threadKey);
+      // Photos/videos/files/polls panels for this conversation, whichever are
+      // cached. Captured before the write so rollback is exact.
+      const previousShared = queryClient.getQueriesData<ThreadMessage[]>({
+        queryKey: ["messages", "shared", conversationId],
+      });
+
+      queryClient.setQueryData<ThreadPage>(threadKey, (page) =>
+        page ? { ...page, messages: page.messages.filter((message) => message.id !== messageId) } : page
+      );
+      for (const [key, list] of previousShared) {
+        if (Array.isArray(list)) {
+          queryClient.setQueryData(
+            key,
+            list.filter((message) => message.id !== messageId)
+          );
+        }
+      }
+
+      try {
+        await unsendMessage(messageId);
+      } catch (error) {
+        // The deletion did not happen, so the message must come back. Anything
+        // else would leave the person believing content was removed from a
+        // conversation it is still sitting in.
+        if (previousThread) queryClient.setQueryData(threadKey, previousThread);
+        for (const [key, list] of previousShared) queryClient.setQueryData(key, list);
+        // Reporting the failure is done HERE, not by the caller.
+        //
+        // Found in QA: the explanation used to be attached as `.catch()` on this
+        // promise inside the message's own component — but that component is
+        // unmounted the moment the optimistic removal takes effect, so the
+        // rejection had nowhere to surface. The message reappeared with no word
+        // of why, which is precisely the "never leave them guessing" rule this
+        // was written for. This hook is owned by the conversation, which stays
+        // mounted for the whole operation.
+        onError(unsendFailureMessage(error));
+        return;
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ["messages", "thread", conversationId] });
+      void queryClient.invalidateQueries({ queryKey: ["messages", "shared", conversationId] });
+      void queryClient.invalidateQueries({ queryKey: messageKeys.conversations(userId) });
+      void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
+    },
+    [channelId, conversationId, onError, queryClient, userId]
+  );
 }
 
 /** Scoped, cleanup-safe invalidations for a Messages session. */

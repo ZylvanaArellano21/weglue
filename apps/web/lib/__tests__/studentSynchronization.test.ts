@@ -94,6 +94,37 @@ describe("Day 10E web content synchronization", () => {
     expect(resetQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(["messages"]);
   });
 
+  /**
+   * Bug 8 — the property the focus/route recovery path depends on.
+   *
+   * `Providers` recovers from focus, reconnect, visibilitychange and route
+   * transitions with `invalidateStudentContentQueries`, NOT with the clearing
+   * variant. That is only safe if invalidation is genuinely non-destructive:
+   * it must mark every root stale (so each active observer refetches under
+   * current RLS) while leaving the cached payload in place, so the viewer keeps
+   * seeing content they are still entitled to instead of a full-page skeleton.
+   *
+   * If this ever started discarding payloads, returning to an already-open tab
+   * would blank Messages again — and, because dismissing the native file picker
+   * refocuses the window, it would also wipe the composer's pending attachment
+   * mid-send (Bug 4).
+   */
+  it("refreshes without discarding cached payloads, so a refocus cannot blank the screen", () => {
+    const invalidateQueries = vi.fn();
+    const resetQueries = vi.fn();
+    const removeQueries = vi.fn();
+    const setQueryData = vi.fn();
+    const queryClient = { invalidateQueries, resetQueries, removeQueries, setQueryData } as unknown as QueryClient;
+
+    invalidateStudentContentQueries(queryClient);
+
+    expect(invalidateQueries).toHaveBeenCalledTimes(STUDENT_CONTENT_QUERY_ROOTS.length);
+    expect(invalidateQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(["messages"]);
+    expect(resetQueries).not.toHaveBeenCalled();
+    expect(removeQueries).not.toHaveBeenCalled();
+    expect(setQueryData).not.toHaveBeenCalled();
+  });
+
   // Parity with mobile's STUDENT_CONTENT_QUERY_ROOTS. A block, restriction or
   // deletion changes who may appear in discovery search and who may appear on
   // an attendee list, so both roots must refresh on the opaque campus signal

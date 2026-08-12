@@ -49,8 +49,9 @@ import {
   setConversationArchived,
   setConversationMuted,
   attachmentObjectUrl,
+  permissionSelectValue,
+  postingPermissionOptions,
   releaseAttachmentUrl,
-  unsendMessage,
   uploadAttachment,
   votePoll,
   type Channel,
@@ -77,6 +78,7 @@ import {
   useMessageSuggestions,
   useMessageThread,
   useMessagesRealtime,
+  useUnsendMessage,
 } from "../../lib/messages/hooks";
 import {
   ChatFileCard,
@@ -275,7 +277,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
       await queryClient.invalidateQueries({ queryKey: messageKeys.hub(conversationId, userId) });
       await queryClient.invalidateQueries({ queryKey: messageKeys.channels(conversationId) });
     };
-    center = <ChannelHub conversationId={conversationId} conversationName={details.name} userId={userId} participants={details.participants} isOfficer={viewerIsOfficer} isOfficersChat={details.type === "officer_chat"} onOpenChannel={(channel) => destination({ filter: "groups", conversationId, channelId: channel.id })} onBack={clearSelection} onCreateChannel={async (name) => {
+    center = <ChannelHub conversationId={conversationId} conversationName={details.name} conversationAvatarUrl={details.avatar_url} userId={userId} participants={details.participants} isOfficer={viewerIsOfficer} isOfficersChat={details.type === "officer_chat"} onOpenChannel={(channel) => destination({ filter: "groups", conversationId, channelId: channel.id })} onOpenInfo={() => destination({ filter: "groups", conversationId, hub: true, info: true, infoTab })} onBack={clearSelection} onCreateChannel={async (name) => {
       try {
         const channel = await createChannel(conversationId, name);
         show("Channel created");
@@ -305,7 +307,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
     // group chat → channels → chat → details path), not to an empty Messages
     // pane, so the previous context is preserved on desktop too.
     const isOfficial = details.type === "club_group" || details.type === "officer_chat";
-    center = <ConversationThread userId={userId} conversationId={conversationId} channelId={channelId} details={details} channelName={selectedChannel ? channelLabel(selectedChannel) : null} canPost={channelId ? undefined : true} targetMessageId={targetMessageId} searchNonce={searchNonce} onOpenHub={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : undefined} onBack={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : clearSelection} onOpenInfo={() => destination({ filter, conversationId, channelId, info: true, infoTab })} onOpenProfile={(id) => router.push(`/u/${id}`)} onOpenEvent={(id) => router.push(`/event/${id}`)} onOpenPost={(id) => router.push(`/post/${id}`)} onInvalidate={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />;
+    center = <ConversationThread userId={userId} conversationId={conversationId} channelId={channelId} details={details} channelName={selectedChannel ? channelLabel(selectedChannel) : null} canPost={channelId ? undefined : true} targetMessageId={targetMessageId} searchNonce={searchNonce} onOpenHub={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : undefined} onBack={isOfficial ? () => destination({ filter: "groups", conversationId, hub: true }) : clearSelection} onOpenInfo={() => destination({ filter, conversationId, channelId, info: true, infoTab })} onOpenProfile={(id) => router.push(`/u/${id}`)} onOpenEvent={(id) => destination({ filter, conversationId, channelId, info: infoOpen, infoTab, eventId: id })} onOpenPost={(id) => destination({ filter, conversationId, channelId, info: infoOpen, infoTab, postId: id })} onInvalidate={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />;
   } else {
     center = <MessagesLanding noClubs={!clubsLoading && !hasClubs} onJoinClub={() => router.push("/clubs")} />;
   }
@@ -324,8 +326,13 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
               render. It must compare against "none". */}
           <MessagesSidebar userId={userId} filter={filter} loading={conversationsLoading} conversations={filter === "single" ? directConversations : groupConversations} suggestionsEnabled={filter === "single" && directConversations.length === 0 && composerMode === "none" && !conversationId && !isDraft} activeConversationId={conversationId} onFilter={setFilter} onOpen={openConversation} onNew={() => setComposerMode("new-message")} onOpenPerson={openPerson} onOpenMessage={openSearchResult} />
           <section className="relative flex min-w-0 flex-col bg-[#fffdf4] md:min-h-0 md:overflow-y-auto">{center}</section>
+          {/* `hub` is carried through every destination below (Bug 2). Club
+              Chat Information is opened FROM the channel list, so closing it,
+              switching its tab or opening a shared event from it must all
+              return to that channel list rather than dropping the person into
+              an empty Messages pane. */}
           {infoOpen && conversationId && details && (
-            <InfoPanel userId={userId} conversationId={conversationId} channelId={channelId} channel={selectedChannel} details={details} isOfficer={viewerIsOfficer} infoTab={infoTab} onClose={() => destination({ filter, conversationId, channelId })} onTab={(tab) => destination({ filter, conversationId, channelId, info: true, infoTab: tab })} onOpenEvent={(eventId) => destination({ filter, conversationId, channelId, info: true, infoTab, eventId })} onOpenMessage={(result) => openSearchResult(result, true)} onOpenProfile={(id) => router.push(`/u/${id}`)} onChanged={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />
+            <InfoPanel userId={userId} conversationId={conversationId} channelId={channelId} channel={selectedChannel} details={details} isOfficer={viewerIsOfficer} infoTab={infoTab} onClose={() => destination({ filter, conversationId, channelId, hub: hubOpen })} onTab={(tab) => destination({ filter, conversationId, channelId, hub: hubOpen, info: true, infoTab: tab })} onOpenEvent={(eventId) => destination({ filter, conversationId, channelId, hub: hubOpen, info: true, infoTab, eventId })} onOpenMessage={(result) => openSearchResult(result, true)} onOpenProfile={(id) => router.push(`/u/${id}`)} onChanged={() => invalidateConversation(conversationId)} onError={(message) => show(message, "error")} />
           )}
         </div>
       </div>
@@ -569,7 +576,7 @@ function DraftThread({ userId, draftPerson, groupName, groupIds, onMaterialized,
   return <ThreadShell title={label} subtitle={draftPerson ? draftPerson.full_name : null}><EmptyThread label="Start the conversation" /><Composer onSend={send} /></ThreadShell>;
 }
 
-function ChannelHub({ conversationId, conversationName, userId, participants, isOfficer, isOfficersChat, onOpenChannel, onBack, onCreateChannel, onRenameChannel, onDeleteChannel, onSetPermission }: { conversationId: string; conversationName: string; userId: string; participants: Array<Person & { joined_at: string; role: string }>; isOfficer: boolean; isOfficersChat: boolean; onOpenChannel: (channel: ChannelPreview) => void; onBack: () => void; onCreateChannel: (name: string) => Promise<void>; onRenameChannel: (channelId: string, name: string) => Promise<void>; onDeleteChannel: (channelId: string) => Promise<void>; onSetPermission: (channelId: string, permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
+function ChannelHub({ conversationId, conversationName, conversationAvatarUrl, userId, participants, isOfficer, isOfficersChat, onOpenChannel, onOpenInfo, onBack, onCreateChannel, onRenameChannel, onDeleteChannel, onSetPermission }: { conversationId: string; conversationName: string; conversationAvatarUrl: string | null; userId: string; participants: Array<Person & { joined_at: string; role: string }>; isOfficer: boolean; isOfficersChat: boolean; onOpenChannel: (channel: ChannelPreview) => void; onOpenInfo: () => void; onBack: () => void; onCreateChannel: (name: string) => Promise<void>; onRenameChannel: (channelId: string, name: string) => Promise<void>; onDeleteChannel: (channelId: string) => Promise<void>; onSetPermission: (channelId: string, permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
   const { data: channels = [], isLoading } = useMessageHub(conversationId, userId);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -577,7 +584,20 @@ function ChannelHub({ conversationId, conversationName, userId, participants, is
   return <div className="mx-auto max-w-2xl px-5 py-6">
     <div className="flex items-center gap-3">
       <button type="button" onClick={onBack} aria-label="Back to messages" className="rounded-full p-2 text-lg text-gray-950 hover:bg-black/5">‹</button>
-      <div className="min-w-0"><h2 className="truncate text-xl font-bold text-gray-900">{conversationName}</h2><p className="text-sm text-gray-500">Choose a chat</p></div>
+      {/* Bug 2 — the club picture and name at the top of the channel list are
+          the entry point to Club Chat Information, matching mobile:
+            channel list → club picture/name → Club Chat Information
+                         → club picture/name → the real Club Profile
+          The web had no way in at all: this header was plain text. */}
+      <button
+        type="button"
+        onClick={onOpenInfo}
+        className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-1 text-left transition hover:bg-black/[0.03] focus:outline-none focus:ring-2 focus:ring-teal"
+        aria-label={`${conversationName} information`}
+      >
+        <Avatar uri={conversationAvatarUrl} size={40} name={conversationName} />
+        <span className="min-w-0"><span className="block truncate text-xl font-bold text-gray-900">{conversationName}<span className="ml-2 text-teal">›</span></span><span className="block text-sm text-gray-500">Choose a chat</span></span>
+      </button>
       {/* Add Channel is officer-only. A member never sees this control, exactly
           as on mobile, where the CHANNELS header carries no action for them. */}
       {isOfficer && !adding && <button type="button" onClick={() => setAdding(true)} className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-teal px-4 py-2 text-sm font-semibold text-teal hover:bg-teal/5"><PlusIcon size={15} />Add Channel</button>}
@@ -600,7 +620,12 @@ function ChannelHub({ conversationId, conversationName, userId, participants, is
           `kind === "channel"`: Main chat is a permanent, structural thread and
           must never pick up a custom channel's destructive actions. */}
       {isOfficer && <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3 text-xs" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
-        <label className="font-semibold text-gray-600">Posting <select value={channel.post_permission} aria-label={`Who can post in ${channelLabel(channel)}`} onChange={(event) => { const permission = event.target.value as PostingPermission; if (permission === "certain") { setConfiguring(channel); } else void onSetPermission(channel.id, permission, []); }} className="ml-1 rounded border bg-white px-1 py-1"><option value="everyone">{isOfficersChat ? "All officers" : "Everyone"}</option><option value="officers">Only officers</option><option value="certain">Certain people</option></select></label>
+        {/* Bug 7 — an Officers conversation offers only "Everyone in this chat"
+            and "Certain people". Everyone inside it is already an officer, so
+            "Only officers" selected exactly the same people and meant nothing.
+            A channel still stored as 'officers' displays as the everyone option
+            (see permissionSelectValue) rather than showing a blank select. */}
+        <label className="font-semibold text-gray-600">Posting <select value={permissionSelectValue(channel.post_permission, isOfficersChat)} aria-label={`Who can post in ${channelLabel(channel)}`} onChange={(event) => { const permission = event.target.value as PostingPermission; if (permission === "certain") { setConfiguring(channel); } else void onSetPermission(channel.id, permission, []); }} className="ml-1 rounded border bg-white px-1 py-1">{postingPermissionOptions(isOfficersChat).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {channel.kind === "channel" && <>
           <button type="button" onClick={() => { const next = window.prompt("New channel name", channel.name); if (next?.trim()) void onRenameChannel(channel.id, next.trim()); }} className="rounded border px-2 py-1 font-semibold text-teal hover:bg-teal/5">Rename</button>
           <button type="button" onClick={() => { if (window.confirm(`Delete #${channel.name}? This also removes its messages.`)) void onDeleteChannel(channel.id); }} className="rounded border border-red-200 px-2 py-1 font-semibold text-red-600 hover:bg-red-50">Delete</button>
@@ -616,6 +641,7 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   const { data: page, isLoading } = useMessageThread(conversationId, channelId, userId);
   const { data: permitted } = useMessagePermission(channelId);
   const queryClient = useQueryClient();
+  const unsend = useUnsendMessage(conversationId, channelId, userId, onError);
   const { outgoing, enqueue, retry } = useOutgoingMessages(conversationId, channelId, userId, onInvalidate, onError);
   const stored = useMemo(() => [...(page?.messages ?? [])].reverse(), [page?.messages]);
   // A pending message is dropped the moment its stored row arrives, matched on
@@ -646,7 +672,7 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   });
   const restrictedSenders = useMemo(() => new Set(restrictedSenderIds ?? []), [restrictedSenderIds]);
   const emptyLabel = channelName && channelName.startsWith("#") ? `No messages in ${channelName} yet` : "No messages yet";
-  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onOpenEvent={onOpenEvent} onOpenPost={onOpenPost} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} isSearchTarget={!!targetMessageId && message.id === targetMessageId} searchNonce={searchNonce} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={enqueue} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
+  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onOpenEvent={onOpenEvent} onOpenPost={onOpenPost} onUnsend={unsend} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} isSearchTarget={!!targetMessageId && message.id === targetMessageId} searchNonce={searchNonce} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={enqueue} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
 }
 
 /**
@@ -802,7 +828,7 @@ function Composer({ disabled = false, disabledReason, allowPolls = false, onSend
  * is the defect Update 3 removes. The timestamp and the actions menu sit under
  * whatever was rendered, so their placement does not depend on the payload.
  */
-function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOpenEvent, onOpenPost, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
+function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOpenEvent, onOpenPost, onUnsend, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onUnsend: (messageId: string) => Promise<void>; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(false), []);
@@ -895,7 +921,20 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
             )}
             <button type="button" role="menuitem" onClick={() => void mutate(() => hideMessage(message.id, userId), "Couldn’t remove that message from your view.")} className="block w-full rounded px-3 py-2 text-left hover:bg-gray-50">Delete for me</button>
             {isOwn && (
-              <button type="button" role="menuitem" onClick={() => void mutate(() => unsendMessage(message.id), "Couldn’t unsend that message.")} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Unsend for everyone</button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  // Not routed through `mutate`: the message is already gone
+                  // from view by the time this resolves, and the hook owns both
+                  // the rollback and the post-success convergence.
+                  setMenu(false);
+                  void onUnsend(message.id);
+                }}
+                className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50"
+              >
+                Unsend for everyone
+              </button>
             )}
             {!isOwn && (
               <button type="button" role="menuitem" onClick={() => { const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) void mutate(() => reportMessage(message.id, reason), "Couldn’t send that report."); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>
@@ -1173,6 +1212,21 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
     : isMembersChat || isOfficersChat || isDirect ? null
     : `${details.participants.length} participants`;
   const initials = channel ? (channel.kind === "main" ? "MA" : `#${channel.name.slice(0, 1).toUpperCase()}`) : details.name.slice(0, 1).toUpperCase();
+  // Bug 5 — a channel's own picture is authoritative; the conversation's is the
+  // fallback for one that has never had its own (rows predating migration 079).
+  const identityAvatarUrl = channel ? channel.avatar_url ?? details.avatar_url : details.avatar_url;
+  /**
+   * Bug 2 — where the club identity leads.
+   *
+   * Only on Club Chat Information (the club conversation itself), and only to
+   * the app's canonical `/club/[clubId]` route — the SAME Club Profile reached
+   * from Home, search and a club card. There is deliberately no chat-local
+   * rendering of a club anywhere in Messages.
+   *
+   * A channel's info panel is excluded: its title is the channel, not the club,
+   * so linking it to a club profile would be a mismatched destination.
+   */
+  const clubProfileHref = isParentInfo && details.club_id ? `/club/${details.club_id}` : null;
 
   // Same restriction as the thread: a blocked pair's attachments are withheld
   // from the shared Media/Files panels too. Storage refuses the bytes anyway.
@@ -1361,9 +1415,20 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
       {/* Update 4 / Bug 7 — the group image, with mobile's camera badge shown
           ONLY to a viewer the backend would actually accept an edit from. */}
       <div className="relative mx-auto w-20">
-        {details.avatar_url
-          ? <Avatar uri={details.avatar_url} size={80} name={title} className="mx-auto" />
+        {/* Bug 5 — a channel shows ITS OWN picture, falling back to the
+            conversation's only when it has never had one. Reading
+            `details.avatar_url` unconditionally meant every channel of a club
+            rendered the same image and an officer's per-channel picture was
+            invisible. */}
+        {identityAvatarUrl
+          ? <Avatar uri={identityAvatarUrl} size={80} name={title} className="mx-auto" />
           : <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal text-2xl font-bold text-white">{initials}</div>}
+        {/* Bug 2 — on Club Chat Information the picture opens the REAL Club
+            Profile. It is a transparent overlay button rather than a wrapper so
+            the officer's camera badge below stays independently clickable. */}
+        {clubProfileHref && (
+          <a href={clubProfileHref} aria-label={`Open the ${details.name} club profile`} className="absolute inset-0 rounded-full focus:outline-none focus:ring-2 focus:ring-teal" />
+        )}
         {canEditIdentity && <>
           <button type="button" onClick={() => avatarInputRef.current?.click()} aria-label="Change group picture" className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#fffdf4] bg-teal text-white shadow focus:outline-none focus:ring-2 focus:ring-teal">
             <CameraIcon size={14} />
@@ -1380,7 +1445,13 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
         </form>
       ) : (
         <div className="mt-3 flex items-center justify-center gap-1.5">
-          <h2 className="truncate text-2xl font-bold text-gray-950">{title}</h2>
+          {/* Bug 2 — the name is the same destination as the picture above, so
+              "click the picture" and "click the name" can never resolve
+              differently. A real anchor, so middle-click and open-in-new-tab
+              behave as they do everywhere else in the product. */}
+          {clubProfileHref
+            ? <a href={clubProfileHref} className="truncate rounded text-2xl font-bold text-gray-950 hover:underline focus:outline-none focus:ring-2 focus:ring-teal" aria-label={`Open the ${details.name} club profile`}>{title}</a>
+            : <h2 className="truncate text-2xl font-bold text-gray-950">{title}</h2>}
           {canEditIdentity && <button type="button" onClick={() => { setNameDraft(details.name === "Group chat" ? "" : details.name); setRenaming(true); }} aria-label="Edit group name" className="shrink-0 rounded-full p-1 text-gray-500 hover:bg-black/5"><PencilIcon size={16} /></button>}
         </div>
       )}
@@ -1564,13 +1635,21 @@ function InfoTabButton({ tab, active, onClick }: { tab: InfoTab; active: boolean
 }
 
 /**
- * "Who can post" — the exact three options mobile offers, with mobile's own
- * context-dependent wording (an officers-only conversation says "All officers"
- * where a members conversation says "Everyone"). This does not invent a
- * permission model; it drives the same `set_channel_post_permission` RPC.
+ * "Who can post" — the same options mobile offers, from the one shared
+ * definition in `postingPermissionOptions` so the two platforms cannot drift.
+ *
+ * Bug 7: an Officers conversation offers "Everyone in this chat" and "Certain
+ * people" only. This does not invent a permission model; it drives the same
+ * `set_channel_post_permission` RPC with the same stored values.
+ *
+ * "Certain people" lists `participants` — the roster of THIS conversation — so
+ * it never searches the wider We Glue user base, and one or several people may
+ * be selected. Posting access also cannot outlive membership: 041's
+ * `cleanup_channel_posters_on_leave` trigger deletes a person's `channel_posters`
+ * rows when they leave the conversation.
  */
 function PermissionsSheet({ channel, participants, isOfficersChat, onClose, onSave }: { channel: Channel; participants: Array<Person & { role: string }>; isOfficersChat: boolean; onClose: () => void; onSave: (permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
-  const [permission, setPermission] = useState<PostingPermission>(channel.post_permission);
+  const [permission, setPermission] = useState<PostingPermission>(permissionSelectValue(channel.post_permission, isOfficersChat));
   const [allowed, setAllowed] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1584,12 +1663,7 @@ function PermissionsSheet({ channel, participants, isOfficersChat, onClose, onSa
     void getChannelPosters(channel.id).then((ids) => { if (alive) setAllowed(ids); }).catch(() => {});
     return () => { alive = false; };
   }, [channel.id, channel.post_permission]);
-  const everyoneLabel = isOfficersChat ? "All officers" : "Everyone";
-  const options: Array<[PostingPermission, string, string]> = [
-    ["everyone", everyoneLabel, "Every member of this conversation can post."],
-    ["officers", "Only officers", "Members can read; only officers can post."],
-    ["certain", "Certain people", "Only the people you select can post."],
-  ];
+  const options = postingPermissionOptions(isOfficersChat);
   const save = async () => {
     setSaving(true);
     try { await onSave(permission, allowed); onClose(); }

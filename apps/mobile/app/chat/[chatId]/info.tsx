@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -80,9 +80,13 @@ import {
 // ─── Chat Information ────────────────────────────────────────────────────────
 // Three distinct screens behind one route, selected by conversation type and
 // the presence of a channelId:
-//   • Parent Conversation Info (official chat, no channelId) — Bug 3/5/6/7:
-//     NO picture, NO content, NO Leave/Delete. Add Person/Share (Members,
-//     officers) + Mute + Archive + people list + 3-dot Report.
+//   • Club Chat Information (official chat, no channelId) — Bug 3/5/6/7 and
+//     Bug 2: the club picture and name, which OPEN THE REAL CLUB PROFILE.
+//     NO content, NO Leave/Delete. Add Person/Share (Members, officers) +
+//     Mute + Archive + people list + 3-dot Report.
+//     The picture here is a link, not an editor: the Club Profile image is
+//     editable only through the Club Profile edit flow, and the per-chat and
+//     per-channel pictures are edited on their own info screens below.
 //   • Main chat / Hashtag Channel Info (official chat, channelId) — Bug 10/11:
 //     own picture, Search, Mute, channel-scoped shared content; officers get
 //     Edit Permissions and (hashtags only) Rename/Delete. NO people/Leave.
@@ -117,20 +121,47 @@ export default function ChatInfo() {
   const isParentInfo = isOfficialChat && !channelId;
   const isThreadInfo = isOfficialChat && !!channelId;
 
-  const [channelMeta, setChannelMeta] = useState<ChannelMeta | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (!channelId) {
-      setChannelMeta(null);
-      return;
-    }
-    getChannelMeta(channelId).then((m) => {
-      if (!cancelled) setChannelMeta(m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [channelId]);
+  /**
+   * Bug 6 — the channel's own metadata, keyed by channel.
+   *
+   * This was `useState` + an effect that fetched on channelId change. Two
+   * separate defects came out of that, both visible in the correction
+   * screenshots:
+   *
+   *   • STALE IDENTITY. The state was never cleared when `channelId` changed,
+   *     so moving between two channels kept rendering the PREVIOUS channel's
+   *     name, picture, permission and rename target until the new fetch
+   *     resolved. Keying the query by channelId makes that structurally
+   *     impossible: a new key has no data, it never has the old channel's.
+   *   • REPEATED LOADING. Nothing was cached, so returning to a channel's
+   *     information always refetched from scratch.
+   *
+   * `channelMetaReady` is what the identity block waits on. Without it the
+   * screen fell back to `displayName` — the PARENT conversation's name — so
+   * opening #event first painted "Business Club · Officers" with the club's
+   * initials and then swapped. That is the flash in the screenshots, and it is
+   * exactly the "never render another conversation's name/image, even briefly"
+   * rule.
+   */
+  const { data: channelMetaData, isPending: channelMetaPending } = useQuery({
+    queryKey: ['channelMeta', channelId],
+    queryFn: () => getChannelMeta(channelId!),
+    enabled: !!channelId,
+    staleTime: 60_000,
+  });
+  const channelMeta = channelId ? channelMetaData ?? null : null;
+  const channelMetaReady = !channelId || (!channelMetaPending && !!channelMetaData);
+  // Local, optimistic edits to the cached row (rename, picture, permission) so
+  // an officer's change shows at once without a refetch.
+  const patchChannelMeta = useCallback(
+    (patch: Partial<ChannelMeta>) => {
+      if (!channelId) return;
+      queryClient.setQueryData<ChannelMeta | null>(['channelMeta', channelId], (current) =>
+        current ? { ...current, ...patch } : current,
+      );
+    },
+    [channelId, queryClient],
+  );
 
   const [activeTab, setActiveTab] = useState<ContentTab>('media');
   const [confirm, setConfirm] = useState<
@@ -157,6 +188,26 @@ export default function ChatInfo() {
   const others = useMemo(
     () => (chatDetails?.participants ?? []).filter((p) => p.user_id !== userId),
     [chatDetails?.participants, userId],
+  );
+
+  /**
+   * Who may be granted "Certain people" posting access.
+   *
+   * Deliberately NOT `others`. Eligibility is "every participant of THIS
+   * conversation", and the viewer is one of them — an officer restricting a
+   * channel is exactly the person most likely to need posting rights in it.
+   * Excluding them made a single-officer Officers chat offer "No eligible
+   * people", so the only way to save `certain` was to grant it to nobody.
+   *
+   * This is the same set the web sheet offers (`details.participants`), so the
+   * two platforms now answer "who can I pick?" identically.
+   *
+   * Scope is still the conversation itself: `chatDetails.participants` is this
+   * conversation's roster, so members of the club's OTHER chats never appear.
+   */
+  const eligiblePosters = useMemo(
+    () => chatDetails?.participants ?? [],
+    [chatDetails?.participants],
   );
   // Blocking. Declared here, alongside the other participant-derived hooks and
   // ABOVE this screen's early returns — `otherUser` is computed after those, so
@@ -326,7 +377,7 @@ export default function ChatInfo() {
     try {
       const url = await uploadImageToBucket('avatars', `${userId}/channel-${channelId}.jpg`, localUri, 512);
       await setChannelAvatar(channelId, url);
-      setChannelMeta((m) => (m ? { ...m, avatar_url: url } : m));
+      patchChannelMeta({ avatar_url: url });
       invalidateAll();
     } catch {
       Alert.alert('Could not update the channel picture.');
@@ -339,7 +390,7 @@ export default function ChatInfo() {
     try {
       await renameChannel(channelId, channelRenameValue.trim());
       setChannelRenameOpen(false);
-      setChannelMeta((m) => (m ? { ...m, name: channelRenameValue.trim().toLowerCase().replace(/\s+/g, '-') } : m));
+      patchChannelMeta({ name: channelRenameValue.trim().toLowerCase().replace(/\s+/g, '-') });
       invalidateAll();
     } catch (e: any) {
       Alert.alert('Could not rename channel', e?.message?.includes('cannot_rename_main') ? 'The Main chat cannot be renamed.' : 'Please try again.');
@@ -460,6 +511,18 @@ export default function ChatInfo() {
       setRenameValue(chatDetails?.stored_name ?? '');
       setRenameOpen(true);
     }
+  }
+
+  /**
+   * Bug 2 — the club identity on Club Chat Information opens the REAL Club
+   * Profile.
+   *
+   * It pushes the canonical `/club/[clubId]` route that the rest of the app
+   * uses, so this is the same screen reached from Home, search and a club card
+   * — deliberately NOT a second, chat-local rendering of a club.
+   */
+  function openClubProfile() {
+    if (clubId) router.push(`/club/${clubId}` as any);
   }
   async function onGroupPicturePress() {
     if (!isGroupAdmin) {
@@ -692,9 +755,42 @@ export default function ChatInfo() {
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* ─── Identity block ─── */}
         {isParentInfo ? (
-          // Parent conversation: NO picture (Bug 2).
+          // Bug 2 — Club Chat Information carries the club picture and name,
+          // and BOTH open the real Club Profile. They are two taps on the same
+          // destination so "tap the picture" and "tap the name" can never
+          // resolve differently. No camera badge: this image is changed only
+          // through the Club Profile edit flow.
           <View style={styles.profileSection}>
-            <Text style={styles.profileName}>{displayName}</Text>
+            <TouchableOpacity
+              onPress={openClubProfile}
+              activeOpacity={0.8}
+              disabled={!clubId}
+              accessibilityRole="button"
+              accessibilityLabel={`Open the ${displayName} club profile`}
+            >
+              <Avatar uri={chatDetails.avatar_url} size={80} username={displayName} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={openClubProfile}
+              activeOpacity={0.7}
+              disabled={!clubId}
+              accessibilityRole="button"
+              accessibilityLabel={`Open the ${displayName} club profile`}
+            >
+              <Text style={styles.profileName}>{displayName}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : isThreadInfo && !channelMetaReady ? (
+          // Bug 6 — a channel's identity is NEVER approximated from its parent.
+          //
+          // Falling through to the block below would render `threadTitle ||
+          // displayName`, and while this channel's own row is still loading
+          // that is the parent conversation's name and initials: opening
+          // #event briefly showed "Business Club · Officers". A loading state
+          // is the honest answer until the correct data exists.
+          <View style={styles.profileSection}>
+            <View style={styles.identityPlaceholder} />
+            <ActivityIndicator color={chatColors.teal} />
           </View>
         ) : (
           <View style={styles.profileSection}>
@@ -976,11 +1072,11 @@ export default function ChatInfo() {
           visible={permOpen}
           channelId={channelId}
           isOfficersChat={isOfficersChat}
-          participants={others.map((p) => ({ userId: p.user_id, name: displayNameOrFallback(p), avatarUrl: p.avatar_url }))}
+          participants={eligiblePosters.map((p) => ({ userId: p.user_id, name: displayNameOrFallback(p), avatarUrl: p.avatar_url }))}
           currentPermission={channelMeta?.post_permission ?? 'everyone'}
           onClose={() => setPermOpen(false)}
           onSaved={(perm) => {
-            setChannelMeta((m) => (m ? { ...m, post_permission: perm } : m));
+            patchChannelMeta({ post_permission: perm });
             invalidateAll();
             setPermOpen(false);
           }}
@@ -1131,15 +1227,46 @@ function PermissionEditor({
 
   useEffect(() => {
     if (!visible) return;
-    setPerm(currentPermission);
+    // Bug 7 — an Officers conversation has no "only officers" state.
+    //
+    // Everyone inside it is already an officer, so 'officers' and 'everyone'
+    // select exactly the same people there. Rows already stored as 'officers'
+    // (every officers channel seeded by 041's #announcements rule, and anything
+    // an officer chose before this change) are shown as "Everyone in this chat"
+    // and normalise to 'everyone' the next time the sheet is saved. Nothing is
+    // rewritten behind the officer's back, and no one's ability to post changes.
+    setPerm(isOfficersChat && currentPermission === 'officers' ? 'everyone' : currentPermission);
     if (currentPermission === 'certain') {
       getChannelPosters(channelId).then((ids) => setSelected(new Set(ids)));
     } else {
       setSelected(new Set());
     }
-  }, [visible, currentPermission, channelId]);
+  }, [visible, currentPermission, channelId, isOfficersChat]);
 
-  const everyoneLabel = isOfficersChat ? 'All officers' : 'Everyone';
+  /**
+   * Bug 7 — the option set differs by conversation kind.
+   *
+   * Officers chat: "Everyone in this chat" (default) and "Certain people".
+   * Members chat: the existing role-based model is deliberately unchanged —
+   * "Everyone", "Only officers", "Certain people" — because there the officer/
+   * member distinction is real and load-bearing.
+   *
+   * "Certain people" already draws from `participants`, which is THIS
+   * conversation's roster, so it never searches the wider We Glue user base;
+   * and `cleanup_channel_posters_on_leave` (041) deletes a person's
+   * channel_posters rows when they leave the conversation, so posting access
+   * cannot outlive membership of the Officers chat.
+   */
+  const permissionOptions: Array<[PostPermission, string, string]> = isOfficersChat
+    ? [
+        ['everyone', 'Everyone in this chat', 'Everyone currently in this chat can post.'],
+        ['certain', 'Certain people', 'Only the people you select from this chat can post.'],
+      ]
+    : [
+        ['everyone', 'Everyone', 'Every member of this conversation can post.'],
+        ['officers', 'Only officers', 'Members can read; only officers can post.'],
+        ['certain', 'Certain people', 'Only the people you select can post.'],
+      ];
 
   async function save() {
     setSaving(true);
@@ -1159,11 +1286,7 @@ function PermissionEditor({
         <View style={styles.sheetCard}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>Who can post</Text>
-          {([
-            ['everyone', everyoneLabel, 'Every member of this conversation can post.'],
-            ['officers', 'Only officers', 'Members can read; only officers can post.'],
-            ['certain', 'Certain people', 'Only the people you select can post.'],
-          ] as Array<[PostPermission, string, string]>).map(([value, label, desc]) => (
+          {permissionOptions.map(([value, label, desc]) => (
             <TouchableOpacity key={value} style={styles.permRow} onPress={() => setPerm(value)} activeOpacity={0.7}>
               <Ionicons name={perm === value ? 'radio-button-on' : 'radio-button-off'} size={20} color={perm === value ? chatColors.teal : chatColors.textMuted} />
               <View style={styles.permText}>
@@ -1242,6 +1365,9 @@ const styles = StyleSheet.create({
   overflowBtn: { padding: 4 },
   scroll: { paddingBottom: 32 },
   profileSection: { alignItems: 'center', paddingVertical: 12, paddingHorizontal: 32 },
+  // Reserves exactly the avatar's footprint while a channel's own identity
+  // loads, so the block does not resize when the real picture arrives.
+  identityPlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0,0,0,0.05)', marginBottom: 12 },
   profileName: { ...chatTypography.chatTitle, marginTop: 10, textAlign: 'center' },
   profileUsername: { fontFamily: chatFonts.regular, fontSize: 13, color: chatColors.textMuted, marginTop: 2, textAlign: 'center' },
   editBadge: {

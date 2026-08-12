@@ -24,6 +24,46 @@ export type ConversationType = "direct" | "group" | "club_group" | "officer_chat
 export type MessageType = "text" | "image" | "video" | "file" | "poll" | "shared_event" | "shared_post";
 export type PostingPermission = "everyone" | "officers" | "certain";
 
+/**
+ * Bug 7 — who may post, per conversation kind.
+ *
+ * Officers chat: "Everyone in this chat" (the default) and "Certain people".
+ * Everyone inside an Officers conversation is already an officer, so the old
+ * "All officers" / "Only officers" pair selected an identical set of people and
+ * the distinction meant nothing.
+ *
+ * Members chat: the existing role-based model is deliberately UNCHANGED. There
+ * the officer/member distinction is real, so "Everyone", "Only officers" and
+ * "Certain people" all stay.
+ *
+ * No migration is needed. The stored values remain the existing
+ * ('everyone' | 'officers' | 'certain') set — an Officers conversation simply
+ * stops offering 'officers', and `permissionSelectValue` displays a channel
+ * still stored that way as the everyone option. `can_post_in_channel` is
+ * untouched, and because every participant of an Officers conversation is an
+ * officer, 'officers' and 'everyone' authorise the same people there: nobody's
+ * ability to post changes.
+ */
+export function postingPermissionOptions(isOfficersChat: boolean): Array<[PostingPermission, string, string]> {
+  return isOfficersChat
+    ? [
+        ["everyone", "Everyone in this chat", "Everyone currently in this chat can post."],
+        ["certain", "Certain people", "Only the people you select from this chat can post."],
+      ]
+    : [
+        ["everyone", "Everyone", "Every member of this conversation can post."],
+        ["officers", "Only officers", "Members can read; only officers can post."],
+        ["certain", "Certain people", "Only the people you select can post."],
+      ];
+}
+
+/** The option a stored permission should appear as. In an Officers chat a row
+ *  still stored as 'officers' shows as "Everyone in this chat" rather than
+ *  leaving the control with no matching option. */
+export function permissionSelectValue(stored: PostingPermission, isOfficersChat: boolean): PostingPermission {
+  return isOfficersChat && stored === "officers" ? "everyone" : stored;
+}
+
 export interface Person {
   user_id: string;
   username: string;
@@ -299,7 +339,16 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
         id: conversation.id,
         type: conversation.type as ConversationType,
         name,
-        avatar_url: conversation.type === "direct" ? other?.profiles?.avatar_url ?? null : club?.avatar_url ?? conversation.avatar_url ?? null,
+        // Bug 5 — the conversation's OWN picture wins over the club's.
+        //
+        // This was `club?.avatar_url ?? conversation.avatar_url`, i.e. a club
+        // chat rendered the live Club Profile image and ignored whatever
+        // picture the chat actually had. That makes the two permanently
+        // coupled: an officer setting a chat picture would see no change, and
+        // changing the Club Profile would silently restyle every existing chat.
+        // The club image is now only the FALLBACK, for rows created before the
+        // picture was seeded.
+        avatar_url: conversation.type === "direct" ? other?.profiles?.avatar_url ?? null : conversation.avatar_url ?? club?.avatar_url ?? null,
         club_id: conversation.club_id ?? null,
         club_handle: club?.handle ?? null,
         other_user_id: other?.user_id ?? null,
@@ -371,7 +420,9 @@ export async function getConversationDetails(conversationId: string, currentUser
     id: raw.id,
     type: raw.type,
     name,
-    avatar_url: raw.type === "direct" ? other?.profiles?.avatar_url ?? null : raw.clubs?.avatar_url ?? raw.avatar_url ?? null,
+    // Bug 5 — as above: the chat's own picture is authoritative, the club's is
+    // only the fallback for a chat that has never had one.
+    avatar_url: raw.type === "direct" ? other?.profiles?.avatar_url ?? null : raw.avatar_url ?? raw.clubs?.avatar_url ?? null,
     club_id: raw.club_id ?? null,
     created_by: raw.created_by ?? null,
     participants: participants.map((participant) => ({
@@ -668,18 +719,77 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
  * already downloaded, screenshotted or re-shared before the block. Nothing
  * server-side can.
  */
+/**
+ * Bug 8 — one download per attachment, not one per render pass.
+ *
+ * Every caller used to issue its own `storage.download()` and mint its own
+ * blob. In practice that meant the same bytes were fetched over and over: each
+ * message bubble downloaded independently of the info panel's media grid, and
+ * `useObjectUrls` re-ran whenever the message list changed — so simply
+ * RECEIVING a message re-downloaded every image in the conversation. Leaving a
+ * chat and coming back downloaded all of it again.
+ *
+ * Paths are content-addressed (`<conversationId>/<uuid>.<ext>`, never reused),
+ * so a resolved blob is safe to share between callers and across mounts.
+ *
+ * This does NOT weaken 074's authorization property. The bytes are still
+ * fetched with `download()` — an authenticated request the storage policy
+ * evaluates — and the cache is dropped wholesale by
+ * `clearPermissionSensitiveStudentContent`, which is what runs when access may
+ * have changed. That is the same contract mobile already has, where
+ * `clearAttachmentCache()` empties its on-disk attachment cache on exactly the
+ * same signal.
+ */
+const attachmentUrlCache = new Map<string, string>();
+const attachmentUrlInFlight = new Map<string, Promise<string | null>>();
+
 export async function attachmentObjectUrl(path: string | null): Promise<string | null> {
   if (!path) return null;
   if (/^https?:\/\//.test(path)) return path;
-  const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).download(path);
-  if (error) throw error;
-  if (!data) return null;
-  return URL.createObjectURL(data);
+
+  const cached = attachmentUrlCache.get(path);
+  if (cached) return cached;
+  // Collapse the stampede: a thread mounting 40 bubbles at once must produce
+  // one request per path, not one per bubble.
+  const existing = attachmentUrlInFlight.get(path);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const { data, error } = await getSupabaseBrowser().storage.from(CHAT_ATTACHMENT_BUCKET).download(path);
+    if (error) throw error;
+    if (!data) return null;
+    const url = URL.createObjectURL(data);
+    attachmentUrlCache.set(path, url);
+    return url;
+  })().finally(() => {
+    attachmentUrlInFlight.delete(path);
+  });
+
+  attachmentUrlInFlight.set(path, request);
+  return request;
 }
 
-/** Frees a blob: URL created by `attachmentObjectUrl`. Safe to call with null. */
+/**
+ * Frees a blob: URL created by `attachmentObjectUrl`. Safe to call with null.
+ *
+ * A CACHED url is deliberately not revoked: it is shared by every caller
+ * showing that attachment, so revoking it when one message unmounts would break
+ * the image for all the others and force a re-download. Cached blobs are
+ * released together by `releaseAllAttachmentUrls`. Anything not in the cache —
+ * a composer preview, an already-evicted entry — is revoked as before.
+ */
 export function releaseAttachmentUrl(url: string | null | undefined): void {
-  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+  if (!url || !url.startsWith("blob:")) return;
+  for (const cached of attachmentUrlCache.values()) if (cached === url) return;
+  URL.revokeObjectURL(url);
+}
+
+/** Drops every cached attachment blob. Called when access may have changed, so
+ *  nothing already downloaded keeps rendering after a block or a removal. */
+export function releaseAllAttachmentUrls(): void {
+  for (const url of attachmentUrlCache.values()) URL.revokeObjectURL(url);
+  attachmentUrlCache.clear();
+  attachmentUrlInFlight.clear();
 }
 
 export async function markConversationRead(conversationId: string): Promise<void> {
@@ -895,11 +1005,72 @@ export async function setChannelPostPermission(channelId: string, permission: Po
   if (error) throw error;
 }
 
+/**
+ * Why an unsend can fail, in terms the person can act on.
+ *
+ * `functions.invoke` rejects with a FunctionsHttpError whose `message` is the
+ * fixed string "Edge Function returned a non-2xx status code" — it carries no
+ * indication of WHICH failure occurred. Every distinct cause therefore used to
+ * arrive at the UI identical, which is exactly why the only copy that could be
+ * written for it was generic. The real status lives on `error.context`, the
+ * undrained `Response`, so it is read here and turned into a cause the caller
+ * can explain honestly.
+ */
+export type UnsendFailure = "not_permitted" | "already_gone" | "offline" | "unknown";
+
+export class UnsendError extends Error {
+  readonly cause_kind: UnsendFailure;
+  constructor(kind: UnsendFailure) {
+    super(`unsend_failed:${kind}`);
+    this.name = "UnsendError";
+    this.cause_kind = kind;
+  }
+}
+
+/**
+ * What the person is told when an unsend genuinely did not happen.
+ *
+ * The message has just reappeared in the thread, so the copy has to explain
+ * that specific situation: the content is still there, and why. It deliberately
+ * avoids technical vocabulary (status codes, "request", "server", "database")
+ * and the generic "Something went wrong. Try again.", which tells someone
+ * nothing about whether their message is still visible to other people.
+ */
+export function unsendFailureMessage(error: unknown): string {
+  const kind: UnsendFailure = error instanceof UnsendError ? error.cause_kind : "unknown";
+  switch (kind) {
+    case "not_permitted":
+      return "You can only unsend your own messages, so this one is still in the chat.";
+    case "already_gone":
+      return "This message had already been removed, so there was nothing left to unsend.";
+    case "offline":
+      return "You’re not connected right now, so this message is still in the chat. Reconnect and unsend it again.";
+    default:
+      return "This message couldn’t be unsent, so everyone in this chat can still see it. Give it a moment and try again.";
+  }
+}
+
 export async function unsendMessage(messageId: string): Promise<void> {
   const { error } = await getSupabaseBrowser().functions.invoke("delete-message", {
     body: { messageId, idempotencyKey: crypto.randomUUID() },
   });
-  if (error) throw error;
+  if (!error) return;
+
+  const response = (error as { context?: unknown }).context;
+  const status =
+    response && typeof response === "object" && "status" in response
+      ? Number((response as { status: unknown }).status)
+      : null;
+
+  // 404 means the row is already unavailable — the message is gone, which is
+  // the outcome the person asked for, so it is NOT surfaced as a failure.
+  if (status === 404) return;
+  if (status === 401 || status === 403) throw new UnsendError("not_permitted");
+  if (status === 409) throw new UnsendError("already_gone");
+  if (status !== null) throw new UnsendError("unknown");
+  // No response at all: the request never completed (offline, DNS, CORS, an
+  // aborted navigation). The message was NOT deleted.
+  throw new UnsendError("offline");
 }
 
 export async function hideMessage(messageId: string, userId: string): Promise<void> {
