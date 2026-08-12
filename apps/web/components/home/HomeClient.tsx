@@ -16,21 +16,17 @@ import { PostCommentsModal } from "./PostCommentsModal";
 import { AttendanceListModal } from "./AttendanceListModal";
 import { ComposePostModal } from "./ComposePostModal";
 import { ComposeEventModal } from "./ComposeEventModal";
-import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
-import { useRealtimeNotifications, type NotificationTarget } from "../../lib/hooks/useNotifications";
+import type { NotificationTarget } from "../../lib/hooks/useNotifications";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
-import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
 import { messagesHref } from "../../lib/messages/routes";
 
-// Root of the authenticated web Home experience. Mounts the live unread-summary
-// + notifications subscriptions and lays out the three desktop columns. Every
-// overlay (event, post, saved, notifications, gluemates) is URL-driven so
-// browser Back closes it and restores the exact prior Home state (tab + scroll).
+// Root of the authenticated web Home experience. The live unread-summary,
+// notifications, and my-clubs subscriptions are owned once for the whole
+// session by Providers (useSessionRealtimeHub), not remounted here. Lays out
+// the three desktop columns. Every overlay (event, post, saved, notifications,
+// gluemates) is URL-driven so browser Back closes it and restores the exact
+// prior Home state (tab + scroll).
 export function HomeClient({ userId }: { userId: string }): JSX.Element {
-  useUnreadSummary(userId); // realtime badge subscription
-  useRealtimeNotifications(userId); // live notification inserts
-  useMyClubsRealtime(userId); // join/leave/role changes invalidate access caches
-
   return (
     <ToastProvider>
       <div className="min-h-screen bg-cream">

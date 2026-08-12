@@ -7,9 +7,6 @@ import { ClubSidebar } from "./ClubSidebar";
 import { ClubCatalog } from "./ClubCatalog";
 import { LeaveClubDialog } from "./LeaveClubDialog";
 import { useMyClubs, useDiscoveryClubs, useJoinClubFromCatalog } from "../../lib/hooks/useClubTab";
-import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
-import { useRealtimeNotifications } from "../../lib/hooks/useNotifications";
-import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
 import type { SidebarClub, CatalogClub } from "../../lib/clubs/clubService";
 
 // Root of the web Club tab. One shared search query filters the Officer/Member
@@ -25,10 +22,8 @@ export function ClubsClient({ userId, scrollToSuggested }: { userId: string; scr
 }
 
 function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested?: boolean }): JSX.Element {
-  useUnreadSummary(userId); // live header badges
-  useRealtimeNotifications(userId);
-  useMyClubsRealtime(userId); // cross-device join/leave reconcile
-
+  // Unread-summary, notifications, and my-clubs realtime are owned once for
+  // the whole session by Providers (useSessionRealtimeHub), not remounted here.
   const show = useToast();
   const { data: mine } = useMyClubs(userId);
   const { data: catalog } = useDiscoveryClubs(userId);

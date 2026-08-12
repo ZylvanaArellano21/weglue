@@ -16,10 +16,9 @@ import {
 } from "../shared/icons";
 import { REPORT_RECEIVED_MESSAGE, useReport } from "../../lib/hooks/useReport";
 import { ToastProvider, useToast } from "../shared/Toast";
-import { messageBadgeCounts, useUnreadSummary, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
+import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
 import { useMyClubs } from "../../lib/hooks/useClubTab";
-import { useMyClubsRealtime } from "../../lib/hooks/useClubRealtime";
 import { ATTACHMENT_UNAVAILABLE_TEXT, blockConfirmMessage, blockUser } from "../../lib/blocking";
 import {
   addGroupParticipants,
@@ -123,8 +122,8 @@ function useEscapeAndOutside(ref: React.RefObject<HTMLElement>, onDismiss: () =>
 }
 
 export function MessagesClient({ userId }: { userId: string }): JSX.Element {
-  useUnreadSummary(userId);
-  useMyClubsRealtime(userId);
+  // The unread-summary and my-clubs realtime subscriptions are owned once for
+  // the whole session by Providers (useSessionRealtimeHub), not remounted here.
   // From `md` up the Message tab is a FIXED-height application shell: the
   // document itself never scrolls, and the only scrollable region is the
   // conversation list inside the Chats column (plus each thread's own message
