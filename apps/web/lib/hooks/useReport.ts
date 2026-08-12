@@ -10,6 +10,8 @@ import { getSupabaseBrowser } from "../supabase-browser";
 
 export const REPORT_RECEIVED_MESSAGE = "Report received. Our team will review it shortly. Thank you.";
 
+export const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate speech", "Inappropriate content", "Impersonation", "Other"];
+
 export type ReportEntityType = "club" | "event" | "post" | "user" | "message" | "chat";
 
 export interface SubmitReportInput {

@@ -9,6 +9,7 @@ import { LeaveClubDialog } from "../clubs/LeaveClubDialog";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { CalendarIcon, LocationIcon, BookmarkIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
+import { ReportModal } from "../shared/ReportModal";
 import { useState } from "react";
 import {
   useEventDetail,
@@ -68,6 +69,7 @@ export function EventDetailModal({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const doRsvp = (status: "going" | "cant") =>
     rsvp(
@@ -136,10 +138,22 @@ export function EventDetailModal({
             </button>
           </div>
 
-          <h2 id="event-detail-title" className="mt-4 text-2xl font-extrabold leading-tight text-gray-900 font-zain">
-            {event.emoji ? `${event.emoji} ` : ""}
-            {event.title}
-          </h2>
+          <div className="mt-4 flex items-start gap-2">
+            <h2 id="event-detail-title" className="flex-1 text-2xl font-extrabold leading-tight text-gray-900 font-zain">
+              {event.emoji ? `${event.emoji} ` : ""}
+              {event.title}
+            </h2>
+            {!event.is_creator && (
+              <button
+                type="button"
+                onClick={() => setReportOpen(true)}
+                aria-label="Report this event"
+                className="rounded p-1.5 text-gray-400 hover:bg-black/5 hover:text-gray-600"
+              >
+                •••
+              </button>
+            )}
+          </div>
           <div className="mt-2"><EventAudienceBadge audience={event.visibility} /></div>
 
           {/* Date & location card */}
@@ -294,6 +308,16 @@ export function EventDetailModal({
     </Modal>
     {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "event", id: eventId }} title={event?.title ?? "Event"} onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
     {leaveOpen && event && <LeaveClubDialog clubId={event.club_id} clubName={event.club.name} userId={userId} onClose={() => setLeaveOpen(false)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
+    {reportOpen && event && (
+      <ReportModal
+        entityType="event"
+        entityId={event.id}
+        entityName={event.title}
+        clubId={event.club_id}
+        onClose={() => setReportOpen(false)}
+        onSubmitted={show}
+      />
+    )}
     </>
   );
 }
