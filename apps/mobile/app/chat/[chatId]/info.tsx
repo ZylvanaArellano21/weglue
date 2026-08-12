@@ -189,6 +189,26 @@ export default function ChatInfo() {
     () => (chatDetails?.participants ?? []).filter((p) => p.user_id !== userId),
     [chatDetails?.participants, userId],
   );
+
+  /**
+   * Who may be granted "Certain people" posting access.
+   *
+   * Deliberately NOT `others`. Eligibility is "every participant of THIS
+   * conversation", and the viewer is one of them — an officer restricting a
+   * channel is exactly the person most likely to need posting rights in it.
+   * Excluding them made a single-officer Officers chat offer "No eligible
+   * people", so the only way to save `certain` was to grant it to nobody.
+   *
+   * This is the same set the web sheet offers (`details.participants`), so the
+   * two platforms now answer "who can I pick?" identically.
+   *
+   * Scope is still the conversation itself: `chatDetails.participants` is this
+   * conversation's roster, so members of the club's OTHER chats never appear.
+   */
+  const eligiblePosters = useMemo(
+    () => chatDetails?.participants ?? [],
+    [chatDetails?.participants],
+  );
   // Blocking. Declared here, alongside the other participant-derived hooks and
   // ABOVE this screen's early returns — `otherUser` is computed after those, so
   // deriving the id from `others` is what keeps hook order unconditional.
@@ -1052,7 +1072,7 @@ export default function ChatInfo() {
           visible={permOpen}
           channelId={channelId}
           isOfficersChat={isOfficersChat}
-          participants={others.map((p) => ({ userId: p.user_id, name: displayNameOrFallback(p), avatarUrl: p.avatar_url }))}
+          participants={eligiblePosters.map((p) => ({ userId: p.user_id, name: displayNameOrFallback(p), avatarUrl: p.avatar_url }))}
           currentPermission={channelMeta?.post_permission ?? 'everyone'}
           onClose={() => setPermOpen(false)}
           onSaved={(perm) => {
