@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
@@ -22,9 +22,25 @@ import { useToast } from '../../components/Toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SearchBottomSheet } from '../../components/shared/SearchBottomSheet';
 import { useHomeTabStore } from '../../store/homeTabStore';
+import { invalidateClubDataEverywhere } from '../../lib/clubCache';
 
+// One New Post screen, two entry points — never two implementations:
+//
+//  • From Home ("Share a Glue → Picture"): photo + caption + the optional
+//    multi-select "Tag a club" search.
+//  • From a Club Profile, officers only (`lockedClubId`): the club is attached
+//    permanently. The tag search is not rendered at all, so the club cannot be
+//    removed or changed, and there is nothing to add a second club with.
+//
+// Both produce the SAME post row with the SAME post_clubs tag, so the post
+// appears in Home → Posts AND in that club's profile — one post, two places.
 export default function NewPostScreen() {
   const router = useRouter();
+  const { lockedClubId, lockedClubName } = useLocalSearchParams<{
+    lockedClubId?: string;
+    lockedClubName?: string;
+  }>();
+  const locked = !!lockedClubId;
   const { session } = useAuthStore();
   const userId = session?.user.id;
   const queryClient = useQueryClient();
@@ -40,6 +56,8 @@ export default function NewPostScreen() {
   const { data: allClubs = [], isLoading: loadingClubs } = useQuery<UserClub[]>({
     queryKey: ['allClubs'],
     queryFn: getAllClubs,
+    // The locked flow never renders the picker, so it must not fetch its list.
+    enabled: !locked,
   });
 
   const filteredClubs = allClubs.filter((c) =>
@@ -108,7 +126,9 @@ export default function NewPostScreen() {
     }
     setSubmitting(true);
     try {
-      const clubIds = selectedClubs.map((c) => c.id);
+      // In locked mode the club comes from the route, never from component
+      // state, so no interaction can drop or swap it.
+      const clubIds = locked ? [lockedClubId!] : selectedClubs.map((c) => c.id);
       const newPostId = await createPost(
         userId,
         imageUri,
@@ -120,6 +140,12 @@ export default function NewPostScreen() {
       // created (PostsFeed picks up pendingScrollPostId once the post is in
       // its data). router.back() preserves the Home screen they came from.
       await queryClient.invalidateQueries({ queryKey: ['homePostsFeed', userId] });
+      if (locked) {
+        // Posting from a club profile returns to that profile, so refresh the
+        // club's own caches (photos / media) as well as Home. The Home tab is
+        // still pointed at Posts so the same post is waiting there too.
+        invalidateClubDataEverywhere(queryClient);
+      }
       useHomeTabStore.getState().setActiveTab('posts');
       useHomeTabStore.getState().setPendingScrollPostId(newPostId);
       show('Post shared! 📸');
@@ -273,6 +299,32 @@ export default function NewPostScreen() {
             maxLength={500}
           />
 
+          {/* Locked club (posting from a Club Profile) — read-only, no control
+              that could unset it. */}
+          {locked ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                backgroundColor: 'rgba(15,166,166,0.08)',
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: '#0FA6A6',
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+              }}
+            >
+              <Ionicons name="people-outline" size={18} color="#0FA6A6" />
+              <Text style={{ fontSize: 13, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
+                Posting to
+              </Text>
+              <Text style={{ flex: 1, fontSize: 15, color: '#111827', fontFamily: 'Inter_600SemiBold' }}>
+                {lockedClubName || 'this club'}
+              </Text>
+            </View>
+          ) : (
+          <>
           {/* Tag a Club */}
           <Text
             style={{
@@ -341,6 +393,8 @@ export default function NewPostScreen() {
               Search clubs...
             </Text>
           </TouchableOpacity>
+          </>
+          )}
         </ScrollView>
 
         {/* Post button */}
@@ -385,7 +439,9 @@ export default function NewPostScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Tag a Club — keyboard-safe bottom sheet, multi-select */}
+      {/* Tag a Club — keyboard-safe bottom sheet, multi-select. Never mounted in
+          locked mode: the club is fixed by the route it was opened from. */}
+      {!locked && (
       <SearchBottomSheet<UserClub>
         visible={clubSelectorVisible}
         title="Tag a Club"
@@ -421,6 +477,7 @@ export default function NewPostScreen() {
           </View>
         )}
       />
+      )}
     </SafeAreaView>
   );
 }

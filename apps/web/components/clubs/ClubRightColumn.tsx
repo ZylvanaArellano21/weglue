@@ -1,7 +1,12 @@
 "use client";
 
 import { CalendarIcon } from "../shared/icons";
-import { formatEventDate, formatEventTime, formatEventLocation } from "../../lib/datetime";
+import {
+  formatEventDate,
+  formatEventTime,
+  formatEventLocation,
+  isInCurrentWeek,
+} from "../../lib/datetime";
 import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
 import type { HomeFeedEvent } from "../../lib/hooks/useHomeEventsFeed";
 import { EventAudienceBadge } from "../home/EventAudienceBadge";
@@ -68,21 +73,31 @@ export function ClubRightColumn({
           <div className="space-y-3">
             {railEvents.map((e) => {
               const loc = formatEventLocation(e.building, e.room, e.location);
+              // Red means "this is happening THIS week" — nothing else. It is
+              // decided purely by the event date against the current
+              // Monday–Sunday window, so an officer and a regular member always
+              // see the same colours for the same event. Everything outside
+              // this week renders in the ordinary black styling, with no red
+              // and no extra bold.
+              const thisWeek = isInCurrentWeek(e.event_date);
+              const detail = thisWeek
+                ? "text-[12px] font-medium text-[#F02719]"
+                : "text-[12px] font-normal text-gray-900";
               return (
                 <div
                   key={e.id}
                   className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.07)]"
                 >
                   <button type="button" onClick={() => e.can_open ? onOpenEvent(e.id) : onRestricted?.()} className="min-w-0 flex-1 text-left">
-                    <p className="truncate text-[14px] font-bold text-gray-900">{e.title}</p>
+                    <p className={`truncate text-[14px] font-bold ${thisWeek ? "text-[#F02719]" : "text-gray-900"}`}>{e.title}</p>
                     <EventAudienceBadge audience={e.visibility} />
-                    <p className="mt-0.5 text-[12px] font-medium text-[#F02719]">
+                    <p className={`mt-0.5 ${detail}`}>
                       {formatEventDate(e.event_date)}
                     </p>
-                    <p className="text-[12px] font-medium text-[#F02719]">
+                    <p className={detail}>
                       {formatEventTime(e.start_time)} - {formatEventTime(e.end_time)}
                     </p>
-                    {loc && <p className="text-[12px] font-medium text-[#F02719]">{loc}</p>}
+                    {loc && <p className={detail}>{loc}</p>}
                   </button>
                   <button
                     type="button"

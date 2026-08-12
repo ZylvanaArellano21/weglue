@@ -8,27 +8,37 @@ import { useAllClubs, useCreatePost } from "../../lib/hooks/useCreatePost";
 
 // Desktop create-post (Share a Glue → Picture). Same model as mobile: a
 // required image, an optional caption, and optional multi-select club tags.
+//
+// Two modes, ONE create-post implementation:
+//  • From Home — the full flow, including "Tag a club (optional)" search.
+//  • From a Club Profile (`lockedClub`) — an officer posts INTO that club. The
+//    club is permanently attached and the tag search is not rendered at all, so
+//    the tag can be neither removed nor changed. Photo + caption only; there is
+//    deliberately no webcam capture on web.
+// Either way the result is the same single post row with the same club tag, so
+// it appears in BOTH Home → Posts and the club profile — never duplicated.
 export function ComposePostModal({
   userId,
   onClose,
   onCreated,
-  presetClubId,
+  lockedClub,
 }: {
   userId: string;
   onClose: () => void;
   onCreated: () => void;
-  /** Pre-tags a club (e.g. posting from that Club Profile). */
-  presetClubId?: string;
+  /** Permanently attaches this club and hides the club picker entirely. */
+  lockedClub?: { id: string; name: string };
 }): JSX.Element {
   const show = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
-  const { data: clubs } = useAllClubs();
+  // Only the Home flow renders the picker, so the locked flow never fetches it.
+  const { data: clubs } = useAllClubs(!lockedClub);
   const create = useCreatePost(userId);
 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
-  const [selected, setSelected] = useState<string[]>(presetClubId ? [presetClubId] : []);
+  const [selected, setSelected] = useState<string[]>([]);
   const [clubQuery, setClubQuery] = useState("");
 
   const onFile = (f: File | undefined) => {
@@ -51,8 +61,11 @@ export function ComposePostModal({
       show("Please select a photo.", "error");
       return;
     }
+    // The locked club is the single source of truth for the tag in that mode —
+    // it is never read from component state, so no UI path can drop it.
+    const clubIds = lockedClub ? [lockedClub.id] : selected;
     create.mutate(
-      { file, caption: caption.trim() || undefined, clubIds: selected },
+      { file, caption: caption.trim() || undefined, clubIds },
       {
         onSuccess: () => {
           show("Post shared! 📸");
@@ -108,34 +121,49 @@ export function ComposePostModal({
           style={{ borderColor: "#E5E7EB" }}
         />
 
-        <p className="mb-2 text-sm font-semibold text-gray-700">Tag a club (optional)</p>
-        <input
-          value={clubQuery}
-          onChange={(e) => setClubQuery(e.target.value)}
-          placeholder="Search clubs…"
-          className="mb-2 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2"
-          style={{ borderColor: "#E5E7EB" }}
-        />
-        <div className="mb-5 max-h-32 space-y-1 overflow-y-auto">
-          {filtered.slice(0, 20).map((c) => {
-            const on = selected.includes(c.id);
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => toggle(c.id)}
-                className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm"
-                style={{
-                  borderColor: on ? "#0FA6A6" : "#E5E7EB",
-                  background: on ? "rgba(15,166,166,0.08)" : "#fff",
-                }}
-              >
-                <span className="text-gray-900">{c.name}</span>
-                {on && <span style={{ color: "#0FA6A6" }}>✓</span>}
-              </button>
-            );
-          })}
-        </div>
+        {lockedClub ? (
+          // Posting from the club profile: the club is fixed. Shown as a static
+          // read-only chip so the officer can see where the post is going, with
+          // no control that could unset it.
+          <div
+            className="mb-5 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+            style={{ borderColor: "#0FA6A6", background: "rgba(15,166,166,0.08)" }}
+          >
+            <span className="text-gray-500">Posting to</span>
+            <span className="font-semibold text-gray-900">{lockedClub.name}</span>
+          </div>
+        ) : (
+          <>
+            <p className="mb-2 text-sm font-semibold text-gray-700">Tag a club (optional)</p>
+            <input
+              value={clubQuery}
+              onChange={(e) => setClubQuery(e.target.value)}
+              placeholder="Search clubs…"
+              className="mb-2 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2"
+              style={{ borderColor: "#E5E7EB" }}
+            />
+            <div className="mb-5 max-h-32 space-y-1 overflow-y-auto">
+              {filtered.slice(0, 20).map((c) => {
+                const on = selected.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => toggle(c.id)}
+                    className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm"
+                    style={{
+                      borderColor: on ? "#0FA6A6" : "#E5E7EB",
+                      background: on ? "rgba(15,166,166,0.08)" : "#fff",
+                    }}
+                  >
+                    <span className="text-gray-900">{c.name}</span>
+                    {on && <span style={{ color: "#0FA6A6" }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         <button
           type="button"
