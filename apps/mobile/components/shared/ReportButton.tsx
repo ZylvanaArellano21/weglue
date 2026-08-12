@@ -21,6 +21,7 @@ const ENTITY_LABEL: Record<ReportEntityType, string> = {
   user: 'user',
   message: 'message',
   chat: 'chat',
+  comment: 'comment',
 };
 
 export interface ReportButtonProps {

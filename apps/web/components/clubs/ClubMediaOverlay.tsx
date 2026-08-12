@@ -9,7 +9,7 @@ import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
 import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
-import { usePostComments, useAddComment, useUpdatePostCaption } from "../../lib/hooks/usePostActions";
+import { usePostComments, useAddComment, useUpdatePostCaption, reportComment } from "../../lib/hooks/usePostActions";
 import { usePostInteractionsRealtime } from "../../lib/hooks/useClubRealtime";
 import { ReportModal } from "../shared/ReportModal";
 import { ClubPhotoRemovalDialog } from "./ClubPhotoRemoval";
@@ -192,6 +192,7 @@ function PostPanel({
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [commentReportTarget, setCommentReportTarget] = useState<{ id: string; content: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
   const [comment, setComment] = useState("");
@@ -314,6 +315,16 @@ function PostPanel({
           onSubmitted={show}
         />
       )}
+      {commentReportTarget && (
+        <ReportModal
+          entityType="comment"
+          entityId={commentReportTarget.id}
+          entityName={commentReportTarget.content}
+          onClose={() => setCommentReportTarget(null)}
+          onSubmitted={show}
+          onSubmit={(reason) => reportComment(commentReportTarget.id, reason)}
+        />
+      )}
       {confirmRemove && (
         <ClubPhotoRemovalDialog
           photo={photo}
@@ -366,10 +377,20 @@ function PostPanel({
           {(comments ?? []).map((c) => (
             <li key={c.id} className="flex items-start gap-2">
               <ClickableUserIdentity userId={c.author.id} ariaLabel={`Open ${c.author.username}'s profile`}><Avatar uri={c.author.avatar_url} size={28} name={c.author.username} /></ClickableUserIdentity>
-              <p className="text-sm text-gray-800">
+              <p className="flex-1 text-sm text-gray-800">
                 <ClickableUserIdentity userId={c.author.id} className="font-semibold">{c.author.username}</ClickableUserIdentity>{" "}
                 {c.content}
               </p>
+              {c.author.id !== userId && (
+                <button
+                  type="button"
+                  onClick={() => setCommentReportTarget({ id: c.id, content: c.content })}
+                  aria-label="Report this comment"
+                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-black/5 hover:text-gray-600"
+                >
+                  •••
+                </button>
+              )}
             </li>
           ))}
         </ul>

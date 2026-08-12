@@ -24,7 +24,7 @@ export const REPORT_SUCCESS_MESSAGE =
 export const REPORT_RECEIVED_MESSAGE =
   "Report received. Our team will review it shortly. Thank you.";
 
-export type ReportEntityType = 'club' | 'event' | 'post' | 'user' | 'message' | 'chat';
+export type ReportEntityType = 'club' | 'event' | 'post' | 'user' | 'message' | 'chat' | 'comment';
 
 export interface SubmitReportInput {
   entityType: ReportEntityType;
@@ -68,36 +68,53 @@ async function doSubmitReport(input: SubmitReportInput): Promise<SubmitReportRes
 
   const userId = session.user.id;
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('username')
-    .eq('id', userId)
-    .maybeSingle();
+  let reportId: string;
 
-  const { data: report, error } = await supabase
-    .from('reports')
-    .insert({
-      reporter_id: userId,
-      reporter_username: (profile as { username?: string } | null)?.username ?? null,
-      reporter_email: session.user.email ?? null,
-      entity_type: input.entityType,
-      entity_id: input.entityId,
-      entity_name: input.entityName ?? null,
-      club_id: input.clubId ?? null,
-      reason: input.reason ?? null,
-      details: input.details ?? null,
-      status: 'pending',
-    })
-    .select('id')
-    .single();
+  if (input.entityType === 'comment') {
+    // A comment's author can delete it themselves at any time, so the
+    // content is captured server-side, at report time, via a SECURITY
+    // DEFINER RPC — a later self-delete cannot erase the evidence (same
+    // pattern as report_message).
+    const { data, error } = await supabase.rpc('report_comment', {
+      p_comment_id: input.entityId,
+      p_reason: input.reason ?? null,
+      p_details: input.details ?? null,
+    });
+    if (error || !data) throw error ?? new Error('Failed to submit report');
+    reportId = data as string;
+  } else {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('id', userId)
+      .maybeSingle();
 
-  if (error || !report) throw error ?? new Error('Failed to submit report');
+    const { data: report, error } = await supabase
+      .from('reports')
+      .insert({
+        reporter_id: userId,
+        reporter_username: (profile as { username?: string } | null)?.username ?? null,
+        reporter_email: session.user.email ?? null,
+        entity_type: input.entityType,
+        entity_id: input.entityId,
+        entity_name: input.entityName ?? null,
+        club_id: input.clubId ?? null,
+        reason: input.reason ?? null,
+        details: input.details ?? null,
+        status: 'pending',
+      })
+      .select('id')
+      .single();
+
+    if (error || !report) throw error ?? new Error('Failed to submit report');
+    reportId = report.id;
+  }
 
   // Email is on top of the stored report. Failures are recorded server-side
   // (reports.email_error) and reported truthfully to the caller.
   try {
     const { data, error: fnError } = await supabase.functions.invoke('send-report-email', {
-      body: { reportId: report.id },
+      body: { reportId },
     });
     if (fnError) throw fnError;
     const emailed = (data as { sent?: boolean } | null)?.sent === true;
