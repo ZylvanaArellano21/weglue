@@ -269,13 +269,14 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
 
         <section>
           <h2 className="text-lg font-semibold text-black mb-2">
-            Children&apos;s Privacy (COPPA)
+            Children&apos;s Privacy
           </h2>
           <p className="text-sm text-[#5F5D5D] leading-relaxed">
-            We Glue is not intended for children under 13 years of age. We do
-            not knowingly collect personal information from children under 13.
-            If you believe we have inadvertently collected such information,
-            please contact us immediately.
+            We Glue is intended for college students and requires users to be
+            at least 17 years old. We do not knowingly collect personal
+            information from anyone under 17. If you believe we have
+            inadvertently collected such information, please contact us
+            immediately.
           </p>
         </section>
 
