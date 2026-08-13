@@ -2,14 +2,14 @@
 
 /**
  * Web-specific onboarding flow state, persisted in sessionStorage so browser
- * refresh, Back/Forward navigation, and the Terms & Conditions round-trip all
- * preserve the user's progress. The shared @weglue/shared zustand store is
- * memory-only (fine for the mobile app, lossy on a web refresh), so the web
- * keeps its own copy and never touches the shared one.
+ * refresh and Back/Forward navigation preserve the user's progress. The
+ * shared @weglue/shared zustand store is memory-only (fine for the mobile
+ * app, lossy on a web refresh), so the web keeps its own copy and never
+ * touches the shared one.
  *
  * The password is deliberately NOT stored here — it stays in component state
- * only, and Terms & Conditions opens as an overlay-free same-tab navigation
- * whose return restores everything except the password fields.
+ * only. Terms & Privacy Policy open as an in-app modal (LegalModal), not a
+ * navigation, so signup form state never needs to survive a round trip.
  */
 
 const KEY = "weglue-web/onboarding";
@@ -20,8 +20,6 @@ export interface OnboardingFlowState {
   matchCount: number;
   pendingUsername: string;
   pendingEmail: string;
-  agreedToTerms: boolean;
-  isOfAge: boolean;
 }
 
 const initialState: OnboardingFlowState = {
@@ -30,8 +28,6 @@ const initialState: OnboardingFlowState = {
   matchCount: 0,
   pendingUsername: "",
   pendingEmail: "",
-  agreedToTerms: false,
-  isOfAge: false,
 };
 
 export function readOnboardingState(): OnboardingFlowState {
@@ -70,9 +66,9 @@ export function resetOnboardingState(): void {
 }
 
 // ─── Transient password holder ───────────────────────────────────────────────
-// Survives CLIENT-SIDE navigations only (e.g. the Terms & Conditions
-// round-trip keeps the module alive), and is gone on any full page load.
-// Deliberately never written to session/local storage or a URL.
+// Survives CLIENT-SIDE navigations only (the module stays alive as long as no
+// full page load happens), and is gone on any full page load. Deliberately
+// never written to session/local storage or a URL.
 
 let transientPassword = "";
 

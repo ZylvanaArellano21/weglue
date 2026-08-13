@@ -35,7 +35,7 @@ const standards = [
   {
     heading: "Prevention",
     body:
-      "We Glue limits access to users who are 16 years old or older, requires account sign-in for core functionality, and maintains moderation/reporting systems to help identify unsafe behavior.",
+      "We Glue limits access to users who are 17 years old or older, requires account sign-in for core functionality, and maintains moderation/reporting systems to help identify unsafe behavior.",
   },
 ];
 
@@ -65,8 +65,7 @@ export default function ChildSafetyStandardsPage(): JSX.Element {
           </p>
           <p>
             We Glue is a student-support community platform. The service is intended
-            for users who are 16 years old or older and is not directed to children
-            under 13.
+            for users who are 17 years old or older and is not directed to children.
           </p>
 
           {standards.map((section) => (
