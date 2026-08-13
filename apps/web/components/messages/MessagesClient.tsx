@@ -651,11 +651,15 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   }, [outgoing, stored]);
   const actualCanPost = channelId ? permitted === true : fallbackCanPost !== false;
   const listRef = useRef<HTMLDivElement>(null);
+  // messages.length in deps: re-marks read whenever a new message streams into
+  // an already-open thread (mirrors apps/mobile/components/chat/ConversationThread.tsx),
+  // not just on initial open — otherwise a live message here still shows as
+  // unread in the header badge until the page is reloaded.
   useEffect(() => {
     if (!conversationId) return;
     if (channelId) void markChannelRead(channelId); else void markConversationRead(conversationId);
     void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
-  }, [channelId, conversationId, queryClient, userId]);
+  }, [channelId, conversationId, queryClient, userId, messages.length]);
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages.length]);
   // Senders whose attachment payload this viewer may not read (a block in
   // either direction). Keyed under "messages" so the existing access-sync cache

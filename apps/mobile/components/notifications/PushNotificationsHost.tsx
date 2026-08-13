@@ -9,11 +9,17 @@
 import { useAuthStore } from '@weglue/shared';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useUnreadSummary } from '../../hooks/useUnreadSummary';
+import { useRealtimeMessageBanners } from '../../hooks/useRealtimeMessageBanners';
 import { ForegroundNotificationBanner } from './ForegroundNotificationBanner';
 
 export function PushNotificationsHost() {
   const { session } = useAuthStore();
   usePushNotifications();
   useUnreadSummary(session?.user.id);
+  // Push-only types (dm_message/group_message/club_chat_message) never
+  // reach the notifications-table-driven banner feed below — this is their
+  // own realtime source (see useRealtimeMessageBanners for why it can't
+  // reuse the existing per-conversation thread sync).
+  useRealtimeMessageBanners(session?.user.id);
   return <ForegroundNotificationBanner />;
 }
