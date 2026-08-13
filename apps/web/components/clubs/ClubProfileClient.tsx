@@ -20,8 +20,6 @@ import { LeaveClubDialog } from "./LeaveClubDialog";
 import { ClubMembersModal } from "./ClubMembersModal";
 import { EditClubModal } from "./EditClubModal";
 import { ManageClubModal } from "./ManageClubModal";
-import { useUnreadSummary } from "../../lib/hooks/useUnreadSummary";
-import { useRealtimeNotifications } from "../../lib/hooks/useNotifications";
 import { useClubRealtime } from "../../lib/hooks/useClubRealtime";
 import { useClubProfile, useToggleClubMembership, OnlyOfficerError, clubProfileKey } from "../../lib/hooks/useClubProfile";
 import { useClubEventsFeed, clubEventsFeedKey } from "../../lib/hooks/useClubEventsFeed";
@@ -44,8 +42,9 @@ type Overlay =
   | null;
 
 export function ClubProfileClient({ clubId, userId }: { clubId: string; userId: string }): JSX.Element {
-  useUnreadSummary(userId);
-  useRealtimeNotifications(userId);
+  // Unread-summary and notifications realtime are owned once for the whole
+  // session by Providers (useSessionRealtimeHub); this club's own realtime
+  // subscription is still per-club and stays here.
   useClubRealtime(clubId, userId);
 
   return (

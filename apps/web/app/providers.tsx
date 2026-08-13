@@ -12,6 +12,41 @@ import {
   refreshPermissionSensitiveStudentContent,
   subscribeBrowserCanonicalRecovery,
 } from "../lib/studentSynchronization";
+import { useUnreadSummary } from "../lib/hooks/useUnreadSummary";
+import { useRealtimeNotifications } from "../lib/hooks/useNotifications";
+import { useMyClubsRealtime } from "../lib/hooks/useClubRealtime";
+
+// The current session's user id, tracked once at the app root. Backs the
+// session-wide realtime hub below — each of these hooks documents that it
+// should mount ONCE per session, but was previously called from every
+// page-level client component (Home, Messages, Clubs, Club profile), so
+// navigating between them tore down and recreated the same three Realtime
+// channels on every route change.
+function useCurrentUserId(): string | undefined {
+  const [userId, setUserId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const supabase = getSupabaseBrowser();
+    void supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
+      setUserId(data.session?.user.id);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        setUserId(session?.user.id);
+      }
+    );
+    return () => subscription.unsubscribe();
+  }, []);
+  return userId;
+}
+
+// Owns the single unread-summary, notifications, and my-clubs realtime
+// subscriptions for the whole session, instead of each page remounting them.
+function useSessionRealtimeHub(): void {
+  const userId = useCurrentUserId();
+  useUnreadSummary(userId);
+  useRealtimeNotifications(userId);
+  useMyClubsRealtime(userId);
+}
 
 function useApplicationAccessGate(queryClient: QueryClient): void {
   const pathname = usePathname();
@@ -282,8 +317,17 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
 
   return (
     <QueryClientProvider client={queryClient}>
+      {/* useUnreadSummary/useRealtimeNotifications/useMyClubsRealtime use
+          useQuery/useQueryClient internally, so this must render INSIDE
+          QueryClientProvider, not in Providers' own body above. */}
+      <SessionRealtimeHub />
       {children}
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   );
+}
+
+function SessionRealtimeHub(): null {
+  useSessionRealtimeHub();
+  return null;
 }
