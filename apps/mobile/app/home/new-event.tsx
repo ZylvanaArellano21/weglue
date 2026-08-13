@@ -365,6 +365,7 @@ export default function NewEventScreen() {
             <Ionicons name="chevron-back" size={26} color="#111827" />
           </TouchableOpacity>
           <Text
+            pointerEvents="none"
             style={{
               position: 'absolute',
               left: 0,
