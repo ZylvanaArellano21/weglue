@@ -62,6 +62,7 @@ FIXTURE_056 = "fx:test_056_fixture_schema.sql"
 FIXTURE_081_082 = "fx:test_081_082_fixture_schema.sql"
 FIXTURE_083 = "fx:test_083_fixture_schema.sql"
 FIXTURE_084 = "fx:test_084_fixture_schema.sql"
+FIXTURE_085 = "fx:test_085_fixture_schema.sql"
 
 CHAINS = {
     "wg_faithful": ["mg:055_durable_admin_audit.sql",
@@ -96,6 +97,7 @@ CHAINS = {
     "wg084": [FIXTURE_084,
               "mg:083_notification_coverage_audit_fixes.sql",
               "mg:084_notification_exactly_one_fixes.sql"],
+    "wg085": [FIXTURE_085, "mg:085_student_joined_named_copy.sql"],
 }
 
 # --- success criteria ------------------------------------------------------
@@ -337,6 +339,28 @@ MANIFEST = [
               "over-broad); group-chat invite-join now notifies exactly "
               "once (was zero) and does not duplicate on re-open; "
               "club invite-join still gets exactly one club_joined."),
+
+    # ---- correction 4 part 3 (085): founder decisions on the Fix 4
+    #      follow-up — chat_invite_joined documented as deferred,
+    #      student_joined's grouped copy names the newest joiner, and its
+    #      route was fixed to actually open that same person (previously
+    #      stale at the first joiner). Verified live 2026-08-13 on a
+    #      throwaway postgres:17 container — 4/4 ASSERTs pass.
+    dict(file="test_085_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg085", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg085 chain."),
+    dict(file="test_085_student_joined_named_copy.sql", type="sql", env="pg17",
+         chain="wg085", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim)",
+         criterion="raise",
+         note="4 BEGIN/ROLLBACK tests: chat_invite_joined documented as "
+              "deferred; single student_joined matches the exact founder "
+              "template and opens that profile; a merged (2+ student) "
+              "notification names the NEWEST joiner and its route advances "
+              "to match (the destination-staleness fix); member_joined's "
+              "stable-entity route is unaffected by the generic recompute."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the
