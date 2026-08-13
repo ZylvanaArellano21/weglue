@@ -9,6 +9,7 @@ import {
 import { followUser } from '../services/followService';
 import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
 import { refreshOfficerStatus } from '../store/officerStore';
+import { publishNotificationInsert, type BannerNotificationRow } from '../lib/notifications/bannerBus';
 
 export function useNotifications(userId: string | undefined) {
   return useQuery({
@@ -36,7 +37,13 @@ export function useRealtimeNotifications(userId: string | undefined) {
         filter: `user_id=eq.${userId}`,
         callback: (payload) => {
           queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
-          const type = (payload.new as { type?: string } | null)?.type;
+          const row = payload.new as BannerNotificationRow | null;
+          const type = row?.type;
+          // Correction 3: the ONE feed for the foreground banner — no second
+          // realtime subscription. actor-safe by construction (domain
+          // triggers never insert a row where user_id = actor_id), but a
+          // defensive check lives in the banner's own decision function too.
+          if (row) publishNotificationInsert(row);
           if (type === 'follow_accepted' || type === 'gluemate' || type === 'new_follower') {
             // Relationship changed — profiles the viewer has open must update.
             queryClient.invalidateQueries({ queryKey: ['userProfile'] });

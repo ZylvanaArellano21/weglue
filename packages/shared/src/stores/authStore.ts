@@ -23,6 +23,13 @@ export interface Profile {
    * server-side so it survives logout, reinstall, and a second device.
    */
   picture_prompt_status?: "pending" | "hidden";
+  /**
+   * True only for a brand-new account that has not yet reached the
+   * authenticated app for the first time. Set server-side at signup
+   * (handle_new_user/ensure_profile, migration 081) and cleared by
+   * consume_push_permission_prompt() the first time it is acted on.
+   */
+  push_permission_prompt_pending?: boolean;
   created_at: string;
   updated_at: string;
 }

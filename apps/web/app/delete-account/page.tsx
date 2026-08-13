@@ -6,8 +6,7 @@ import { useState } from "react";
 // Public FALLBACK deletion route, for people who cannot sign in (lost password,
 // lost school email). It is NOT the normal way to delete an account: signed-in
 // users delete permanently and instantly from inside the app —
-//   web:     Your Profile → Delete Account   (/account/delete)
-//   mobile:  Profile menu → Delete Account, or → Account Center → Delete Account
+//   web + mobile:  Account Center → Delete Account   (/account/delete)
 // App Store Guideline 5.1.1(v) requires that in-app path to exist and requires
 // that we never make a user email support to delete their account, so this page
 // leads with the self-service option instead of the form.
@@ -88,11 +87,10 @@ export default function DeleteAccountPage(): JSX.Element {
           </p>
           <ul className="mt-3 space-y-1 text-sm leading-relaxed text-gray-700">
             <li>
-              <span className="font-medium">On the web:</span> Your Profile → Delete Account
+              <span className="font-medium">On the web:</span> Account Center → Delete Account
             </li>
             <li>
-              <span className="font-medium">In the app:</span> Profile menu → Delete Account (also
-              in Account Center)
+              <span className="font-medium">In the app:</span> Account Center → Delete Account
             </li>
           </ul>
           <Link

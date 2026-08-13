@@ -12,7 +12,6 @@ export type SidebarItemKey =
   | 'privacyCenter'
   | 'help'
   | 'terms'
-  | 'deleteAccount'
   | 'logout';
 
 export interface SidebarItem {
@@ -115,17 +114,6 @@ export function buildSidebarItems(
       label: 'Terms & Conditions',
       icon: 'document-text-outline',
       onPress: go('/home/terms'),
-    },
-    {
-      // Permanent account deletion (App Store Guideline 5.1.1(v)). It also
-      // lives inside Account Center, where it belongs alongside the other
-      // account settings — but it is surfaced directly here too so it is
-      // reachable in one tap from the profile menu and cannot be missed.
-      key: 'deleteAccount',
-      label: 'Delete Account',
-      icon: 'trash-outline',
-      destructive: true,
-      onPress: go('/account-center/delete-account'),
     },
     {
       key: 'logout',

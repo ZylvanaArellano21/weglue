@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@weglue/shared";
 import { useRealtimeNotifications } from "../../hooks/useNotifications";
 import { useClubRealtimeSync } from "../../hooks/useClubRealtimeSync";
+import { useFirstLoginPushPermission } from "../../hooks/useFirstLoginPushPermission";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../hooks/useUnreadSummary";
 import { CountBadge } from "../../components/shared/CountBadge";
 
@@ -22,11 +23,19 @@ export default function TabsLayout() {
   // screen and device without a manual refresh.
   useClubRealtimeSync(session?.user.id);
 
+  // Correction 1: the ONE sanctioned automatic OS permission-box trigger —
+  // fires once, the first time a brand-new account's session reaches Home.
+  useFirstLoginPushPermission();
+
   // Messages tab badge: unread MESSAGES, split Single + Groups by the same RPC
   // that feeds the two controls on the Message tab, so this number always
   // equals Single + Groups. Kept live by PushNotificationsHost's subscription.
   const { data: unreadSummary } = useUnreadSummaryValue(session?.user.id);
   const unreadMessages = messageBadgeCounts(unreadSummary).total;
+  // Correction 6: Home tab badge — same cache read, same authoritative
+  // unread_notifications total the Home screen's own header bell already
+  // shows ((tabs)/index.tsx), so the two can never disagree.
+  const unreadNotifications = unreadSummary?.unread_notifications ?? 0;
 
   if (isLoading) {
     return (
@@ -83,8 +92,16 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
+          // Badge stays INSIDE the wrapper bounds (Android clips overhang) —
+          // same pattern as the Messages tab below.
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "home" : "home-outline"} size={28} color={color} />
+            <View style={{ width: 38, height: 32, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name={focused ? "home" : "home-outline"} size={28} color={color} />
+              <CountBadge
+                count={unreadNotifications}
+                style={{ position: "absolute", top: 0, right: 0 }}
+              />
+            </View>
           ),
         }}
       />

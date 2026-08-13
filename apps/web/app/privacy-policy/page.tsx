@@ -77,11 +77,10 @@ export default function PrivacyPolicyPage(): JSX.Element | null {
           </p>
           <ul className="mt-3 space-y-1 text-sm text-[#5F5D5D] leading-relaxed list-disc pl-5">
             <li>
-              On the web: <strong>Your Profile → Delete Account</strong>
+              On the web: <strong>Account Center → Delete Account</strong>
             </li>
             <li>
-              In the mobile app: <strong>Profile menu → Delete Account</strong>{" "}
-              (also available in <strong>Account Center → Delete Account</strong>)
+              In the mobile app: <strong>Account Center → Delete Account</strong>
             </li>
           </ul>
           <p className="mt-3 text-sm text-[#5F5D5D] leading-relaxed">

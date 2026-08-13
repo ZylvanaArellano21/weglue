@@ -3,7 +3,8 @@ import { createClient } from "../../../lib/supabase/server";
 import { DeleteAccountClient } from "../../../components/account/DeleteAccountClient";
 
 // Permanent, self-service account deletion for signed-in web users.
-// Reachable from Your Profile → Delete Account.
+// Reachable from Account Center → Delete Account (correction 7: this is now
+// the only in-app entry point — the redundant Profile Sidebar row was removed).
 
 export const metadata = { title: "Delete Account" };
 export const dynamic = "force-dynamic";

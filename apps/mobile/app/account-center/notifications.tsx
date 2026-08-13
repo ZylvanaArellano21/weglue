@@ -32,6 +32,7 @@ import {
   requestPermissionFromUserAction,
   type PermissionState,
 } from '../../lib/notifications/permissions';
+import { onPermissionDecision, reconcilePermissionChange } from '../../lib/notifications/permissionSync';
 import { registerPushTokenIfPermitted } from '../../lib/notifications/registerPush';
 import type { NotificationPreferences } from '../../services/notificationService';
 
@@ -78,8 +79,15 @@ export default function NotificationSettingsScreen() {
   const [permission, setPermission] = useState<PermissionState | null>(null);
 
   const refreshPermission = useCallback(async () => {
-    setPermission(await getPermissionState());
-  }, []);
+    const state = await getPermissionState();
+    setPermission(state);
+    // Correction 2: a change made in the OS Settings app while backgrounded
+    // (Allow → Don't Allow or back) must cascade to every preference column
+    // too — but only on a REAL transition, never on a no-op re-check, or a
+    // user's manual per-category choice would get silently wiped every time
+    // this screen regains focus.
+    if (userId) void reconcilePermissionChange(userId, state);
+  }, [userId]);
 
   // Track OS-level permission, including "changed in Settings while
   // backgrounded" — the row re-reads on every foreground.
@@ -95,6 +103,7 @@ export default function NotificationSettingsScreen() {
     if (permission === 'undetermined') {
       const result = await requestPermissionFromUserAction();
       setPermission(result);
+      if (userId) void onPermissionDecision(userId, result);
       if (result === 'granted') void registerPushTokenIfPermitted();
     } else {
       await openNotificationSettings();
@@ -149,7 +158,13 @@ export default function NotificationSettingsScreen() {
             </Text>
           </View>
           <Switch
-            value={prefs.push_enabled}
+            // Correction 2: the UI can never claim push is enabled while
+            // device permission blocks it — forced off, and non-interactive,
+            // whenever permission isn't granted. The permission card above
+            // is the one path back to Allow/Open Settings; this switch is not
+            // a second way to ask.
+            value={prefs.push_enabled && permission === 'granted'}
+            disabled={permission !== 'granted'}
             onValueChange={(value) => update.mutate({ push_enabled: value })}
             trackColor={{ false: profileColors.border, true: profileColors.teal }}
             thumbColor={profileColors.white}
@@ -166,8 +181,8 @@ export default function NotificationSettingsScreen() {
               <Text style={styles.rowDescription}>{row.description}</Text>
             </View>
             <Switch
-              value={prefs[row.key]}
-              disabled={!prefs.push_enabled}
+              value={prefs[row.key] && permission === 'granted'}
+              disabled={pushDisabled}
               onValueChange={(value) => update.mutate({ [row.key]: value })}
               trackColor={{ false: profileColors.border, true: profileColors.teal }}
               thumbColor={profileColors.white}

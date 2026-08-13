@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { dateInAppTz, dayDiff, todayInAppTz } from "../datetime";
 import { resolveNotificationVisual, type NotificationVisual, type NotificationVisualActor, type NotificationVisualEntity } from "@weglue/shared";
+import { publishNotificationInsert, type BannerNotificationRow } from "../notifications/bannerBus";
 
 // Web port of apps/mobile/services/notificationService.ts + hooks/useNotifications.ts
 // + lib/notifications/routes.ts. Same canonical notifications table, same types,
@@ -343,9 +344,12 @@ export function useRealtimeNotifications(userId: string | undefined) {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
-        () => {
+        (payload: { new: BannerNotificationRow | null }) => {
           void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
           void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
+          // Correction 3: the ONE feed for the foreground banner — no second
+          // realtime subscription.
+          if (payload.new) publishNotificationInsert(payload.new);
         }
       )
       .subscribe();
