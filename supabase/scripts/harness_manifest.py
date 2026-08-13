@@ -61,6 +61,7 @@ FIXTURE_057 = "fx:test_057_fixture_schema.sql"
 FIXTURE_056 = "fx:test_056_fixture_schema.sql"
 FIXTURE_081_082 = "fx:test_081_082_fixture_schema.sql"
 FIXTURE_083 = "fx:test_083_fixture_schema.sql"
+FIXTURE_084 = "fx:test_084_fixture_schema.sql"
 
 CHAINS = {
     "wg_faithful": ["mg:055_durable_admin_audit.sql",
@@ -92,6 +93,9 @@ CHAINS = {
                  "mg:081_first_login_push_permission.sql",
                  "mg:082_conversation_read_realtime_sync.sql"],
     "wg083": [FIXTURE_083, "mg:083_notification_coverage_audit_fixes.sql"],
+    "wg084": [FIXTURE_084,
+              "mg:083_notification_coverage_audit_fixes.sql",
+              "mg:084_notification_exactly_one_fixes.sql"],
 }
 
 # --- success criteria ------------------------------------------------------
@@ -314,6 +318,25 @@ MANIFEST = [
               "text, and the new club_photo type (notifies every other "
               "member exactly once, never the uploader, never double-fires "
               "alongside a tagged_post's club_post)."),
+
+    # ---- correction 4 part 2 (084): the founder's follow-up "exactly one
+    #      notification" proof for every add-to-chat path. Verified live
+    #      2026-08-13 on a throwaway postgres:17 container — 6/6 ASSERTs pass.
+    dict(file="test_084_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg084", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg084 chain."),
+    dict(file="test_084_notification_exactly_one_fixes.sql", type="sql", env="pg17",
+         chain="wg084", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim)",
+         criterion="raise",
+         note="6 BEGIN/ROLLBACK tests: officer-added member gets exactly one "
+              "club-membership notification (not also club_joined); a "
+              "self-driven join still gets club_joined (guard not "
+              "over-broad); group-chat invite-join now notifies exactly "
+              "once (was zero) and does not duplicate on re-open; "
+              "club invite-join still gets exactly one club_joined."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the
