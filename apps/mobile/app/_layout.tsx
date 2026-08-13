@@ -30,8 +30,10 @@ import { SidebarHost } from "../components/sidebar/SidebarHost";
 import { MediaPickerHost } from "../components/media/MediaPickerHost";
 import { PushNotificationsHost } from "../components/notifications/PushNotificationsHost";
 import { timedQuery } from "../lib/timedQuery";
+import { withTimeout } from "../lib/withTimeout";
 import {
   clearCachedProfile,
+  readCachedProfile,
   writeCachedProfile,
 } from "../lib/profileCache";
 import { PlatformAdminBlock } from "../components/auth/PlatformAdminBlock";
@@ -47,6 +49,13 @@ import { StudentSynchronizationHost } from "../components/synchronization/Studen
 import { shouldRecoverOnMobileForeground } from "../lib/studentSynchronization";
 
 SplashScreen.preventAutoHideAsync();
+
+// Cold-start network calls are bounded so a stalled radio/DNS/TLS handshake
+// (the classic cold-start failure mode — neither resolves nor rejects) can
+// never hold the navigator hostage indefinitely. Both fail open into the
+// same path a real network error already takes.
+const ACCESS_CHECK_TIMEOUT_MS = 5000;
+const SYNC_PROFILE_TIMEOUT_MS = 4000;
 
 // expo-router renders this instead of crashing when any screen throws during
 // render (e.g. a malformed cached profile field reaching a component). It
@@ -190,11 +199,13 @@ export default function RootLayout() {
       return;
     }
     try {
-      setAccess(await getMyAccessState());
+      setAccess(await withTimeout(getMyAccessState(), ACCESS_CHECK_TIMEOUT_MS));
     } catch {
-      // Fail OPEN: a network blip must not lock a healthy student out. This is
-      // safe because the server is the real control — migration 058 denies a
-      // restricted account regardless of what this client believes.
+      // Fail OPEN: a network blip (or a stalled cold-start request that never
+      // settles) must not lock a healthy student out, or hold the navigator
+      // hostage. This is safe because the server is the real control —
+      // migration 058 denies a restricted account regardless of what this
+      // client believes.
       setAccess(null);
     }
   }, [session]);
@@ -345,13 +356,28 @@ export default function RootLayout() {
       setLoading(false);
       return;
     }
+
+    // Cold start / reopen: hydrate instantly from the last known profile so
+    // the navigator never has to block on two fresh round trips just to show
+    // what it already showed last time. The network fetch below still runs
+    // and quietly reconciles with the real data.
+    const cached = await readCachedProfile(userId);
+    if (cached) {
+      setProfile(cached.profile);
+      setOnboarded(cached.isOnboarded);
+      setLoading(false);
+    }
+
     try {
-      const [profileResult, interestsResult] = await timedQuery(
-        "startup.syncProfile",
-        Promise.all([
-          supabase.from("profiles").select("*").eq("id", userId).single(),
-          supabase.from("user_interests").select("id").eq("user_id", userId).limit(1),
-        ]),
+      const [profileResult, interestsResult] = await withTimeout(
+        timedQuery(
+          "startup.syncProfile",
+          Promise.all([
+            supabase.from("profiles").select("*").eq("id", userId).single(),
+            supabase.from("user_interests").select("id").eq("user_id", userId).limit(1),
+          ]),
+        ),
+        SYNC_PROFILE_TIMEOUT_MS,
       );
       const onboarded = (interestsResult.data?.length ?? 0) > 0;
       if (profileResult.data) {
