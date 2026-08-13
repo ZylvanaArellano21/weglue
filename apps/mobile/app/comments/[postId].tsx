@@ -32,6 +32,7 @@ import { useComposerBottomInset } from '../../lib/useComposerBottomInset';
 import { usePostComments, useAddComment, usePostDetail } from '../../hooks/useHomePostsFeed';
 import { timeAgo } from '../../components/home/PostCard';
 import type { PostComment } from '../../services/postService';
+import { openReportFlow } from '../../components/shared/ReportButton';
 
 export default function CommentsScreen() {
   const router = useRouter();
@@ -167,6 +168,20 @@ export default function CommentsScreen() {
                       {timeAgo(item.created_at)}
                     </Text>
                   </View>
+                  {item.author.id !== viewerUserId && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        openReportFlow({ entityType: 'comment', entityId: item.id, entityName: item.content })
+                      }
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Report this comment"
+                      style={{ paddingTop: 2 }}
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
             />

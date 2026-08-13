@@ -14,7 +14,8 @@ import {
   LockIcon, MegaphoneIcon, PaperclipIcon, PencilIcon, PeopleIcon, PersonAddIcon, PersonRemoveIcon,
   PlusIcon, SearchIcon, ShareIcon, TagIcon, TrashIcon,
 } from "../shared/icons";
-import { REPORT_RECEIVED_MESSAGE, useReport } from "../../lib/hooks/useReport";
+import type { ReportEntityType } from "../../lib/hooks/useReport";
+import { ReportModal } from "../shared/ReportModal";
 import { ToastProvider, useToast } from "../shared/Toast";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
@@ -92,8 +93,6 @@ import {
 
 type Filter = "single" | "groups";
 type InfoTab = "polls" | "media" | "events" | "files";
-
-const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate speech", "Inappropriate content", "Impersonation", "Other"];
 
 /**
  * Dismisses a transient surface (menu, popover, modal) on an outside pointer
@@ -829,6 +828,7 @@ function Composer({ disabled = false, disabledReason, allowPolls = false, onSend
  */
 function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOpenEvent, onOpenPost, onUnsend, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onUnsend: (messageId: string) => Promise<void>; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
   const [menu, setMenu] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(false), []);
   useEscapeAndOutside(menuRef, closeMenu);
@@ -936,9 +936,18 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
               </button>
             )}
             {!isOwn && (
-              <button type="button" role="menuitem" onClick={() => { const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`); if (reason && REPORT_REASONS.includes(reason)) void mutate(() => reportMessage(message.id, reason), "Couldn’t send that report."); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>
+              <button type="button" role="menuitem" onClick={() => { setMenu(false); setReportOpen(true); }} className="block w-full rounded px-3 py-2 text-left text-red-600 hover:bg-red-50">Report</button>
             )}
           </div>
+        )}
+        {reportOpen && (
+          <ReportModal
+            entityType="message"
+            entityId={message.id}
+            onClose={() => setReportOpen(false)}
+            onSubmitted={onError}
+            onSubmit={(reason) => reportMessage(message.id, reason).then(onChanged)}
+          />
         )}
       </div>
     </div>
@@ -1186,9 +1195,9 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
   const [confirmRemove, setConfirmRemove] = useState<(Person & { role: string }) | null>(null);
   const [confirmBlock, setConfirmBlock] = useState<(Person & { role: string }) | null>(null);
   const [confirmDeleteEveryone, setConfirmDeleteEveryone] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ entityType: ReportEntityType; entityId: string; entityName?: string | null; clubId?: string | null } | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
-  const report = useReport();
   const { data: matches = [], isLoading: searchLoading } = useMessageContentSearch(query, conversationId);
   useEscapeAndOutside(overflowRef, useCallback(() => setOverflow(false), []));
 
@@ -1339,16 +1348,22 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
     // Bug 8 — mobile's creator overflow is exactly one destructive entry.
     overflowActions.push({ label: "Delete for everyone", icon: <TrashIcon size={16} />, destructive: true, run: () => setConfirmDeleteEveryone(true) });
   }
-  if (isOfficialChat && details.club_id) {
+  // Official chats report as the club they belong to (matches every other
+  // club-content report). Direct and custom-group chats have no other
+  // "report the whole chat" surface — only individual messages/participants
+  // — so this reports the conversation itself. Not offered for a
+  // channel/thread view: the parent chat's Report already covers it.
+  if (!isThreadInfo && isOfficialChat && details.club_id) {
     overflowActions.push({
       label: "Report",
       icon: <FlagIcon size={16} />,
-      run: () => {
-        const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`);
-        if (reason && REPORT_REASONS.includes(reason)) {
-          report.mutate({ entityType: "club", entityId: details.club_id!, entityName: details.name, clubId: details.club_id, reason }, { onSuccess: () => onError(REPORT_RECEIVED_MESSAGE), onError: () => onError("Couldn’t send that report.") });
-        }
-      },
+      run: () => setReportTarget({ entityType: "club", entityId: details.club_id!, entityName: details.name, clubId: details.club_id }),
+    });
+  } else if (!isThreadInfo && (isDirect || isCustomGroup)) {
+    overflowActions.push({
+      label: "Report",
+      icon: <FlagIcon size={16} />,
+      run: () => setReportTarget({ entityType: "chat", entityId: conversationId, entityName: details.name }),
     });
   }
 
@@ -1372,15 +1387,9 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
             canRemove={canManageMembers && person.user_id !== userId}
             onOpenProfile={onOpenProfile}
             onMessage={() => onOpenProfile(person.user_id)}
-            onReport={() => {
-              const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`);
-              if (reason && REPORT_REASONS.includes(reason)) {
-                report.mutate(
-                  { entityType: "user", entityId: person.user_id, entityName: person.full_name ?? person.username, clubId: details.club_id ?? undefined, reason },
-                  { onSuccess: () => onError(REPORT_RECEIVED_MESSAGE), onError: () => onError("Couldn’t send that report.") }
-                );
-              }
-            }}
+            onReport={() =>
+              setReportTarget({ entityType: "user", entityId: person.user_id, entityName: person.full_name ?? person.username, clubId: details.club_id ?? undefined })
+            }
             onBlock={() => setConfirmBlock(person)}
             onRemove={() => setConfirmRemove(person)}
           />
@@ -1547,6 +1556,13 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
       confirmLabel="Block"
       onConfirm={() => void blockMember(confirmBlock)}
       onCancel={() => setConfirmBlock(null)} />}
+    {reportTarget && (
+      <ReportModal
+        {...reportTarget}
+        onClose={() => setReportTarget(null)}
+        onSubmitted={onError}
+      />
+    )}
   </aside>;
 }
 

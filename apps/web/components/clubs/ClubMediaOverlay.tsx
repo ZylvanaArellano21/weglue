@@ -9,9 +9,9 @@ import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
 import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
-import { usePostComments, useAddComment, useUpdatePostCaption } from "../../lib/hooks/usePostActions";
+import { usePostComments, useAddComment, useUpdatePostCaption, reportComment } from "../../lib/hooks/usePostActions";
 import { usePostInteractionsRealtime } from "../../lib/hooks/useClubRealtime";
-import { useReport, REPORT_RECEIVED_MESSAGE } from "../../lib/hooks/useReport";
+import { ReportModal } from "../shared/ReportModal";
 import { ClubPhotoRemovalDialog } from "./ClubPhotoRemoval";
 import type { ClubPhoto } from "../../lib/clubs/clubProfileService";
 
@@ -189,9 +189,10 @@ function PostPanel({
   const { data: comments } = usePostComments(postId, true);
   const addComment = useAddComment();
   const updateCaption = useUpdatePostCaption();
-  const report = useReport();
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [commentReportTarget, setCommentReportTarget] = useState<{ id: string; content: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
   const [comment, setComment] = useState("");
@@ -221,14 +222,6 @@ function PostPanel({
 
   const isAuthor = post.author.id === userId;
   const isFollowing = post.author.is_following;
-
-  const doReport = () => {
-    setMenuOpen(false);
-    report.mutate(
-      { entityType: "post", entityId: postId, clubId, reason: "Reported from Club Media" },
-      { onSuccess: () => show(REPORT_RECEIVED_MESSAGE), onError: () => show("Could not submit report. Try again.", "error") }
-    );
-  };
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -295,7 +288,9 @@ function PostPanel({
                   }}
                 />
               )}
-              <MenuItem label="Report post" onClick={doReport} danger />
+              {!isAuthor && (
+                <MenuItem label="Report post" onClick={() => { setMenuOpen(false); setReportOpen(true); }} danger />
+              )}
               {/* The ONLY officer action on a member's tagged post, matching
                   mobile: detach it from this club. It confirms first, and it
                   never deletes the post. */}
@@ -311,6 +306,25 @@ function PostPanel({
         </div>
       </div>
       {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "post", id: postId }} title="Share post" onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
+      {reportOpen && (
+        <ReportModal
+          entityType="post"
+          entityId={postId}
+          clubId={clubId}
+          onClose={() => setReportOpen(false)}
+          onSubmitted={show}
+        />
+      )}
+      {commentReportTarget && (
+        <ReportModal
+          entityType="comment"
+          entityId={commentReportTarget.id}
+          entityName={commentReportTarget.content}
+          onClose={() => setCommentReportTarget(null)}
+          onSubmitted={show}
+          onSubmit={(reason) => reportComment(commentReportTarget.id, reason)}
+        />
+      )}
       {confirmRemove && (
         <ClubPhotoRemovalDialog
           photo={photo}
@@ -363,10 +377,20 @@ function PostPanel({
           {(comments ?? []).map((c) => (
             <li key={c.id} className="flex items-start gap-2">
               <ClickableUserIdentity userId={c.author.id} ariaLabel={`Open ${c.author.username}'s profile`}><Avatar uri={c.author.avatar_url} size={28} name={c.author.username} /></ClickableUserIdentity>
-              <p className="text-sm text-gray-800">
+              <p className="flex-1 text-sm text-gray-800">
                 <ClickableUserIdentity userId={c.author.id} className="font-semibold">{c.author.username}</ClickableUserIdentity>{" "}
                 {c.content}
               </p>
+              {c.author.id !== userId && (
+                <button
+                  type="button"
+                  onClick={() => setCommentReportTarget({ id: c.id, content: c.content })}
+                  aria-label="Report this comment"
+                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-black/5 hover:text-gray-600"
+                >
+                  •••
+                </button>
+              )}
             </li>
           ))}
         </ul>

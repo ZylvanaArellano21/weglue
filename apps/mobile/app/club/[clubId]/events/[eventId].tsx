@@ -210,10 +210,12 @@ export default function ClubEventDetailScreen() {
               </Text>
             </TouchableOpacity>
 
-            {/* Report button */}
-            <TouchableOpacity onPress={handleReport} activeOpacity={0.7} style={{ marginRight: 8 }}>
-              <Ionicons name="ellipsis-horizontal" size={20} color="#6B7280" />
-            </TouchableOpacity>
+            {/* Report button — never on an event you created yourself */}
+            {!event.is_creator && (
+              <TouchableOpacity onPress={handleReport} activeOpacity={0.7} style={{ marginRight: 8 }}>
+                <Ionicons name="ellipsis-horizontal" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            )}
 
             {/* Join/Joined button */}
             {joiningClub ? (

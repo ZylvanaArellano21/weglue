@@ -500,7 +500,16 @@ export default function ChatInfo() {
 
   function reportConversation() {
     setOverflowOpen(false);
-    if (clubId) openReportFlow({ entityType: 'club', entityId: clubId, entityName: displayName });
+    if (clubId) {
+      // Official/officer chats are a club surface — report the club, matching
+      // every other club-content report on this app.
+      openReportFlow({ entityType: 'club', entityId: clubId, entityName: displayName });
+      return;
+    }
+    // Direct and custom-group chats have no other "report the whole chat"
+    // surface — only individual messages/participants — so this reports the
+    // conversation itself.
+    openReportFlow({ entityType: 'chat', entityId: chatId, entityName: displayName });
   }
 
   // ── Identity taps (direct/group only) ──
@@ -993,8 +1002,11 @@ export default function ChatInfo() {
                 </TouchableOpacity>
               )
             )}
-            {/* Report (official chats) */}
-            {isOfficialChat && (
+            {/* Report this chat — official chats report as the club; direct
+                and custom-group chats report the conversation itself. Not
+                shown for a channel/thread view (isThreadInfo): the parent
+                chat's Report already covers it. */}
+            {!isThreadInfo && (isOfficialChat || isDirect || isCustomGroup) && (
               <TouchableOpacity style={styles.menuRow} onPress={reportConversation}>
                 <Ionicons name="flag-outline" size={19} color={chatColors.text} />
                 <Text style={styles.menuLabel}>Report</Text>

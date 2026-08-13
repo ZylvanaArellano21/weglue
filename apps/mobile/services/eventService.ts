@@ -547,6 +547,9 @@ export interface EventDetail {
   user_rsvp_status: 'going' | 'cant' | null;
   is_saved: boolean;
   user_has_joined_club: boolean;
+  /** Whether the viewer is the one who created this event — used to hide
+   *  the Report affordance on your own content. */
+  is_creator: boolean;
 }
 
 export async function getEventDetail(
@@ -558,7 +561,7 @@ export async function getEventDetail(
       supabase
         .from('events')
         .select(`
-          id, club_id, title, emoji, description, cover_image_url,
+          id, club_id, created_by, title, emoji, description, cover_image_url,
           event_date, start_time, end_time, event_end_at, location, building, room, visibility,
           clubs!inner(id, name, avatar_url)
         `)
@@ -627,6 +630,7 @@ export async function getEventDetail(
     user_rsvp_status: (rsvpRow?.status as 'going' | 'cant' | null) ?? null,
     is_saved: !!savedRow,
     user_has_joined_club: !!memberCheck,
+    is_creator: (event as any).created_by === userId,
   };
 }
 

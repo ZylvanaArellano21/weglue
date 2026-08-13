@@ -228,23 +228,25 @@ export default function EventDetailScreen() {
               >
                 {event.emoji ? `${event.emoji} ` : ''}{event.title}
               </Text>
-              <TouchableOpacity
-                onPress={() =>
-                  openReportFlow({
-                    entityType: 'event',
-                    entityId: event.id,
-                    entityName: event.title,
-                    clubId: event.club_id,
-                  })
-                }
-                activeOpacity={0.7}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={{ paddingTop: 6 }}
-                accessibilityRole="button"
-                accessibilityLabel="Report this event"
-              >
-                <Ionicons name="ellipsis-horizontal" size={20} color="#6B7280" />
-              </TouchableOpacity>
+              {!event.is_creator && (
+                <TouchableOpacity
+                  onPress={() =>
+                    openReportFlow({
+                      entityType: 'event',
+                      entityId: event.id,
+                      entityName: event.title,
+                      clubId: event.club_id,
+                    })
+                  }
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ paddingTop: 6 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Report this event"
+                >
+                  <Ionicons name="ellipsis-horizontal" size={20} color="#6B7280" />
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Date & Time + Location card */}

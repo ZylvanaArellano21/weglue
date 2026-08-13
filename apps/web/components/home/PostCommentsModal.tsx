@@ -4,18 +4,23 @@ import { FormEvent, useState } from "react";
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
 import { ClickableUserIdentity } from "../shared/ClickableIdentity";
-import { useAddComment, usePostComments } from "../../lib/hooks/usePostActions";
+import { useAddComment, usePostComments, reportComment } from "../../lib/hooks/usePostActions";
+import { ReportModal } from "../shared/ReportModal";
+import { useToast } from "../shared/Toast";
 
 export function PostCommentsModal({ postId, userId, onClose }: { postId: string; userId: string; onClose: () => void }): JSX.Element {
   const { data: comments, isLoading, isError } = usePostComments(postId, true);
   const { mutate: addComment, isPending, isError: commentError, error: commentErrorDetails } = useAddComment();
   const [content, setContent] = useState("");
+  const [reportTarget, setReportTarget] = useState<{ id: string; content: string } | null>(null);
+  const show = useToast();
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!content.trim() || isPending) return;
     addComment({ postId, userId, content: content.trim() }, { onSuccess: () => setContent("") });
   };
   return (
+    <>
     <Modal onClose={onClose} labelledBy="comments-title" maxWidth={520}>
       <div className="flex max-h-[80vh] flex-col p-5 sm:p-6">
         <h2 id="comments-title" className="pr-8 text-xl font-bold text-gray-900">Comments</h2>
@@ -23,14 +28,24 @@ export function PostCommentsModal({ postId, userId, onClose }: { postId: string;
           {isLoading ? <p className="py-8 text-center text-sm text-gray-500">Loading comments…</p> :
            isError ? <p className="py-8 text-center text-sm text-gray-500">Comments could not be loaded.</p> :
            comments?.length ? <ul className="space-y-3">{comments.map((comment) => (
-             <li key={comment.id} className="flex gap-2.5">
+             <li key={comment.id} className="flex items-start gap-2.5">
                <ClickableUserIdentity userId={comment.author.id} ariaLabel={`Open ${comment.author.username}'s profile`} className="shrink-0">
                  <Avatar uri={comment.author.avatar_url} size={34} name={comment.author.username} />
                </ClickableUserIdentity>
-               <div className="min-w-0 rounded-xl bg-black/[0.04] px-3 py-2">
+               <div className="min-w-0 flex-1 rounded-xl bg-black/[0.04] px-3 py-2">
                  <ClickableUserIdentity userId={comment.author.id} className="block w-fit text-sm font-semibold text-gray-900">{comment.author.username}</ClickableUserIdentity>
                  <p className="break-words text-sm text-gray-700">{comment.content}</p>
                </div>
+               {comment.author.id !== userId && (
+                 <button
+                   type="button"
+                   onClick={() => setReportTarget({ id: comment.id, content: comment.content })}
+                   aria-label="Report this comment"
+                   className="shrink-0 rounded p-1 text-gray-400 hover:bg-black/5 hover:text-gray-600"
+                 >
+                   •••
+                 </button>
+               )}
              </li>
            ))}</ul> : <p className="py-8 text-center text-sm text-gray-500">No comments yet. Start the conversation.</p>}
         </div>
@@ -42,5 +57,16 @@ export function PostCommentsModal({ postId, userId, onClose }: { postId: string;
         {commentError && <p role="alert" className="mt-2 text-xs text-red-600">{commentErrorDetails instanceof Error ? commentErrorDetails.message : "Could not add comment. Try again."}</p>}
       </div>
     </Modal>
+    {reportTarget && (
+      <ReportModal
+        entityType="comment"
+        entityId={reportTarget.id}
+        entityName={reportTarget.content}
+        onClose={() => setReportTarget(null)}
+        onSubmitted={show}
+        onSubmit={(reason) => reportComment(reportTarget.id, reason)}
+      />
+    )}
+    </>
   );
 }

@@ -37,6 +37,9 @@ export interface EventDetail {
   can_view_attendees: boolean;
   /** The mobile contract allows management only to current club officers. */
   can_manage: boolean;
+  /** Whether the viewer is the one who created this event — used to hide
+   *  the Report affordance on your own content. */
+  is_creator: boolean;
 }
 
 async function getEventDetail(eventId: string, userId: string): Promise<EventDetail | null> {
@@ -110,6 +113,7 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
     can_rsvp: canRsvpToEvent(audienceFacts),
     can_view_attendees: canViewEventAttendees(audienceFacts),
     can_manage: canManageEvent(audienceFacts),
+    is_creator: audienceFacts.isCreator,
   };
 }
 

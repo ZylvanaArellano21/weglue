@@ -30,6 +30,20 @@ async function getPostComments(postId: string): Promise<PostComment[]> {
   }));
 }
 
+// A comment's author can delete it themselves at any time, so the content is
+// captured server-side, at report time, via a SECURITY DEFINER RPC — a later
+// self-delete cannot erase the evidence (same pattern as report_message).
+// Mirrors apps/mobile/services/reportService.ts's 'comment' branch.
+export async function reportComment(commentId: string, reason?: string | null): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.rpc("report_comment", {
+    p_comment_id: commentId,
+    p_reason: reason ?? null,
+    p_details: null,
+  });
+  if (error) throw error;
+}
+
 export function usePostComments(postId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: ["postComments", postId],

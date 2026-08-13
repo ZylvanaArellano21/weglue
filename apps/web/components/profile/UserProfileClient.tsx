@@ -15,6 +15,7 @@ import {
 } from "../../lib/hooks/useUserProfile";
 import { useDidIBlock, useBlockUser, useUnblockUser } from "../../lib/hooks/useBlocking";
 import { personMessageHref } from "../../lib/messages/routes";
+import { ReportModal } from "../shared/ReportModal";
 import {
   UNAVAILABLE_TITLE,
   UNAVAILABLE_BODY,
@@ -59,6 +60,7 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
   const { mutate: block, isPending: blocking } = useBlockUser(viewerUserId);
   const { mutate: unblock, isPending: unblocking } = useUnblockUser(viewerUserId);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const following = profile?.follow_status === "following";
   const { data: posts } = useUserPosts(following || profile?.is_private === false ? targetUserId : undefined);
   const { data: weekly } = useUserWeeklyEvents(targetUserId, !!profile && !profile.hide_events && (following || !profile.is_private));
@@ -231,6 +233,7 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
   const onUnblock = () => runUnblock(profile.username);
 
   return (
+    <>
     <ProfileLayout
       avatarUrl={profile.avatar_url}
       fullName={profile.full_name}
@@ -300,6 +303,14 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
                   role="menu"
                   className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-lg"
                 >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setMenuOpen(false); setReportOpen(true); }}
+                    className="block w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
+                  >
+                    Report
+                  </button>
                   {iBlockedThem ? (
                     <button
                       type="button"
@@ -328,5 +339,24 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
         </div>
       }
     />
+    {reportOpen && (
+      <ReportModal
+        entityType="user"
+        entityId={targetUserId}
+        entityName={profile.username ? `@${profile.username}` : profile.full_name}
+        onClose={() => setReportOpen(false)}
+        onSubmitted={show}
+        onBlock={
+          iBlockedThem
+            ? undefined
+            : () =>
+                block(targetUserId, {
+                  onSuccess: () => router.push("/home"),
+                  onError: () => show("Couldn’t block. Please try again.", "error"),
+                })
+        }
+      />
+    )}
+    </>
   );
 }

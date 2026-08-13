@@ -7,6 +7,7 @@ import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/Clickabl
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
 import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
+import { ReportModal } from "../shared/ReportModal";
 import { useToast } from "../shared/Toast";
 
 // Minimal post overlay (?post=), the destination for like/comment notifications
@@ -31,6 +32,7 @@ export function PostModal({
   const { data: post, isLoading } = usePostDetail(postId, userId);
   const { mutate: like } = useLikePost();
   const [shareOpen, setShareOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const show = useToast();
 
   return (
@@ -57,6 +59,16 @@ export function PostModal({
                 <span className="text-gray-400">·</span>
                 {post.tagged_clubs.map((club) => <ClickableClubIdentity key={club.id} clubId={club.id} className="truncate">@{club.name}</ClickableClubIdentity>)}
               </span>
+            )}
+            {post.author.id !== userId && (
+              <button
+                type="button"
+                onClick={() => setReportOpen(true)}
+                aria-label="Report this post"
+                className="ml-auto rounded p-1.5 text-gray-400 hover:bg-black/5 hover:text-gray-600"
+              >
+                •••
+              </button>
             )}
           </div>
 
@@ -103,6 +115,16 @@ export function PostModal({
       )}
     </Modal>
     {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "post", id: postId }} title="Share post" onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
+    {reportOpen && post && (
+      <ReportModal
+        entityType="post"
+        entityId={post.id}
+        entityName={post.caption}
+        clubId={post.tagged_clubs[0]?.id ?? null}
+        onClose={() => setReportOpen(false)}
+        onSubmitted={show}
+      />
+    )}
     </>
   );
 }
