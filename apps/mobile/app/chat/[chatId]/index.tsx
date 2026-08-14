@@ -21,6 +21,7 @@ import {
   useNonMemberPreview,
 } from '../../../hooks/useChats';
 import { useRealtimeParticipants } from '../../../hooks/useRealtimeMessages';
+import { useInvitePushPermission } from '../../../hooks/useInvitePushPermission';
 import { useQueryClient } from '@tanstack/react-query';
 import { NonMemberPreview } from '../../../components/chat/NonMemberPreview';
 import { ConversationThread } from '../../../components/chat/ConversationThread';
@@ -65,12 +66,25 @@ export default function ChatRoom() {
     draftParticipantIds?: string;
     draftNames?: string;
     draftGroupName?: string;
+    fromInvite?: string;
   }>();
   const { chatId, ptype, pclub, pname, pavatar, jumpToMessageId } = params;
   const router = useRouter();
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
   const queryClient = useQueryClient();
+  // Fix 4 — reached via a just-redeemed invitation. router.replace() was used
+  // at every hop to get here (index.tsx → /invite/[token] → this screen), so
+  // there is no real "back" stack entry underneath: Back has to be an
+  // explicit destination (Messages → Group), not router.back().
+  const fromInvite = params.fromInvite === '1';
+  const goBack = () =>
+    fromInvite ? router.replace('/(tabs)/messages?filter=group' as any) : router.back();
+  // Fix 5 — request the native notification permission here (not Home) when
+  // this screen was reached via a successful invitation join. No-ops for
+  // every other navigation into this screen, and no-ops if status isn't
+  // undetermined (see the hook for the full contract).
+  useInvitePushPermission(fromInvite);
 
   // Which draft this is, decided by the PARAMS (see the note above — a
   // "new-group" segment is unreachable). These never change while mounted, so
@@ -258,7 +272,7 @@ export default function ChatRoom() {
       return (
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <TouchableOpacity onPress={goBack} style={styles.backBtn}>
               <Ionicons name="chevron-back" size={24} color={chatColors.text} />
             </TouchableOpacity>
           </View>
@@ -281,7 +295,7 @@ export default function ChatRoom() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={goBack} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -307,7 +321,7 @@ export default function ChatRoom() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={goBack} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
           <TouchableOpacity
@@ -394,7 +408,7 @@ export default function ChatRoom() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={goBack} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>

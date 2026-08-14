@@ -5,14 +5,22 @@
  *  • The OS prompt is NEVER fired at first launch or mid-onboarding. It only
  *    runs after the user acts on the We Glue explanation card/toggle (a
  *    "meaningful moment": opening Notifications, enabling in Settings), OR
- *    the one sanctioned automatic call site: useFirstLoginPushPermission,
- *    fired exactly once, the moment a brand-new account's FIRST explicit
- *    `signInWithPassword()` success lands it on Home for the first time.
- *    (apps/mobile/app/auth/confirmed.tsx deliberately signs back out and
- *    hands off to /auth/login after verifying an email, instead of landing
- *    the user in the tabs itself — so the OS box can only ever appear
- *    immediately after that explicit Log In, never during signup, email
- *    verification, or on the Login/confirmation screens themselves.)
+ *    one of two sanctioned automatic call sites:
+ *      1. useFirstLoginPushPermission, fired exactly once, the moment a
+ *         brand-new account's FIRST explicit `signInWithPassword()` success
+ *         lands it on Home for the first time. (apps/mobile/app/auth/
+ *         confirmed.tsx deliberately signs back out and hands off to
+ *         /auth/login after verifying an email, instead of landing the user
+ *         in the tabs itself — so the OS box can only ever appear
+ *         immediately after that explicit Log In, never during signup,
+ *         email verification, or on the Login/confirmation screens
+ *         themselves.)
+ *      2. useInvitePushPermission (Fix 5), fired over the Members
+ *         sub-channels screen immediately after a successful installed or
+ *         Android-post-install invitation join, for any account — gated on
+ *         the OS status still being undetermined rather than a
+ *         brand-new-account flag, since an existing member who never
+ *         answered the prompt is exactly who this exists for.
  *  • After a denial we never re-prompt automatically — Android 13+ and iOS
  *    both make repeat prompts a no-op or a policy problem. We remember that
  *    we asked and offer "Open Settings" instead.

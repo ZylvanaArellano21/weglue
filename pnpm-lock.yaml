@@ -162,6 +162,9 @@ importers:
       '@babel/core':
         specifier: ^7.24.6
         version: 7.29.7
+      '@expo/config-plugins':
+        specifier: ~54.0.5
+        version: 54.0.5
       '@types/node':
         specifier: ^20.19.43
         version: 20.19.43
@@ -201,6 +204,9 @@ importers:
       next:
         specifier: 14.2.35
         version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      qrcode-generator:
+        specifier: ^2.0.4
+        version: 2.0.4
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -811,9 +817,6 @@ packages:
 
   '@expo/code-signing-certificates@0.0.6':
     resolution: {integrity: sha512-iNe0puxwBNEcuua9gmTGzq+SuMDa0iATai1FlFTMHJ/vUmKvN/V//drXoLJkVb5i5H3iE/n/qIJxyoBnXouD0w==}
-
-  '@expo/config-plugins@54.0.4':
-    resolution: {integrity: sha512-g2yXGICdoOw5i3LkQSDxl2Q5AlQCrG7oniu0pCPPO+UxGb7He4AFqSvPSy8HpRUj55io17hT62FTjYRD+d6j3Q==}
 
   '@expo/config-plugins@54.0.5':
     resolution: {integrity: sha512-aWQ3sViNRoQWw6So4A2qhWCt24CuGBK6MrRHI1AG+V6/NQAjIZCHaSvcXK2gXKpmisRhTSUWaKPIgLJQFB+AeQ==}
@@ -1758,6 +1761,7 @@ packages:
   '@xmldom/xmldom@0.9.10':
     resolution: {integrity: sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw==}
     engines: {node: '>=14.6'}
+    deprecated: this version has critical issues, please update to the latest version
 
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
@@ -5218,25 +5222,6 @@ snapshots:
     dependencies:
       node-forge: 1.4.0
 
-  '@expo/config-plugins@54.0.4':
-    dependencies:
-      '@expo/config-types': 54.0.10
-      '@expo/json-file': 10.0.16
-      '@expo/plist': 0.4.9
-      '@expo/sdk-runtime-versions': 1.0.0
-      chalk: 4.1.2
-      debug: 4.4.3
-      getenv: 2.0.0
-      glob: 13.0.6
-      resolve-from: 5.0.0
-      semver: 7.8.5
-      slash: 3.0.0
-      slugify: 1.6.9
-      xcode: 3.0.1
-      xml2js: 0.6.0
-    transitivePeerDependencies:
-      - supports-color
-
   '@expo/config-plugins@54.0.5':
     dependencies:
       '@expo/config-types': 54.0.10
@@ -5261,7 +5246,7 @@ snapshots:
   '@expo/config@12.0.13':
     dependencies:
       '@babel/code-frame': 7.10.4
-      '@expo/config-plugins': 54.0.4
+      '@expo/config-plugins': 54.0.5
       '@expo/config-types': 54.0.10
       '@expo/json-file': 10.2.0
       deepmerge: 4.3.1
@@ -5457,7 +5442,7 @@ snapshots:
   '@expo/prebuild-config@54.0.8(expo@54.0.36)(typescript@5.9.3)':
     dependencies:
       '@expo/config': 12.0.13
-      '@expo/config-plugins': 54.0.4
+      '@expo/config-plugins': 54.0.5
       '@expo/config-types': 54.0.10
       '@expo/image-utils': 0.8.14(typescript@5.9.3)
       '@expo/json-file': 10.2.0

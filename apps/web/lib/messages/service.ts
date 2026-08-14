@@ -1005,6 +1005,39 @@ export async function setChannelPostPermission(channelId: string, permission: Po
   if (error) throw error;
 }
 
+// ─── Invitations (non-expiring, opaque tokens) — same RPC contract mobile's
+// messagingService.ts uses, so Copy link / QR / Share / Reset on both
+// platforms always resolve to the same active token for a conversation. ───
+export const INVITE_BASE_URL = "https://weglue.app/invite";
+
+export async function getInviteToken(conversationId: string): Promise<string> {
+  const { data, error } = await getSupabaseBrowser().rpc("get_or_create_chat_invitation", { p_conversation_id: conversationId });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function rotateInviteToken(conversationId: string): Promise<string> {
+  const { data, error } = await getSupabaseBrowser().rpc("rotate_chat_invitation", { p_conversation_id: conversationId });
+  if (error) throw error;
+  return data as string;
+}
+
+export interface InviteJoinResult {
+  conversation_id: string;
+  type: "club_group";
+  club_id: string | null;
+  default_channel_id: string | null;
+}
+
+/** Feature 3 (desktop invite redemption) — same RPC and error contract as
+ *  mobile's joinInvite: throws with a `.message` of `invitation_invalid`,
+ *  `different_university`, or `email_not_verified` on a terminal failure. */
+export async function joinChatInvitation(token: string): Promise<InviteJoinResult> {
+  const { data, error } = await getSupabaseBrowser().rpc("join_chat_invitation", { p_token: token });
+  if (error) throw error;
+  return data as InviteJoinResult;
+}
+
 /**
  * Why an unsend can fail, in terms the person can act on.
  *

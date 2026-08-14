@@ -63,6 +63,7 @@ FIXTURE_081_082 = "fx:test_081_082_fixture_schema.sql"
 FIXTURE_083 = "fx:test_083_fixture_schema.sql"
 FIXTURE_084 = "fx:test_084_fixture_schema.sql"
 FIXTURE_085 = "fx:test_085_fixture_schema.sql"
+FIXTURE_086 = "fx:test_086_fixture_schema.sql"
 
 CHAINS = {
     "wg_faithful": ["mg:055_durable_admin_audit.sql",
@@ -98,6 +99,7 @@ CHAINS = {
               "mg:083_notification_coverage_audit_fixes.sql",
               "mg:084_notification_exactly_one_fixes.sql"],
     "wg085": [FIXTURE_085, "mg:085_student_joined_named_copy.sql"],
+    "wg086": [FIXTURE_086, "mg:086_members_only_chat_invitations.sql"],
 }
 
 # --- success criteria ------------------------------------------------------
@@ -361,6 +363,34 @@ MANIFEST = [
               "notification names the NEWEST joiner and its route advances "
               "to match (the destination-staleness fix); member_joined's "
               "stable-entity route is unaffected by the generic recompute."),
+
+    # ---- Members-invite rebuild (086): audit-driven fix narrowing invite
+    #      authorization to Members chat (club_group) only, adding an
+    #      auth.users.email_confirmed_at gate to redemption, and closing a
+    #      check-then-insert race with an advisory lock + partial unique
+    #      index. Verified 2026-08-14 on a throwaway postgres:17 container —
+    #      11/11 ASSERTs pass (tests A-K).
+    dict(file="test_086_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg086", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg086 chain."),
+    dict(file="test_086_members_only_chat_invitations.sql", type="sql", env="pg17",
+         chain="wg086", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim)",
+         criterion="raise",
+         note="11 tests: officer can create/rotate a Members-chat invite (A); "
+              "a regular member cannot create/reset one (B); a custom-group "
+              "creator can no longer create one — the core Fix 1 regression "
+              "(C); an officer cannot create one for the officers chat (D); "
+              "an unverified account cannot redeem, no membership leaks (E); "
+              "a verified account redeems and gets default_channel_id (F); "
+              "the new partial unique index makes one-active-token-per-"
+              "conversation DB-enforced, not just RPC convention (G); reset "
+              "immediately invalidates the old link (H); redeeming as an "
+              "existing officer is a clean no-op, role preserved (I); the "
+              "migration's own data-fix retroactively revokes a pre-086 "
+              "custom-group token (J); an invalid token leaks no data (K)."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the

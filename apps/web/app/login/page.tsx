@@ -12,6 +12,9 @@ import {
   setPendingSignupEmail,
 } from "../../lib/authFlow";
 import { resetOnboardingState } from "../../lib/onboardingState";
+import { getPendingInvite, setPendingInvite, clearPendingInvite } from "../../lib/pendingInvite";
+import { joinChatInvitation } from "../../lib/messages/service";
+import { clubHubHref } from "../../lib/messages/routes";
 
 type LoginError =
   | null
@@ -44,6 +47,19 @@ function LoginContent(): JSX.Element {
   const [loginError, setLoginError] = useState<LoginError>(null);
   const [verifying, setVerifying] = useState(false);
   const verifyingRef = useRef(false);
+
+  // Feature 3 — a desktop invite link redirects straight here with
+  // `?invite=<token>`. Persist it immediately (localStorage survives the
+  // whole Create an Account → verify email → back to Login detour, which
+  // query params on this one page would not) so it's still here on
+  // whichever visit finally logs in.
+  const inviteParam = searchParams.get("invite");
+  useEffect(() => {
+    if (inviteParam) setPendingInvite(inviteParam);
+  }, [inviteParam]);
+  const createAccountHref = inviteParam
+    ? `/onboarding/interests?invite=${encodeURIComponent(inviteParam)}`
+    : "/onboarding/interests";
 
   function clearAllErrors() {
     setFieldErrors({});
@@ -111,6 +127,28 @@ function LoginContent(): JSX.Element {
       // this account.
       resetOnboardingState();
       clearPendingSignup();
+
+      // Feature 3 — redeem a preserved invitation on the SAME login that
+      // just authenticated, then open Members sub-channels instead of the
+      // normal dashboard. Prefer the query param this exact visit arrived
+      // with; fall back to whatever survived in localStorage from an
+      // earlier visit (e.g. returning from Create an Account).
+      const token = inviteParam ?? getPendingInvite();
+      if (token) {
+        try {
+          const result = await joinChatInvitation(token);
+          clearPendingInvite();
+          router.push(clubHubHref(result.conversation_id));
+          router.refresh();
+          return;
+        } catch {
+          // Redemption failed (invalid/reset link, different university, a
+          // transient error) — don't trap an otherwise-successful login;
+          // fall through to the normal destination below.
+          clearPendingInvite();
+        }
+      }
+
       router.push("/dashboard");
       router.refresh();
     }
@@ -276,7 +314,7 @@ function LoginContent(): JSX.Element {
 
             <p className="text-center text-xs font-semibold text-black mt-5">
               New here?{" "}
-              <Link href="/onboarding/interests" className="text-[#0FA6A6] hover:underline">
+              <Link href={createAccountHref} className="text-[#0FA6A6] hover:underline">
                 Create an account
               </Link>
             </p>
