@@ -2,7 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
@@ -338,5 +338,12 @@ function SessionRealtimeHub(): JSX.Element {
   const userId = useSessionRealtimeHub();
   // Correction 3: the foreground banner overlay, layered above every page —
   // renders nothing until a notification actually arrives for this user.
-  return <ForegroundNotificationBanner userId={userId} />;
+  // Suspense is required here: ForegroundNotificationBanner reads
+  // useSearchParams(), and this hub is mounted at the root layout for every
+  // page — without it, static prerendering fails build-wide.
+  return (
+    <Suspense fallback={null}>
+      <ForegroundNotificationBanner userId={userId} />
+    </Suspense>
+  );
 }
