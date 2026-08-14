@@ -21,6 +21,7 @@ import { PostsFeed } from '../../components/home/PostsFeed';
 import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
 import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
 import { CountBadge } from '../../components/shared/CountBadge';
+import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
 type ActiveTab = 'posts' | 'events';
 
@@ -54,6 +55,17 @@ export default function HomeScreen() {
     useCallback(() => {
       void refreshOfficerStatus(userId);
     }, [userId]),
+  );
+
+  // Correction 3: while Home is the focused tab, it is the "directly
+  // relevant active Home surface" — a foreground banner for a notification
+  // whose destination is Home itself (club_joined, student_joined,
+  // member_joined, and similar feed/membership updates) would be redundant.
+  useFocusEffect(
+    useCallback(() => {
+      setActiveDestination('home');
+      return () => clearActiveDestination('home');
+    }, []),
   );
 
   // Animate dropdown

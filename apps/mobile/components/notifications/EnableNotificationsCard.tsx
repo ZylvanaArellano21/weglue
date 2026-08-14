@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuthStore } from '@weglue/shared';
 import {
   getPermissionState,
   hasAskedBefore,
@@ -19,9 +20,11 @@ import {
   requestPermissionFromUserAction,
   type PermissionState,
 } from '../../lib/notifications/permissions';
+import { onPermissionDecision } from '../../lib/notifications/permissionSync';
 import { registerPushTokenIfPermitted } from '../../lib/notifications/registerPush';
 
 export function EnableNotificationsCard() {
+  const userId = useAuthStore((s) => s.session?.user.id);
   const [state, setState] = useState<PermissionState | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [showSettingsPath, setShowSettingsPath] = useState(false);
@@ -41,12 +44,13 @@ export function EnableNotificationsCard() {
   const handleEnable = useCallback(async () => {
     const result = await requestPermissionFromUserAction();
     setState(result);
+    if (userId) void onPermissionDecision(userId, result);
     if (result === 'granted') {
       void registerPushTokenIfPermitted();
     } else if (result === 'denied') {
       setShowSettingsPath(true);
     }
-  }, []);
+  }, [userId]);
 
   if (dismissed || state === null || state === 'granted') return null;
 

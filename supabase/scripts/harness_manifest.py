@@ -59,6 +59,10 @@ PG17_CONTAINER = _os.environ.get("WEGLUE_HARNESS_PG17", "weglue-harness-pg17")
 # "mg:" = migration file in supabase/migrations.
 FIXTURE_057 = "fx:test_057_fixture_schema.sql"
 FIXTURE_056 = "fx:test_056_fixture_schema.sql"
+FIXTURE_081_082 = "fx:test_081_082_fixture_schema.sql"
+FIXTURE_083 = "fx:test_083_fixture_schema.sql"
+FIXTURE_084 = "fx:test_084_fixture_schema.sql"
+FIXTURE_085 = "fx:test_085_fixture_schema.sql"
 
 CHAINS = {
     "wg_faithful": ["mg:055_durable_admin_audit.sql",
@@ -86,6 +90,14 @@ CHAINS = {
     # to database wg" — it reuses the students that harness creates.
     "wg_conc": [FIXTURE_057, "mg:057_student_blocking.sql",
                 "fx:test_057_student_blocking.sql"],
+    "wg081082": [FIXTURE_081_082,
+                 "mg:081_first_login_push_permission.sql",
+                 "mg:082_conversation_read_realtime_sync.sql"],
+    "wg083": [FIXTURE_083, "mg:083_notification_coverage_audit_fixes.sql"],
+    "wg084": [FIXTURE_084,
+              "mg:083_notification_coverage_audit_fixes.sql",
+              "mg:084_notification_exactly_one_fixes.sql"],
+    "wg085": [FIXTURE_085, "mg:085_student_joined_named_copy.sql"],
 }
 
 # --- success criteria ------------------------------------------------------
@@ -266,6 +278,89 @@ MANIFEST = [
          criterion="raise",
          note="Fresh-database permissions. Must pass with NO fixture and NO "
               "grants bridge — that is the whole point of the file."),
+
+    # ---- corrections 1/5 family (081 first-login push permission, 082
+    #      conversation-read realtime sync). Disposable-fixture family like
+    #      055-062, but run directly on plain postgres:17 (not 15 + a
+    #      separate PG17_COMPAT rerun) since that is the Production major and
+    #      there is no lighter pg15 image already in the chain for it.
+    #      Verified live 2026-08-13: fixture + 081 + 082 + test all apply/pass
+    #      cleanly on a throwaway `docker run postgres:17` container (not the
+    #      shared stack17 stack) — 8/8 ASSERTs pass.
+    dict(file="test_081_082_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg081082", pg="17", setup_role="postgres (throwaway container, not pgowner)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg081082 chain."),
+    dict(file="test_081_082_notifications_permission_readsync.sql", type="sql", env="pg17",
+         chain="wg081082", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim)",
+         criterion="raise",
+         note="8 BEGIN/ROLLBACK tests: new-signup flag, existing-row DEFAULT "
+              "(no backfill), consume_push_permission_prompt ownership + "
+              "idempotency, ensure_profile repair-vs-existing-row, and "
+              "mark_conversation_read/mark_channel_read persisting AND "
+              "broadcasting sync:message-inbox (082's actual fix)."),
+
+    # ---- correction 4 family (083 notification event-coverage audit fixes).
+    #      Verified live 2026-08-13 on a throwaway postgres:17 container —
+    #      fixture + 083 + test all apply/pass cleanly, 8/8 ASSERTs pass.
+    dict(file="test_083_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg083", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg083 chain."),
+    dict(file="test_083_notification_coverage_audit_fixes.sql", type="sql", env="pg17",
+         chain="wg083", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim)",
+         criterion="raise",
+         note="8 BEGIN/ROLLBACK tests covering the 5 audit fixes: officer_role "
+              "and club_chat_added/group_chat_added no-op-vs-real-change "
+              "duplicate-notification guards, club_inactive real message "
+              "text, and the new club_photo type (notifies every other "
+              "member exactly once, never the uploader, never double-fires "
+              "alongside a tagged_post's club_post)."),
+
+    # ---- correction 4 part 2 (084): the founder's follow-up "exactly one
+    #      notification" proof for every add-to-chat path. Verified live
+    #      2026-08-13 on a throwaway postgres:17 container — 6/6 ASSERTs pass.
+    dict(file="test_084_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg084", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg084 chain."),
+    dict(file="test_084_notification_exactly_one_fixes.sql", type="sql", env="pg17",
+         chain="wg084", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim)",
+         criterion="raise",
+         note="6 BEGIN/ROLLBACK tests: officer-added member gets exactly one "
+              "club-membership notification (not also club_joined); a "
+              "self-driven join still gets club_joined (guard not "
+              "over-broad); group-chat invite-join now notifies exactly "
+              "once (was zero) and does not duplicate on re-open; "
+              "club invite-join still gets exactly one club_joined."),
+
+    # ---- correction 4 part 3 (085): founder decisions on the Fix 4
+    #      follow-up — chat_invite_joined documented as deferred,
+    #      student_joined's grouped copy names the newest joiner, and its
+    #      route was fixed to actually open that same person (previously
+    #      stale at the first joiner). Verified live 2026-08-13 on a
+    #      throwaway postgres:17 container — 4/4 ASSERTs pass.
+    dict(file="test_085_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg085", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg085 chain."),
+    dict(file="test_085_student_joined_named_copy.sql", type="sql", env="pg17",
+         chain="wg085", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim)",
+         criterion="raise",
+         note="4 BEGIN/ROLLBACK tests: chat_invite_joined documented as "
+              "deferred; single student_joined matches the exact founder "
+              "template and opens that profile; a merged (2+ student) "
+              "notification names the NEWEST joiner and its route advances "
+              "to match (the destination-staleness fix); member_joined's "
+              "stable-entity route is unaffected by the generic recompute."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the

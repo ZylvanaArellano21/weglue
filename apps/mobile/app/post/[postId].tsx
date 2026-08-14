@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -12,6 +12,7 @@ import { ConfirmModal } from '../../components/ConfirmModal';
 import { useToast } from '../../components/Toast';
 import { followUser, unfollowUser } from '../../services/followService';
 import type { FeedPost } from '../../services/postService';
+import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
 export default function PostDetailScreen() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
@@ -20,6 +21,14 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { show, ToastComponent } = useToast();
+
+  // While THIS post is on screen, a like/comment/tag notification banner for
+  // it never duplicates what's already visible; leaving re-enables it.
+  useEffect(() => {
+    if (!postId) return;
+    setActiveDestination('post', postId);
+    return () => clearActiveDestination('post', postId);
+  }, [postId]);
 
   const { data: post, isLoading } = usePostDetail(postId, userId);
   const { mutate: likePost } = useLikePost();

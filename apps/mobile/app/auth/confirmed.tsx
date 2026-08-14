@@ -35,6 +35,16 @@ export default function AuthConfirmedScreen() {
   // We do NOT check email_confirmed_at here — it is a DB column, not a JWT
   // claim, so it is always null right after setSession fires onAuthStateChange.
   // Valid tokens from the email confirmation flow mean the user is confirmed.
+  //
+  // Correction 1: this session exists ONLY to consume the verification token
+  // (that exchange is what marks email_confirmed_at server-side — the part
+  // that must happen here). It must never itself become the user's route into
+  // Home: the native notification-permission box may only appear immediately
+  // after an explicit email+password Log In, and any auto-authenticated path
+  // straight into the tabs would let it fire before that. So we sign the
+  // session back out immediately and hand off to Login, prefilled, with the
+  // verified banner — the user must type their password and tap Log In to
+  // reach Home, exactly once, the same as every other returning session.
   useEffect(() => {
     if (!session || handledRef.current) return;
 
@@ -45,13 +55,14 @@ export default function AuthConfirmedScreen() {
     }
 
     clearPendingSignup();
+    const email = session.user.email ?? "";
 
-    // Verification is the last onboarding step there is — go straight to the
-    // normal Home experience. No profile picture, no club catalog, no club
-    // selection, no "Done" step. The user's club matches are already waiting
-    // in their recommendation batch (created server-side at signup) and appear
-    // inside Home → Events.
-    router.replace("/(tabs)");
+    void supabase.auth.signOut().finally(() => {
+      router.replace({
+        pathname: "/auth/login",
+        params: { prefillEmail: email, verified: "1" },
+      });
+    });
   }, [session]);
 
   return (

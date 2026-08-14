@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { requestLeaveClub } from '../../store/leaveClubStore';
 import { openReportFlow } from '../../components/shared/ReportButton';
 import { formatEventLocation, isEventPastAt } from '../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../components/events/EventAudienceBadge';
+import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00');
@@ -39,6 +40,14 @@ export default function EventDetailScreen() {
   const userId = session?.user.id;
   const router = useRouter();
   const { show, ToastComponent } = useToast();
+
+  // While THIS event is on screen, a reminder/update/canceled banner for it
+  // never duplicates what's already visible; leaving re-enables it.
+  useEffect(() => {
+    if (!eventId) return;
+    setActiveDestination('event', eventId);
+    return () => clearActiveDestination('event', eventId);
+  }, [eventId]);
 
   const { data: event, isLoading } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);

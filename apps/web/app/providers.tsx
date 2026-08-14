@@ -2,7 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
@@ -15,6 +15,8 @@ import {
 import { useUnreadSummary } from "../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications } from "../lib/hooks/useNotifications";
 import { useMyClubsRealtime } from "../lib/hooks/useClubRealtime";
+import { useRealtimeMessageBanners } from "../lib/hooks/useRealtimeMessageBanners";
+import { ForegroundNotificationBanner } from "../components/notifications/ForegroundNotificationBanner";
 
 // The current session's user id, tracked once at the app root. Backs the
 // session-wide realtime hub below — each of these hooks documents that it
@@ -41,11 +43,16 @@ function useCurrentUserId(): string | undefined {
 
 // Owns the single unread-summary, notifications, and my-clubs realtime
 // subscriptions for the whole session, instead of each page remounting them.
-function useSessionRealtimeHub(): void {
+function useSessionRealtimeHub(): string | undefined {
   const userId = useCurrentUserId();
   useUnreadSummary(userId);
   useRealtimeNotifications(userId);
   useMyClubsRealtime(userId);
+  // Push-only message types never reach the notifications-table-driven
+  // banner feed — their own realtime source (see the hook for why it can't
+  // reuse the existing per-conversation thread sync).
+  useRealtimeMessageBanners(userId);
+  return userId;
 }
 
 function useApplicationAccessGate(queryClient: QueryClient): void {
@@ -327,7 +334,16 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-function SessionRealtimeHub(): null {
-  useSessionRealtimeHub();
-  return null;
+function SessionRealtimeHub(): JSX.Element {
+  const userId = useSessionRealtimeHub();
+  // Correction 3: the foreground banner overlay, layered above every page —
+  // renders nothing until a notification actually arrives for this user.
+  // Suspense is required here: ForegroundNotificationBanner reads
+  // useSearchParams(), and this hub is mounted at the root layout for every
+  // page — without it, static prerendering fails build-wide.
+  return (
+    <Suspense fallback={null}>
+      <ForegroundNotificationBanner userId={userId} />
+    </Suspense>
+  );
 }

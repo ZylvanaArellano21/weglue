@@ -54,7 +54,10 @@ const MENU_KEYS: SidebarItemKey[] = [
   'notifications',
   'privacyCenter',
 ];
-const FOOTER_KEYS: SidebarItemKey[] = ['help', 'terms', 'deleteAccount', 'logout'];
+// Correction 7: Delete Account is reachable ONLY through Account Center now —
+// the sidebar's own row (which used to duplicate it "for one-tap reach") is
+// removed, not just hidden, so there is exactly one entry point.
+const FOOTER_KEYS: SidebarItemKey[] = ['help', 'terms', 'logout'];
 
 export function SidebarOverlay() {
   const router = useRouter();

@@ -1,8 +1,15 @@
 /**
  * The single app-wide push wiring (mounted once in the root layout).
  *
- *  • Foreground presentation: banners show unless the user is ALREADY looking
- *    at that exact thread/screen (no duplicate in-app + system alert).
+ *  • Foreground presentation (correction 3): while the app is genuinely
+ *    active, the native OS banner is unconditionally suppressed here —
+ *    ForegroundNotificationBanner (fed by the realtime notifications
+ *    channel, not this push-received event) is the ONE canonical
+ *    presentation in that state, so a delivered push can never double up
+ *    with it. Backgrounded-but-JS-alive keeps the native banner (the custom
+ *    React banner isn't visible to the user in that state anyway), gated
+ *    only by the existing exact-thread check — and a fully killed app never
+ *    runs this handler at all, so background push is untouched.
  *  • Tap routing: background taps and cold-start taps both resolve through
  *    the route allowlist and land on the exact target with the Notifications
  *    inbox underneath (Back always returns to Notifications).
@@ -22,6 +29,8 @@ import { useAuthStore } from '@weglue/shared';
 import { supabase } from '../lib/supabase';
 import { ensureAndroidChannels } from '../lib/notifications/channels';
 import { isViewingThread } from '../lib/notifications/activeThread';
+import { getPermissionState } from '../lib/notifications/permissions';
+import { reconcilePermissionChange } from '../lib/notifications/permissionSync';
 import { registerPushTokenIfPermitted } from '../lib/notifications/registerPush';
 import {
   navigateToNotificationTarget,
@@ -32,6 +41,17 @@ import { consumePendingRoute, storePendingRoute } from '../lib/notifications/pen
 // Module-level: must exist before any notification arrives, even pre-render.
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
+    if (AppState.currentState === 'active') {
+      // App genuinely foregrounded — ForegroundNotificationBanner is the
+      // sole presentation. shouldSetBadge stays true (harmless/idempotent
+      // alongside useUnreadSummary's own badge sync).
+      return {
+        shouldShowBanner: false,
+        shouldShowList: false,
+        shouldPlaySound: false,
+        shouldSetBadge: true,
+      };
+    }
     const data = notification.request.content.data as Record<string, unknown> | undefined;
     const route = (data?.route ?? {}) as Record<string, unknown>;
     // Silence the banner for the thread that is open on screen right now.
@@ -138,12 +158,18 @@ export function usePushNotifications(): void {
 
   // Token registration: on login and whenever the app foregrounds (covers
   // permission granted in Settings while backgrounded, and token rotation).
+  // Also the second passive re-check site for correction 2's transition
+  // detection — a permission flip caught here cascades to preferences too.
   useEffect(() => {
     if (!userId) return;
-    void registerPushTokenIfPermitted();
+    const checkPermissionAndToken = () => {
+      void registerPushTokenIfPermitted();
+      void getPermissionState().then((state) => reconcilePermissionChange(userId, state));
+    };
+    checkPermissionAndToken();
     const sub = AppState.addEventListener('change', (status) => {
       if (status === 'active' && Platform.OS !== 'web') {
-        void registerPushTokenIfPermitted();
+        checkPermissionAndToken();
       }
     });
     return () => sub.remove();
