@@ -64,6 +64,39 @@ describe('inviteController — one controller, one redemption, one navigation', 
     expect(push).toHaveBeenCalledTimes(1);
   });
 
+  it('a second delivery of the SAME token shortly AFTER the first already completed is still ignored (the real getInitialURL/url-event race, not just true concurrency)', async () => {
+    vi.useFakeTimers();
+    try {
+      await captureInviteToken('tok-delayed', { hasSession: true, isOnboarded: true });
+      expect(push).toHaveBeenCalledTimes(1);
+
+      // The first delivery fully resolved and navigated already — this is
+      // the scenario the old "release the guard in `finally`" design missed.
+      await vi.advanceTimersByTimeAsync(1500);
+      await captureInviteToken('tok-delayed', { hasSession: true, isOnboarded: true });
+
+      expect(setPendingInvite).toHaveBeenCalledTimes(1);
+      expect(push).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a genuinely later re-tap of the same link (past the cooldown) is allowed to navigate again', async () => {
+    vi.useFakeTimers();
+    try {
+      await captureInviteToken('tok-later', { hasSession: true, isOnboarded: true });
+      expect(push).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await captureInviteToken('tok-later', { hasSession: true, isOnboarded: true });
+
+      expect(push).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('captureInviteUrl ignores non-invite URLs entirely', async () => {
     await captureInviteUrl('https://weglue.app/event/abc', { hasSession: true, isOnboarded: true });
     expect(setPendingInvite).not.toHaveBeenCalled();

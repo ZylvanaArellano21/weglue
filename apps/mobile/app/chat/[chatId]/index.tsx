@@ -80,11 +80,6 @@ export default function ChatRoom() {
   const fromInvite = params.fromInvite === '1';
   const goBack = () =>
     fromInvite ? router.replace('/(tabs)/messages?filter=group' as any) : router.back();
-  // Fix 5 — request the native notification permission here (not Home) when
-  // this screen was reached via a successful invitation join. No-ops for
-  // every other navigation into this screen, and no-ops if status isn't
-  // undetermined (see the hook for the full contract).
-  useInvitePushPermission(fromInvite);
 
   // Which draft this is, decided by the PARAMS (see the note above — a
   // "new-group" segment is unreachable). These never change while mounted, so
@@ -116,6 +111,14 @@ export default function ChatRoom() {
 
   const { data: chatDetails, isLoading: detailsLoading } = useChatDetails(realChatId);
   const { data: isMember, refetch: refetchMembership } = useConversationMembership(realChatId, userId);
+
+  // Fix 5 — request the native notification permission here (not Home) when
+  // this screen was reached via a successful invitation join. Gated on
+  // !detailsLoading too, not just fromInvite: the hub content isn't actually
+  // visible yet while chatDetails is still loading (see the bare-spinner
+  // branch below), and the requirement is specifically that the box appears
+  // OVER Members sub-channels, not over a loading spinner that precedes it.
+  useInvitePushPermission(fromInvite && !detailsLoading);
 
   // Derived from the ROUTE, not the draft flags, so they survive resolution
   // unchanged — a draft DM stays a DM the instant it becomes a real one, with

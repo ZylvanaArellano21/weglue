@@ -15,8 +15,20 @@ import { getPendingInvite, setPendingInvite, parseInviteToken } from './pendingI
 // The guard is module-level (not React state) on purpose: it must survive
 // across the several independent call sites and re-renders that can all
 // observe "no token captured yet" in the same tick.
-
-let inFlightToken: string | null = null;
+//
+// It does NOT release the instant the async work finishes. The two deliveries
+// of a cold-start URL (getInitialURL() resolving and the first 'url' event)
+// aren't guaranteed to land in the same tick — one can lag the other by real
+// wall-clock time — so releasing early re-opens exactly the bug this exists
+// to close: a second `router.push('/invite/<token>')` for the same token,
+// which is the literal "a second Joining… screen slides in a moment later"
+// symptom from the original video evidence. A short cooldown after the LAST
+// time this token was captured covers that realistic re-delivery window
+// while still letting a genuinely fresh tap of the same link later in the
+// session (after the user has navigated away) through.
+const RECENT_CAPTURE_COOLDOWN_MS = 4000;
+let recentToken: string | null = null;
+let recentAt = 0;
 
 /**
  * Records that `token` has just arrived from any source, and — if the user
@@ -24,26 +36,23 @@ let inFlightToken: string | null = null;
  * If they are not, the token is simply persisted; `resumePendingInvite`
  * (called from the root screen once auth/onboarding settles) picks it up.
  *
- * Idempotent: calling this twice in the same tick with the same token before
- * the first call's persistence write resolves is a no-op the second time.
+ * Idempotent: a second delivery of the SAME token within the cooldown
+ * window — whether truly concurrent or merely close in time — is a no-op.
  */
 export async function captureInviteToken(
   token: string,
   opts: { hasSession: boolean; isOnboarded: boolean },
 ): Promise<void> {
-  if (inFlightToken === token) return;
-  inFlightToken = token;
-  try {
-    await setPendingInvite(token);
-    if (opts.hasSession && opts.isOnboarded) {
-      router.push(`/invite/${token}` as any);
-    }
-    // Else: the auth/onboarding flow runs; resumePendingInvite consumes it.
-  } finally {
-    // Release the guard once persistence + (maybe) navigation have been
-    // issued, so a genuinely NEW token later isn't blocked by a stale entry.
-    if (inFlightToken === token) inFlightToken = null;
+  const now = Date.now();
+  if (recentToken === token && now - recentAt < RECENT_CAPTURE_COOLDOWN_MS) return;
+  recentToken = token;
+  recentAt = now;
+
+  await setPendingInvite(token);
+  if (opts.hasSession && opts.isOnboarded) {
+    router.push(`/invite/${token}` as any);
   }
+  // Else: the auth/onboarding flow runs; resumePendingInvite consumes it.
 }
 
 /** Parses an incoming URL and, if it's an invite link, runs it through the

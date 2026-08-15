@@ -190,7 +190,14 @@ BEGIN;
       SELECT 1 FROM public.club_members
       WHERE club_id = '10101010-1010-1010-1010-101010101010' AND user_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff' AND role = 'member'
     ), 'TEST F FAILED: club membership must exist after redemption';
-    RAISE NOTICE 'TEST F PASSED: verified account redeems and gets the sub-channels destination';
+    -- Update 1, outcome 2: redemption joins the club AND the Members chat —
+    -- both, not just one. The prior version of this test only checked
+    -- club_members.
+    ASSERT EXISTS (
+      SELECT 1 FROM public.conversation_participants
+      WHERE conversation_id = '20202020-2020-2020-2020-202020202020' AND user_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff' AND hidden_at IS NULL
+    ), 'TEST F FAILED: Members chat participation must exist after redemption, not just club membership';
+    RAISE NOTICE 'TEST F PASSED: verified account redeems and gets the sub-channels destination, joined to both the club and the Members chat';
   END $$;
 ROLLBACK;
 
@@ -283,7 +290,15 @@ BEGIN;
       WHERE club_id = 'a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a0a0' AND user_id = '90909090-9090-9090-9090-909090909090';
     ASSERT v_count = 1, 'TEST I FAILED: expected exactly one club_members row, got ' || v_count;
     ASSERT v_role = 'officer', 'TEST I FAILED: officer role must be preserved, got ' || v_role;
-    RAISE NOTICE 'TEST I PASSED: redeeming as an existing officer is a clean no-op, role preserved';
+    -- The officer was seeded as a club_members row only (no prior
+    -- conversation_participants row — a realistic "never wired to chat"
+    -- drift case). Redemption must still ensure Members-chat participation
+    -- even on the no-op club-membership path.
+    ASSERT EXISTS (
+      SELECT 1 FROM public.conversation_participants
+      WHERE conversation_id = 'b0b0b0b0-b0b0-b0b0-b0b0-b0b0b0b0b0b0' AND user_id = '90909090-9090-9090-9090-909090909090' AND hidden_at IS NULL
+    ), 'TEST I FAILED: existing officer must still end up as a visible Members chat participant';
+    RAISE NOTICE 'TEST I PASSED: redeeming as an existing officer is a clean no-op, role preserved, chat participation ensured';
   END $$;
 ROLLBACK;
 

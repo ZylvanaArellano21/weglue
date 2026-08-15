@@ -40,7 +40,7 @@ describe('useInvitePushPermission — reuses existing permission infra, gated on
 describe('Members sub-channels hub — permission call site wiring', () => {
   const hubSrc = source('../../app/chat/[chatId]/index.tsx');
 
-  it('calls useInvitePushPermission gated on fromInvite, not unconditionally', () => {
-    expect(hubSrc).toMatch(/useInvitePushPermission\(fromInvite\)/);
+  it('calls useInvitePushPermission gated on fromInvite AND the content actually being loaded (not a bare spinner)', () => {
+    expect(hubSrc).toMatch(/useInvitePushPermission\(fromInvite && !detailsLoading\)/);
   });
 });

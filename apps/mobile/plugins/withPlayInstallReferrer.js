@@ -151,20 +151,29 @@ function withInstallReferrerPackageRegistration(config) {
     if (contents.includes('PlayInstallReferrerPackage()')) {
       return config;
     }
-    // Matches Expo's generated MainApplication.kt: a `packages` MutableList
-    // built via `PackageList(this).packages`, extended with `.apply { add(...) }`
-    // calls for hand-added native modules. Adding one more `add(...)` line
-    // to that same pattern is the standard way to register a manually
-    // written native module in a managed Expo project.
-    if (/val packages = PackageList\(this\)\.packages/.test(contents)) {
+    // Expo SDK 54 / RN 0.81's generated MainApplication.kt (verified via a
+    // real `expo prebuild --platform android` run against this exact
+    // project, not assumed from an older SDK's docs):
+    //
+    //   override fun getPackages(): List<ReactPackage> =
+    //       PackageList(this).packages.apply {
+    //         // Packages that cannot be autolinked yet can be added manually here, for example:
+    //         // add(MyReactNativePackage())
+    //       }
+    //
+    // i.e. `PackageList(this).packages.apply { ... }`, not the older
+    // `val packages = PackageList(this).packages` + `packages.add(...)` shape.
+    // Insert directly inside the `.apply {` block, matching the file's own
+    // commented example.
+    if (/PackageList\(this\)\.packages\.apply\s*\{/.test(contents)) {
       config.modResults.contents = contents.replace(
-        /val packages = PackageList\(this\)\.packages/,
-        `val packages = PackageList(this).packages\n              packages.add(PlayInstallReferrerPackage())`,
+        /(PackageList\(this\)\.packages\.apply\s*\{)/,
+        `$1\n              add(PlayInstallReferrerPackage())`,
       );
     } else {
       throw new Error(
-        'withPlayInstallReferrer: could not find the expected `PackageList(this).packages` ' +
-          'line in MainApplication.kt to register PlayInstallReferrerPackage. Inspect the ' +
+        'withPlayInstallReferrer: could not find the expected `PackageList(this).packages.apply { }` ' +
+          'block in MainApplication.kt to register PlayInstallReferrerPackage. Inspect the ' +
           'generated file after `expo prebuild` and update this plugin to match.',
       );
     }

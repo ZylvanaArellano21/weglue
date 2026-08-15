@@ -26,7 +26,16 @@ export const metadata = {
 // to, so it's authoritative regardless of whether the iOS listing is public
 // yet. If Apple ever reassigns the app's ascAppId, update both places.
 const APP_STORE_URL = "https://apps.apple.com/app/we-glue/id6786491344";
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.weglue.app";
+
+// Feature 1 — the opaque invite token rides in `referrer`, URL-encoded, so
+// the Play Install Referrer API hands it back verbatim on first launch
+// (apps/mobile/lib/androidInstallReferrer.ts parses this exact
+// "invite_token=<token>" shape). No email, name, or other PII — the token
+// itself carries no identity.
+function playStoreUrl(token: string): string {
+  const referrer = encodeURIComponent(`invite_token=${token}`);
+  return `https://play.google.com/store/apps/details?id=com.weglue.app&referrer=${referrer}`;
+}
 
 interface InvitePreview {
   valid: boolean;
@@ -117,7 +126,7 @@ export default async function InvitePage({
   // iOS / Android, app not installed: auto-redirect to the correct store,
   // with the single matching button as the only fallback if that doesn't
   // fire (popup/navigation blocked, slow connection, etc).
-  const storeUrl = platform === "ios" ? APP_STORE_URL : PLAY_STORE_URL;
+  const storeUrl = platform === "ios" ? APP_STORE_URL : playStoreUrl(params.token);
   const storeLabel = platform === "ios" ? "Continue to App Store" : "Continue to Google Play";
   const openingLabel = platform === "ios" ? "Opening the App Store…" : "Opening Google Play…";
   const headline =
