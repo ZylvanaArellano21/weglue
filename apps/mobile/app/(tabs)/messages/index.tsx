@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   View,
@@ -31,10 +31,25 @@ export default function MessagesIndex() {
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
 
+  // A successful invitation-driven join lands here via
+  // `/(tabs)/messages?filter=group` (Fix 4 — "Back always returns to
+  // Messages → Group"). Read it once as the initial tab, matching how the
+  // screen behaves for a fresh mount; a `useEffect` below also applies it if
+  // this screen was already mounted (tab navigators keep siblings alive), but
+  // only the FIRST time a given param value arrives, so a manual tap back to
+  // Single afterward is never fought.
+  const { filter: filterParam } = useLocalSearchParams<{ filter?: string }>();
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<ChatFilter>('single');
+  const [filter, setFilter] = useState<ChatFilter>(filterParam === 'group' ? 'group' : 'single');
   const [showArchived, setShowArchived] = useState(false);
   const searching = query.trim().length > 0;
+  const consumedFilterParam = useRef(filterParam);
+  useEffect(() => {
+    if (filterParam && filterParam !== consumedFilterParam.current) {
+      consumedFilterParam.current = filterParam;
+      if (filterParam === 'group') setFilter('group');
+    }
+  }, [filterParam]);
 
   const queryClient = useQueryClient();
   // Re-derive the conversation list from current authorized participation each

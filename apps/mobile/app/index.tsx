@@ -11,7 +11,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@weglue/shared";
 import { getPendingSignupEmail } from "../lib/authFlow";
-import { getPendingInvite } from "../lib/pendingInvite";
+import { resumePendingInvite } from "../lib/inviteController";
+import { checkAndroidInstallReferrerOnce } from "../lib/androidInstallReferrer";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function WelcomeScreen() {
@@ -29,6 +30,15 @@ export default function WelcomeScreen() {
         void AsyncStorage.removeItem("weglue-account-deletion-success");
       }
     });
+    // Feature 1 — a fresh Android install has no session yet; this persists
+    // any Play Install Referrer invite token so it survives signup/login the
+    // same way a deep-link-captured token does. No-ops on iOS, on every
+    // launch after the first, and if there's no token to find.
+    void checkAndroidInstallReferrerOnce({
+      hasSession: !!session?.user?.email_confirmed_at,
+      isOnboarded: !!session?.user?.email_confirmed_at,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -72,10 +82,8 @@ export default function WelcomeScreen() {
     // backfilled that flag.
     // A deferred chat invite is consumed exactly here so the invited chat is
     // the first destination shown — then normal app entry.
-    getPendingInvite().then((token) => {
-      if (token) {
-        router.replace(`/invite/${token}` as any);
-      } else {
+    resumePendingInvite().then((hadPendingInvite) => {
+      if (!hadPendingInvite) {
         router.replace("/(tabs)");
       }
     });

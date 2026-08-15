@@ -202,7 +202,8 @@
       ],
       "expo-font",
       "@react-native-community/datetimepicker",
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/withPlayInstallReferrer"
     ],
     "experiments": {
       "typedRoutes": true

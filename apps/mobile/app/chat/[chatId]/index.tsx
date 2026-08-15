@@ -21,6 +21,7 @@ import {
   useNonMemberPreview,
 } from '../../../hooks/useChats';
 import { useRealtimeParticipants } from '../../../hooks/useRealtimeMessages';
+import { useInvitePushPermission } from '../../../hooks/useInvitePushPermission';
 import { useQueryClient } from '@tanstack/react-query';
 import { NonMemberPreview } from '../../../components/chat/NonMemberPreview';
 import { ConversationThread } from '../../../components/chat/ConversationThread';
@@ -65,12 +66,20 @@ export default function ChatRoom() {
     draftParticipantIds?: string;
     draftNames?: string;
     draftGroupName?: string;
+    fromInvite?: string;
   }>();
   const { chatId, ptype, pclub, pname, pavatar, jumpToMessageId } = params;
   const router = useRouter();
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
   const queryClient = useQueryClient();
+  // Fix 4 — reached via a just-redeemed invitation. router.replace() was used
+  // at every hop to get here (index.tsx → /invite/[token] → this screen), so
+  // there is no real "back" stack entry underneath: Back has to be an
+  // explicit destination (Messages → Group), not router.back().
+  const fromInvite = params.fromInvite === '1';
+  const goBack = () =>
+    fromInvite ? router.replace('/(tabs)/messages?filter=group' as any) : router.back();
 
   // Which draft this is, decided by the PARAMS (see the note above — a
   // "new-group" segment is unreachable). These never change while mounted, so
@@ -102,6 +111,14 @@ export default function ChatRoom() {
 
   const { data: chatDetails, isLoading: detailsLoading } = useChatDetails(realChatId);
   const { data: isMember, refetch: refetchMembership } = useConversationMembership(realChatId, userId);
+
+  // Fix 5 — request the native notification permission here (not Home) when
+  // this screen was reached via a successful invitation join. Gated on
+  // !detailsLoading too, not just fromInvite: the hub content isn't actually
+  // visible yet while chatDetails is still loading (see the bare-spinner
+  // branch below), and the requirement is specifically that the box appears
+  // OVER Members sub-channels, not over a loading spinner that precedes it.
+  useInvitePushPermission(fromInvite && !detailsLoading);
 
   // Derived from the ROUTE, not the draft flags, so they survive resolution
   // unchanged — a draft DM stays a DM the instant it becomes a real one, with
@@ -258,7 +275,7 @@ export default function ChatRoom() {
       return (
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <TouchableOpacity onPress={goBack} style={styles.backBtn}>
               <Ionicons name="chevron-back" size={24} color={chatColors.text} />
             </TouchableOpacity>
           </View>
@@ -281,7 +298,7 @@ export default function ChatRoom() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={goBack} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -307,7 +324,7 @@ export default function ChatRoom() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={goBack} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={chatColors.text} />
           </TouchableOpacity>
           <TouchableOpacity
@@ -394,7 +411,7 @@ export default function ChatRoom() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={goBack} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>

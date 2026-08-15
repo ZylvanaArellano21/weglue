@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,6 +15,14 @@ import { chatColors, chatFonts, chatShadow } from '../../components/chat/chatThe
 // If not, we persist the token and route into the normal onboarding/login flow;
 // this screen resumes once they're authenticated.
 
+// Terminal invite-redemption failures: retrying the SAME token cannot ever
+// succeed, so the persisted token must be cleared (Fix 2 — "invalid tokens
+// return a clear result without joining"; Fix 4 — "the token is cleared only
+// after success or a terminal invalid result"). Any other error (network,
+// timeout, unexpected) is treated as transient and the token is kept so the
+// user can retry.
+const TERMINAL_INVITE_ERRORS = ['invitation_invalid', 'different_university', 'email_not_verified'];
+
 export default function InviteScreen() {
   const { token } = useLocalSearchParams<{ token: string }>();
   const router = useRouter();
@@ -27,6 +35,15 @@ export default function InviteScreen() {
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [state, setState] = useState<'loading' | 'joining' | 'ready' | 'error'>('loading');
   const [errorText, setErrorText] = useState('');
+  const [errorTitle, setErrorTitle] = useState("Can't open this invite");
+
+  // Fix 4, criterion 1: "one link causes one redemption and one navigation."
+  // The upstream controller (lib/inviteController.ts) already dedupes at the
+  // URL-capture layer, but this screen's own effect can still re-run (auth
+  // state settling flips `isLoading`/`signedIn` mid-mount) — this ref makes
+  // the join+navigate branch execute at most once per token per mount,
+  // independent of how many times the effect body re-runs before that.
+  const joinedTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -39,7 +56,8 @@ export default function InviteScreen() {
         setPreview(p);
         if (!p.valid) {
           setState('error');
-          setErrorText('This invite link is no longer valid. Ask for a new one.');
+          setErrorTitle('This invite link is no longer valid');
+          setErrorText('Ask a club officer for a new one.');
           void clearPendingInvite();
           return;
         }
@@ -54,26 +72,48 @@ export default function InviteScreen() {
           return;
         }
 
+        if (joinedTokenRef.current === token) return; // already redeemed this mount
+        joinedTokenRef.current = token;
+
         // Fully authenticated → join automatically, no confirmation.
         setState('joining');
         const result = await joinInvite(token);
         await clearPendingInvite();
         if (!alive) return;
 
-        // Open the destination chat immediately.
-        if (result.type === 'club_group' && result.default_channel_id) {
-          router.replace(`/chat/${result.conversation_id}/${result.default_channel_id}` as any);
-        } else {
-          router.replace(`/chat/${result.conversation_id}` as any);
-        }
+        // Members sub-channels is ALWAYS the first destination — never the
+        // Main chat thread. `default_channel_id` is returned for callers
+        // that need it elsewhere, not for this navigation. `fromInvite=1`
+        // tells the sub-channels screen that it was reached via a successful
+        // invitation redemption, which changes two things there: (Fix 5) it
+        // requests the native notification permission here when status is
+        // still undecided, and (Fix 4) its Back control targets Messages →
+        // Group explicitly — a chain of router.replace() calls (index.tsx →
+        // this screen → the hub) leaves no real "back" stack entry to fall
+        // through to, so router.back() alone cannot satisfy that requirement.
+        router.replace(`/chat/${result.conversation_id}?fromInvite=1` as any);
       } catch (e: any) {
         if (!alive) return;
+        const code: string = e?.message ?? '';
         setState('error');
-        setErrorText(
-          e?.message?.includes('different_university')
-            ? 'This chat is for a different university, so you can\'t join it.'
-            : 'Something went wrong joining this chat. Please try again.',
-        );
+        if (code.includes('invitation_invalid')) {
+          setErrorTitle('This invite link is no longer valid');
+          setErrorText('Ask a club officer for a new one.');
+        } else if (code.includes('different_university')) {
+          setErrorTitle("Can't open this invite");
+          setErrorText("This chat is for a different university, so you can't join it.");
+        } else if (code.includes('email_not_verified')) {
+          setErrorTitle("Can't open this invite");
+          setErrorText('Please verify your email before joining.');
+        } else {
+          setErrorTitle("Can't open this invite");
+          setErrorText('Something went wrong joining this chat. Please try again.');
+        }
+        if (TERMINAL_INVITE_ERRORS.some((terminal) => code.includes(terminal))) {
+          void clearPendingInvite();
+        }
+        // Otherwise (transient/unexpected failure): the token stays
+        // persisted so the user can retry via the same link.
       }
     })();
 
@@ -89,7 +129,7 @@ export default function InviteScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <TouchableOpacity onPress={() => router.replace('/(tabs)/messages' as any)} style={styles.close} hitSlop={8}>
+      <TouchableOpacity onPress={() => router.replace('/(tabs)/messages?filter=group' as any)} style={styles.close} hitSlop={8}>
         <Ionicons name="close" size={24} color={chatColors.text} />
       </TouchableOpacity>
 
@@ -97,9 +137,9 @@ export default function InviteScreen() {
         {state === 'error' ? (
           <>
             <Ionicons name="alert-circle-outline" size={54} color={chatColors.textMuted} />
-            <Text style={styles.title}>Can't open this invite</Text>
+            <Text style={styles.title}>{errorTitle}</Text>
             <Text style={styles.body}>{errorText}</Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/messages' as any)}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/messages?filter=group' as any)}>
               <Text style={styles.primaryLabel}>Go to messages</Text>
             </TouchableOpacity>
           </>

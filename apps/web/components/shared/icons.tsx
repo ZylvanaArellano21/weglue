@@ -385,3 +385,30 @@ export function PencilIcon(p: IconProps): JSX.Element {
     </svg>
   );
 }
+
+/** Ionicons `qr-code-outline` — Show QR code (Share invite panel). */
+export function QrCodeIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M14 14h3v3h-3z" />
+      <path d="M20 14v3" />
+      <path d="M14 20h3" />
+      <path d="M20 20h.01" />
+    </svg>
+  );
+}
+
+/** Ionicons `refresh-outline` — Reset link (Share invite panel). */
+export function RefreshIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M20 11a8 8 0 0 0-14.3-4.9" />
+      <path d="M4 4v5h5" />
+      <path d="M4 13a8 8 0 0 0 14.3 4.9" />
+      <path d="M20 20v-5h-5" />
+    </svg>
+  );
+}

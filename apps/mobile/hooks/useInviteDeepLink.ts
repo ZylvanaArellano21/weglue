@@ -1,30 +1,19 @@
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
 import { useAuthStore } from '@weglue/shared';
-import { parseInviteToken, setPendingInvite } from '../lib/pendingInvite';
+import { captureInviteUrl } from '../lib/inviteController';
 import { shouldHandleDeepLinkNavigation } from '../lib/platformAdmin';
 
 // ─── Invite deep-link capture ────────────────────────────────────────────────
-// Captures invite tokens from cold-start and warm-start deep links. The token
-// is ALWAYS persisted first (so it survives onboarding / app restart), then:
-//   • signed-in + onboarded  → open the invite screen now
-//   • otherwise              → leave it persisted; index.tsx routing consumes
-//                              it once onboarding completes.
+// Captures invite tokens from cold-start and warm-start deep links and hands
+// them to the one invitation controller (lib/inviteController.ts), which
+// dedupes and decides whether to persist-only or persist-and-navigate.
 // Non-invite links are ignored (auth links are handled by useAuthDeepLink).
-
-async function handleUrl(url: string, isOnboarded: boolean, hasSession: boolean) {
-  const token = parseInviteToken(url);
-  if (!token) return;
-
-  // Persist immediately — the whole point of a deferred invite.
-  await setPendingInvite(token);
-
-  if (hasSession && isOnboarded) {
-    router.push(`/invite/${token}` as any);
-  }
-  // Else: onboarding/login flow runs; index.tsx picks the token up at the end.
-}
+//
+// Expo Linking can deliver the SAME cold-start URL twice — both
+// getInitialURL() and the first 'url' event can fire for one launch — so
+// both call sites below funnel through the controller's single dedup guard
+// rather than each independently deciding to navigate.
 
 export function useInviteDeepLink(accessResolved = true) {
   const session = useAuthStore((s) => s.session);
@@ -42,11 +31,11 @@ export function useInviteDeepLink(accessResolved = true) {
     if (!allowDeepLinks) return;
 
     Linking.getInitialURL().then((url) => {
-      if (url) void handleUrl(url, isOnboarded, hasSession);
+      if (url) void captureInviteUrl(url, { hasSession, isOnboarded });
     });
 
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      void handleUrl(url, isOnboarded, hasSession);
+      void captureInviteUrl(url, { hasSession, isOnboarded });
     });
 
     return () => subscription.remove();
