@@ -23,7 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, Redirect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { Avatar } from '../../components/shared/Avatar';
@@ -65,6 +65,17 @@ export default function CommentsScreen() {
     if (!content || isPending) return;
     submitComment({ postId, userId: viewerUserId, content }, { onSuccess: () => setDraft('') });
   };
+
+  // A Comments sheet with NO post id is never a legitimate state — this screen
+  // is only ever reached by tapping comments on a specific post. It could only
+  // be mounted param-less by the navigator itself choosing it as a launch
+  // destination, which is the cold-launch bug fixed in app/_layout.tsx (the
+  // anchor route must be declared first). This guard is the structural
+  // backstop for that: rather than rendering "This post is no longer
+  // available" over an empty screen and trapping the user, send them to Home —
+  // the correct destination for opening the app. Declared AFTER every hook
+  // above so hook order is never conditional.
+  if (!postId) return <Redirect href="/(tabs)" />;
 
   return (
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>

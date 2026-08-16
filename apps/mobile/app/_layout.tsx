@@ -52,6 +52,14 @@ import { shouldRecoverOnMobileForeground } from "../lib/studentSynchronization";
 
 SplashScreen.preventAutoHideAsync();
 
+// The root stack's anchor route. Kept as a declaration of intent, but note it
+// is NOT on its own sufficient — see the <Stack.Screen name="index"> ordering
+// note in the navigator below, which is what actually fixes the cold-launch
+// destination (verified by experiment in the iOS simulator).
+export const unstable_settings = {
+  initialRouteName: "index",
+};
+
 // Cold-start network calls are bounded so a stalled radio/DNS/TLS handshake
 // (the classic cold-start failure mode — neither resolves nor rejects) can
 // never hold the navigator hostage indefinitely. Both fail open into the
@@ -297,10 +305,41 @@ export default function RootLayout() {
     authBaselineRef.current = nextSession ? "signed-in" : "signed-out";
   }, []);
 
+  // Which user id has already been through the startup access gate in THIS
+  // process. Supabase emits TOKEN_REFRESHED on a timer and on every return to
+  // the foreground, and it re-emits SIGNED_IN when it merely restores an
+  // existing session. Treating each of those as a fresh startup checkpoint is
+  // what made the app "constantly load": setLoading(true) makes
+  // (tabs)/_layout.tsx render a full-screen spinner INSTEAD of the tabs, and
+  // setAccess(undefined) makes accessPending true, which unmounts the entire
+  // navigator and replaces it with a blank screen. Every routine token refresh
+  // therefore blanked and remounted the whole app, on whatever screen the user
+  // was sitting on, and every remount refetched that screen's queries.
+  //
+  // Gating on "have we already resolved access for this exact user" keeps the
+  // real protection intact — a genuine sign-in, an account switch and a cold
+  // start all still gate before the navigator renders — while a routine
+  // refresh of an already-gated session no longer tears the UI down.
+  // Restriction enforcement is unchanged: refreshAccess() still re-runs on
+  // every one of these events (its useCallback identity changes with the new
+  // session object, re-firing the effect below), and the moment it reports a
+  // restriction the isRestricted branch replaces the navigator anyway.
+  const accessGatedUserIdRef = useRef<string | null>(null);
+  const shouldGateStartupAccess = useCallback((nextSession: Session | null): boolean => {
+    const uid = nextSession?.user?.id ?? null;
+    if (!uid) {
+      accessGatedUserIdRef.current = null;
+      return false;
+    }
+    if (accessGatedUserIdRef.current === uid) return false;
+    accessGatedUserIdRef.current = uid;
+    return true;
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       observeSessionForSignInDetection(session);
-      if (session && shouldSyncStudentProfile(session)) {
+      if (session && shouldSyncStudentProfile(session) && shouldGateStartupAccess(session)) {
         // Close the navigator before profile hydration on every authenticated
         // startup. The access RPC is the only path that reopens it.
         setAccess(undefined);
@@ -328,14 +367,20 @@ export default function RootLayout() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       observeSessionForSignInDetection(session);
-      // For an explicit login (SIGNED_IN), set isLoading=true before syncing the
-      // profile so the navigation guard in index.tsx never evaluates with a partial
-      // state (session set, profile still null). Without this, the guard briefly
+      // A first-time gate for THIS user id (genuine login, account switch, or
+      // cold start) — never a routine TOKEN_REFRESHED / re-emitted SIGNED_IN
+      // for a session that has already been through it. See the note on
+      // accessGatedUserIdRef above: doing this unconditionally blanked and
+      // remounted the whole app every few minutes.
+      const gateStartup = !!session && shouldSyncStudentProfile(session) && shouldGateStartupAccess(session);
+      // For an explicit login, set isLoading=true before syncing the profile so
+      // the navigation guard in index.tsx never evaluates with a partial state
+      // (session set, profile still null). Without this, the guard briefly
       // routes to the profile-pic screen before syncProfile resolves — the flash.
-      if (event === "SIGNED_IN") setLoading(true);
-      if (session && shouldSyncStudentProfile(session)) {
-        // TOKEN_REFRESHED is also an access-state checkpoint. Do not reuse a
-        // cached protected navigator until it has completed.
+      if (event === "SIGNED_IN" && gateStartup) setLoading(true);
+      if (gateStartup) {
+        // Do not reuse a cached protected navigator until the canonical access
+        // check for this newly-established session has completed.
         setAccess(undefined);
         setLoading(true);
       }
@@ -352,6 +397,9 @@ export default function RootLayout() {
         // Profile hydration is deliberately deferred to the access-gated
         // effect below.
       } else {
+        // Signed out: forget which user has been gated, so the next sign-in
+        // (including the same account signing back in) is gated again.
+        accessGatedUserIdRef.current = null;
         setAccess(null);
         setProfile(null);
         setOnboarded(false);
@@ -516,6 +564,22 @@ export default function RootLayout() {
             logout/deletion, the strip of the previous screen. It is now a pure
             overlay (SidebarHost below), so its destinations are ordinary
             full-screen pushes on this opaque stack. */}
+        {/* THE ANCHOR MUST BE DECLARED FIRST.
+            Declaring comments/[postId] as the first child made it the stack's
+            initial route on a cold launch: the Comments sheet mounted with no
+            postId, usePostDetail(undefined) never ran, so `post` stayed
+            undefined with isLoading false and the sheet immediately rendered
+            "This post is no longer available" over an empty screen — on BOTH
+            platforms, which is exactly what users were seeing.
+            unstable_settings.initialRouteName alone does NOT override this:
+            verified in the iOS simulator, the bug reproduced with the anchor
+            set and disappeared the moment this declaration stopped being
+            first. Keeping a real, already-registered route (index) at the top
+            of the list is what pins the launch destination.
+            Only names matching REAL routes may be declared here — a name with
+            no matching file makes the navigator re-reconcile its children on
+            every state change (the historical logout-freeze loop). */}
+        <Stack.Screen name="index" />
         <Stack.Screen
           name="comments/[postId]"
           options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', gestureEnabled: true }}
