@@ -1,11 +1,11 @@
 import { memo } from 'react';
-import { View, Image, Text } from 'react-native';
-import { parsePresetColor, parseTextAvatar } from './Avatar';
-import { getResizedImageUrl } from '../../lib/imageResize';
+import { View } from 'react-native';
+import { Avatar } from './Avatar';
 
 interface AvatarItem {
   id: string;
   avatar_url: string | null;
+  username?: string;
 }
 
 interface AvatarStackProps {
@@ -42,38 +42,10 @@ export const AvatarStack = memo(function AvatarStack({
             borderWidth,
             borderColor: '#FEFCF0',
             overflow: 'hidden',
-            backgroundColor: '#E5E7EB',
             zIndex: i,
           }}
         >
-          {a.avatar_url && !parsePresetColor(a.avatar_url) && !parseTextAvatar(a.avatar_url) ? (
-            <Image
-              source={{ uri: getResizedImageUrl(a.avatar_url, size * 2) ?? undefined }}
-              resizeMode="cover"
-              fadeDuration={0}
-              style={{ width: size, height: size }}
-            />
-          ) : (
-            <View
-              style={{
-                width: size,
-                height: size,
-                backgroundColor: parsePresetColor(a.avatar_url) ?? '#0FA6A6',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {parseTextAvatar(a.avatar_url) ? (
-                <Text
-                  style={{ color: '#fff', fontSize: size * 0.45, fontWeight: '700' }}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                >
-                  {parseTextAvatar(a.avatar_url)}
-                </Text>
-              ) : null}
-            </View>
-          )}
+          <Avatar uri={a.avatar_url} size={size} username={a.username} />
         </View>
       ))}
     </View>
