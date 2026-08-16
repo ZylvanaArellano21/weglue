@@ -88,8 +88,15 @@ export function usePushNotifications(): void {
   // Survives re-renders: a cold-start response must be handled exactly once.
   const handledColdStart = useRef(false);
 
-  const openFromPush = useRef<(data: Record<string, unknown> | undefined) => void>(() => {});
-  openFromPush.current = (data: Record<string, unknown> | undefined) => {
+  // Async and fully awaited by every caller that needs to know handling has
+  // truly finished (the cold-start path below) — storePendingRoute's
+  // AsyncStorage write and markNotificationRead's network call are real async
+  // work, not fire-and-forget, so nothing downstream can treat this tap as
+  // "handled" before it has actually landed.
+  const openFromPush = useRef<(data: Record<string, unknown> | undefined) => Promise<void>>(
+    async () => {},
+  );
+  openFromPush.current = async (data: Record<string, unknown> | undefined) => {
     const route = validateNotificationRoute(data?.route);
     if (!route) return;
     const notificationId = typeof data?.notificationId === 'string' ? data.notificationId : null;
@@ -97,11 +104,11 @@ export function usePushNotifications(): void {
     const current = useAuthStore.getState().session;
     if (!current) {
       // Preserve securely; login replays it for the intended recipient only.
-      void storePendingRoute(data?.route, notificationId);
+      await storePendingRoute(data?.route, notificationId);
       return;
     }
     navigateToNotificationTarget(router, route);
-    void markNotificationRead(notificationId);
+    await markNotificationRead(notificationId);
     queryClient.invalidateQueries({ queryKey: ['notifications'] });
     queryClient.invalidateQueries({ queryKey: ['unreadSummary'] });
   };
@@ -111,7 +118,8 @@ export function usePushNotifications(): void {
     void ensureAndroidChannels();
 
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      openFromPush.current(
+      // Live taps have no native-cache clear tied to them — fire-and-forget.
+      void openFromPush.current(
         response.notification.request.content.data as Record<string, unknown> | undefined,
       );
     });
@@ -127,11 +135,25 @@ export function usePushNotifications(): void {
     handledColdStart.current = true;
     void Notifications.getLastNotificationResponseAsync().then((response) => {
       if (!response) return;
+      const data = response.notification.request.content.data as Record<string, unknown> | undefined;
       // Small defer: let the initial route (tabs/welcome) mount first.
       setTimeout(() => {
-        openFromPush.current(
-          response.notification.request.content.data as Record<string, unknown> | undefined,
-        );
+        // Fully awaited — including storePendingRoute's AsyncStorage write and
+        // markNotificationRead's network call — before the native cache is
+        // touched. validateNotificationRoute/storePendingRoute/
+        // markNotificationRead can never reject (each is either documented
+        // never-throws or wraps its own try/catch); the one unguarded call
+        // inside openFromPush is navigateToNotificationTarget's router.push,
+        // in the signed-in branch — so an unexpected rejection here means
+        // handling did NOT definitively complete. Clear only on success;
+        // on rejection, deliberately leave the native response uncleared so
+        // the next cold launch retries this exact tap from scratch instead
+        // of silently losing it.
+        void openFromPush.current(data)
+          .then(() => {
+            void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+          })
+          .catch(() => {});
       }, 350);
     });
   }, [isLoading]);

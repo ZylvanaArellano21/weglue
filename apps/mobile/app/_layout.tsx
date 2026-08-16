@@ -18,10 +18,12 @@ import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persi
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { AppState, Platform, Text, TouchableOpacity, View } from "react-native";
+import type { Session } from "@supabase/supabase-js";
 import { useAuthStore } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
+import { markGenuineSignIn } from "../lib/notifications/pendingRoute";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
 import { useInviteDeepLink } from "../hooks/useInviteDeepLink";
 import { useAccessSynchronization } from "../hooks/useAccessSynchronization";
@@ -274,8 +276,30 @@ export default function RootLayout() {
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
 
+  // Detects a genuine sign-in during THIS process's lifetime using only
+  // observed session-value transitions — never a single Supabase auth event
+  // name (SIGNED_IN can also fire while merely confirming an already-restored
+  // session, not just on a real login). The very first session value
+  // observed this launch — whether null or already-authenticated — becomes
+  // the baseline and is never itself treated as a sign-in. Only a LATER
+  // null -> non-null transition, occurring after a null baseline was already
+  // established, is a genuine sign-in: a session cannot legitimately appear
+  // where we already confirmed there was none without an explicit
+  // authentication action. This gates pendingRoute.ts's post-login replay so
+  // an ordinary cold launch with an already-persisted session can never
+  // consume/replay a route parked for a later, still-pending sign-in.
+  const authBaselineRef = useRef<"unset" | "signed-out" | "signed-in">("unset");
+  const observeSessionForSignInDetection = useCallback((nextSession: Session | null) => {
+    const cameFromSignedOutBaseline = authBaselineRef.current === "signed-out";
+    if (authBaselineRef.current !== "unset" && nextSession && cameFromSignedOutBaseline) {
+      markGenuineSignIn();
+    }
+    authBaselineRef.current = nextSession ? "signed-in" : "signed-out";
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      observeSessionForSignInDetection(session);
       if (session && shouldSyncStudentProfile(session)) {
         // Close the navigator before profile hydration on every authenticated
         // startup. The access RPC is the only path that reopens it.
@@ -303,6 +327,7 @@ export default function RootLayout() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      observeSessionForSignInDetection(session);
       // For an explicit login (SIGNED_IN), set isLoading=true before syncing the
       // profile so the navigation guard in index.tsx never evaluates with a partial
       // state (session set, profile still null). Without this, the guard briefly

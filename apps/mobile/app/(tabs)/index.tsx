@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   Pressable,
   Animated,
-  Image,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,7 +17,7 @@ import { useSidebarStore } from '../../store/sidebarStore';
 import { useDismissPicturePrompt } from '../../hooks/usePicturePrompt';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
-import { parsePresetColor, parseTextAvatar } from '../../components/shared/Avatar';
+import { Avatar } from '../../components/shared/Avatar';
 import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
 import { CountBadge } from '../../components/shared/CountBadge';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
@@ -134,7 +133,7 @@ export default function HomeScreen() {
             <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8}>
               <HeaderAvatar
                 avatarUrl={profile?.avatar_url ?? null}
-                initial={firstName.slice(0, 1).toUpperCase() || '?'}
+                username={profile?.username}
               />
             </TouchableOpacity>
 
@@ -375,85 +374,19 @@ export default function HomeScreen() {
 }
 
 // ─── HeaderAvatar ─────────────────────────────────────────────────────────────
-// Renders the user's own avatar in the home header, handling preset: color URLs
-// that would crash RCTImageLoader if passed directly to <Image source={{ uri }} />.
+// Renders the user's own avatar in the home header via the shared Avatar
+// component — the same resolution every other screen already uses, so preset
+// We Glue avatars, text avatars, legacy preset colors and real uploaded
+// photos (resized) all render identically here. Home previously reimplemented
+// this rendering by hand and never learned the preset:<id> encoding, which is
+// why a preset avatar (a first-class option in Edit Profile Picture) silently
+// fell through to a broken <Image> source and showed the gray placeholder.
 
 interface HeaderAvatarProps {
   avatarUrl: string | null;
-  initial: string;
+  username?: string;
 }
 
-function HeaderAvatar({ avatarUrl, initial }: HeaderAvatarProps) {
-  const presetColor = parsePresetColor(avatarUrl);
-  const textContent = parseTextAvatar(avatarUrl);
-
-  const baseStyle = {
-    width: 63,
-    height: 63,
-    borderRadius: 31.5,
-  };
-
-  if (textContent) {
-    return (
-      <View
-        style={[
-          baseStyle,
-          {
-            backgroundColor: '#0FA6A6',
-            alignItems: 'center' as const,
-            justifyContent: 'center' as const,
-          },
-        ]}
-      >
-        <Text
-          style={{ color: '#fff', fontSize: 22, fontWeight: '700' }}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-        >
-          {textContent}
-        </Text>
-      </View>
-    );
-  }
-
-  if (presetColor) {
-    return (
-      <View
-        style={[
-          baseStyle,
-          {
-            backgroundColor: presetColor,
-            alignItems: 'center' as const,
-            justifyContent: 'center' as const,
-          },
-        ]}
-      >
-        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>{initial}</Text>
-      </View>
-    );
-  }
-
-  if (avatarUrl) {
-    return (
-      <Image
-        source={{ uri: avatarUrl }}
-        style={[baseStyle, { backgroundColor: '#E5E7EB' }]}
-      />
-    );
-  }
-
-  return (
-    <View
-      style={[
-        baseStyle,
-        {
-          backgroundColor: '#0FA6A6',
-          alignItems: 'center' as const,
-          justifyContent: 'center' as const,
-        },
-      ]}
-    >
-      <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>{initial}</Text>
-    </View>
-  );
+function HeaderAvatar({ avatarUrl, username }: HeaderAvatarProps) {
+  return <Avatar uri={avatarUrl} size={63} username={username} />;
 }
