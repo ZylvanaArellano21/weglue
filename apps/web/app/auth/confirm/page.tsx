@@ -46,6 +46,17 @@ export default async function AuthConfirmPage({ searchParams }: PageProps): Prom
     }
   } catch {}
 
+  // The session established above exists only to consume the verification
+  // token (that exchange is what marks email_confirmed_at server-side).
+  // It must never itself log the user in — sign it back out immediately so
+  // they land here signed OUT and choose to Log In themselves, exactly like
+  // the native app's confirmed.tsx already does.
+  if (success) {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+  }
+
   return (
     <>
       <style>{`

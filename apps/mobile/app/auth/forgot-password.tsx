@@ -17,7 +17,12 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useOnboardingStore } from "@weglue/shared";
 import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
-import { RESET_PASSWORD_REDIRECT, checkSignupStatus } from "../../lib/authFlow";
+import {
+  RESET_PASSWORD_REDIRECT,
+  checkSignupStatus,
+  sendVerificationEmail,
+  setPendingSignupEmail,
+} from "../../lib/authFlow";
 
 type EmailState = "idle" | "not_found" | "unverified" | "verified";
 
@@ -37,6 +42,7 @@ export default function ForgotPasswordScreen() {
   const [emailState, setEmailState] = useState<EmailState>("idle");
   const [sent, setSent] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   function handleEmailChange(v: string) {
     setEmail(v);
@@ -50,6 +56,33 @@ export default function ForgotPasswordScreen() {
     setPendingEmail(email.trim().toLowerCase());
     setPendingPassword("");
     router.replace("/onboarding/interests");
+  }
+
+  /**
+   * "Verify now" for an unverified account — an unverified account must
+   * never continue into password reset, so this reuses the exact same
+   * verification flow Login's "Verify now" already uses (never a second
+   * implementation): send exactly one verification email, then hand off to
+   * Confirm Email, which adopts that same cooldown.
+   */
+  async function handleVerifyNow() {
+    if (verifying) return;
+    setVerifying(true);
+    const normalizedEmail = email.trim().toLowerCase();
+    try {
+      const result = await sendVerificationEmail(normalizedEmail);
+      if (!result.ok && "message" in result) {
+        setSubmitError(result.message);
+        return;
+      }
+      await setPendingSignupEmail(normalizedEmail);
+      router.push({
+        pathname: "/auth/verify-email",
+        params: { email: normalizedEmail },
+      });
+    } finally {
+      setVerifying(false);
+    }
   }
 
   async function handleSubmit() {
@@ -184,10 +217,14 @@ export default function ForgotPasswordScreen() {
 
             {emailState === "unverified" && (
               <Text style={styles.errorText}>
-                This account was not finished.{" "}
-                <Text style={styles.errorLink} onPress={continueCreatingAccount}>
-                  Continue creating your account.
-                </Text>
+                This email hasn't been verified.{" "}
+                {verifying ? (
+                  <Text style={styles.errorLink}>Sending…</Text>
+                ) : (
+                  <Text style={styles.errorLink} onPress={handleVerifyNow}>
+                    Verify now
+                  </Text>
+                )}
               </Text>
             )}
 
