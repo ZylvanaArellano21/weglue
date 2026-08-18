@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { WebContinue } from "../../../components/auth/WebContinue";
+import { getSupabaseBrowser } from "../../../lib/supabase-browser";
 
 export default function FragmentConfirm(): JSX.Element | null {
   const [hasTokens, setHasTokens] = useState(false);
@@ -13,7 +14,14 @@ export default function FragmentConfirm(): JSX.Element | null {
       : window.location.hash;
     if (!hash) return;
     const params = new URLSearchParams(hash);
-    if (params.get("access_token")) setHasTokens(true);
+    if (!params.get("access_token")) return;
+    setHasTokens(true);
+    // The Supabase client auto-detects and establishes a session from this
+    // fragment (detectSessionInUrl). That session exists only to consume the
+    // verification token — sign it back out immediately so the user lands
+    // here signed OUT and chooses to Log In themselves, same as the
+    // server-side /auth/confirm path and the native app's confirmed.tsx.
+    void getSupabaseBrowser().auth.signOut();
   }, []);
 
   if (!hasTokens) return null;

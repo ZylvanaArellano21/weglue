@@ -11,9 +11,15 @@ import { shouldHandleDeepLinkNavigation } from "../lib/platformAdmin";
  *   - https://weglue.app/auth/confirm#access_token=…    (Android App Link
  *     intercepts the web confirmation URL before the browser sees it)
  * Both are email-verification / password-recovery links issued by We Glue's
- * own email/password auth. Tokens land in the URL fragment. Expired/invalid
- * links arrive as #error=…&error_code=otp_expired — route those to the
- * confirm-email screen with a clear resend path instead of dropping them.
+ * own email/password auth. Tokens can land in the URL fragment (legacy
+ * implicit flow) OR as query params — `code` (PKCE) or `token_hash`+`type`
+ * (OTP) — the same shapes apps/web/app/auth/confirm/page.tsx already
+ * handles server-side. A confirmation link that arrives as `?code=` used to
+ * be silently dropped here (App Link still intercepted it, but neither
+ * branch matched), leaving the user stuck with nothing visibly happening.
+ * Expired/invalid links arrive as #error=…&error_code=otp_expired — route
+ * those to the confirm-email screen with a clear resend path instead of
+ * dropping them.
  */
 async function handleUrl(url: string) {
   // Guard against a malformed/non-string payload from the native Linking
@@ -25,15 +31,37 @@ async function handleUrl(url: string) {
     url.includes("auth/confirmed") || url.includes("auth/confirm");
   if (!isAuthLink) return;
 
-  const fragment = url.split("#")[1] ?? "";
-  const params = new URLSearchParams(fragment);
-  const access_token = params.get("access_token");
-  const refresh_token = params.get("refresh_token");
-  const error_code = params.get("error_code");
+  const [beforeHash, fragment = ""] = url.split("#");
+  const hashParams = new URLSearchParams(fragment);
+  const access_token = hashParams.get("access_token");
+  const refresh_token = hashParams.get("refresh_token");
+  const error_code = hashParams.get("error_code");
 
   if (access_token && refresh_token) {
     await supabase.auth.setSession({ access_token, refresh_token });
     // onAuthStateChange in _layout.tsx fires automatically after setSession
+    return;
+  }
+
+  const queryIndex = beforeHash.indexOf("?");
+  const query = queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : "";
+  const queryParams = new URLSearchParams(query);
+  const code = queryParams.get("code");
+  const token_hash = queryParams.get("token_hash");
+  const type = queryParams.get("type");
+
+  if (code) {
+    await supabase.auth.exchangeCodeForSession(code);
+    // onAuthStateChange in _layout.tsx fires automatically after the exchange
+    return;
+  }
+
+  if (token_hash && type) {
+    await supabase.auth.verifyOtp({
+      token_hash,
+      type: type as "signup" | "email",
+    });
+    // onAuthStateChange in _layout.tsx fires automatically after verifyOtp
     return;
   }
 
