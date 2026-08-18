@@ -72,22 +72,22 @@ export default function InterestsPage(): JSX.Element | null {
   }
 
   return (
-    <main className="min-h-screen bg-[#FEFCF0] flex justify-center px-6 py-8">
+    <main className="min-h-screen bg-[#FEFCF0] flex justify-center px-4 py-5 sm:px-6 sm:py-8">
       <div className="w-full max-w-[820px]">
         <SurveyTopBar />
         <SurveyProgress filled={1} step="Step 1 of 2" />
 
-        <h1 className="text-[27px] font-bold text-[#0FA6A6] leading-tight mt-9 mb-3">
+        <h1 className="text-[22px] sm:text-[27px] font-bold text-[#0FA6A6] leading-tight mt-6 sm:mt-9 mb-2 sm:mb-3">
           What are your interests?
         </h1>
-        <p className="text-[19px] text-[#0FA6A6] mb-9 leading-relaxed">
+        <p className="text-[14px] sm:text-[19px] text-[#0FA6A6] mb-6 sm:mb-9 leading-relaxed">
           Select everything that excites you. We will match you to clubs that fit.
         </p>
 
         <div
           role="group"
           aria-label="Interests"
-          className="flex flex-wrap gap-x-[22px] gap-y-[26px] mb-10"
+          className="flex flex-wrap gap-x-2.5 gap-y-3 sm:gap-x-[22px] sm:gap-y-[26px] mb-8 sm:mb-10"
         >
           {INTERESTS.map((item) => (
             <SurveyChip
@@ -99,14 +99,14 @@ export default function InterestsPage(): JSX.Element | null {
           ))}
         </div>
 
-        <div className="flex items-center justify-end gap-5 pb-8">
-          <p aria-live="polite" className="text-[15px] font-semibold text-[#F02719]">
+        <div className="flex items-center justify-end gap-3 sm:gap-5 pb-8">
+          <p aria-live="polite" className="text-[13px] sm:text-[15px] font-semibold text-[#F02719]">
             {error}
           </p>
           <button
             type="button"
             onClick={handleNext}
-            className="h-[56px] px-14 bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-[19px] rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+            className="h-[46px] px-8 sm:h-[56px] sm:px-14 bg-[#0FA6A6] text-[#FEFCF0] font-semibold text-[15px] sm:text-[19px] rounded-full shadow-[0px_4px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
           >
             Next
           </button>

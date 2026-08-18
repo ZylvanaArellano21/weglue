@@ -1,5 +1,14 @@
 import Image from "next/image";
 import Link from "next/link";
+import { InstagramIcon, LinkedinIcon } from "../components/shared/icons";
+
+const INSTAGRAM_URL =
+  "https://www.instagram.com/we_glue?igsh=YzE1eDV2MnQ4YW5w&utm_source=qr";
+const LINKEDIN_URL =
+  "https://www.linkedin.com/company/we-glue?trk=public_profile_topcard-current-company";
+const CONTACT_MAILTO = `mailto:zylvana.arellano.campos@gmail.com?subject=${encodeURIComponent(
+  "We Glue — Contact Request"
+)}`;
 
 function NavBar() {
   return (
@@ -27,7 +36,7 @@ function NavBar() {
             Log In
           </Link>
           <Link
-            href="/get-started"
+            href="/download"
             className="bg-[#0FA6A6] text-white text-sm font-semibold px-4 py-2 rounded-full hover:bg-[#0d9494] transition-colors"
           >
             Download App
@@ -59,22 +68,22 @@ function Footer() {
             </p>
             <div className="flex gap-3 mt-4">
               <a
-                href="https://instagram.com"
+                href={INSTAGRAM_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Instagram"
-                className="w-8 h-8 rounded-full border border-black/15 flex items-center justify-center text-black hover:border-[#0FA6A6] hover:text-[#0FA6A6] transition-colors text-sm font-bold"
+                className="w-8 h-8 rounded-full border border-black/15 flex items-center justify-center text-black hover:border-[#0FA6A6] hover:text-[#0FA6A6] transition-colors"
               >
-                IG
+                <InstagramIcon size={16} />
               </a>
               <a
-                href="https://linkedin.com"
+                href={LINKEDIN_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="LinkedIn"
-                className="w-8 h-8 rounded-full border border-black/15 flex items-center justify-center text-black hover:border-[#0FA6A6] hover:text-[#0FA6A6] transition-colors text-sm font-bold"
+                className="w-8 h-8 rounded-full border border-black/15 flex items-center justify-center text-black hover:border-[#0FA6A6] hover:text-[#0FA6A6] transition-colors"
               >
-                in
+                <LinkedinIcon size={16} />
               </a>
             </div>
           </div>
@@ -89,13 +98,13 @@ function Footer() {
             <Link href="/community-guidelines" className="text-xs text-[#5F5D5D] hover:text-[#0FA6A6]">
               Community Guidelines
             </Link>
-            <Link href="/login" className="text-xs text-[#5F5D5D] hover:text-[#0FA6A6]">
+            <a href={CONTACT_MAILTO} className="text-xs text-[#5F5D5D] hover:text-[#0FA6A6]">
               Contact Us
-            </Link>
+            </a>
           </div>
           <div>
             <Link
-              href="/get-started"
+              href="/download"
               className="bg-[#0FA6A6] text-white text-sm font-semibold px-5 py-2.5 rounded-full hover:bg-[#0d9494] transition-colors"
             >
               Download App
@@ -162,7 +171,7 @@ export default function LandingPage({ searchParams }: { searchParams?: { deleted
           your clubs, your community, and your people.
         </p>
         <Link
-          href="/get-started"
+          href="/onboarding/interests"
           className="inline-flex items-center justify-center bg-[#0FA6A6] text-white font-semibold text-base px-10 py-3.5 rounded-full hover:bg-[#0d9494] transition-colors shadow-md"
         >
           Get Started
@@ -240,7 +249,7 @@ export default function LandingPage({ searchParams }: { searchParams?: { deleted
           Starts Here
         </h3>
         <Link
-          href="/get-started"
+          href="/onboarding/interests"
           className="inline-flex items-center justify-center bg-[#0FA6A6] text-white font-semibold text-base px-10 py-3.5 rounded-full hover:bg-[#0d9494] transition-colors shadow-md"
         >
           Get Started

@@ -412,3 +412,30 @@ export function RefreshIcon(p: IconProps): JSX.Element {
     </svg>
   );
 }
+
+// ─── Brand icons (footer) ───────────────────────────────────────────────────
+// Redrawn as single-color outline glyphs so they match every other icon in
+// this file — no logo assets, no icon-library dependency.
+
+/** Instagram — rounded square, camera-lens circle, flash dot. */
+export function InstagramIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <rect x="3" y="3" width="18" height="18" rx="5.5" />
+      <circle cx="12" cy="12" r="4.2" />
+      <circle cx="17.1" cy="6.9" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** LinkedIn — rounded square with the "in" glyph. */
+export function LinkedinIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <rect x="3" y="3" width="18" height="18" rx="5.5" />
+      <circle cx="8.1" cy="8.3" r="1.05" fill="currentColor" stroke="none" />
+      <path d="M8.1 11v6.2" />
+      <path d="M11.9 17.2v-4c0-1.4.95-2.5 2.3-2.5s2.3 1.1 2.3 2.5v4" />
+    </svg>
+  );
+}
