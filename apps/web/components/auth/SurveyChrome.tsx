@@ -5,19 +5,19 @@ import Link from "next/link";
 /** Top bar shared by the two survey steps: Cancel · Survey · Log In. */
 export function SurveyTopBar(): JSX.Element {
   return (
-    <div className="relative flex items-center justify-between mb-8">
+    <div className="relative flex items-center justify-between mb-5 sm:mb-8">
       <Link
         href="/get-started"
-        className="text-[19px] font-semibold text-[#0FA6A6] hover:opacity-80 transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0FA6A6]"
+        className="text-[15px] sm:text-[19px] font-semibold text-[#0FA6A6] hover:opacity-80 transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0FA6A6]"
       >
         Cancel
       </Link>
-      <span className="absolute left-1/2 -translate-x-1/2 top-[38px] text-[19px] font-semibold text-[#0FA6A6]">
+      <span className="absolute left-1/2 -translate-x-1/2 top-[30px] sm:top-[38px] text-[15px] sm:text-[19px] font-semibold text-[#0FA6A6]">
         Survey
       </span>
       <Link
         href="/login"
-        className="bg-[#0FA6A6] text-white text-[17px] font-semibold px-8 py-2.5 rounded-full shadow-[0px_3px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+        className="bg-[#0FA6A6] text-white text-[14px] sm:text-[17px] font-semibold px-5 py-2 sm:px-8 sm:py-2.5 rounded-full shadow-[0px_3px_4px_rgba(0,0,0,0.25)] hover:bg-[#0d9494] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
       >
         Log In
       </Link>
@@ -34,16 +34,16 @@ export function SurveyProgress({
   step: string;
 }): JSX.Element {
   return (
-    <div className="mt-6">
-      <div className="flex gap-10">
-        <div className="h-[10px] flex-1 rounded-full bg-[#0FA6A6]" />
+    <div className="mt-4 sm:mt-6">
+      <div className="flex gap-4 sm:gap-10">
+        <div className="h-[6px] sm:h-[10px] flex-1 rounded-full bg-[#0FA6A6]" />
         <div
-          className={`h-[10px] flex-1 rounded-full ${
+          className={`h-[6px] sm:h-[10px] flex-1 rounded-full ${
             filled === 2 ? "bg-[#0FA6A6]" : "bg-[#E4E2D9]"
           }`}
         />
       </div>
-      <p className="text-[15px] font-semibold text-[#3F3D3D] mt-4">{step}</p>
+      <p className="text-[12px] sm:text-[15px] font-semibold text-[#3F3D3D] mt-3 sm:mt-4">{step}</p>
     </div>
   );
 }
@@ -64,7 +64,7 @@ export function SurveyChip({
       role="checkbox"
       aria-checked={selected}
       onClick={onToggle}
-      className={`px-[22px] py-[11px] rounded-full text-[17px] font-semibold transition-colors shadow-[0px_3px_4px_rgba(0,0,0,0.25)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0FA6A6] ${
+      className={`px-4 py-2 sm:px-[22px] sm:py-[11px] rounded-full text-[14px] sm:text-[17px] font-semibold transition-colors shadow-[0px_3px_4px_rgba(0,0,0,0.25)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0FA6A6] ${
         selected
           ? "bg-[#0FA6A6] text-white"
           : "bg-[#FFFEF7] text-black hover:bg-white"

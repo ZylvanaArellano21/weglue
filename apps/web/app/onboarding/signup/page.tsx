@@ -241,10 +241,17 @@ export default function SignupPage(): JSX.Element | null {
   return (
     <main className="min-h-screen bg-[#FEFCF0] px-4 pb-10">
       {/* Brand top-left */}
-      <div className="flex items-center gap-2 pt-6 pl-4 sm:pl-8">
-        <Image src="/logo.png" alt="" width={64} height={58} priority />
+      <div className="flex items-center gap-2 pt-4 pl-2 sm:pt-6 sm:pl-8">
+        <Image
+          src="/logo.png"
+          alt=""
+          width={64}
+          height={58}
+          className="w-9 h-8 sm:w-16 sm:h-[58px]"
+          priority
+        />
         <span
-          className="text-[22px] font-bold text-[#0FA6A6]"
+          className="text-[17px] sm:text-[22px] font-bold text-[#0FA6A6]"
           style={{ fontFamily: "var(--font-zain)" }}
         >
           We Glue
@@ -252,25 +259,25 @@ export default function SignupPage(): JSX.Element | null {
       </div>
 
       {/* Match celebration header */}
-      <div className="text-center -mt-6">
-        <h1 className="text-[30px] font-bold text-[#0FA6A6] flex items-center justify-center gap-4">
-          <span aria-hidden className="text-[28px]">
+      <div className="text-center mt-3 sm:-mt-6 px-2">
+        <h1 className="text-[19px] sm:text-[30px] font-bold text-[#0FA6A6] flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:gap-4">
+          <span aria-hidden className="text-[18px] sm:text-[28px]">
             🎉
           </span>
           <span>
             You matched with <span className="underline">+{matchCount}</span> clubs
           </span>
-          <span aria-hidden className="text-[28px]">
+          <span aria-hidden className="text-[18px] sm:text-[28px]">
             🎉
           </span>
         </h1>
-        <p className="text-[19px] font-semibold text-black mt-4">
+        <p className="text-[13px] sm:text-[19px] font-semibold text-black mt-2 sm:mt-4">
           Create an account so that you can see your matches!
         </p>
       </div>
 
       {/* Card */}
-      <div className="max-w-[406px] mx-auto mt-9 bg-[#FFFEF7] shadow-[0px_18px_60px_rgba(0,0,0,0.25)] px-6 py-8">
+      <div className="max-w-[406px] mx-auto mt-6 sm:mt-9 bg-[#FFFEF7] shadow-[0px_18px_60px_rgba(0,0,0,0.25)] px-6 py-8">
         <form onSubmit={handleNext} className="flex flex-col" noValidate>
           {/* Username */}
           <label htmlFor="username" className="text-sm font-bold text-black mb-2">
