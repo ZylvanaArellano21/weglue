@@ -73,7 +73,7 @@ function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested
           shrink and the scroll silently falls back to the document.
           Below `lg` the sidebar is not rendered at all, so normal document flow
           is kept for tablet and phone widths. */}
-      <div className="flex min-h-screen flex-col bg-cream lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
+      <div className="flex min-h-screen flex-col bg-cream pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0 lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
         <div className="shrink-0">
           <AppHeader userId={userId} />
         </div>

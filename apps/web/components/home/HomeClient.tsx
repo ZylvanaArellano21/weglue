@@ -11,6 +11,7 @@ import { EventDetailModal } from "./EventDetailModal";
 import { SavedEventsModal } from "./SavedEventsModal";
 import { NotificationsModal } from "./NotificationsModal";
 import { GluematesModal } from "./GluematesModal";
+import { CalendarModal } from "./CalendarModal";
 import { PostModal } from "./PostModal";
 import { PostCommentsModal } from "./PostCommentsModal";
 import { AttendanceListModal } from "./AttendanceListModal";
@@ -29,7 +30,7 @@ import { messagesHref } from "../../lib/messages/routes";
 export function HomeClient({ userId }: { userId: string }): JSX.Element {
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-cream">
+      <div className="min-h-screen bg-cream pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <AppHeader userId={userId} />
         <Suspense fallback={<div className="h-96 animate-pulse" />}>
           <HomeMain userId={userId} />
@@ -52,6 +53,11 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const savedOpen = params.get("saved") === "1";
   const notifOpen = params.get("notifications") === "1";
   const gluematesOpen = params.get("gluemates") === "1";
+  // Opened by the phone bottom tab bar's Calendar tab (AppHeader) — there is
+  // no standalone /calendar route, so it reuses the same overlay
+  // RightColumn's "Expand calendar" button opens, just URL-driven instead of
+  // local state so it's reachable from outside this component.
+  const calendarOpen = params.get("calendar") === "1";
   const compose = params.get("compose"); // "post" | "event"
 
   const buildUrl = useCallback(
@@ -109,14 +115,22 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
 
   return (
     <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_minmax(0,600px)] xl:grid-cols-[240px_minmax(0,600px)_320px] lg:justify-center">
+      {/* The third (Upcoming Events/Calendar) column used to only appear at
+          xl (1280px+) while the left sidebar appeared at lg (1024px+) — no
+          iPad, portrait or landscape, ever reaches 1280px, so the right
+          column could never show on any tablet. Both columns now key off
+          the same lg breakpoint; the middle track's minmax(0,1fr) and the
+          narrower fixed side tracks keep all three columns fitting down to
+          1024px (the narrowest common tablet-landscape width) with no
+          horizontal overflow. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)_minmax(240px,280px)] lg:justify-center">
         <div className="hidden lg:block">
           <ProfileSidebar userId={userId} />
         </div>
         <div>
           <HomeFeed userId={userId} onOpenEvent={openEvent} />
         </div>
-        <div className="hidden xl:block">
+        <div className="hidden lg:block">
           <RightColumn userId={userId} onOpenEvent={openEvent} />
         </div>
       </div>
@@ -139,6 +153,14 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
           userId={userId}
           onClose={() => clear("gluemates")}
           onOpenUser={(id) => router.push(`/u/${id}`)}
+        />
+      )}
+      {calendarOpen && !eventId && !postId && (
+        <CalendarModal
+          userId={userId}
+          initialDate={null}
+          onClose={() => clear("calendar")}
+          onOpenEvent={openEvent}
         />
       )}
 
