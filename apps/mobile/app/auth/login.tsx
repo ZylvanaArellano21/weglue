@@ -358,7 +358,10 @@ const styles = StyleSheet.create({
   brand: { alignItems: "center", paddingTop: 8, paddingBottom: 24 },
   logo: { width: 70, height: 64, marginBottom: 4 },
   brandName: { fontSize: 30, fontFamily: "Zain_700Bold", color: "#000" },
-  form: { paddingHorizontal: 24, paddingBottom: 40 },
+  // maxWidth + alignSelf: "center" is a no-op on any phone (screens are
+  // already narrower than 480) but caps and centers the form on iPad/Android
+  // tablet instead of the fields stretching edge-to-edge across the screen.
+  form: { paddingHorizontal: 24, paddingBottom: 40, width: "100%", maxWidth: 480, alignSelf: "center" },
   label: { fontSize: 14, fontWeight: "600", color: "#000", marginBottom: 6 },
   input: {
     backgroundColor: "#FEFCF0",

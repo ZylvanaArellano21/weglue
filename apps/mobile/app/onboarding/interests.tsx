@@ -117,7 +117,10 @@ const styles = StyleSheet.create({
   topBar: { paddingHorizontal: 20, paddingTop: 8 },
   backBtn: { width: 40, height: 40, justifyContent: "center" },
   backArrow: { fontSize: 30, color: "#000", lineHeight: 36 },
-  progressWrap: { paddingHorizontal: 24, marginTop: 8, marginBottom: 4 },
+  // width/maxWidth/alignSelf are a no-op on phone (screens are already
+  // narrower than 700) but cap and center the survey column on iPad/Android
+  // tablet instead of the progress bar / chip grid stretching edge-to-edge.
+  progressWrap: { paddingHorizontal: 24, marginTop: 8, marginBottom: 4, width: "100%", maxWidth: 700, alignSelf: "center" },
   progressTrack: {
     height: 6,
     backgroundColor: "#E0E0E0",
@@ -135,7 +138,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: "#5F5D5D",
   },
-  scroll: { paddingHorizontal: 24, paddingTop: 16 },
+  scroll: { paddingHorizontal: 24, paddingTop: 16, width: "100%", maxWidth: 700, alignSelf: "center" },
   heading: {
     fontSize: 28,
     fontWeight: "700",
@@ -182,6 +185,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 4,
+    width: "100%",
+    maxWidth: 700,
+    alignSelf: "center",
   },
   primaryBtnDisabled: {
     backgroundColor: "#CCCCCC",

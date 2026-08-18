@@ -131,7 +131,7 @@ export function MessagesClient({ userId }: { userId: string }): JSX.Element {
   // list). Below `md` the columns stack, so normal document flow is kept.
   return (
     <ToastProvider>
-      <div className="flex min-h-screen flex-col bg-cream md:h-[100dvh] md:min-h-0 md:overflow-hidden">
+      <div className="flex min-h-screen flex-col bg-cream pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0 md:h-[100dvh] md:min-h-0 md:overflow-hidden">
         <div className="shrink-0">
           <AppHeader userId={userId} />
         </div>

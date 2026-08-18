@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CountBadge } from "../shared/CountBadge";
-import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon } from "../shared/icons";
+import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon } from "../shared/icons";
 import { ProfileMenu } from "../profile/ProfileMenu";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { useDiscoverySearch } from "../../lib/hooks/useDiscoverySearch";
@@ -208,7 +208,17 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           )}
         </div>
 
-        <nav className="flex shrink-0 items-center gap-4 sm:gap-5" aria-label="Primary">
+        {/* Hidden below md (768px) — the bottom tab bar (rendered after this
+            header) takes over Home/Clubs/Messages/Calendar navigation on
+            phone widths, matching the native app's bottom bar instead of a
+            top icon row. md, not lg: tablets (iPad portrait and up) get the
+            desktop-style top nav, same as the rest of the desktop-equivalent
+            IA tablets get elsewhere (see HomeClient's column grid) — the
+            phone bottom bar is strictly a phone-width feature. Search stays
+            reachable up here too (its expand/collapse behavior is
+            unchanged) since the bottom bar's Search tab just expands and
+            focuses this same field. */}
+        <nav className="hidden shrink-0 items-center gap-4 sm:gap-5 md:flex" aria-label="Primary">
           <NavIcon href="/home" label="Home" active={isHome} badge={notifications} badgeLabel="unread notifications">
             <HomeIcon size={26} filled={isHome} />
           </NavIcon>
@@ -221,8 +231,116 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
 
           <ProfileMenu userId={userId} />
         </nav>
+
+        {/* Below md, the avatar/profile menu still needs a home in the top
+            bar — the bottom tab bar deliberately does not carry it (mirrors
+            native: the avatar opens a menu/drawer, it is not one of the
+            bottom tabs). */}
+        <div className="shrink-0 md:hidden">
+          <ProfileMenu userId={userId} />
+        </div>
       </div>
+
+      <BottomTabBar
+        isHome={isHome}
+        isClubs={isClubs}
+        isMessages={isMessages}
+        notifications={notifications}
+        messages={messages}
+        onSearchTap={() => {
+          setExpanded(true);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }}
+      />
     </header>
+  );
+}
+
+// Phone/tablet-portrait bottom navigation — same destinations as the top
+// `nav` above (Home, Clubs, Messages) plus Search (expands/focuses the
+// existing header search field rather than duplicating that logic) and
+// Calendar (opens the existing Home calendar overlay via a query param;
+// there is no standalone /calendar route). Fixed to the viewport bottom
+// like the native app's tab bar; every AppHeader-mounting page reserves
+// matching bottom padding below `lg` so this never covers real content.
+function BottomTabBar({
+  isHome,
+  isClubs,
+  isMessages,
+  notifications,
+  messages,
+  onSearchTap,
+}: {
+  isHome: boolean;
+  isClubs: boolean;
+  isMessages: boolean;
+  notifications: number;
+  messages: number;
+  onSearchTap: () => void;
+}): JSX.Element {
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t bg-cream/95 backdrop-blur md:hidden"
+      style={{ borderColor: "rgba(0,0,0,0.06)", paddingBottom: "env(safe-area-inset-bottom)" }}
+      aria-label="Primary"
+    >
+      <BottomTabIcon href="/home" label="Home" active={isHome} badge={notifications} badgeLabel="unread notifications">
+        <HomeIcon size={24} filled={isHome} />
+      </BottomTabIcon>
+      <BottomTabIcon href="/clubs" label="Clubs" active={isClubs}>
+        <PeopleIcon size={25} filled={isClubs} />
+      </BottomTabIcon>
+      <button
+        type="button"
+        aria-label="Search"
+        onClick={onSearchTap}
+        className="flex h-14 flex-1 flex-col items-center justify-center text-gray-700"
+      >
+        <SearchIcon size={24} />
+      </button>
+      <BottomTabIcon href="/messages" label="Messages" active={isMessages} badge={messages} badgeLabel="unread messages">
+        <ChatIcon size={24} filled={isMessages} />
+      </BottomTabIcon>
+      <BottomTabIcon href="/home?calendar=1" label="Calendar" active={false}>
+        <CalendarIcon size={23} />
+      </BottomTabIcon>
+    </nav>
+  );
+}
+
+function BottomTabIcon({
+  href,
+  label,
+  active,
+  badge = 0,
+  badgeLabel,
+  children,
+}: {
+  href: string;
+  label: string;
+  active?: boolean;
+  badge?: number;
+  badgeLabel?: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      className="relative flex h-14 flex-1 flex-col items-center justify-center"
+      style={{ color: active ? "#0FA6A6" : "#1F2937" }}
+    >
+      {children}
+      {badge > 0 && (
+        <CountBadge
+          count={badge}
+          label={badgeLabel}
+          style={{ position: "absolute", top: 2, right: "28%" }}
+        />
+      )}
+    </Link>
   );
 }
 
