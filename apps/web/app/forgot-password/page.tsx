@@ -9,6 +9,8 @@ import {
   checkSignupStatus,
   getResetCooldownRemaining,
   sendPasswordResetEmail,
+  sendVerificationEmail,
+  setPendingSignupEmail,
 } from "../../lib/authFlow";
 import { writeOnboardingState } from "../../lib/onboardingState";
 
@@ -31,7 +33,9 @@ function ForgotPasswordContent(): JSX.Element {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [resendFeedback, setResendFeedback] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const submittingRef = useRef(false);
+  const verifyingRef = useRef(false);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startCooldown = useCallback((seconds: number) => {
@@ -73,6 +77,35 @@ function ForgotPasswordContent(): JSX.Element {
   function continueCreatingAccount() {
     writeOnboardingState({ pendingEmail: email.trim().toLowerCase() });
     router.push("/onboarding/interests");
+  }
+
+  /**
+   * "Verify now" for an unverified account — an unverified account must
+   * never continue into password reset, so this reuses the exact same
+   * verification flow Login's "Verify Now" already uses (never a second
+   * implementation): send exactly one verification email, then hand off to
+   * Confirm Email, which adopts that same 60s cooldown.
+   */
+  async function handleVerifyNow() {
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
+    setVerifying(true);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    try {
+      const result = await sendVerificationEmail(normalizedEmail);
+      if (!result.ok && "message" in result) {
+        setSubmitError(result.message);
+        return;
+      }
+      setPendingSignupEmail(normalizedEmail);
+      router.push(
+        `/onboarding/verify-email?email=${encodeURIComponent(normalizedEmail)}`
+      );
+    } finally {
+      verifyingRef.current = false;
+      setVerifying(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -274,14 +307,18 @@ function ForgotPasswordContent(): JSX.Element {
               )}
               {emailState === "unverified" && (
                 <p className="text-[13px] text-[#F02719]">
-                  This account was not finished.{" "}
-                  <button
-                    type="button"
-                    onClick={continueCreatingAccount}
-                    className="text-[#0FA6A6] font-semibold underline"
-                  >
-                    Continue creating your account.
-                  </button>
+                  This email hasn&apos;t been verified.{" "}
+                  {verifying ? (
+                    <span className="text-[#0FA6A6] font-semibold">Sending…</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleVerifyNow}
+                      className="text-[#0FA6A6] font-semibold underline"
+                    >
+                      Verify now
+                    </button>
+                  )}
                 </p>
               )}
               {submitError && (

@@ -3,8 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "../../../lib/supabase/client";
+import { useSearchParams } from "next/navigation";
 import {
   RESEND_COOLDOWN_SECONDS,
   getPendingSignupEmail,
@@ -18,7 +17,6 @@ const RESEND_SUCCESS_MESSAGE =
   "Verification email sent. Check your inbox — and your spam/junk folder.";
 
 function VerifyEmailContent(): JSX.Element {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const emailParam = searchParams.get("email");
   const expiredParam = searchParams.get("expired");
@@ -82,24 +80,6 @@ function VerifyEmailContent(): JSX.Element {
     []
   );
 
-  // Same-browser flow: clicking the email link opens /auth/confirm which sets
-  // session cookies. Poll for the verified session and move the user along
-  // automatically, exactly as the screenshot copy promises.
-  useEffect(() => {
-    const supabase = createClient();
-    const interval = setInterval(async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user?.email_confirmed_at) {
-        clearInterval(interval);
-        router.push("/dashboard");
-        router.refresh();
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [router]);
-
   async function handleResend() {
     if (sendingRef.current || resending || cooldown > 0 || !email) return;
     sendingRef.current = true;
@@ -156,8 +136,8 @@ function VerifyEmailContent(): JSX.Element {
         </p>
 
         <p className="text-[14px] text-[#5F5D5D] leading-relaxed mt-9">
-          Tap the link in the email to verify your account. Once verified, you
-          will be taken to the next step automatically.
+          Tap the link in the email to verify your account. Once verified,
+          return here and tap Log In.
         </p>
 
         {expiredNotice && (
