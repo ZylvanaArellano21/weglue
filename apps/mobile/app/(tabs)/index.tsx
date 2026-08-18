@@ -6,6 +6,7 @@ import {
   Pressable,
   Animated,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -17,10 +18,17 @@ import { useSidebarStore } from '../../store/sidebarStore';
 import { useDismissPicturePrompt } from '../../hooks/usePicturePrompt';
 import { EventsFeed } from '../../components/home/EventsFeed';
 import { PostsFeed } from '../../components/home/PostsFeed';
+import { HomeTabletSidePanel } from '../../components/home/HomeTabletSidePanel';
 import { Avatar } from '../../components/shared/Avatar';
 import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
 import { CountBadge } from '../../components/shared/CountBadge';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
+
+// iPad / Android tablet gets the desktop-web IA (side column with Upcoming
+// Events + calendar access) instead of the stretched-phone-layout the
+// screen used to render at any width. 768 matches the same tablet threshold
+// apps/web/components/home/AppHeader.tsx uses (md).
+const TABLET_BREAKPOINT = 768;
 
 type ActiveTab = 'posts' | 'events';
 
@@ -34,6 +42,8 @@ export default function HomeScreen() {
 
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const dropdownAnim = useRef(new Animated.Value(0)).current;
+  const { width } = useWindowDimensions();
+  const isTablet = width >= TABLET_BREAKPOINT;
 
   const userId = session?.user.id;
   const firstName = profile?.full_name?.split(' ')[0] ?? profile?.username ?? '';
@@ -324,49 +334,63 @@ export default function HomeScreen() {
           </Animated.View>
         )}
 
-        {/* Tab Switcher — Posts | Events, each centered in its half with a
-            centered underline under the active tab (matches founder design). */}
-        <View
-          style={{
-            flexDirection: 'row',
-            marginTop: 8,
-            borderBottomWidth: 1,
-            borderBottomColor: '#E5E7EB',
-          }}
-        >
-          {(['posts', 'events'] as ActiveTab[]).map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              onPress={() => {
-                closeDropdown();
-                setActiveTab(tab);
-              }}
-              activeOpacity={0.7}
+        {/* Below the header, iPad/Android tablet splits into the same two
+            surfaces as desktop web (main feed + a side column with Upcoming
+            Events and calendar access) instead of the phone's single stacked
+            column stretched across the whole tablet width. */}
+        <View style={{ flex: 1, flexDirection: isTablet ? 'row' : 'column' }}>
+          <View style={{ flex: 1 }}>
+            {/* Tab Switcher — Posts | Events, each centered in its half with a
+                centered underline under the active tab (matches founder design). */}
+            <View
               style={{
-                flex: 1,
-                alignItems: 'center',
-                paddingBottom: 10,
-                borderBottomWidth: 2,
-                borderBottomColor: activeTab === tab ? '#0FA6A6' : 'transparent',
+                flexDirection: 'row',
+                marginTop: 8,
+                borderBottomWidth: 1,
+                borderBottomColor: '#E5E7EB',
               }}
             >
-              <Text
-                style={{
-                  fontSize: 15,
-                  fontWeight: activeTab === tab ? '600' : '400',
-                  color: activeTab === tab ? '#0FA6A6' : '#9CA3AF',
-                  fontFamily: activeTab === tab ? 'Inter_600SemiBold' : 'Inter_400Regular',
-                }}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+              {(['posts', 'events'] as ActiveTab[]).map((tab) => (
+                <TouchableOpacity
+                  key={tab}
+                  onPress={() => {
+                    closeDropdown();
+                    setActiveTab(tab);
+                  }}
+                  activeOpacity={0.7}
+                  style={{
+                    flex: 1,
+                    alignItems: 'center',
+                    paddingBottom: 10,
+                    borderBottomWidth: 2,
+                    borderBottomColor: activeTab === tab ? '#0FA6A6' : 'transparent',
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 15,
+                      fontWeight: activeTab === tab ? '600' : '400',
+                      color: activeTab === tab ? '#0FA6A6' : '#9CA3AF',
+                      fontFamily: activeTab === tab ? 'Inter_600SemiBold' : 'Inter_400Regular',
+                    }}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-        {/* Feed Content */}
-        <View style={{ flex: 1 }}>
-          {activeTab === 'events' ? <EventsFeed /> : <PostsFeed />}
+            {/* Feed Content */}
+            <View style={{ flex: 1 }}>
+              {activeTab === 'events' ? <EventsFeed /> : <PostsFeed />}
+            </View>
+          </View>
+
+          {isTablet && (
+            <View style={{ width: 300, borderLeftWidth: 1, borderLeftColor: '#E5E7EB' }}>
+              <HomeTabletSidePanel />
+            </View>
+          )}
         </View>
 
     </SafeAreaView>
