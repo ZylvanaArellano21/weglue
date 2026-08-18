@@ -64,6 +64,7 @@ FIXTURE_083 = "fx:test_083_fixture_schema.sql"
 FIXTURE_084 = "fx:test_084_fixture_schema.sql"
 FIXTURE_085 = "fx:test_085_fixture_schema.sql"
 FIXTURE_086 = "fx:test_086_fixture_schema.sql"
+FIXTURE_087 = "fx:test_087_fixture_schema.sql"
 
 CHAINS = {
     "wg_faithful": ["mg:055_durable_admin_audit.sql",
@@ -100,6 +101,7 @@ CHAINS = {
               "mg:084_notification_exactly_one_fixes.sql"],
     "wg085": [FIXTURE_085, "mg:085_student_joined_named_copy.sql"],
     "wg086": [FIXTURE_086, "mg:086_members_only_chat_invitations.sql"],
+    "wg087": [FIXTURE_087, "mg:087_club_recommendation_launch_campus_null_fix.sql"],
 }
 
 # --- success criteria ------------------------------------------------------
@@ -391,6 +393,36 @@ MANIFEST = [
               "existing officer is a clean no-op, role preserved (I); the "
               "migration's own data-fix retroactively revokes a pre-086 "
               "custom-group token (J); an invalid token leaks no data (K)."),
+
+    # ---- club recommendation minimum-2 guarantee fix (087): the
+    #      recommendation pool was excluding launch-campus clubs with a NULL
+    #      university_id (migration 042 defines them as launch-campus too),
+    #      which could leave the eligible pool undercounted so the batch
+    #      never topped up to 2 even when the campus had enough real clubs —
+    #      the root cause behind "We found 1 club you'll love" in production.
+    #      Verified 2026-08-18 on a throwaway postgres:17 container against a
+    #      hand-built fixture (not the shared stack — clubs/profiles/etc. are
+    #      minimal disposable rows) — 6/6 ASSERTs pass (tests A-F).
+    dict(file="test_087_fixture_schema.sql", type="fixture", env="pg17",
+         chain="wg087", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="n/a (schema fixture)",
+         criterion="raise",
+         note="Fixture file; success = applies cleanly as part of the wg087 chain."),
+    dict(file="test_087_club_recommendation_launch_campus_null_fix.sql", type="sql", env="pg17",
+         chain="wg087", pg="17", setup_role="postgres (throwaway container)",
+         assert_role="request.jwt.claim.sub GUC (auth.uid() shim) + SET ROLE authenticated",
+         criterion="raise",
+         note="6 BEGIN/ROLLBACK tests: NULL-university-id launch-campus clubs "
+              "are eligible, the core fix (A); a genuinely different "
+              "university's club stays excluded — no cross-campus leakage "
+              "(B); already-joined clubs stay excluded even when "
+              "university_id IS NULL (C); full end-to-end pass through "
+              "generate_club_recommendation_batch() + "
+              "get_my_club_recommendations() as the real authenticated role "
+              "via RLS, returning >=2 real, non-fabricated clubs (D); the "
+              "target never pads beyond the real eligible count — exactly 1 "
+              "eligible club stays 1 (E); preview_club_match_count() gets "
+              "the same fix (F)."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the
