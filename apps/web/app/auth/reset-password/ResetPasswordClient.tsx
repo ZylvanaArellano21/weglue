@@ -21,7 +21,11 @@ const LogoBlock = () => (
   </div>
 );
 
-export default function ResetPasswordClient(): JSX.Element | null {
+export default function ResetPasswordClient({
+  serverExchanged,
+}: {
+  serverExchanged: boolean;
+}): JSX.Element | null {
   const [view, setView] = useState<View>("loading");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -53,9 +57,22 @@ export default function ResetPasswordClient(): JSX.Element | null {
   }
 
   useEffect(() => {
-    async function handleToken() {
+    async function resolveSession() {
       const supabase = getSupabaseBrowser();
 
+      // The server already exchanged a `code` or `token_hash` query param
+      // (see page.tsx) — that set a session cookie shared with this browser
+      // client via @supabase/ssr. Confirm it actually landed before trusting
+      // it; getSession() reads the cookie, no network round trip.
+      if (serverExchanged) {
+        const { data } = await supabase.auth.getSession();
+        setView(data.session ? "form" : "expired");
+        return;
+      }
+
+      // Legacy implicit flow: tokens only ever exist in the URL fragment,
+      // which the server can never read, so this is the one case the server
+      // could not have already handled.
       const hash = window.location.hash.startsWith("#")
         ? window.location.hash.slice(1)
         : window.location.hash;
@@ -76,24 +93,11 @@ export default function ResetPasswordClient(): JSX.Element | null {
         }
       }
 
-      const searchParams = new URLSearchParams(window.location.search);
-      const tokenHash = searchParams.get("token_hash");
-      const type = searchParams.get("type");
-
-      if (tokenHash && type === "recovery") {
-        const { error } = await supabase.auth.verifyOtp({
-          token_hash: tokenHash,
-          type: "recovery",
-        });
-        setView(error ? "expired" : "form");
-        return;
-      }
-
       setView("expired");
     }
 
-    handleToken();
-  }, []);
+    resolveSession();
+  }, [serverExchanged]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
