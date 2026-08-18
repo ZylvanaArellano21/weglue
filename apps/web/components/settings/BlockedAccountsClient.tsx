@@ -14,7 +14,7 @@ import {
 export function BlockedAccountsClient({ userId }: { userId: string }): JSX.Element {
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-cream">
+      <div className="min-h-screen bg-cream pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <AppHeader userId={userId} />
         <Body userId={userId} />
       </div>

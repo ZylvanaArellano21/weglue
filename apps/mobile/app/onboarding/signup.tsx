@@ -368,7 +368,10 @@ const styles = StyleSheet.create({
   topBar: { paddingHorizontal: 20, paddingTop: 8 },
   backBtn: { width: 40, height: 40, justifyContent: "center" },
   backArrow: { fontSize: 30, color: "#000", lineHeight: 36 },
-  header: { alignItems: "center", paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24 },
+  // width/maxWidth/alignSelf are a no-op on phone (screens are already
+  // narrower than 480) but cap and center this column on iPad/Android
+  // tablet instead of stretching edge-to-edge.
+  header: { alignItems: "center", paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24, width: "100%", maxWidth: 480, alignSelf: "center" },
   partyRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
   partyEmoji: { fontSize: 24 },
   matchedText: { fontSize: 24, fontWeight: "700", color: "#0FA6A6" },
@@ -386,7 +389,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 24,
   },
-  form: { paddingHorizontal: 24, paddingBottom: 40 },
+  form: { paddingHorizontal: 24, paddingBottom: 40, width: "100%", maxWidth: 480, alignSelf: "center" },
   label: { fontSize: 14, fontWeight: "600", color: "#000", marginBottom: 6 },
   input: {
     backgroundColor: "#FEFCF0",

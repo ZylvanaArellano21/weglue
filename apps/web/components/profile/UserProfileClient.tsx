@@ -38,7 +38,7 @@ export function UserProfileClient({
 }): JSX.Element {
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-cream">
+      <div className="min-h-screen bg-cream pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <AppHeader userId={viewerUserId} />
         {/* One boundary for the whole body: it reads useSearchParams for the
             selected tab, and PageOverlays reads it for the post/event params. */}
