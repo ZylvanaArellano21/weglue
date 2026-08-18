@@ -228,15 +228,14 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           <NavIcon href="/messages" label="Messages" active={isMessages} badge={messages} badgeLabel="unread messages">
             <ChatIcon size={26} filled={isMessages} />
           </NavIcon>
-
-          <ProfileMenu userId={userId} />
         </nav>
 
-        {/* Below md, the avatar/profile menu still needs a home in the top
-            bar — the bottom tab bar deliberately does not carry it (mirrors
-            native: the avatar opens a menu/drawer, it is not one of the
-            bottom tabs). */}
-        <div className="shrink-0 md:hidden">
+        {/* Rendered once, at every breakpoint — the bottom tab bar
+            deliberately does not carry the avatar (mirrors native: the
+            avatar opens a menu/drawer, it is not one of the bottom tabs), so
+            the top bar keeps it visible everywhere rather than mounting a
+            second ProfileMenu instance just to swap position responsively. */}
+        <div className="shrink-0">
           <ProfileMenu userId={userId} />
         </div>
       </div>
@@ -257,13 +256,13 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   );
 }
 
-// Phone/tablet-portrait bottom navigation — same destinations as the top
-// `nav` above (Home, Clubs, Messages) plus Search (expands/focuses the
+// Phone-width (below md/768px) bottom navigation — same destinations as the
+// top `nav` above (Home, Clubs, Messages) plus Search (expands/focuses the
 // existing header search field rather than duplicating that logic) and
 // Calendar (opens the existing Home calendar overlay via a query param;
 // there is no standalone /calendar route). Fixed to the viewport bottom
 // like the native app's tab bar; every AppHeader-mounting page reserves
-// matching bottom padding below `lg` so this never covers real content.
+// matching bottom padding below `md` so this never covers real content.
 function BottomTabBar({
   isHome,
   isClubs,
