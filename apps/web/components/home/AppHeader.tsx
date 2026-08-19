@@ -49,6 +49,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const [composeOpen, setComposeOpen] = useState(false);
 
   const isHome = pathname === "/home" || pathname === "/dashboard";
+  const isSearch = pathname === "/search";
   const notifications = summary?.unread_notifications ?? 0;
   // Messages badge = Single + Groups from the SAME canonical RPC the two
   // Message-tab controls read, so the three numbers can never disagree.
@@ -270,15 +271,15 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
         </div>
 
         {/* Hidden below md (768px) — the bottom tab bar (rendered after this
-            header) takes over Home/Clubs/Messages/Calendar navigation on
-            phone widths, matching the native app's bottom bar instead of a
+            header) takes over Home/Clubs/Search/Messages/Calendar navigation
+            on phone widths, matching the native app's bottom bar instead of a
             top icon row. md, not lg: tablets (iPad portrait and up) get the
             desktop-style top nav, same as the rest of the desktop-equivalent
             IA tablets get elsewhere (see HomeClient's column grid) — the
-            phone bottom bar is strictly a phone-width feature. Search stays
-            reachable up here too (its expand/collapse behavior is
-            unchanged) since the bottom bar's Search tab just expands and
-            focuses this same field. */}
+            phone bottom bar is strictly a phone-width feature. This top nav
+            has no Search icon of its own — desktop's search stays the
+            inline expand-in-place field below, reached via the circular
+            button further down. */}
         <nav className="hidden shrink-0 items-center gap-4 sm:gap-5 md:order-3 md:flex" aria-label="Primary">
           <NavIcon href="/home" label="Home" active={isHome} badge={notifications} badgeLabel="unread notifications">
             <HomeIcon size={26} filled={isHome} />
@@ -393,40 +394,40 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
     <BottomTabBar
       isHome={isHome}
       isClubs={isClubs}
+      isSearch={isSearch}
       isMessages={isMessages}
       notifications={notifications}
       messages={messages}
-      onSearchTap={() => {
-        setExpanded(true);
-        window.scrollTo({ top: 0, behavior: "smooth" });
-        requestAnimationFrame(() => inputRef.current?.focus());
-      }}
     />
     </>
   );
 }
 
-// Phone-width (below md/768px) bottom navigation — same destinations as the
-// top `nav` above (Home, Clubs, Messages) plus Search (expands/focuses the
-// existing header search field rather than duplicating that logic) and
-// Calendar (opens the existing Home calendar overlay via a query param;
-// there is no standalone /calendar route). Fixed to the viewport bottom
-// like the native app's tab bar; every AppHeader-mounting page reserves
-// matching bottom padding below `md` so this never covers real content.
+// Phone-width (below md/768px) bottom navigation — same order as native's tab
+// bar (Home, Clubs, Search, Messages, Calendar). Search is a real full-screen
+// tab (/search — apps/web/components/search/SearchClient.tsx), not the
+// header's inline expand-in-place field: native's Search is its own browse
+// screen reachable from anywhere, and that field lived inside <header>, which
+// is hidden below `md` on every non-Home page, so the old expand-on-tap
+// behavior was invisible outside Home. Calendar opens the existing Home
+// calendar overlay via a query param; there is no standalone /calendar route.
+// Fixed to the viewport bottom like the native app's tab bar; every
+// AppHeader-mounting page reserves matching bottom padding below `md` so
+// this never covers real content.
 function BottomTabBar({
   isHome,
   isClubs,
+  isSearch,
   isMessages,
   notifications,
   messages,
-  onSearchTap,
 }: {
   isHome: boolean;
   isClubs: boolean;
+  isSearch: boolean;
   isMessages: boolean;
   notifications: number;
   messages: number;
-  onSearchTap: () => void;
 }): JSX.Element {
   return (
     <nav
@@ -444,14 +445,9 @@ function BottomTabBar({
       <BottomTabIcon href="/clubs" label="Clubs" active={isClubs}>
         <PeopleIcon size={25} filled={isClubs} />
       </BottomTabIcon>
-      <button
-        type="button"
-        aria-label="Search"
-        onClick={onSearchTap}
-        className="flex h-14 flex-1 flex-col items-center justify-center text-white"
-      >
+      <BottomTabIcon href="/search" label="Search" active={isSearch}>
         <SearchIcon size={24} />
-      </button>
+      </BottomTabIcon>
       <BottomTabIcon href="/messages" label="Messages" active={isMessages} badge={messages} badgeLabel="unread messages">
         <ChatIcon size={24} filled={isMessages} />
       </BottomTabIcon>
