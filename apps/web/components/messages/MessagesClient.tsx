@@ -301,7 +301,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
       destination({ filter: "groups", draftGroupIds: ids, draftGroupName: name });
     }} />;
   } else if (isDraft) {
-    center = <DraftThread userId={userId} draftPerson={draftPerson} groupName={draftGroupName} groupIds={draftGroupIds} onMaterialized={(id) => destination({ filter, conversationId: id }, true)} onError={(message) => show(message, "error")} />;
+    center = <DraftThread userId={userId} draftPerson={draftPerson} groupName={draftGroupName} groupIds={draftGroupIds} onMaterialized={(id) => destination({ filter, conversationId: id }, true)} onError={(message) => show(message, "error")} onClearSelection={clearSelection} />;
   } else if (conversationId && details) {
     // Back from a channel thread returns to that club's channel chooser (mobile's
     // group chat → channels → chat → details path), not to an empty Messages
@@ -311,6 +311,13 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
   } else {
     center = <MessagesLanding noClubs={!clubsLoading && !hasClubs} onJoinClub={() => router.push("/clubs")} />;
   }
+
+  // Phone has no split view — like native, it pushes a full-screen detail
+  // (thread/composer/hub/error) over the list and pops back to it, never
+  // stacking both in one column. `showingDetail` is true for every branch
+  // above that renders something other than the bare landing state.
+  const showingDetail = !!conversationId || composerMode !== "none" || isDraft;
+  const phoneShowInfo = infoOpen && !!conversationId && !!details;
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-0 py-0 sm:px-4 sm:py-6 md:flex md:min-h-0 md:flex-1 md:flex-col">
@@ -324,8 +331,12 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
               is "none" — truthy — so the previous `!composerMode` test was
               permanently false and the empty-Single Suggested section could never
               render. It must compare against "none". */}
-          <MessagesSidebar userId={userId} filter={filter} loading={conversationsLoading} conversations={filter === "single" ? directConversations : groupConversations} suggestionsEnabled={filter === "single" && directConversations.length === 0 && composerMode === "none" && !conversationId && !isDraft} activeConversationId={conversationId} onFilter={setFilter} onOpen={openConversation} onNew={() => setComposerMode("new-message")} onOpenPerson={openPerson} onOpenMessage={openSearchResult} />
-          <section className="relative flex min-w-0 flex-col bg-[#fffdf4] md:min-h-0 md:overflow-y-auto">{center}</section>
+          <div className={showingDetail ? "hidden md:contents" : "contents"}>
+            <MessagesSidebar userId={userId} filter={filter} loading={conversationsLoading} conversations={filter === "single" ? directConversations : groupConversations} suggestionsEnabled={filter === "single" && directConversations.length === 0 && composerMode === "none" && !conversationId && !isDraft} activeConversationId={conversationId} onFilter={setFilter} onOpen={openConversation} onNew={() => setComposerMode("new-message")} onOpenPerson={openPerson} onOpenMessage={openSearchResult} onBrowseClubs={() => router.push("/clubs")} onNewGroupChat={() => setComposerMode("new-group")} />
+          </div>
+          <div className={!showingDetail || phoneShowInfo ? "hidden md:contents" : "contents"}>
+            <section className="relative flex min-w-0 flex-col bg-[#fffdf4] md:min-h-0 md:overflow-y-auto">{center}</section>
+          </div>
           {/* `hub` is carried through every destination below (Bug 2). Club
               Chat Information is opened FROM the channel list, so closing it,
               switching its tab or opening a shared event from it must all
@@ -341,7 +352,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
   );
 }
 
-function MessagesSidebar({ userId, filter, loading, conversations, suggestionsEnabled, activeConversationId, onFilter, onOpen, onNew, onOpenPerson, onOpenMessage }: { userId: string; filter: Filter; loading: boolean; conversations: ConversationPreview[]; suggestionsEnabled: boolean; activeConversationId: string | null; onFilter: (filter: Filter) => void; onOpen: (conversation: ConversationPreview) => void; onNew: () => void; onOpenPerson: (person: Person) => void; onOpenMessage: (result: MessageSearchResult) => void }): JSX.Element {
+function MessagesSidebar({ userId, filter, loading, conversations, suggestionsEnabled, activeConversationId, onFilter, onOpen, onNew, onOpenPerson, onOpenMessage, onBrowseClubs, onNewGroupChat }: { userId: string; filter: Filter; loading: boolean; conversations: ConversationPreview[]; suggestionsEnabled: boolean; activeConversationId: string | null; onFilter: (filter: Filter) => void; onOpen: (conversation: ConversationPreview) => void; onNew: () => void; onOpenPerson: (person: Person) => void; onOpenMessage: (result: MessageSearchResult) => void; onBrowseClubs: () => void; onNewGroupChat: () => void }): JSX.Element {
   const [query, setQuery] = useState("");
   const { data: people = [], isLoading: peopleLoading } = useMessagePeopleSearch(query);
   const { data: contentResults = [], isLoading: contentLoading } = useMessageContentSearch(query, null);
@@ -375,7 +386,7 @@ function MessagesSidebar({ userId, filter, loading, conversations, suggestionsEn
         </label>
         <div className="mt-3 flex gap-3" role="tablist" aria-label="Conversation type">
           <FilterButton label="Single" active={filter === "single"} badge={singleUnread} badgeLabel="unread direct messages" onClick={() => onFilter("single")} />
-          <FilterButton label="Groups" active={filter === "groups"} badge={groupsUnread} badgeLabel="unread group messages" onClick={() => onFilter("groups")} />
+          <FilterButton label="Group" active={filter === "groups"} badge={groupsUnread} badgeLabel="unread group messages" onClick={() => onFilter("groups")} />
         </div>
       </div>
       {/* THE one scrollable region of the Chats column. `min-h-0` is required:
@@ -401,7 +412,11 @@ function MessagesSidebar({ userId, filter, loading, conversations, suggestionsEn
             <SuggestedPeople people={suggestions} loading={suggestionsLoading} failed={suggestionsFailed} onSelect={onOpenPerson} />
           </div>
         )}
-        {!loading && !term && active.length === 0 && !suggestionsEnabled && <p className="px-2 py-6 text-sm text-gray-500">No conversations yet.</p>}
+        {!loading && !term && active.length === 0 && !suggestionsEnabled && (
+          filter === "groups"
+            ? <GroupEmptyState onBrowseClubs={onBrowseClubs} onNewGroupChat={onNewGroupChat} />
+            : <p className="px-2 py-6 text-sm text-gray-500">No conversations yet.</p>
+        )}
         {archived.length > 0 && <details className="mt-3 border-t pt-3"><summary className="cursor-pointer px-2 text-sm font-semibold text-gray-500">Archived ({archived.length})</summary>{archived.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={activeConversationId === conversation.id} onClick={() => onOpen(conversation)} />)}</details>}
       </div>
     </aside>
@@ -450,6 +465,23 @@ function MessageSearchRow({ result, onClick }: { result: MessageSearchResult; on
 }
 
 function SidebarSkeleton(): JSX.Element { return <div className="space-y-2 px-1">{[1, 2, 3].map((item) => <div key={item} className="h-16 animate-pulse rounded-xl bg-black/5" />)}</div>; }
+
+// Matches apps/mobile/components/chat/GroupEmptyState.tsx exactly (copy, order,
+// icon-circle/primary-button/link structure) — the Groups filter's empty state
+// on both platforms, not a desktop-only "Join a Club" fallback.
+function GroupEmptyState({ onBrowseClubs, onNewGroupChat }: { onBrowseClubs: () => void; onNewGroupChat: () => void }): JSX.Element {
+  return (
+    <div className="flex flex-col items-center px-8 pb-12 pt-10 text-center">
+      <span className="mb-5 flex h-[72px] w-[72px] items-center justify-center rounded-full text-teal opacity-90" style={{ background: "rgba(15,166,166,0.1)" }}>
+        <PeopleIcon size={40} filled />
+      </span>
+      <p className="mb-2 text-lg font-semibold text-gray-900">No group chats yet</p>
+      <p className="mb-7 text-sm leading-5 text-gray-500">Join a club to unlock group conversations, or start your own group chat with friends.</p>
+      <button type="button" onClick={onBrowseClubs} className="w-full max-w-[280px] rounded-full bg-teal py-4 text-[15px] font-semibold text-white shadow-[0_3px_5px_rgba(0,0,0,0.22)] transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-2">Browse Clubs</button>
+      <button type="button" onClick={onNewGroupChat} className="mt-4 py-2 text-[13px] font-semibold text-teal">or start a new group chat</button>
+    </div>
+  );
+}
 
 function MessagesLanding({ noClubs, onJoinClub }: { noClubs: boolean; onJoinClub: () => void }): JSX.Element {
   return <div className="flex min-h-[480px] items-start justify-center px-6 pt-40">{noClubs ? <button type="button" onClick={onJoinClub} className="w-full max-w-sm rounded-full bg-teal px-8 py-4 text-lg font-semibold text-white shadow-[0_3px_5px_rgba(0,0,0,0.22)] transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-2">Join a Club</button> : <div className="text-center"><p className="text-2xl font-bold text-gray-900 font-zain">Messages</p><p className="mt-2 text-sm text-gray-500">Select a conversation or start a new one.</p></div>}</div>;
@@ -551,7 +583,7 @@ function NewGroupPicker({ onBack, onContinue }: { onBack: () => void; onContinue
   );
 }
 
-function DraftThread({ userId, draftPerson, groupName, groupIds, onMaterialized, onError }: { userId: string; draftPerson: Person | null | undefined; groupName: string | null; groupIds: string[]; onMaterialized: (id: string) => void; onError: (message: string) => void }): JSX.Element {
+function DraftThread({ userId, draftPerson, groupName, groupIds, onMaterialized, onError, onClearSelection }: { userId: string; draftPerson: Person | null | undefined; groupName: string | null; groupIds: string[]; onMaterialized: (id: string) => void; onError: (message: string) => void; onClearSelection: () => void }): JSX.Element {
   const label = draftPerson ? `To: @${draftPerson.username}` : groupIds.length ? groupName || "New group" : "New message";
   const send = async (text: string, file?: File) => {
     try {
@@ -573,7 +605,7 @@ function DraftThread({ userId, draftPerson, groupName, groupIds, onMaterialized,
       onMaterialized(conversationId);
     } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t send the message."); }
   };
-  return <ThreadShell title={label} subtitle={draftPerson ? draftPerson.full_name : null}><EmptyThread label="Start the conversation" /><Composer onSend={send} /></ThreadShell>;
+  return <ThreadShell title={label} subtitle={draftPerson ? draftPerson.full_name : null} onBack={onClearSelection}><EmptyThread label="Start the conversation" /><Composer onSend={send} /></ThreadShell>;
 }
 
 function ChannelHub({ conversationId, conversationName, conversationAvatarUrl, userId, participants, isOfficer, isOfficersChat, onOpenChannel, onOpenInfo, onBack, onCreateChannel, onRenameChannel, onDeleteChannel, onSetPermission }: { conversationId: string; conversationName: string; conversationAvatarUrl: string | null; userId: string; participants: Array<Person & { joined_at: string; role: string }>; isOfficer: boolean; isOfficersChat: boolean; onOpenChannel: (channel: ChannelPreview) => void; onOpenInfo: () => void; onBack: () => void; onCreateChannel: (name: string) => Promise<void>; onRenameChannel: (channelId: string, name: string) => Promise<void>; onDeleteChannel: (channelId: string) => Promise<void>; onSetPermission: (channelId: string, permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
