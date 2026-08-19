@@ -47,7 +47,7 @@ export function PostCommentsModal({ postId, userId, onClose }: { postId: string;
                  </button>
                )}
              </li>
-           ))}</ul> : <p className="py-8 text-center text-sm text-gray-500">No comments yet. Start the conversation.</p>}
+           ))}</ul> : <p className="py-8 text-center text-sm text-gray-500">No comments yet. Be the first!</p>}
         </div>
         <form onSubmit={submit} className="mt-4 flex gap-2 border-t pt-3">
           <label htmlFor="new-comment" className="sr-only">Add a comment</label>

@@ -127,7 +127,7 @@ function PostCard({
 
   const followLabel = post.author.is_following
     ? post.author.follows_me
-      ? "Gluemates 🎉"
+      ? "Gluemate"
       : "Following"
     : post.author.is_requested
       ? "Requested"
@@ -159,8 +159,10 @@ function PostCard({
           </span>
         )}
         {/* Relationship pill — matches the native Home feed's Follow /
-            Following / Gluemates 🎉 / Requested / Follow back pill. Own
-            posts never show this (nothing to follow). */}
+            Following / Gluemate / Requested / Follow back pill (plain
+            "Gluemate", no emoji — the canonical label from mobile's shared
+            Pill component, not the "🎉" success-toast copy). Own posts
+            never show this (nothing to follow). */}
         {!isOwnPost && (
           <button
             type="button"

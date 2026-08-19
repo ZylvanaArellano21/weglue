@@ -470,15 +470,22 @@ function EventsPanel({
               </span>
             </button>
 
-            {/* Mobile removes an event by swiping the row; a desktop pointer has
-                no swipe, so the same action is an explicit button. It always
-                confirms first, because it deletes the RSVP itself. */}
+            {/* Native removes an event by swiping the row; a desktop pointer
+                has no swipe, so there this is an explicit button that only
+                reveals on hover. Below md that hover-reveal is a real bug,
+                not a smaller feature: touch has no persistent :hover state
+                at all, so `opacity-0 group-hover:opacity-100` left phone
+                with genuinely no way to ever see or tap this button — not a
+                design simplification, a dead control. Phone keeps it
+                always-visible instead (opacity-100 unconditionally below
+                md); desktop's hover-reveal is unchanged. Either way it
+                always confirms first, because it deletes the RSVP itself. */}
             {onRemoveEvent && (
               <button
                 type="button"
                 onClick={() => onRemoveEvent(e.id)}
                 aria-label={`Remove your attendance for ${e.title}`}
-                className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[11px] font-semibold text-[#F02719] opacity-0 shadow-sm transition-opacity focus:opacity-100 group-hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black"
+                className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[11px] font-semibold text-[#F02719] opacity-100 shadow-sm transition-opacity focus:opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black"
               >
                 Remove
               </button>
