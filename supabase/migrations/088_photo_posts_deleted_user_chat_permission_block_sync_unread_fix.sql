@@ -225,12 +225,16 @@ DECLARE
   v_notifications      INT;
   v_dm_threads         INT;
   v_club_threads       INT;
+  v_direct_messages    INT;
+  v_group_messages     INT;
   v_conversations      JSONB := '[]'::jsonb;
 BEGIN
   IF v_uid IS NULL THEN
     RETURN jsonb_build_object(
       'unread_notifications', 0,
       'unread_threads', 0,
+      'unread_direct_messages', 0,
+      'unread_group_messages', 0,
       'unread_conversations', '[]'::jsonb
     );
   END IF;
@@ -239,6 +243,72 @@ BEGIN
   FROM notifications n
   JOIN notification_types t ON t.type = n.type
   WHERE n.user_id = v_uid AND n.read = false AND t.in_app AND t.enabled;
+
+  -- Single category: unread messages across one-to-one conversations.
+  SELECT count(*) INTO v_direct_messages
+  FROM conversation_participants cp
+  JOIN conversations c ON c.id = cp.conversation_id
+  JOIN messages m      ON m.conversation_id = c.id
+  WHERE cp.user_id = v_uid
+    AND c.type = 'direct'
+    AND cp.hidden_at IS NULL
+    AND c.deleted_at IS NULL
+    AND m.sender_id <> v_uid
+    AND m.deleted_at IS NULL
+    AND m.created_at > COALESCE(cp.last_read_at, cp.joined_at, 'epoch')
+    AND (cp.cleared_before IS NULL OR m.created_at > cp.cleared_before)
+    AND NOT EXISTS (
+      SELECT 1 FROM message_hides mh
+      WHERE mh.message_id = m.id AND mh.user_id = v_uid
+    );
+
+  -- Groups category: custom group chats (conversation read state) PLUS club
+  -- member chats and club officer chats (per-channel read state). The two
+  -- halves cannot overlap: they select disjoint conversation types.
+  SELECT
+    COALESCE((
+      SELECT count(*)
+      FROM conversation_participants cp
+      JOIN conversations c ON c.id = cp.conversation_id
+      JOIN messages m      ON m.conversation_id = c.id
+      WHERE cp.user_id = v_uid
+        AND c.type = 'group'
+        AND cp.hidden_at IS NULL
+        AND c.deleted_at IS NULL
+        AND m.sender_id <> v_uid
+        AND m.deleted_at IS NULL
+        AND m.created_at > COALESCE(cp.last_read_at, cp.joined_at, 'epoch')
+        AND (cp.cleared_before IS NULL OR m.created_at > cp.cleared_before)
+        AND NOT EXISTS (
+          SELECT 1 FROM message_hides mh
+          WHERE mh.message_id = m.id AND mh.user_id = v_uid
+        )
+    ), 0)
+    +
+    COALESCE((
+      SELECT count(*)
+      FROM conversation_participants cp
+      JOIN conversations c          ON c.id = cp.conversation_id
+      JOIN conversation_channels ch ON ch.conversation_id = c.id
+      JOIN messages m               ON m.conversation_id = c.id
+                                   AND m.channel_id = ch.id
+      WHERE cp.user_id = v_uid
+        AND c.type IN ('club_group','officer_chat')
+        AND cp.hidden_at IS NULL
+        AND c.deleted_at IS NULL
+        AND m.sender_id <> v_uid
+        AND m.deleted_at IS NULL
+        AND m.created_at > COALESCE(
+              (SELECT cr.last_read_at FROM channel_reads cr
+               WHERE cr.channel_id = ch.id AND cr.user_id = v_uid),
+              cp.joined_at, 'epoch')
+        AND (cp.cleared_before IS NULL OR m.created_at > cp.cleared_before)
+        AND NOT EXISTS (
+          SELECT 1 FROM message_hides mh
+          WHERE mh.message_id = m.id AND mh.user_id = v_uid
+        )
+    ), 0)
+  INTO v_group_messages;
 
   WITH unread_messages AS (
     SELECT c.id AS conversation_id, m.id AS message_id
@@ -347,6 +417,8 @@ BEGIN
   RETURN jsonb_build_object(
     'unread_notifications', COALESCE(v_notifications, 0),
     'unread_threads', COALESCE(v_dm_threads, 0) + COALESCE(v_club_threads, 0),
+    'unread_direct_messages', COALESCE(v_direct_messages, 0),
+    'unread_group_messages', COALESCE(v_group_messages, 0),
     'unread_conversations', v_conversations
   );
 END;

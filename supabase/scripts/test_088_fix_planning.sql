@@ -26,6 +26,8 @@ BEGIN
   SELECT public.get_unread_summary_for(NULL) INTO v_summary;
   IF COALESCE((v_summary ->> 'unread_notifications')::int, -1) <> 0
      OR COALESCE((v_summary ->> 'unread_threads')::int, -1) <> 0
+     OR COALESCE((v_summary ->> 'unread_direct_messages')::int, -1) <> 0
+     OR COALESCE((v_summary ->> 'unread_group_messages')::int, -1) <> 0
      OR COALESCE(jsonb_typeof(v_summary -> 'unread_conversations'), '') <> 'array' THEN
     RAISE EXCEPTION 'unread summary shape is wrong';
   END IF;
