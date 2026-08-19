@@ -1,7 +1,7 @@
 "use client";
 
 import { Avatar } from "../shared/Avatar";
-import { ChatBubbleOutlineIcon, StarOutlineIcon } from "../shared/icons";
+import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon } from "../shared/icons";
 import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
 
 export type ClubTab = "home" | "calendar" | "officers" | "media";
@@ -28,6 +28,7 @@ export function ClubProfileHeader({
   onOfficerChat,
   onGroupChat,
   onOpenPeople,
+  onBack,
 }: {
   club: ClubProfileData;
   activeTab: ClubTab;
@@ -39,9 +40,17 @@ export function ClubProfileHeader({
   onGroupChat: () => void;
   /** Opens the Members / Gluemates list. Available to officers AND members. */
   onOpenPeople: (filter: "members" | "gluemates") => void;
+  /** Phone-only back chevron floating on the banner — checked directly
+   * against the native Club Profile screenshot, which has no other way
+   * back. Desktop/tablet keep browser/AppHeader navigation, unchanged. */
+  onBack: () => void;
 }): JSX.Element {
   return (
-    <section className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
+    // Negative margins cancel the parent <main>'s own px-4 sm:px-6 exactly,
+    // so the banner reaches the real screen edges on phone like native's —
+    // md:mx-0 removes the offset entirely at md+, leaving desktop identical
+    // to before.
+    <section className="-mx-4 overflow-hidden rounded-none bg-white shadow-none sm:-mx-6 md:mx-0 md:rounded-2xl md:shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
       {/* Banner + overlapping avatar + Edit */}
       <div className="relative h-40 w-full bg-gray-200 sm:h-48">
         {club.banner_url ? (
@@ -50,6 +59,14 @@ export function ClubProfileHeader({
         ) : (
           <div className="h-full w-full" style={{ background: "linear-gradient(135deg,#0FA6A6,#0b7d7d)" }} />
         )}
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back"
+          className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-gray-800 shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:hidden"
+        >
+          <ChevronLeftIcon size={22} />
+        </button>
         {club.is_officer && (
           <button
             type="button"
@@ -101,13 +118,15 @@ export function ClubProfileHeader({
           <p className="mt-1 max-w-2xl text-[15px] text-gray-800">{club.description}</p>
         )}
 
+        {/* Full width on phone (matches native exactly), auto width at md+
+            (unchanged desktop sizing). */}
         <div className="mt-3">
           {club.is_member ? (
             <button
               type="button"
               onClick={onToggleMembership}
               disabled={membershipPending}
-              className="rounded-full border px-6 py-1.5 text-[15px] font-semibold text-teal transition hover:bg-teal/5 disabled:opacity-60"
+              className="w-full rounded-full border px-6 py-1.5 text-[15px] font-semibold text-teal transition hover:bg-teal/5 disabled:opacity-60 md:w-auto"
               style={{ borderColor: "#0FA6A6" }}
             >
               Joined
@@ -117,7 +136,7 @@ export function ClubProfileHeader({
               type="button"
               onClick={onToggleMembership}
               disabled={membershipPending}
-              className="rounded-full bg-teal px-8 py-1.5 text-[15px] font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+              className="w-full rounded-full bg-teal px-8 py-1.5 text-[15px] font-semibold text-white transition hover:opacity-90 disabled:opacity-60 md:w-auto"
             >
               Join
             </button>

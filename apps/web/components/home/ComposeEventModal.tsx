@@ -180,7 +180,7 @@ export function ComposeEventModal({
     <Modal onClose={onClose} labelledBy="compose-event-title" maxWidth={560}>
       <div className="max-h-[80vh] overflow-y-auto p-5 sm:p-6">
         <h2 id="compose-event-title" className="mb-4 text-center text-lg font-bold text-gray-900">
-          {isEdit ? "Edit event" : "New Glue"}
+          {isEdit ? "Edit event" : "New Event"}
         </h2>
 
         <label className="mb-1 block text-sm font-semibold text-gray-700">Hosting as</label>
@@ -248,10 +248,10 @@ export function ComposeEventModal({
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
 
         <label className="mb-1 block text-sm font-semibold text-gray-700">Event name</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} className={`${inputCls} mb-4`} style={inputStyle} placeholder="Name your event" />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} className={`${inputCls} mb-4`} style={inputStyle} placeholder="Name of the event…" />
 
         <label className="mb-1 block text-sm font-semibold text-gray-700">Description</label>
-        <textarea value={about} onChange={(e) => setAbout(e.target.value)} rows={3} className={`${inputCls} mb-4 resize-none`} style={inputStyle} placeholder="What's it about?" />
+        <textarea value={about} onChange={(e) => setAbout(e.target.value)} rows={3} className={`${inputCls} mb-4 resize-none`} style={inputStyle} placeholder="About this event…" />
 
         <div className="mb-4 grid grid-cols-3 gap-3">
           <div>

@@ -10,7 +10,6 @@ import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon, PersonAddIcon
 import { ProfileMenu } from "../profile/ProfileMenu";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { useDiscoverySearch } from "../../lib/hooks/useDiscoverySearch";
-import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 import { useIsOfficer } from "../../lib/hooks/useClubMembership";
 import { Avatar } from "../shared/Avatar";
 
@@ -43,10 +42,6 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const pathname = usePathname();
   const router = useRouter();
   const { data: summary } = useUnreadSummaryValue(userId);
-  // Phone-only top bar needs the Gluemates count directly — on desktop it
-  // comes from ProfileSidebar instead, which is `hidden lg:block` and so
-  // never mounts (and never reaches this count) below that breakpoint.
-  const { data: profile } = useOwnProfile(userId);
   // Backs the phone-only compose picker below — same permission source
   // ShareAGlue already uses on desktop (event creation is officer-only,
   // enforced server-side; this only decides whether to show the option).
@@ -332,21 +327,29 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           )}
         </div>
 
-        {/* Phone-only: Gluemates. On desktop this lives in ProfileSidebar,
-            which is `hidden lg:block` — below that breakpoint it never
-            mounts, so phone had NO way to reach Gluemates at all until this
-            icon. Matches native's second top-right icon + count badge. */}
+        {/* Phone-only: Notifications. Checked directly against
+            apps/mobile/app/(tabs)/index.tsx — this second top-right icon
+            (person-add glyph; that's the native icon choice, kept here for
+            an exact visual match even though it reads oddly for
+            notifications) calls handleNotificationsPress, which routes to
+            /home/notifications. An earlier pass wired this to Gluemates
+            instead, going only by the icon's shape rather than checking
+            what it actually does — Gluemates was never the gap that needed
+            filling (it's already reachable from the profile page's stat
+            row, same as native), Notifications was: ProfileSidebar carries
+            the only other entry point and it's `hidden lg:block`, so phone
+            had no way to reach it at all until this icon. */}
         <Link
-          href="/home?gluemates=1"
-          aria-label="Gluemates"
+          href="/home?notifications=1"
+          aria-label="Notifications"
           className="relative order-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm md:hidden"
           style={{ borderColor: "rgba(0,0,0,0.1)" }}
         >
           <PersonAddIcon size={20} />
-          {(profile?.gluemates_count ?? 0) > 0 && (
+          {notifications > 0 && (
             <CountBadge
-              count={profile?.gluemates_count ?? 0}
-              label="gluemates"
+              count={notifications}
+              label="unread notifications"
               style={{ position: "absolute", top: -4, right: -4 }}
             />
           )}
