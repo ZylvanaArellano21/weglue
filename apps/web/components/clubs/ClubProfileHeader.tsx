@@ -118,8 +118,17 @@ export function ClubProfileHeader({
 
         {/* Name + description (desktop/tablet) — phone shows the
             description once, inside the About section below, so it isn't
-            duplicated here too. */}
-        <h1 className="mt-1 text-[26px] font-bold text-gray-900">{club.name}</h1>
+            duplicated here too.
+            The avatar is `absolute -top-14` (56px) and 104px tall, so its
+            bottom edge sits ~48px below this container's top regardless of
+            what's rendered before it. On desktop that space was always
+            cleared by the Stats+Chat-pills row's own height — but that row
+            is `hidden` (zero height, not just invisible) below md, so on a
+            real phone the club name rendered directly under the small
+            `pt-3` padding and the avatar covered its first few letters.
+            mt-12 (48px) clears it; md:mt-1 restores the exact original
+            desktop spacing, unaffected. */}
+        <h1 className="mt-12 text-[26px] font-bold text-gray-900 md:mt-1">{club.name}</h1>
         {club.description && (
           <p className="mt-1 hidden max-w-2xl text-[15px] text-gray-800 md:block">{club.description}</p>
         )}
