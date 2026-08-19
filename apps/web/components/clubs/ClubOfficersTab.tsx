@@ -50,9 +50,15 @@ export function ClubOfficersTab({
             >
               <Avatar uri={officer.avatar_url} size={64} name={officer.display_name} />
             </button>
-            <div className="min-w-0 flex-1">
-              <p className="text-[15px] font-semibold italic text-teal">{officer.role_title}</p>
-              <p className="truncate text-[16px] font-bold text-gray-900">{officer.display_name}</p>
+            {/* Phone: name bold on top, role teal (not italic) below —
+                checked directly against apps/mobile/app/club/[clubId]/
+                index.tsx's OfficerRow, which is the reverse order/styling
+                of desktop's existing italic-role-then-name layout. Desktop
+                is unchanged (md:order-* restores its exact original
+                order/italic). */}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <p className="order-2 truncate text-[16px] font-bold text-gray-900 md:order-1 md:not-italic">{officer.display_name}</p>
+              <p className="order-1 text-[15px] font-semibold text-teal md:order-2 md:italic">{officer.role_title}</p>
             </div>
             {!isSelf && officer.user_id && (
               <button

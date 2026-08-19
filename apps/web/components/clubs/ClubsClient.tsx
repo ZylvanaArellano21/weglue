@@ -34,6 +34,9 @@ function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested
   const [query, setQuery] = useState("");
   // The club whose Unjoin confirmation is open, if any.
   const [leaving, setLeaving] = useState<{ id: string; name: string } | null>(null);
+  // Phone-only: reveals the discovery catalog from the empty state's
+  // "Discover Clubs" button — native's own gating, not a smaller catalog.
+  const [phoneDiscoverOpen, setPhoneDiscoverOpen] = useState(false);
   const q = query.trim().toLowerCase();
 
   const matchesSidebar = (c: SidebarClub) =>
@@ -80,21 +83,51 @@ function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested
           <AppHeader userId={userId} />
         </div>
         <main className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:pb-0">
-          {/* Phone: "Officer Club" / "Member Club" card grid — checked
-              directly against apps/mobile/app/(tabs)/clubs/index.tsx.
-              ClubSidebar (the only place this data shows) is `hidden
-              lg:block`, so below that breakpoint phone had NO way to see
-              its own clubs from this tab at all, only the discovery
-              catalog below. Native's Clubs tab is actually "my clubs"
-              only — discovery lives elsewhere and only surfaces here as an
-              empty-state fallback — but removing the catalog phone
-              already has access to today would be a regression, not a
-              parity fix, so it stays beneath this as an addition rather
-              than a replacement. */}
+          {/* Phone: "Officer Club" / "Member Club" ONLY — checked directly
+              against apps/mobile/app/(tabs)/clubs/index.tsx, which is
+              exclusively "my clubs"; the discovery catalog (Suggested/
+              Popular) does not render there at all except as an
+              empty-state fallback when the student has zero clubs, reached
+              through a "Discover Clubs" button, not shown inline. An
+              earlier pass deliberately kept the catalog visible on phone
+              here too, reasoning that removing existing access would be a
+              regression — corrected: the founder confirmed the exact
+              native structure is what's wanted, catalog included, so it's
+              now hidden below md whenever the student has at least one
+              club, matching the empty/non-empty split native actually
+              uses. */}
           <div className="md:hidden">
-            <PhoneMyClubs officerClubs={officerClubs} memberClubs={memberClubs} />
+            {officerClubs.length > 0 || memberClubs.length > 0 ? (
+              <PhoneMyClubs officerClubs={officerClubs} memberClubs={memberClubs} />
+            ) : (
+              <PhoneClubsEmptyState onDiscover={() => setPhoneDiscoverOpen(true)} />
+            )}
           </div>
-          <div className="grid grid-cols-1 gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
+
+          {/* Phone discovery — reached ONLY via "Discover Clubs" in the
+              empty state above, matching native's own gating (there is no
+              separate discovery route on web to send this to instead, so
+              this reveals the same catalog content in place). */}
+          {phoneDiscoverOpen && (officerClubs.length === 0 && memberClubs.length === 0) && (
+            <div className="md:hidden">
+              <ClubCatalog
+                suggested={suggested}
+                popular={popular}
+                onJoin={(club) =>
+                  join.mutate(club.id, {
+                    onSuccess: () => show("Joined club! 🎉"),
+                    onError: () => show("Something went wrong. Try again.", "error"),
+                  })
+                }
+                onLeave={(club) => setLeaving(club)}
+                joiningId={join.isPending ? (join.variables ?? null) : null}
+                hasQuery={q.length > 0}
+                scrollToSuggested={scrollToSuggested}
+              />
+            </div>
+          )}
+
+          <div className="hidden md:grid md:grid-cols-1 md:gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
             <div className="hidden lg:block lg:min-h-0 lg:overflow-y-auto lg:pb-6">
               <ClubSidebar
                 officerClubs={officerClubs}
@@ -139,6 +172,30 @@ function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested
         />
       )}
     </>
+  );
+}
+
+// Phone-only, zero-clubs state — exact copy from
+// apps/mobile/app/(tabs)/clubs/index.tsx's STRINGS.EMPTY_TITLE/
+// EMPTY_SUBTITLE, with a "Discover Clubs" button revealing the catalog in
+// place (native routes to a separate discovery screen this app doesn't
+// have; revealing the same content here is the equivalent action).
+function PhoneClubsEmptyState({ onDiscover }: { onDiscover: () => void }): JSX.Element {
+  return (
+    <div className="flex flex-col items-center px-6 py-16 text-center">
+      <span className="mb-5 text-5xl" aria-hidden>🎓</span>
+      <h2 className="mb-2.5 text-lg font-extrabold text-gray-900">Your community is waiting for you</h2>
+      <p className="mb-7 text-sm leading-relaxed text-gray-500">
+        Join clubs that match your interests and connect with students on campus.
+      </p>
+      <button
+        type="button"
+        onClick={onDiscover}
+        className="rounded-full bg-teal px-7 py-3.5 text-[15px] font-bold text-white"
+      >
+        Discover Clubs
+      </button>
+    </div>
   );
 }
 
