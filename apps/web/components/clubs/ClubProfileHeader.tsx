@@ -1,7 +1,8 @@
 "use client";
 
 import { Avatar } from "../shared/Avatar";
-import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon, CalendarIcon, LocationIcon } from "../shared/icons";
+import { AvatarStack } from "../shared/AvatarStack";
+import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon, CalendarIcon, LocationIcon, EllipsisIcon } from "../shared/icons";
 import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
 import { parseMeetingSchedule, formatEventTime, formatEventLocation } from "../../lib/datetime";
 
@@ -30,6 +31,7 @@ export function ClubProfileHeader({
   onGroupChat,
   onOpenPeople,
   onBack,
+  onReport,
 }: {
   club: ClubProfileData;
   activeTab: ClubTab;
@@ -45,6 +47,10 @@ export function ClubProfileHeader({
    * against the native Club Profile screenshot, which has no other way
    * back. Desktop/tablet keep browser/AppHeader navigation, unchanged. */
   onBack: () => void;
+  /** Phone-only "…" report button, bottom-right of the banner — native's
+   * ReportButton for the club itself. Desktop has no equivalent affordance
+   * on this screen today, so this stays additive to phone only. */
+  onReport: () => void;
 }): JSX.Element {
   return (
     // Negative margins cancel the parent <main>'s own px-4 sm:px-6 exactly,
@@ -69,10 +75,13 @@ export function ClubProfileHeader({
           <ChevronLeftIcon size={22} />
         </button>
         {club.is_officer && (
+          // Native puts this top-right, bottom-right on desktop is this
+          // component's pre-existing (unrelated) position — kept exactly as
+          // it was for md+, only phone moves to match native.
           <button
             type="button"
             onClick={onEdit}
-            className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-teal px-4 py-1.5 text-[13px] font-semibold text-white shadow-md transition hover:opacity-90"
+            className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-teal px-4 py-1.5 text-[13px] font-semibold text-white shadow-md transition hover:opacity-90 md:top-auto md:bottom-3"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path d="M12 20h9" />
@@ -81,6 +90,18 @@ export function ClubProfileHeader({
             Edit
           </button>
         )}
+        {/* "…" report-club button, bottom-right of the banner — native's
+            ReportButton, always present (not officer-gated), clear of the
+            Edit button (top-right on phone) and the avatar (bottom-left). No
+            desktop equivalent existed before, so this stays phone-only. */}
+        <button
+          type="button"
+          onClick={onReport}
+          aria-label={`Report ${club.name}`}
+          className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-gray-800 shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:hidden"
+        >
+          <EllipsisIcon size={20} />
+        </button>
       </div>
 
       <div className="relative px-5 pb-2 pt-3 sm:px-7">
@@ -133,12 +154,15 @@ export function ClubProfileHeader({
           <p className="mt-1 hidden max-w-2xl text-[15px] text-gray-800 md:block">{club.description}</p>
         )}
 
-        {/* Phone: plain member count, matching native exactly (no
-            Gluemates count here — that's reachable from the profile page's
-            own stat, same as everywhere else this session has kept it). */}
-        <p className="mt-1 text-[13px] text-gray-500 md:hidden">
+        {/* Phone: member count — checked directly against native, this is
+            tappable and opens the Members list, not plain text. */}
+        <button
+          type="button"
+          onClick={() => onOpenPeople("members")}
+          className="mt-1 block text-left text-[13px] text-gray-500 md:hidden"
+        >
           {club.member_count} Member{club.member_count === 1 ? "" : "s"}
-        </p>
+        </button>
 
         {/* Desktop/tablet Join/Joined — unchanged position and sizing. */}
         <div className="mt-3 hidden md:block">
@@ -230,6 +254,22 @@ export function ClubProfileHeader({
           >
             Join this club to chat and see upcoming events
           </p>
+        )}
+
+        {/* Gluemates row — phone-only, matches native exactly: only shown
+            when the club has at least one gluemate, an overlapping avatar
+            stack plus a bold count, opening the same Members list filtered
+            to gluemates. Desktop already surfaces this as one of the two
+            Stats above, so this is additive to phone only. */}
+        {club.gluemates_count > 0 && (
+          <button
+            type="button"
+            onClick={() => onOpenPeople("gluemates")}
+            className="mt-3 flex items-center gap-2 md:hidden"
+          >
+            <AvatarStack avatars={club.gluemates} size={28} overlap={12} />
+            <span className="text-xs font-bold text-gray-900">{club.gluemates_count} Gluemates</span>
+          </button>
         )}
 
         {/* About (description + goals) and Meeting Schedule — phone-only.
