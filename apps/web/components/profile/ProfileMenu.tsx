@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "../shared/Avatar";
-import { SettingsIcon, ShieldIcon } from "../shared/icons";
+import { SettingsIcon, ShieldIcon, BookmarkIcon, HeartIcon, BellIcon } from "../shared/icons";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { AccountCenterModal } from "./AccountCenterModal";
 import { PrivacyCenterModal } from "./PrivacyCenterModal";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
+import { useSavedEventsCount } from "../../lib/hooks/useSavedEvents";
+import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { supportMailtoUrl, SUPPORT_EMAIL } from "../../lib/support";
 import {
   redirectToPublicLanding,
@@ -23,8 +25,17 @@ import {
 // Same destinations, same order, same labels, same confirmations:
 //
 //   avatar / name / View profile → Your Profile
+//   Saved Events                 → mobile's bookmark row, same badge count
+//                                  (phone-only here — desktop already has this
+//                                  in ProfileSidebar, so it would be a second,
+//                                  redundant copy of the same destination)
+//   Interests                    → /interests (phone-only, same reason)
 //   Account Center               → the account modal (email, username, password,
 //                                  delete) — mobile's /account-center
+//   Notifications                → mobile's bell row (phone-only — desktop has
+//                                  it in ProfileSidebar; phone ALSO has a
+//                                  header shortcut, matching mobile which has
+//                                  both a header icon AND this sidebar row)
 //   Privacy Center               → the privacy modal — mobile's /privacy-center
 //   Help                         → the device mail composer, with the same
 //                                  address and subject as mobile
@@ -43,6 +54,10 @@ export function ProfileMenu({ userId }: { userId: string }): JSX.Element {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: profile } = useOwnProfile(userId);
+  // Backs the phone-only Saved Events / Notifications rows below.
+  const { data: savedEventsCount = 0 } = useSavedEventsCount(userId);
+  const { data: summary } = useUnreadSummaryValue(userId);
+  const notifications = summary?.unread_notifications ?? 0;
 
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<OpenModal>(null);
@@ -201,9 +216,52 @@ export function ProfileMenu({ userId }: { userId: string }): JSX.Element {
 
           <div className="h-px bg-black/[0.07]" />
 
+          {/* Phone-only: Saved Events + Interests. Desktop already has both
+              in ProfileSidebar (hidden lg:block), so adding them here too
+              would just duplicate the same destination — these exist only
+              to close the gap phone had with no ProfileSidebar at all. */}
+          <MenuRow
+            icon={<BookmarkIcon size={19} />}
+            onClick={() => {
+              close();
+              router.push("/home?saved=1");
+            }}
+            count={savedEventsCount}
+            className="md:hidden"
+          >
+            Saved Events
+          </MenuRow>
+          <MenuRow
+            icon={<HeartIcon size={19} />}
+            onClick={() => {
+              close();
+              router.push("/interests");
+            }}
+            className="md:hidden"
+          >
+            Interests
+          </MenuRow>
+
           <MenuRow icon={<SettingsIcon size={19} />} onClick={() => openModal("account")}>
             Account Center
           </MenuRow>
+
+          {/* Phone-only: Notifications. Mobile has this row IN ADDITION to
+              its header icon (both reach the same screen) — the phone
+              header already carries the same shortcut, this just completes
+              the match with mobile's sidebar. */}
+          <MenuRow
+            icon={<BellIcon size={19} />}
+            onClick={() => {
+              close();
+              router.push("/home?notifications=1");
+            }}
+            count={notifications}
+            className="md:hidden"
+          >
+            Notifications
+          </MenuRow>
+
           <MenuRow icon={<ShieldIcon size={19} />} onClick={() => openModal("privacy")}>
             Privacy Center
           </MenuRow>
@@ -296,22 +354,32 @@ function MenuRow({
   icon,
   onClick,
   children,
+  count,
+  className = "",
 }: {
   icon: React.ReactNode;
   onClick: () => void;
   children: React.ReactNode;
+  /** Right-aligned count, matching mobile's badge on this same row. */
+  count?: number;
+  className?: string;
 }): JSX.Element {
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[14px] font-medium text-gray-800 transition-colors hover:bg-black/[0.035] focus:outline-none focus-visible:bg-black/[0.05]"
+      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[14px] font-medium text-gray-800 transition-colors hover:bg-black/[0.035] focus:outline-none focus-visible:bg-black/[0.05] ${className}`}
     >
       <span className="text-gray-700" aria-hidden>
         {icon}
       </span>
-      {children}
+      <span className="flex-1">{children}</span>
+      {typeof count === "number" && count > 0 && (
+        <span className="text-[13px] font-semibold" style={{ color: "#0FA6A6" }}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }

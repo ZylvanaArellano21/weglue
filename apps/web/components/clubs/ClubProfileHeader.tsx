@@ -1,8 +1,9 @@
 "use client";
 
 import { Avatar } from "../shared/Avatar";
-import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon } from "../shared/icons";
+import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon, CalendarIcon, LocationIcon } from "../shared/icons";
 import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
+import { parseMeetingSchedule, formatEventTime, formatEventLocation } from "../../lib/datetime";
 
 export type ClubTab = "home" | "calendar" | "officers" | "media";
 
@@ -142,6 +143,84 @@ export function ClubProfileHeader({
             </button>
           )}
         </div>
+
+        {/* Non-member hint — phone-only, matches native exactly. Desktop's
+            chat-pill cluster above already communicates the same thing more
+            visibly (the pills simply aren't there for a non-member), so this
+            text nudge is native's phone-specific affordance, not a desktop
+            gap. */}
+        {!club.is_member && (
+          <p
+            className="mt-3 rounded-[10px] border px-3 py-3 text-center text-[13px] font-medium md:hidden"
+            style={{ background: "rgba(15,166,166,0.08)", borderColor: "rgba(15,166,166,0.2)", color: "#0FA6A6" }}
+          >
+            Join this club to chat and see upcoming events
+          </p>
+        )}
+
+        {/* About (description + goals) and Meeting Schedule — phone-only.
+            Checked directly against apps/mobile/app/club/[clubId]/index.tsx:
+            both sections are ALWAYS visible regardless of the active tab, so
+            they live here in the persistent header, not in ClubHomeTab. The
+            data (goals, meeting_schedule) and formatting helpers
+            (parseMeetingSchedule, formatEventTime, formatEventLocation) were
+            already built and tested on web — this was purely a missing
+            render, nothing to fetch or compute. Desktop keeps the compact
+            single-line description it already had; this is additive detail
+            phone specifically had none of. */}
+        {(club.description || club.goals.length > 0) && (
+          <div className="mt-4 md:hidden">
+            <h2 className="mb-1.5 text-base font-bold text-gray-900">About</h2>
+            {club.description && (
+              <p className="mb-2 text-[13px] leading-relaxed text-gray-800">{club.description}</p>
+            )}
+            {club.goals.map((goal) => (
+              <div key={goal.id} className="mb-1 flex items-start gap-2">
+                <span
+                  className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[3px] text-white"
+                  style={{ background: "#0FA6A6" }}
+                  aria-hidden
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                </span>
+                <span className="text-[13px] leading-relaxed text-gray-800">{goal.goal_text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {(() => {
+          const slots = parseMeetingSchedule(
+            club.meeting_schedule,
+            club.meeting_day,
+            club.meeting_time_start,
+            club.meeting_time_end
+          );
+          const locationText = formatEventLocation(club.meeting_building, club.meeting_room, club.meeting_location);
+          if (slots.length === 0 && !locationText) return null;
+          return (
+            <div className="mt-4 md:hidden">
+              <h2 className="mb-1.5 text-base font-bold text-gray-900">Meeting Schedule</h2>
+              <div className="rounded-[10px] bg-white p-3.5" style={{ boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>
+                {slots.map((slot, i) => (
+                  <div key={`${slot.day}-${i}`} className="mb-1.5 flex items-start gap-2 last:mb-0">
+                    <span className="mt-0.5 text-teal" aria-hidden><CalendarIcon size={16} /></span>
+                    <span className="text-[13px] font-bold text-gray-900">
+                      {slot.day}
+                      {slot.start && slot.end ? ` ${formatEventTime(slot.start)} - ${formatEventTime(slot.end)}` : ""}
+                    </span>
+                  </div>
+                ))}
+                {locationText && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-teal" aria-hidden><LocationIcon size={16} /></span>
+                    <span className="text-[13px] font-bold text-gray-900">{locationText}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Tab nav */}
         <nav className="mt-4 flex gap-8 border-t pt-3" style={{ borderColor: "rgba(0,0,0,0.08)" }} aria-label="Club sections">
