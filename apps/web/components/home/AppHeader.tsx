@@ -6,10 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CountBadge } from "../shared/CountBadge";
-import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon } from "../shared/icons";
+import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon, PersonAddIcon } from "../shared/icons";
 import { ProfileMenu } from "../profile/ProfileMenu";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { useDiscoverySearch } from "../../lib/hooks/useDiscoverySearch";
+import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 import { Avatar } from "../shared/Avatar";
 
 // Fixed top navigation (matches the web Home + Club screenshots): logo, the
@@ -41,6 +42,10 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const pathname = usePathname();
   const router = useRouter();
   const { data: summary } = useUnreadSummaryValue(userId);
+  // Phone-only top bar needs the Gluemates count directly — on desktop it
+  // comes from ProfileSidebar instead, which is `hidden lg:block` and so
+  // never mounts (and never reaches this count) below that breakpoint.
+  const { data: profile } = useOwnProfile(userId);
 
   const isHome = pathname === "/home" || pathname === "/dashboard";
   const notifications = summary?.unread_notifications ?? 0;
@@ -112,28 +117,47 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
       style={{ borderColor: "rgba(0,0,0,0.06)" }}
     >
       <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4 sm:px-6">
+        {/* Phone width has no logo/search-bar chrome at all (matches the
+            native app's header, which is just the avatar + a couple of
+            icons) — the avatar sits first in DOM/left on phone via `order-1`,
+            then reorders to its normal desktop position (right, after
+            everything else) at md+ via `md:order-5`. Rendered ONCE only —
+            duplicate-mounting ProfileMenu for a second breakpoint position
+            was a real bug caught in an earlier pass. */}
+        <div className="order-1 shrink-0 md:order-5">
+          <ProfileMenu userId={userId} />
+        </div>
+
         {/* The WHOLE logo is the link: the anchor is an inline-flex box that
             wraps the image exactly, so every pixel of the mark navigates Home
             from any authenticated route. The asset is 611x409 — passing its
             real intrinsic size and sizing with CSS keeps it undistorted, where
             the previous 40x40 squashed it into a square. `h-11 w-auto` renders
             ~66x44: noticeably larger and easier to see, and still well inside
-            the 64px header, so no layout moves. */}
+            the 64px header, so no layout moves. Hidden below md — phone gets
+            no logo, matching native. */}
         <Link
           href="/home"
           aria-label="We Glue home"
           title="Home"
-          className="inline-flex shrink-0 items-center rounded-md focus:outline-none focus-visible:ring-2"
+          className="hidden shrink-0 items-center rounded-md focus:outline-none focus-visible:ring-2 md:order-1 md:inline-flex"
         >
           <Image src="/logo.png" alt="We Glue" width={611} height={409} priority className="h-11 w-auto" />
         </Link>
 
         {/* The search region is ALWAYS flex-1 so the nav icons keep a fixed
             right-aligned position whether the field is expanded or collapsed —
-            expanding/collapsing must never make the icons jump (spec §3). */}
-        <div className="flex min-w-0 flex-1 items-center">
+            expanding/collapsing must never make the icons jump (spec §3). On
+            phone, the field itself (not this flex-1 spacer) stays hidden
+            unless the user explicitly opened it from the bottom tab bar's
+            Search tab — Home no longer auto-shows a persistent search bar
+            below md, matching native (search lives only on the bottom tab). */}
+        <div className="order-2 flex min-w-0 flex-1 items-center md:order-2">
           {showInput ? (
-            <div ref={fieldRef} className="relative w-full max-w-xl">
+            <div
+              ref={fieldRef}
+              className={`relative w-full max-w-xl ${isHome && !expanded ? "hidden md:block" : ""}`}
+            >
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
                 <SearchIcon size={18} />
               </span>
@@ -191,6 +215,9 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
                 )}
             </div>
           ) : (
+            // Hidden below md — phone shows no search affordance in the top
+            // row at all (reachable only via the bottom tab bar's Search
+            // tab), matching native.
             <button
               type="button"
               aria-label="Open search"
@@ -200,7 +227,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
                 // Focus once the input has rendered.
                 requestAnimationFrame(() => inputRef.current?.focus());
               }}
-              className="flex h-10 w-10 items-center justify-center rounded-full border bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2"
+              className="hidden h-10 w-10 items-center justify-center rounded-full border bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 md:flex"
               style={{ borderColor: "rgba(0,0,0,0.1)" }}
             >
               <SearchIcon size={18} />
@@ -218,7 +245,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
             reachable up here too (its expand/collapse behavior is
             unchanged) since the bottom bar's Search tab just expands and
             focuses this same field. */}
-        <nav className="hidden shrink-0 items-center gap-4 sm:gap-5 md:flex" aria-label="Primary">
+        <nav className="hidden shrink-0 items-center gap-4 sm:gap-5 md:order-3 md:flex" aria-label="Primary">
           <NavIcon href="/home" label="Home" active={isHome} badge={notifications} badgeLabel="unread notifications">
             <HomeIcon size={26} filled={isHome} />
           </NavIcon>
@@ -230,14 +257,25 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           </NavIcon>
         </nav>
 
-        {/* Rendered once, at every breakpoint — the bottom tab bar
-            deliberately does not carry the avatar (mirrors native: the
-            avatar opens a menu/drawer, it is not one of the bottom tabs), so
-            the top bar keeps it visible everywhere rather than mounting a
-            second ProfileMenu instance just to swap position responsively. */}
-        <div className="shrink-0">
-          <ProfileMenu userId={userId} />
-        </div>
+        {/* Phone-only: Gluemates. On desktop this lives in ProfileSidebar,
+            which is `hidden lg:block` — below that breakpoint it never
+            mounts, so phone had NO way to reach Gluemates at all until this
+            icon. Matches native's second top-right icon + count badge. */}
+        <Link
+          href="/home?gluemates=1"
+          aria-label="Gluemates"
+          className="relative order-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm md:hidden"
+          style={{ borderColor: "rgba(0,0,0,0.1)" }}
+        >
+          <PersonAddIcon size={20} />
+          {(profile?.gluemates_count ?? 0) > 0 && (
+            <CountBadge
+              count={profile?.gluemates_count ?? 0}
+              label="gluemates"
+              style={{ position: "absolute", top: -4, right: -4 }}
+            />
+          )}
+        </Link>
       </div>
 
       <BottomTabBar
@@ -280,8 +318,12 @@ function BottomTabBar({
 }): JSX.Element {
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t bg-cream/95 backdrop-blur md:hidden"
-      style={{ borderColor: "rgba(0,0,0,0.06)", paddingBottom: "env(safe-area-inset-bottom)" }}
+      // Solid brand teal with white icons — matches the native app's tab bar
+      // exactly (#0FA6A6, sampled directly from the running iOS build), not
+      // the previous cream bar with dark/teal icons that read as a web
+      // toolbar rather than an app tab bar.
+      className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around bg-[#0FA6A6] md:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       aria-label="Primary"
     >
       <BottomTabIcon href="/home" label="Home" active={isHome} badge={notifications} badgeLabel="unread notifications">
@@ -294,7 +336,7 @@ function BottomTabBar({
         type="button"
         aria-label="Search"
         onClick={onSearchTap}
-        className="flex h-14 flex-1 flex-col items-center justify-center text-gray-700"
+        className="flex h-14 flex-1 flex-col items-center justify-center text-white"
       >
         <SearchIcon size={24} />
       </button>
@@ -328,8 +370,11 @@ function BottomTabIcon({
       href={href}
       aria-label={label}
       aria-current={active ? "page" : undefined}
-      className="relative flex h-14 flex-1 flex-col items-center justify-center"
-      style={{ color: active ? "#0FA6A6" : "#1F2937" }}
+      // White on the solid-teal bar for every tab — matches native, where
+      // the active/inactive distinction is the icon's filled vs. outline
+      // shape (already passed as `filled={...}` by each caller), not a
+      // color change.
+      className="relative flex h-14 flex-1 flex-col items-center justify-center text-white"
     >
       {children}
       {badge > 0 && (

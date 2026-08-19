@@ -74,7 +74,7 @@ export default function InterestsPage(): JSX.Element | null {
   return (
     <main className="min-h-screen bg-[#FEFCF0] flex justify-center px-4 py-5 sm:px-6 sm:py-8">
       <div className="w-full max-w-[820px]">
-        <SurveyTopBar />
+        <SurveyTopBar cancelHref="/" />
         <SurveyProgress filled={1} step="Step 1 of 2" />
 
         <h1 className="text-[22px] sm:text-[27px] font-bold text-[#0FA6A6] leading-tight mt-6 sm:mt-9 mb-2 sm:mb-3">
