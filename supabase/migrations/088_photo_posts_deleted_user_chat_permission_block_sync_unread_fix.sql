@@ -55,34 +55,39 @@ BEGIN
        WHERE p.university_id = v_author_university
          AND p.id <> NEW.author_id
     LOOP
-      INSERT INTO public.notifications (
-        user_id, actor_id, type, entity_id, entity_type, read, message
-      )
-      VALUES (
-        v_recipient.id,
-        NEW.author_id,
-        'club_post',
-        NEW.id,
-        'post',
-        false,
-        v_author_name || ' shared a photo post.'
-      )
-      ON CONFLICT DO NOTHING
-      RETURNING id INTO v_notification_id;
-
-      IF v_notification_id IS NOT NULL THEN
-        PERFORM public.enqueue_push(
+      BEGIN
+        INSERT INTO public.notifications (
+          user_id, actor_id, type, entity_id, entity_type, read, message
+        )
+        VALUES (
           v_recipient.id,
-          v_notification_id,
+          NEW.author_id,
           'club_post',
-          v_author_name,
-          v_author_name || ' shared a photo post.',
-          jsonb_build_object('screen', 'post', 'postId', NEW.id),
-          'club_post:' || NEW.id::text,
-          'club_post:' || NEW.id::text || ':' || v_recipient.id::text,
-          0
-        );
-      END IF;
+          NEW.id,
+          'post',
+          false,
+          v_author_name || ' shared a photo post.'
+        )
+        ON CONFLICT DO NOTHING
+        RETURNING id INTO v_notification_id;
+
+        IF v_notification_id IS NOT NULL THEN
+          PERFORM public.enqueue_push(
+            v_recipient.id,
+            v_notification_id,
+            'club_post',
+            v_author_name,
+            v_author_name || ' shared a photo post.',
+            jsonb_build_object('screen', 'post', 'postId', NEW.id),
+            'club_post:' || NEW.id::text,
+            'club_post:' || NEW.id::text || ':' || v_recipient.id::text,
+            0
+          );
+        END IF;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'notify_photo_post_university failed for recipient %: %',
+          v_recipient.id, SQLERRM;
+      END;
     END LOOP;
   EXCEPTION WHEN OTHERS THEN
     RAISE WARNING 'notify_photo_post_university failed: %', SQLERRM;
