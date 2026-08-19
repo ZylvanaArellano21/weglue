@@ -31,6 +31,12 @@ export function useClubRealtimeSync(userId: string | undefined) {
       queryClient.invalidateQueries({ queryKey: ['conversationHub'] });
       queryClient.invalidateQueries({ queryKey: ['clubChannels'] });
       queryClient.invalidateQueries({ queryKey: ['chatDetails'] });
+      // Fix 5 — this was missing, so a permission change (mode or the
+      // certain-people list) never reached an already-open Chat Info /
+      // Permissions screen on another device: it reads its own
+      // ['channelMeta', channelId] query, keyed separately from the three
+      // above, with a 60s staleTime and nothing else invalidating it.
+      queryClient.invalidateQueries({ queryKey: ['channelMeta'] });
     };
 
     const channel = createSafeChannel('club-sync', [
@@ -52,12 +58,15 @@ export function useClubRealtimeSync(userId: string | undefined) {
       // Channel added / renamed / deleted / permission changed anywhere in a
       // conversation I'm in → hub rows, thread headers and info stay current.
       { event: '*', schema: 'public', table: 'conversation_channels', callback: invalidateChannels },
-      // My certain-people posting rights changed → re-derive on next thread open.
+      // Certain-people posting rights changed for anyone in a channel I can
+      // see (RLS still scopes delivery) → re-derive on next thread open.
+      // Deliberately unfiltered by user_id: an officer editing SOMEONE
+      // ELSE's access, or checking the saved state from a second device,
+      // needs this too — not just a change to the viewer's own row.
       {
         event: '*',
         schema: 'public',
         table: 'channel_posters',
-        filter: `user_id=eq.${userId}`,
         callback: invalidateChannels,
       },
     ]);

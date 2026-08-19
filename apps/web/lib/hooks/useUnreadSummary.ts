@@ -22,11 +22,23 @@ import { subscribeBroadcast } from "../realtime";
 // icon — all derive from the last two keys, so the icon count is always
 // exactly Single + Groups by construction (migration 076).
 
+export type UnreadConversationCount = {
+  conversation_id: string;
+  unread_count: number;
+};
+
 export type UnreadSummary = {
   unread_notifications: number;
   unread_threads: number;
   unread_direct_messages: number;
   unread_group_messages: number;
+  /**
+   * Fix 10 — exactly which conversations have unread activity, so a chat-list
+   * row can show its own badge instead of only the aggregate Single/Group
+   * counts above. Same source RPC as everything else here. Only entries with
+   * unread_count > 0 are present.
+   */
+  unread_conversations: UnreadConversationCount[];
 };
 
 /** The single message-tab badge contract: total = Single + Groups. */
@@ -50,7 +62,17 @@ async function fetchUnreadSummary(): Promise<UnreadSummary> {
     unread_threads: Math.max(0, summary.unread_threads ?? 0),
     unread_direct_messages: Math.max(0, summary.unread_direct_messages ?? 0),
     unread_group_messages: Math.max(0, summary.unread_group_messages ?? 0),
+    unread_conversations: Array.isArray(summary.unread_conversations) ? summary.unread_conversations : [],
   };
+}
+
+/** O(1) per-conversation lookup for a chat-list row's own badge. */
+export function unreadCountForConversation(
+  summary: UnreadSummary | undefined,
+  conversationId: string | undefined,
+): number {
+  if (!summary || !conversationId) return 0;
+  return summary.unread_conversations.find((c) => c.conversation_id === conversationId)?.unread_count ?? 0;
 }
 
 /** Read-only value (no subscription). Use at extra render sites. */

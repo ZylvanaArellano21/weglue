@@ -27,6 +27,7 @@ import { markGenuineSignIn } from "../lib/notifications/pendingRoute";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
 import { useInviteDeepLink } from "../hooks/useInviteDeepLink";
 import { useAccessSynchronization } from "../hooks/useAccessSynchronization";
+import { useBlockSynchronization } from "../hooks/useBlocking";
 import { LeaveClubHost } from "../components/club/LeaveClubHost";
 import { SidebarHost } from "../components/sidebar/SidebarHost";
 import { MediaPickerHost } from "../components/media/MediaPickerHost";
@@ -229,6 +230,7 @@ export default function RootLayout() {
     !!session && shouldSyncStudentProfile(session),
     refreshAccess,
   );
+  useBlockSynchronization(session?.user.id);
 
   // Fresh check on every foreground, so a restriction applied while the app was
   // backgrounded takes effect on the next resume rather than the next launch.

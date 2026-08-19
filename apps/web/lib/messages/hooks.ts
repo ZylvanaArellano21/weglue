@@ -232,6 +232,14 @@ export function useMessagesRealtime(conversationId: string | null, userId: strin
     const open = createSafeChannel(`messages-conversation-${conversationId}`, [
       { event: "*", schema: "public", table: "conversation_participants", filter: `conversation_id=eq.${conversationId}`, callback: invalidateOpen },
       { event: "*", schema: "public", table: "conversation_channels", filter: `conversation_id=eq.${conversationId}`, callback: invalidateOpen },
+      // Fix 5 — the "certain people" allow-list itself was never watched:
+      // conversation_channels only changes on a MODE switch, so editing WHO
+      // is on the list without changing the mode silently went unsynced on
+      // every other device/session. channel_posters has no conversation_id
+      // column to filter by (only channel_id), so this is unfiltered here —
+      // RLS still scopes actual delivery, and the subscription only lives
+      // while this conversation is open.
+      { event: "*", schema: "public", table: "channel_posters", callback: invalidateOpen },
     ]);
     // The database emits an opaque Day 10E-style invalidation for every
     // message lifecycle event. Canonical RLS-backed refetches own visibility.

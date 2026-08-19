@@ -13,7 +13,7 @@ vi.mock('../../lib/realtime', () => ({
   subscribeBroadcast: vi.fn(),
 }));
 
-import { messageBadgeCounts, type UnreadSummary } from '../useUnreadSummary';
+import { messageBadgeCounts, unreadCountForConversation, type UnreadSummary } from '../useUnreadSummary';
 
 const source = (relativePath: string) =>
   readFileSync(decodeURIComponent(new URL(relativePath, import.meta.url).pathname), 'utf8');
@@ -23,6 +23,7 @@ const summary = (over: Partial<UnreadSummary> = {}): UnreadSummary => ({
   unread_threads: 0,
   unread_direct_messages: 0,
   unread_group_messages: 0,
+  unread_conversations: [],
   ...over,
 });
 
@@ -66,5 +67,21 @@ describe('Message-tab unread categorization', () => {
   it('keeps the app-icon badge on the untouched thread count', () => {
     const hook = source('../useUnreadSummary.ts');
     expect(hook).toContain('query.data.unread_notifications + query.data.unread_threads');
+  });
+
+  it('resolves the exact unread conversation, not just the aggregate count', () => {
+    const withConversations = summary({
+      unread_conversations: [
+        { conversation_id: 'convo-a', unread_count: 2 },
+        { conversation_id: 'convo-b', unread_count: 1 },
+      ],
+    });
+    expect(unreadCountForConversation(withConversations, 'convo-a')).toBe(2);
+    expect(unreadCountForConversation(withConversations, 'convo-b')).toBe(1);
+    // Read: present in every conversation with unread activity, absent (not
+    // zero-valued) everywhere else — this is a list, not a fixed map.
+    expect(unreadCountForConversation(withConversations, 'convo-c')).toBe(0);
+    expect(unreadCountForConversation(undefined, 'convo-a')).toBe(0);
+    expect(unreadCountForConversation(summary(), undefined)).toBe(0);
   });
 });

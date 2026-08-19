@@ -1,15 +1,17 @@
 /**
- * The single canonical foreground notification presentation on mobile
- * (correction 3). While the app is active, usePushNotifications.ts
- * unconditionally suppresses the native OS banner — this component is the
- * only thing left that can show anything, fed by the same realtime INSERT
+ * The no-permission-only foreground notification fallback. Rendered only
+ * while OS notification permission is NOT granted (see
+ * PushNotificationsHost.tsx) — native presentation is impossible in that
+ * state, foreground or background, so this is the sole presentation for
+ * that population. Styled to resemble each platform's native banner chrome
+ * rather than a generic in-app toast. Fed by the same realtime INSERT
  * stream useRealtimeNotifications already subscribes to (via bannerBus, no
  * second subscription). At most one banner per notification id, ever
  * (session-lived dedup Set survives a flaky-connection replay), and never
  * for the actor's own action or the exact destination already on screen.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Text, TouchableOpacity } from 'react-native';
+import { Animated, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
@@ -107,28 +109,75 @@ export function ForegroundNotificationBanner() {
         activeOpacity={0.9}
         accessibilityRole="button"
         accessibilityLabel={current.message ?? 'New notification'}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          backgroundColor: '#1A1A1A',
-          borderRadius: 14,
-          paddingHorizontal: 14,
-          paddingVertical: 12,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.25,
-          shadowRadius: 8,
-          elevation: 8,
-        }}
+        style={
+          Platform.OS === 'android'
+            ? {
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.2,
+                shadowRadius: 6,
+                elevation: 8,
+              }
+            : {
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: 10,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 16,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.18,
+                shadowRadius: 10,
+                elevation: 6,
+              }
+        }
       >
-        <Ionicons name="notifications" size={18} color="#0FA6A6" />
-        <Text
-          numberOfLines={2}
-          style={{ flex: 1, color: '#FFFFFF', fontSize: 13, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}
+        <View
+          style={{
+            width: Platform.OS === 'android' ? 24 : 28,
+            height: Platform.OS === 'android' ? 24 : 28,
+            borderRadius: Platform.OS === 'android' ? 12 : 8,
+            backgroundColor: '#0FA6A6',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginTop: Platform.OS === 'android' ? 0 : 1,
+          }}
         >
-          {current.message ?? 'You have a new notification.'}
-        </Text>
+          <Ionicons name="notifications" size={Platform.OS === 'android' ? 14 : 15} color="#FFFFFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontSize: 12,
+              fontWeight: Platform.OS === 'android' ? '500' : '600',
+              color: Platform.OS === 'android' ? '#5F6368' : '#8E8E93',
+              marginBottom: 2,
+              fontFamily: Platform.OS === 'android' ? 'Inter_500Medium' : 'Inter_600SemiBold',
+            }}
+          >
+            We Glue
+          </Text>
+          <Text
+            numberOfLines={2}
+            style={{
+              fontSize: 14,
+              color: Platform.OS === 'android' ? '#202124' : '#000000',
+              fontFamily: 'Inter_400Regular',
+            }}
+          >
+            {current.message ?? 'You have a new notification.'}
+          </Text>
+        </View>
       </TouchableOpacity>
     </Animated.View>
   );

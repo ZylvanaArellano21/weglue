@@ -17,6 +17,7 @@ const summary = (over: Partial<UnreadSummary> = {}): UnreadSummary => ({
   unread_threads: 0,
   unread_direct_messages: 0,
   unread_group_messages: 0,
+  unread_conversations: [],
   ...over,
 });
 

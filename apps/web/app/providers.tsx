@@ -16,6 +16,7 @@ import { useUnreadSummary } from "../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications } from "../lib/hooks/useNotifications";
 import { useMyClubsRealtime } from "../lib/hooks/useClubRealtime";
 import { useRealtimeMessageBanners } from "../lib/hooks/useRealtimeMessageBanners";
+import { useBlockSynchronization } from "../lib/hooks/useBlocking";
 import { ForegroundNotificationBanner } from "../components/notifications/ForegroundNotificationBanner";
 
 // The current session's user id, tracked once at the app root. Backs the
@@ -52,6 +53,7 @@ function useSessionRealtimeHub(): string | undefined {
   // banner feed — their own realtime source (see the hook for why it can't
   // reuse the existing per-conversation thread sync).
   useRealtimeMessageBanners(userId);
+  useBlockSynchronization(userId);
   return userId;
 }
 
