@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useHomePostsFeed, useLikePost, type FeedPost } from "../../lib/hooks/useHomePostsFeed";
+import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
 import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
@@ -58,6 +59,7 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
         <PostCard
           key={post.id}
           post={post}
+          viewerUserId={userId}
           onLike={() =>
             like({ userId, postId: post.id, hasLiked: post.user_has_liked })
           }
@@ -88,15 +90,52 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
 
 function PostCard({
   post,
+  viewerUserId,
   onLike,
   onOpenComments,
   onShare,
 }: {
   post: FeedPost;
+  viewerUserId: string;
   onLike: () => void;
   onOpenComments: () => void;
   onShare: () => void;
 }): JSX.Element {
+  const show = useToast();
+  const { mutate: follow, isPending: following } = useFollow(viewerUserId);
+  const { mutate: unfollow, isPending: unfollowing } = useUnfollow(viewerUserId);
+  const isOwnPost = post.author.id === viewerUserId;
+
+  const onFollowAction = () => {
+    if (following || unfollowing) return;
+    if (post.author.is_following || post.author.is_requested) {
+      // Stopping a follow (or cancelling a pending request) always confirms
+      // first, matching the profile page's Follow button — starting one
+      // never does (below).
+      if (!window.confirm(`Unfollow ${post.author.username}?`)) return;
+      unfollow(post.author.id, {
+        onSuccess: () => show(post.author.is_requested && !post.author.is_following ? "Request cancelled" : "Unfollowed"),
+        onError: () => show("Failed to update.", "error"),
+      });
+      return;
+    }
+    follow(post.author.id, {
+      onSuccess: () => show(post.author.profile_is_private ? "Requested to follow" : "Following! 🎉"),
+      onError: () => show("Failed to follow.", "error"),
+    });
+  };
+
+  const followLabel = post.author.is_following
+    ? post.author.follows_me
+      ? "Gluemates 🎉"
+      : "Following"
+    : post.author.is_requested
+      ? "Requested"
+      : post.author.follows_me
+        ? "Follow back"
+        : "Follow";
+  const followLikeStyle = post.author.is_following || post.author.is_requested;
+
   return (
     <article
       className="overflow-hidden rounded-xl"
@@ -107,9 +146,9 @@ function PostCard({
       }}
     >
       <div className="flex items-center gap-2.5 px-3.5 py-3">
-        <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex items-center gap-2.5">
+        <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex min-w-0 flex-1 items-center gap-2.5">
           <Avatar uri={post.author.avatar_url} size={34} name={post.author.username} />
-          <span className="text-[15px] font-semibold text-gray-800">
+          <span className="truncate text-[15px] font-semibold text-gray-800">
             {post.author.username}
           </span>
         </ClickableUserIdentity>
@@ -118,6 +157,24 @@ function PostCard({
             <span className="text-gray-400">·</span>
             {post.tagged_clubs.map((club) => <ClickableClubIdentity key={club.id} clubId={club.id} className="truncate">@{club.name}</ClickableClubIdentity>)}
           </span>
+        )}
+        {/* Relationship pill — matches the native Home feed's Follow /
+            Following / Gluemates 🎉 / Requested / Follow back pill. Own
+            posts never show this (nothing to follow). */}
+        {!isOwnPost && (
+          <button
+            type="button"
+            onClick={onFollowAction}
+            disabled={following || unfollowing}
+            className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold disabled:opacity-60"
+            style={
+              followLikeStyle
+                ? { border: "1.5px solid #0FA6A6", color: "#0FA6A6", background: "rgba(15,166,166,0.08)" }
+                : { background: "#0FA6A6", color: "#fff" }
+            }
+          >
+            {followLabel}
+          </button>
         )}
       </div>
 
