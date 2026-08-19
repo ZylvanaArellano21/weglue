@@ -235,6 +235,15 @@ export function CheckboxIcon(p: IconProps): JSX.Element {
 }
 
 /** Ionicons `notifications-off-outline` (outline) / `notifications-off` (on). */
+export function BellIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)} fill={p.filled ? "currentColor" : "none"}>
+      <path d="M18 8.5a6 6 0 0 0-12 0c0 6-2 7.5-2 7.5h16s-2-1.5-2-7.5Z" />
+      <path d="M10.3 20a2 2 0 0 0 3.4 0" />
+    </svg>
+  );
+}
+
 export function BellOffIcon(p: IconProps): JSX.Element {
   return (
     <svg {...svgProps(p)} fill={p.filled ? "currentColor" : "none"}>
