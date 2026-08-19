@@ -293,92 +293,101 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           </NavIcon>
         </nav>
 
-        {/* Phone-only AND Home-only: compose. Native's "+" opens a small
-            picker (Picture / Event, Event gated to officers — same
-            permission ShareAGlue already uses on desktop, server-enforced
-            either way) rather than posting directly. Always routes to
-            /home: compose is a Home-tab concept there's no equivalent
-            surface for on Clubs/Messages, and that's exactly how native's
-            own Home-tab "+" behaves — it also only exists on that one
-            screen, not a persistent bar everywhere. */}
-        <div ref={composeRef} className={isHome ? "relative order-3 md:hidden" : "hidden"}>
-          <button
-            type="button"
-            aria-label="New post"
-            aria-haspopup="menu"
-            aria-expanded={composeOpen}
-            onClick={() => setComposeOpen((v) => !v)}
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0FA6A6] text-white shadow-sm"
-          >
-            <PlusIcon size={20} strokeWidth={2.2} />
-          </button>
-          {composeOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 top-12 z-50 min-w-[150px] overflow-hidden rounded-xl bg-white py-1.5"
-              style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.14)" }}
+        {/* Phone-only AND Home-only: compose + notifications, STACKED
+            vertically as one column — checked directly against
+            apps/mobile/app/(tabs)/index.tsx's header, which wraps both in a
+            single `<View style={{ alignItems: 'flex-end', gap: 8 }}>` (a
+            column by RN's default flexDirection), not a row. This wrapper
+            is the one flex item in the header row (its own order-3); the
+            two buttons are its children, no longer separately positioned,
+            so they can never end up side-by-side again. Both buttons also
+            share native's exact 38×38 rounded-square shape (10px radius,
+            not a circle) — only the fill (teal for +, transparent/teal
+            outline for notifications) differs, matching native exactly. */}
+        <div className={isHome ? "order-3 flex flex-col items-end gap-2 md:hidden" : "hidden"}>
+          {/* Compose. Native's "+" opens a small picker (Picture / Event,
+              Event gated to officers — same permission ShareAGlue already
+              uses on desktop, server-enforced either way) rather than
+              posting directly. Always routes to /home: compose is a
+              Home-tab concept there's no equivalent surface for on
+              Clubs/Messages, and that's exactly how native's own Home-tab
+              "+" behaves — it also only exists on that one screen, not a
+              persistent bar everywhere. */}
+          <div ref={composeRef} className="relative">
+            <button
+              type="button"
+              aria-label="New post"
+              aria-haspopup="menu"
+              aria-expanded={composeOpen}
+              onClick={() => setComposeOpen((v) => !v)}
+              className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] bg-[#0FA6A6] text-white shadow-sm"
             >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setComposeOpen(false);
-                  router.push("/home?compose=post");
-                }}
-                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[15px] text-gray-900 hover:bg-gray-50"
+              <PlusIcon size={20} strokeWidth={2.2} />
+            </button>
+            {composeOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-12 z-50 min-w-[150px] overflow-hidden rounded-xl bg-white py-1.5"
+                style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.14)" }}
               >
-                <ImageIcon size={20} /> Picture
-              </button>
-              {isOfficer && (
                 <button
                   type="button"
                   role="menuitem"
                   onClick={() => {
                     setComposeOpen(false);
-                    router.push("/home?compose=event");
+                    router.push("/home?compose=post");
                   }}
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[15px] text-gray-900 hover:bg-gray-50"
                 >
-                  <CalendarIcon size={20} /> Event
+                  <ImageIcon size={20} /> Picture
                 </button>
-              )}
-            </div>
-          )}
-        </div>
+                {isOfficer && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setComposeOpen(false);
+                      router.push("/home?compose=event");
+                    }}
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[15px] text-gray-900 hover:bg-gray-50"
+                  >
+                    <CalendarIcon size={20} /> Event
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
-        {/* Phone-only: Notifications. Checked directly against
-            apps/mobile/app/(tabs)/index.tsx — this second top-right icon
-            (person-add glyph; that's the native icon choice, kept here for
-            an exact visual match even though it reads oddly for
-            notifications) calls handleNotificationsPress, which routes to
-            /home/notifications. An earlier pass wired this to Gluemates
-            instead, going only by the icon's shape rather than checking
-            what it actually does — Gluemates was never the gap that needed
-            filling (it's already reachable from the profile page's stat
-            row, same as native), Notifications was: ProfileSidebar carries
-            the only other entry point and it's `hidden lg:block`, so phone
-            had no way to reach it at all until this icon. Home-only on
-            phone too, for the same reason as the compose button above —
-            native's icon only exists on that one screen. */}
-        <Link
-          href="/home?notifications=1"
-          aria-label="Notifications"
-          className={
-            isHome
-              ? "relative order-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm md:hidden"
-              : "hidden"
-          }
-          style={{ borderColor: "rgba(0,0,0,0.1)" }}
-        >
-          <PersonAddIcon size={20} />
-          {notifications > 0 && (
-            <CountBadge
-              count={notifications}
-              label="unread notifications"
-              style={{ position: "absolute", top: -4, right: -4 }}
-            />
-          )}
-        </Link>
+          {/* Notifications. Checked directly against
+              apps/mobile/app/(tabs)/index.tsx — this second top-right icon
+              (person-add glyph; that's the native icon choice, kept here
+              for an exact visual match even though it reads oddly for
+              notifications) calls handleNotificationsPress, which routes to
+              /home/notifications. An earlier pass wired this to Gluemates
+              instead, going only by the icon's shape rather than checking
+              what it actually does — Gluemates was never the gap that
+              needed filling (it's already reachable from the profile
+              page's stat row, same as native), Notifications was:
+              ProfileSidebar carries the only other entry point and it's
+              `hidden lg:block`, so phone had no way to reach it at all
+              until this icon. Same outlined-teal rounded-square as
+              native's, not the white circle this used to be. */}
+          <Link
+            href="/home?notifications=1"
+            aria-label="Notifications"
+            className="relative flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[10px] border-[1.5px] text-teal"
+            style={{ borderColor: "#0FA6A6" }}
+          >
+            <PersonAddIcon size={20} />
+            {notifications > 0 && (
+              <CountBadge
+                count={notifications}
+                label="unread notifications"
+                style={{ position: "absolute", top: -1, right: -1 }}
+              />
+            )}
+          </Link>
+        </div>
       </div>
     </header>
 
