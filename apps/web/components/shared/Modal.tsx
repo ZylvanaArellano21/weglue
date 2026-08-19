@@ -106,7 +106,14 @@ export function Modal({
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-[100] flex justify-center overflow-y-auto bg-black/50 p-4 sm:p-8 ${placement === "bottom" ? "items-end sm:items-center" : "items-start"}`}
+      // Below md, every overlay is a real full-screen view (native's pattern:
+      // event/post detail, notifications, etc. all push a full screen with a
+      // back chevron, never a floating card over the previous one) — no dark
+      // backdrop needed since the panel fills the viewport. At md+ this is
+      // the original centered/bottom-sheet card behavior (the sm-tier
+      // padding/rounding split collapses into one md rule below since sm's
+      // 640px breakpoint is already inside the phone range this now owns).
+      className={`fixed inset-0 z-[100] flex justify-center items-start overflow-y-auto bg-cream md:bg-black/50 md:p-8 ${placement === "bottom" ? "md:items-end" : "md:items-start"}`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -116,17 +123,23 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={`relative w-full rounded-2xl bg-cream shadow-2xl ${placement === "bottom" ? "my-0 sm:my-4 rounded-b-none sm:rounded-b-2xl" : "my-4"}`}
-        style={{ maxWidth }}
+        className="relative w-full min-h-full rounded-none bg-cream shadow-2xl md:min-h-0 md:my-4 md:max-w-[var(--modal-max-width)] md:rounded-2xl"
+        style={{ "--modal-max-width": `${maxWidth}px` } as React.CSSProperties}
       >
+        {/* Phone: back chevron, top-left, matching every native detail
+            screen. Desktop/tablet: the original circular X, unchanged.
+            Kept on a translucent white circle in both cases — content varies
+            per modal (a full-bleed dark event image sits directly behind
+            this on EventDetailModal), so the button needs to stay legible
+            against anything, not just cream backgrounds. */}
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-3 top-3 z-10 rounded-full bg-white/80 p-1.5 text-gray-600 hover:text-gray-900"
-          style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }}
+          className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-gray-700 shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:left-auto md:right-3 md:h-auto md:w-auto md:p-1.5 md:text-gray-600"
         >
-          <CloseIcon size={18} />
+          <span className="md:hidden"><ChevronGlyph dir="left" /></span>
+          <span className="hidden md:inline"><CloseIcon size={18} /></span>
         </button>
         {indicator && (
           <span className="absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-xs font-semibold text-white">
