@@ -112,6 +112,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   };
 
   return (
+    <>
     <header
       className="sticky top-0 z-40 border-b bg-cream/95 backdrop-blur"
       style={{ borderColor: "rgba(0,0,0,0.06)" }}
@@ -277,20 +278,31 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           )}
         </Link>
       </div>
-
-      <BottomTabBar
-        isHome={isHome}
-        isClubs={isClubs}
-        isMessages={isMessages}
-        notifications={notifications}
-        messages={messages}
-        onSearchTap={() => {
-          setExpanded(true);
-          window.scrollTo({ top: 0, behavior: "smooth" });
-          requestAnimationFrame(() => inputRef.current?.focus());
-        }}
-      />
     </header>
+
+    {/* Rendered as a SIBLING of <header>, never a descendant: `header` has
+        `backdrop-blur` (backdrop-filter), and per the CSS spec a filter or
+        backdrop-filter on an ancestor creates a new containing block for
+        `position: fixed` descendants — so a fixed child positions itself
+        relative to THAT ANCESTOR's box, not the viewport. With BottomTabBar
+        nested inside header, "bottom: 0" resolved to the bottom of the
+        ~64px header instead of the real screen bottom, so on an actual
+        phone the bar rendered stuck right under the top content instead of
+        docked to the bottom of the screen — invisible to `tsc`/desktop
+        testing, only visible on a real device. */}
+    <BottomTabBar
+      isHome={isHome}
+      isClubs={isClubs}
+      isMessages={isMessages}
+      notifications={notifications}
+      messages={messages}
+      onSearchTap={() => {
+        setExpanded(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }}
+    />
+    </>
   );
 }
 
