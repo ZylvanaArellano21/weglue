@@ -271,7 +271,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
         />
       )}
 
-      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} onClose={() => setAttendanceEventId(null)} />}
+      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} userId={userId} onClose={() => setAttendanceEventId(null)} />}
 
       {people && (
         <ClubMembersModal
