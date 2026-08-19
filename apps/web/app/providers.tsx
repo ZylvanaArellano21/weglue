@@ -256,6 +256,40 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
   }, [queryClient]);
 }
 
+// This codebase has never registered a service worker — yet a real device
+// tested during this engagement had one active at the root scope (`/sw.js`,
+// which now 404s) with a Workbox cache holding ~400 stale static assets.
+// It's a leftover from something that used to be hosted at this domain
+// before it pointed here; nothing in this app can prevent it from
+// installing, only clean it up after the fact. Deploy after deploy, a
+// returning browser with this registration can keep serving that old cache
+// indefinitely instead of ever fetching the new build — which is why real
+// devices reported seeing no changes while the deployed code was already
+// correct. No-op for anyone who never had one. The one-time reload (guarded
+// by a session flag, so it can't loop) is needed because unregistering does
+// not stop a service worker from controlling the page that is ALREADY open —
+// only the next navigation. Without it, this exact visit still renders stale
+// content once and the fix would only become visible on the visit after.
+function useLegacyServiceWorkerCleanup(): void {
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    void navigator.serviceWorker.getRegistrations().then((regs) => {
+      if (regs.length === 0) return;
+      regs.forEach((reg) => void reg.unregister());
+      if (!("caches" in window)) return;
+      void caches
+        .keys()
+        .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+        .then(() => {
+          const flag = "weglue-legacy-sw-cleanup-reloaded";
+          if (sessionStorage.getItem(flag)) return;
+          sessionStorage.setItem(flag, "1");
+          window.location.reload();
+        });
+    });
+  }, []);
+}
+
 // Single, centralized auth → Realtime bridge (mounted once at the app root).
 // Private Broadcast channels (event:/post: interaction realtime) are only
 // authorized while the Realtime socket carries the user's current access token,
@@ -318,6 +352,7 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
       })
   );
 
+  useLegacyServiceWorkerCleanup();
   useRealtimeAuthBridge();
   useApplicationAccessGate(queryClient);
   useStudentContentSynchronization(queryClient);
