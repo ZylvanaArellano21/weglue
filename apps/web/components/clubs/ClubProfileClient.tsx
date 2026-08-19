@@ -192,6 +192,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onOfficerChat={() => void openClubChat("officer_chat")}
             onGroupChat={() => void openClubChat("club_group")}
             onOpenPeople={setPeople}
+            onBack={() => router.back()}
           />
 
           {activeTab === "home" && (

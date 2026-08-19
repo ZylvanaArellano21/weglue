@@ -171,6 +171,14 @@ export function ChevronRightIcon(p: IconProps): JSX.Element {
   );
 }
 
+export function ChevronLeftIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
 /** Circled ✕ — clears / removes the current profile picture in the editor. */
 export function CloseCircleIcon(p: IconProps): JSX.Element {
   return (
