@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ShareAGlue } from "./ShareAGlue";
 import { EventsFeed } from "./EventsFeed";
 import { PostsFeed } from "./PostsFeed";
+import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 
 type Tab = "posts" | "events";
 
@@ -20,6 +21,8 @@ export function HomeFeed({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const { data: profile } = useOwnProfile(userId);
+  const firstName = profile?.full_name?.split(" ")[0] ?? profile?.username ?? "";
 
   const tab: Tab = params.get("tab") === "posts" ? "posts" : "events";
 
@@ -39,7 +42,18 @@ export function HomeFeed({
 
   return (
     <div>
-      <ShareAGlue userId={userId} onSelect={handleShare} />
+      {/* Phone-only greeting — native's Home shows this instead of the
+          Share-a-Glue bar (compose lives only in the header "+" there,
+          matching the phone-only picker AppHeader now renders). Exact copy/
+          derivation match apps/mobile/app/(tabs)/index.tsx: first word of
+          full_name, falling back to username. */}
+      <h1 className="mb-1 mt-2 text-2xl font-bold text-black md:hidden">
+        Welcome back {firstName}
+      </h1>
+
+      <div className="hidden md:block">
+        <ShareAGlue userId={userId} onSelect={handleShare} />
+      </div>
 
       <div
         role="tablist"

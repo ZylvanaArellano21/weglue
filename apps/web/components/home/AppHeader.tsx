@@ -6,11 +6,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CountBadge } from "../shared/CountBadge";
-import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon, PersonAddIcon } from "../shared/icons";
+import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon, PersonAddIcon, PlusIcon, ImageIcon } from "../shared/icons";
 import { ProfileMenu } from "../profile/ProfileMenu";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { useDiscoverySearch } from "../../lib/hooks/useDiscoverySearch";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
+import { useIsOfficer } from "../../lib/hooks/useClubMembership";
 import { Avatar } from "../shared/Avatar";
 
 // Fixed top navigation (matches the web Home + Club screenshots): logo, the
@@ -46,6 +47,11 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   // comes from ProfileSidebar instead, which is `hidden lg:block` and so
   // never mounts (and never reaches this count) below that breakpoint.
   const { data: profile } = useOwnProfile(userId);
+  // Backs the phone-only compose picker below — same permission source
+  // ShareAGlue already uses on desktop (event creation is officer-only,
+  // enforced server-side; this only decides whether to show the option).
+  const { data: isOfficer } = useIsOfficer(userId);
+  const [composeOpen, setComposeOpen] = useState(false);
 
   const isHome = pathname === "/home" || pathname === "/dashboard";
   const notifications = summary?.unread_notifications ?? 0;
@@ -60,7 +66,24 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
+  const composeRef = useRef<HTMLDivElement>(null);
   const { data: searchResults, isLoading: searchLoading, isError: searchError } = useDiscoverySearch(userId, value);
+
+  // Closes the phone compose picker on outside click/Escape — same pattern
+  // ShareAGlue already uses for the identical desktop menu.
+  useEffect(() => {
+    if (!composeOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (composeRef.current && !composeRef.current.contains(e.target as Node)) setComposeOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && setComposeOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [composeOpen]);
 
   // Navigating to any non-Home destination returns the search to its collapsed
   // circular state (spec §3). Home always renders it expanded regardless.
@@ -257,6 +280,57 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
             <ChatIcon size={26} filled={isMessages} />
           </NavIcon>
         </nav>
+
+        {/* Phone-only: compose. Native's "+" opens a small picker (Picture /
+            Event, Event gated to officers — same permission ShareAGlue
+            already uses on desktop, server-enforced either way) rather than
+            posting directly. Always routes to /home: compose is a Home-tab
+            concept there's no equivalent surface for on Clubs/Messages, and
+            that's exactly how native's own Home-tab "+" behaves. */}
+        <div ref={composeRef} className="relative order-3 md:hidden">
+          <button
+            type="button"
+            aria-label="New post"
+            aria-haspopup="menu"
+            aria-expanded={composeOpen}
+            onClick={() => setComposeOpen((v) => !v)}
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0FA6A6] text-white shadow-sm"
+          >
+            <PlusIcon size={20} strokeWidth={2.2} />
+          </button>
+          {composeOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-12 z-50 min-w-[150px] overflow-hidden rounded-xl bg-white py-1.5"
+              style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.14)" }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setComposeOpen(false);
+                  router.push("/home?compose=post");
+                }}
+                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[15px] text-gray-900 hover:bg-gray-50"
+              >
+                <ImageIcon size={20} /> Picture
+              </button>
+              {isOfficer && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setComposeOpen(false);
+                    router.push("/home?compose=event");
+                  }}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[15px] text-gray-900 hover:bg-gray-50"
+                >
+                  <CalendarIcon size={20} /> Event
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Phone-only: Gluemates. On desktop this lives in ProfileSidebar,
             which is `hidden lg:block` — below that breakpoint it never
