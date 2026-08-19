@@ -131,8 +131,15 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
 
   return (
     <>
+    {/* On phone, native has no persistent top bar at all outside Home — Club
+        Profile, Clubs, and every other screen start straight into their own
+        content (each with its own header treatment, if any). Hiding every
+        child below still left this element itself rendering as an empty
+        64px strip pinned to the top of every phone page. Hidden entirely
+        below md unless isHome; md:block always restores it for desktop,
+        which keeps the persistent top nav on every page there. */}
     <header
-      className="sticky top-0 z-40 border-b bg-cream/95 backdrop-blur"
+      className={`${isHome ? "" : "hidden md:block"} sticky top-0 z-40 border-b bg-cream/95 backdrop-blur`}
       style={{ borderColor: "rgba(0,0,0,0.06)" }}
     >
       <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4 sm:px-6">
@@ -142,8 +149,16 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
             then reorders to its normal desktop position (right, after
             everything else) at md+ via `md:order-5`. Rendered ONCE only —
             duplicate-mounting ProfileMenu for a second breakpoint position
-            was a real bug caught in an earlier pass. */}
-        <div className="order-1 shrink-0 md:order-5">
+            was a real bug caught in an earlier pass.
+            Phone-only AND Home-only: native's compact avatar/+/notifications
+            row exists on the Home screen alone — Club Profile, Clubs, and
+            every other screen have no such bar (each has its own top
+            treatment, e.g. Club Profile's back chevron floating on its own
+            cover image). This was rendering on every AppHeader-mounting
+            page below md, overlapping content that has its own header.
+            Desktop's top nav is unaffected — it's meant to persist across
+            every page there, this only scopes the phone-specific row. */}
+        <div className={`${isHome ? "order-1" : "hidden md:block"} shrink-0 md:order-5`}>
           <ProfileMenu userId={userId} />
         </div>
 
@@ -276,13 +291,15 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
           </NavIcon>
         </nav>
 
-        {/* Phone-only: compose. Native's "+" opens a small picker (Picture /
-            Event, Event gated to officers — same permission ShareAGlue
-            already uses on desktop, server-enforced either way) rather than
-            posting directly. Always routes to /home: compose is a Home-tab
-            concept there's no equivalent surface for on Clubs/Messages, and
-            that's exactly how native's own Home-tab "+" behaves. */}
-        <div ref={composeRef} className="relative order-3 md:hidden">
+        {/* Phone-only AND Home-only: compose. Native's "+" opens a small
+            picker (Picture / Event, Event gated to officers — same
+            permission ShareAGlue already uses on desktop, server-enforced
+            either way) rather than posting directly. Always routes to
+            /home: compose is a Home-tab concept there's no equivalent
+            surface for on Clubs/Messages, and that's exactly how native's
+            own Home-tab "+" behaves — it also only exists on that one
+            screen, not a persistent bar everywhere. */}
+        <div ref={composeRef} className={isHome ? "relative order-3 md:hidden" : "hidden"}>
           <button
             type="button"
             aria-label="New post"
@@ -338,11 +355,17 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
             filling (it's already reachable from the profile page's stat
             row, same as native), Notifications was: ProfileSidebar carries
             the only other entry point and it's `hidden lg:block`, so phone
-            had no way to reach it at all until this icon. */}
+            had no way to reach it at all until this icon. Home-only on
+            phone too, for the same reason as the compose button above —
+            native's icon only exists on that one screen. */}
         <Link
           href="/home?notifications=1"
           aria-label="Notifications"
-          className="relative order-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm md:hidden"
+          className={
+            isHome
+              ? "relative order-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm md:hidden"
+              : "hidden"
+          }
           style={{ borderColor: "rgba(0,0,0,0.1)" }}
         >
           <PersonAddIcon size={20} />

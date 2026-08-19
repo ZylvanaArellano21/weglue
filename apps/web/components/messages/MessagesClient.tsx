@@ -318,7 +318,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
           grow the document. `min-h-0` on every descendant in this chain is what
           lets the list below actually reach `overflow-y-auto` instead of
           stretching its parent. */}
-      <div className="min-h-[calc(100vh-88px)] overflow-hidden border-y bg-cream shadow-[0_2px_8px_rgba(0,0,0,0.16)] sm:rounded-sm sm:border md:min-h-0 md:flex-1" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
+      <div className="min-h-[100vh] overflow-hidden border-y bg-cream shadow-[0_2px_8px_rgba(0,0,0,0.16)] sm:rounded-sm sm:border md:min-h-0 md:flex-1" style={{ borderColor: "rgba(0,0,0,0.17)" }}>
         <div className={infoOpen && conversationId ? "grid grid-cols-1 md:h-full md:grid-rows-[minmax(0,1fr)] lg:grid-cols-[292px_minmax(0,1fr)_360px]" : "grid grid-cols-1 md:h-full md:grid-cols-[292px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)]"}>
           {/* suggestionsEnabled: `composerMode` is a STRING union whose idle value
               is "none" — truthy — so the previous `!composerMode` test was
@@ -461,7 +461,7 @@ function MessagesLanding({ noClubs, onJoinClub }: { noClubs: boolean; onJoinClub
  *  conversation is missing before resolution has finished. */
 function ThreadSkeleton(): JSX.Element {
   return (
-    <div className="flex min-h-[calc(100vh-88px)] flex-col md:h-full md:min-h-0" aria-busy="true" aria-live="polite">
+    <div className="flex min-h-[100vh] flex-col md:h-full md:min-h-0" aria-busy="true" aria-live="polite">
       <header className="flex min-h-[76px] shrink-0 items-center justify-center border-b px-5" style={{ borderColor: "rgba(0,0,0,0.16)" }}>
         <div className="h-6 w-40 animate-pulse rounded-full bg-black/5" />
       </header>
@@ -797,7 +797,7 @@ type MessageTypeLocal = ThreadMessage["message_type"];
 function ThreadShell({ title, subtitle, onOpenHub, onBack, onOpenInfo, children }: { title: string; subtitle: string | null; onOpenHub?: () => void; onBack?: () => void; onOpenInfo?: () => void; children: React.ReactNode }): JSX.Element {
   // `md:h-full` (not a viewport min-height) keeps the thread exactly as tall as
   // its column, so the message list scrolls internally and the page does not.
-  return <div className="flex min-h-[calc(100vh-88px)] flex-col md:h-full md:min-h-0"><header className="relative flex min-h-[76px] shrink-0 items-center justify-center border-b px-5 text-center" style={{ borderColor: "rgba(0,0,0,0.16)" }}>{onBack && <button type="button" onClick={onBack} aria-label="Back" className="absolute left-3 rounded-full p-2 text-lg text-gray-950 hover:bg-black/5">‹</button>}<div className="flex min-w-0 items-center gap-2">{onOpenHub && <button type="button" onClick={onOpenHub} aria-label="Open channel navigator" className="rounded-full p-2 text-lg text-gray-950 hover:bg-black/5">☰</button>}<button type="button" onClick={onOpenInfo} className="min-w-0 rounded-lg px-2 py-1 transition hover:bg-black/[0.03] focus:outline-none focus:ring-2 focus:ring-teal" aria-label={`${title} information`}><span className="block truncate text-xl font-bold text-gray-950">{title}{onOpenInfo && <span className="ml-2 text-teal">›</span>}</span>{subtitle && <span className="block truncate text-sm font-semibold text-gray-500">{subtitle}</span>}</button></div></header>{children}</div>;
+  return <div className="flex min-h-[100vh] flex-col md:h-full md:min-h-0"><header className="relative flex min-h-[76px] shrink-0 items-center justify-center border-b px-5 text-center" style={{ borderColor: "rgba(0,0,0,0.16)" }}>{onBack && <button type="button" onClick={onBack} aria-label="Back" className="absolute left-3 rounded-full p-2 text-lg text-gray-950 hover:bg-black/5">‹</button>}<div className="flex min-w-0 items-center gap-2">{onOpenHub && <button type="button" onClick={onOpenHub} aria-label="Open channel navigator" className="rounded-full p-2 text-lg text-gray-950 hover:bg-black/5">☰</button>}<button type="button" onClick={onOpenInfo} className="min-w-0 rounded-lg px-2 py-1 transition hover:bg-black/[0.03] focus:outline-none focus:ring-2 focus:ring-teal" aria-label={`${title} information`}><span className="block truncate text-xl font-bold text-gray-950">{title}{onOpenInfo && <span className="ml-2 text-teal">›</span>}</span>{subtitle && <span className="block truncate text-sm font-semibold text-gray-500">{subtitle}</span>}</button></div></header>{children}</div>;
 }
 
 function EmptyThread({ label }: { label: string }): JSX.Element { return <p className="m-auto text-sm text-gray-400">{label}</p>; }
