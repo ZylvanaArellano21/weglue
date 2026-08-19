@@ -56,6 +56,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
   const messages = messageBadgeCounts(summary).total;
   const isClubs = pathname === "/clubs" || pathname.startsWith("/club/");
   const isMessages = pathname === "/messages";
+  const isCalendar = pathname === "/calendar";
 
   // Off-Home expand/collapse state for the global search.
   const [expanded, setExpanded] = useState(false);
@@ -396,6 +397,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
       isClubs={isClubs}
       isSearch={isSearch}
       isMessages={isMessages}
+      isCalendar={isCalendar}
       notifications={notifications}
       messages={messages}
     />
@@ -404,21 +406,23 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
 }
 
 // Phone-width (below md/768px) bottom navigation — same order as native's tab
-// bar (Home, Clubs, Search, Messages, Calendar). Search is a real full-screen
-// tab (/search — apps/web/components/search/SearchClient.tsx), not the
-// header's inline expand-in-place field: native's Search is its own browse
-// screen reachable from anywhere, and that field lived inside <header>, which
-// is hidden below `md` on every non-Home page, so the old expand-on-tap
-// behavior was invisible outside Home. Calendar opens the existing Home
-// calendar overlay via a query param; there is no standalone /calendar route.
-// Fixed to the viewport bottom like the native app's tab bar; every
-// AppHeader-mounting page reserves matching bottom padding below `md` so
-// this never covers real content.
+// bar (Home, Clubs, Search, Messages, Calendar). Search (/search —
+// components/search/SearchClient.tsx) and Calendar (/calendar —
+// components/calendar/CalendarTabClient.tsx) are both real full-screen tabs
+// now, not the header's inline expand-in-place field or the /home?calendar=1
+// overlay: native's Search and Calendar are each their own standalone
+// screen reachable from anywhere, and that header field lives inside
+// <header>, which is hidden below `md` on every non-Home page — so the old
+// expand-on-tap behavior was invisible outside Home. Fixed to the viewport
+// bottom like the native app's tab bar; every AppHeader-mounting page
+// reserves matching bottom padding below `md` so this never covers real
+// content.
 function BottomTabBar({
   isHome,
   isClubs,
   isSearch,
   isMessages,
+  isCalendar,
   notifications,
   messages,
 }: {
@@ -426,6 +430,7 @@ function BottomTabBar({
   isClubs: boolean;
   isSearch: boolean;
   isMessages: boolean;
+  isCalendar: boolean;
   notifications: number;
   messages: number;
 }): JSX.Element {
@@ -451,7 +456,7 @@ function BottomTabBar({
       <BottomTabIcon href="/messages" label="Messages" active={isMessages} badge={messages} badgeLabel="unread messages">
         <ChatIcon size={24} filled={isMessages} />
       </BottomTabIcon>
-      <BottomTabIcon href="/home?calendar=1" label="Calendar" active={false}>
+      <BottomTabIcon href="/calendar" label="Calendar" active={isCalendar}>
         <CalendarIcon size={23} />
       </BottomTabIcon>
     </nav>
