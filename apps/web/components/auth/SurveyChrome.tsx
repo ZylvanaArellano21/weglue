@@ -3,11 +3,17 @@
 import Link from "next/link";
 
 /** Top bar shared by the two survey steps: Cancel · Survey · Log In. */
-export function SurveyTopBar(): JSX.Element {
+export function SurveyTopBar({
+  cancelHref,
+}: {
+  /** Where Cancel goes — the previous step (Activities → Interests) or all
+   * the way out of the survey (Interests → landing page). */
+  cancelHref: string;
+}): JSX.Element {
   return (
     <div className="relative flex items-center justify-between mb-5 sm:mb-8">
       <Link
-        href="/get-started"
+        href={cancelHref}
         className="text-[15px] sm:text-[19px] font-semibold text-[#0FA6A6] hover:opacity-80 transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0FA6A6]"
       >
         Cancel

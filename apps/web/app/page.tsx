@@ -15,7 +15,7 @@ function NavBar() {
     <nav className="sticky top-0 z-50 bg-[#FEFCF0]/90 backdrop-blur-sm border-b border-black/5">
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2">
-          <Image src="/logo.png" alt="We Glue" width={28} height={28} />
+          <Image src="/logo.png" alt="We Glue" width={38} height={38} />
           <span className="font-bold text-base text-black" style={{ fontFamily: "var(--font-zain)" }}>
             We Glue
           </span>
