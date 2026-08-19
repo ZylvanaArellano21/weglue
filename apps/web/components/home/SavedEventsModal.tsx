@@ -3,11 +3,12 @@
 import { Modal } from "../shared/Modal";
 import { ImageIcon } from "../shared/icons";
 import { EmptyState } from "./EmptyState";
-import { useSavedEvents } from "../../lib/hooks/useSavedEvents";
+import { useSavedEvents, useUnsaveEvent } from "../../lib/hooks/useSavedEvents";
 import { formatEventDate, formatEventTime, formatEventLocation } from "../../lib/datetime";
 import type { CalendarEvent } from "../../lib/hooks/useCalendar";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { EventAudienceBadge } from "./EventAudienceBadge";
+import { useToast } from "../shared/Toast";
 
 // The "Saved" overlay (matches the web screenshot): real saved-event records,
 // upcoming events bucketed by Today / This Week / …, then past. Each row opens
@@ -22,9 +23,19 @@ export function SavedEventsModal({
   onOpenEvent: (eventId: string) => void;
 }): JSX.Element {
   const { data, isLoading } = useSavedEvents(userId);
+  const unsave = useUnsaveEvent(userId);
+  const show = useToast();
   const hasUpcoming = (data?.upcoming.length ?? 0) > 0;
   const hasPast = (data?.past.length ?? 0) > 0;
   const isEmpty = !isLoading && !hasUpcoming && !hasPast;
+
+  // Optimistic: the row disappears via the list refetch on success; on
+  // failure nothing has changed underneath, so the toast is the only signal
+  // needed, matching mobile's useUnsaveEvent error handling exactly.
+  const onUnsave = (eventId: string) =>
+    unsave.mutate(eventId, {
+      onError: () => show("Could not unsave the event. Please try again.", "error"),
+    });
 
   return (
     <Modal onClose={onClose} labelledBy="saved-title" maxWidth={620}>
@@ -54,7 +65,7 @@ export function SavedEventsModal({
                 </p>
                 <div className="space-y-2">
                   {section.data.map((e) => (
-                    <SavedRow key={e.id} event={e} onOpen={() => onOpenEvent(e.id)} />
+                    <SavedRow key={e.id} event={e} onOpen={() => onOpenEvent(e.id)} onUnsave={() => onUnsave(e.id)} unsaving={unsave.isPending && unsave.variables === e.id} />
                   ))}
                 </div>
               </div>
@@ -66,7 +77,7 @@ export function SavedEventsModal({
                 </p>
                 <div className="space-y-2">
                   {data!.past.map((e) => (
-                    <SavedRow key={e.id} event={e} onOpen={() => onOpenEvent(e.id)} past />
+                    <SavedRow key={e.id} event={e} onOpen={() => onOpenEvent(e.id)} onUnsave={() => onUnsave(e.id)} unsaving={unsave.isPending && unsave.variables === e.id} past />
                   ))}
                 </div>
               </div>
@@ -81,10 +92,14 @@ export function SavedEventsModal({
 function SavedRow({
   event,
   onOpen,
+  onUnsave,
+  unsaving,
   past,
 }: {
   event: CalendarEvent;
   onOpen: () => void;
+  onUnsave: () => void;
+  unsaving: boolean;
   past?: boolean;
 }): JSX.Element {
   const location = formatEventLocation(event.building, event.room, event.location);
@@ -114,9 +129,20 @@ function SavedRow({
         </p>
         {location && <p className="truncate text-xs text-gray-400">{location}</p>}
       </div>
-      <span aria-hidden className="text-gray-300">
-        ›
-      </span>
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <span aria-hidden className="text-gray-300">
+          ›
+        </span>
+        <button
+          type="button"
+          onClick={onUnsave}
+          disabled={unsaving}
+          className="text-xs font-medium disabled:opacity-50"
+          style={{ color: "#F02719" }}
+        >
+          {unsaving ? "…" : "Unsave"}
+        </button>
+      </div>
     </div>
   );
 }
