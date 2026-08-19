@@ -35,6 +35,8 @@ export interface SidebarClub {
   next_event: SidebarNextEvent | null;
   /** The club's recurring meeting slots — shown when next_event is null. */
   meeting_schedule: MeetingSlot[];
+  meeting_building: string | null;
+  meeting_room: string | null;
 }
 
 export interface MyClubs {
@@ -49,7 +51,7 @@ export async function getMyClubs(userId: string): Promise<MyClubs> {
   const { data: memberships } = await supabase
     .from("club_members")
     .select(
-      "club_id, role, joined_at, clubs!inner(id, name, handle, avatar_url, meeting_schedule, meeting_day, meeting_time_start, meeting_time_end, is_active)"
+      "club_id, role, joined_at, clubs!inner(id, name, handle, avatar_url, meeting_schedule, meeting_day, meeting_time_start, meeting_time_end, meeting_building, meeting_room, is_active)"
     )
     .eq("user_id", userId)
     .eq("clubs.is_active", true)
@@ -130,6 +132,8 @@ export async function getMyClubs(userId: string): Promise<MyClubs> {
         c.meeting_time_start,
         c.meeting_time_end
       ),
+      meeting_building: c.meeting_building ?? null,
+      meeting_room: c.meeting_room ?? null,
     };
 
     if (m.role === "officer") {

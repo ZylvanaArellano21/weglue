@@ -91,14 +91,17 @@ export function ClubProfileHeader({
           </div>
         </div>
 
-        {/* Counts + chat actions cluster (right-aligned, top of the content
-            area). The chat pills use the SAME outlined-teal style + icons as the
-            mobile Club Profile actions; they're grouped and equal-width so the
+        {/* Counts + chat actions cluster — desktop/tablet only. The chat
+            pills use the SAME outlined-teal style + icons as the mobile
+            Club Profile actions; they're grouped and equal-width so the
             pair reads as one intentional control, clear of the banner Edit
             button, the avatar, the description and the tabs. Officer Chat is
             officer-only; Group Chat follows the same membership rule as mobile
-            (any member, which includes officers). */}
-        <div className="flex min-h-[56px] flex-wrap items-start justify-end gap-x-8 gap-y-3 pt-1">
+            (any member, which includes officers). Phone gets its own layout
+            below (native has no separate Members/Gluemates stat row here at
+            all — just "N Members" as plain text, then Join/Chat/Admin Chat
+            as buttons). */}
+        <div className="hidden min-h-[56px] flex-wrap items-start justify-end gap-x-8 gap-y-3 pt-1 md:flex">
           <div className="flex items-center gap-8">
             <Stat value={club.member_count} label="Members" onClick={() => onOpenPeople("members")} />
             <Stat value={club.gluemates_count} label="Gluemates" onClick={() => onOpenPeople("gluemates")} />
@@ -113,21 +116,29 @@ export function ClubProfileHeader({
           )}
         </div>
 
-        {/* Name + description + Join/Joined */}
+        {/* Name + description (desktop/tablet) — phone shows the
+            description once, inside the About section below, so it isn't
+            duplicated here too. */}
         <h1 className="mt-1 text-[26px] font-bold text-gray-900">{club.name}</h1>
         {club.description && (
-          <p className="mt-1 max-w-2xl text-[15px] text-gray-800">{club.description}</p>
+          <p className="mt-1 hidden max-w-2xl text-[15px] text-gray-800 md:block">{club.description}</p>
         )}
 
-        {/* Full width on phone (matches native exactly), auto width at md+
-            (unchanged desktop sizing). */}
-        <div className="mt-3">
+        {/* Phone: plain member count, matching native exactly (no
+            Gluemates count here — that's reachable from the profile page's
+            own stat, same as everywhere else this session has kept it). */}
+        <p className="mt-1 text-[13px] text-gray-500 md:hidden">
+          {club.member_count} Member{club.member_count === 1 ? "" : "s"}
+        </p>
+
+        {/* Desktop/tablet Join/Joined — unchanged position and sizing. */}
+        <div className="mt-3 hidden md:block">
           {club.is_member ? (
             <button
               type="button"
               onClick={onToggleMembership}
               disabled={membershipPending}
-              className="w-full rounded-full border px-6 py-1.5 text-[15px] font-semibold text-teal transition hover:bg-teal/5 disabled:opacity-60 md:w-auto"
+              className="rounded-full border px-6 py-1.5 text-[15px] font-semibold text-teal transition hover:bg-teal/5 disabled:opacity-60"
               style={{ borderColor: "#0FA6A6" }}
             >
               Joined
@@ -137,9 +148,63 @@ export function ClubProfileHeader({
               type="button"
               onClick={onToggleMembership}
               disabled={membershipPending}
-              className="w-full rounded-full bg-teal px-8 py-1.5 text-[15px] font-semibold text-white transition hover:opacity-90 disabled:opacity-60 md:w-auto"
+              className="rounded-full bg-teal px-8 py-1.5 text-[15px] font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
             >
               Join
+            </button>
+          )}
+        </div>
+
+        {/* Phone: Join/Joined + Chat as one row, Admin Chat full-width
+            below (officer-only) — checked directly against native, which
+            combines membership + chat entry points here instead of
+            splitting them the way desktop does. "Chat" and "Admin Chat" are
+            native's exact labels for what desktop calls "Group Chat" /
+            "Officer Chat" — same destinations, this screen just doesn't
+            show a member who isn't in either chat a button for it. */}
+        <div className="mt-3 flex flex-col gap-2 md:hidden">
+          <div className="flex gap-2">
+            {club.is_member ? (
+              <button
+                type="button"
+                onClick={onToggleMembership}
+                disabled={membershipPending}
+                className="flex-1 rounded-full px-4 py-2.5 text-[15px] font-semibold text-teal transition disabled:opacity-60"
+                style={{ background: "rgba(15,166,166,0.12)" }}
+              >
+                Joined ✓
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onToggleMembership}
+                disabled={membershipPending}
+                className="flex-1 rounded-full bg-teal px-4 py-2.5 text-[15px] font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+              >
+                Join
+              </button>
+            )}
+            {club.is_member && (
+              <button
+                type="button"
+                onClick={onGroupChat}
+                className="flex flex-1 items-center justify-center gap-2 rounded-full border-[1.5px] px-4 py-2.5 text-[15px] font-semibold text-teal transition hover:bg-teal/5"
+                style={{ borderColor: "#0FA6A6" }}
+              >
+                <ChatBubbleOutlineIcon size={17} strokeWidth={1.9} />
+                Chat
+              </button>
+            )}
+          </div>
+          {club.is_officer && (
+            <button
+              type="button"
+              onClick={onOfficerChat}
+              className="flex w-full items-center justify-center gap-2 rounded-full border-[1.5px] px-4 py-2.5 text-[15px] font-semibold text-teal transition hover:bg-teal/5"
+              style={{ borderColor: "#0FA6A6" }}
+            >
+              <StarOutlineIcon size={16} strokeWidth={2} />
+              Admin Chat
             </button>
           )}
         </div>
@@ -222,8 +287,13 @@ export function ClubProfileHeader({
           );
         })()}
 
-        {/* Tab nav */}
-        <nav className="mt-4 flex gap-8 border-t pt-3" style={{ borderColor: "rgba(0,0,0,0.08)" }} aria-label="Club sections">
+        {/* Tab nav — desktop/tablet only. Native has no tabs at all: About,
+            Meeting Schedule, Upcoming/Past Events, Photos, Calendar and
+            Officers are one continuous scroll (checked directly against
+            apps/mobile/app/club/[clubId]/index.tsx, a single ScrollView with
+            every section inline) — ClubProfileClient renders that same
+            stacked structure below on phone instead of tab-switching. */}
+        <nav className="mt-4 hidden gap-8 border-t pt-3 md:flex" style={{ borderColor: "rgba(0,0,0,0.08)" }} aria-label="Club sections">
           {TABS.map((t) => {
             const active = t.key === activeTab;
             return (

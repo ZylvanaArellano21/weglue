@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ToastProvider, useToast } from "../shared/Toast";
 import { AppHeader } from "../home/AppHeader";
 import { EventDetailModal } from "../home/EventDetailModal";
+import { EventCard } from "../home/EventCard";
 import { ComposeEventModal } from "../home/ComposeEventModal";
 import { ComposePostModal } from "../home/ComposePostModal";
 import { ClubMediaOverlay } from "./ClubMediaOverlay";
@@ -195,6 +196,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onBack={() => router.back()}
           />
 
+          {/* Desktop/tablet — unchanged tab-switched content. */}
+          <div className="hidden md:block">
           {activeTab === "home" && (
             <ClubHomeTab
               club={club}
@@ -232,10 +235,126 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             />
           )}
           {activeTab === "media" && <ClubMediaTab photos={club.photos} onOpenPhoto={openPhoto} />}
+          </div>
+
+          {/* Phone — one continuous scroll, no tabs. Checked directly
+              against apps/mobile/app/club/[clubId]/index.tsx: Upcoming
+              Events, Past Events, Photos that Glue, a mini Calendar, then
+              Officers, all inline in that exact order (About and Meeting
+              Schedule already live in ClubProfileHeader above, since native
+              shows those regardless of scroll position too). Reuses the
+              same tab components/EventCard as desktop where the content is
+              identical — only the wrapping (stacked vs. tab-switched)
+              differs. */}
+          <div className="md:hidden">
+            <h2 className="mb-3 mt-2 text-xl font-bold text-gray-900">Upcoming Events</h2>
+            {upcoming.length > 0 ? (
+              <div className="space-y-5">
+                {upcoming.map((e) => (
+                  <EventCard
+                    key={e.id}
+                    event={e}
+                    onRsvp={handleRsvp}
+                    onToggleSave={handleSave}
+                    onToggleClub={() => handleToggleMembership()}
+                    onOpenEvent={openSingleEvent}
+                    onOpenClub={() => {}}
+                    onOpenAttendees={setAttendanceEventId}
+                    onRestricted={() => show(eventRestrictionMessage("members_only", club.name) ?? "", "error")}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-xl bg-white/60 py-8 text-center text-sm text-gray-500">No upcoming events yet</p>
+            )}
+
+            <h2 className="mb-3 mt-8 text-xl font-bold text-gray-900">Past Events</h2>
+            {past.length > 0 ? (
+              <div className="space-y-5">
+                {past.map((e) => (
+                  <EventCard
+                    key={e.id}
+                    event={e}
+                    isPast
+                    onRsvp={handleRsvp}
+                    onToggleSave={handleSave}
+                    onToggleClub={() => handleToggleMembership()}
+                    onOpenEvent={openSingleEvent}
+                    onOpenClub={() => {}}
+                    onOpenAttendees={setAttendanceEventId}
+                    onRestricted={() => show(eventRestrictionMessage("members_only", club.name) ?? "", "error")}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-xl bg-white/60 py-8 text-center text-sm text-gray-500">No past events yet</p>
+            )}
+
+            <div className="mb-3 mt-8 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Photos that Glue</h2>
+              <div className="flex items-center gap-3">
+                {club.is_officer && (
+                  <button
+                    type="button"
+                    onClick={() => setCompose("post")}
+                    className="flex items-center gap-1 text-sm font-semibold text-teal"
+                  >
+                    + Post
+                  </button>
+                )}
+                {club.photos.length > 0 && (
+                  <button type="button" onClick={() => openPhoto(0)} className="text-sm font-semibold text-teal">
+                    See all
+                  </button>
+                )}
+              </div>
+            </div>
+            {club.photos.length > 0 ? (
+              <div className="grid grid-cols-3 gap-1">
+                {club.photos.slice(0, 9).map((photo, i) => (
+                  <button
+                    key={photo.id}
+                    type="button"
+                    onClick={() => openPhoto(i)}
+                    className="relative aspect-square overflow-hidden rounded-lg bg-gray-200"
+                    aria-label={photo.caption ? `Open photo: ${photo.caption}` : "Open photo"}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photo.url} alt={photo.caption ?? ""} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-xl bg-white/60 py-8 text-center text-sm text-gray-500">No photos yet</p>
+            )}
+
+            <h2 className="mb-3 mt-8 text-xl font-bold text-gray-900">Calendar</h2>
+            <ClubCalendarTab
+              events={allEvents}
+              onOpenDate={(dateEvents) => setOverlay({ kind: "event", list: dateEvents, index: 0 })}
+            />
+
+            {club.officers.length > 0 && (
+              <>
+                <h2 className="mb-3 mt-8 text-xl font-bold text-gray-900">Officers</h2>
+                <ClubOfficersTab
+                  officers={club.officers}
+                  currentUserId={userId}
+                  canManage={false}
+                  onManage={() => {}}
+                  onOpenProfile={(id) => router.push(`/u/${id}`)}
+                  onMessage={(id) => router.push(personMessageHref(id))}
+                />
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Right column — persistent across tabs */}
-        <div className="min-w-0">
+        {/* Right column — desktop/tablet only. It's a condensed preview of
+            the same goals/meeting-schedule/events/photos content the phone
+            scroll above already shows in full, so showing both below md
+            would duplicate every section. */}
+        <div className="hidden min-w-0 md:block">
           <ClubRightColumn
             club={club}
             upcomingEvents={upcoming}
