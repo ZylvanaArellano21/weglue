@@ -192,7 +192,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
         />
       )}
       {commentsPostId && <PostCommentsModal postId={commentsPostId} userId={userId} onClose={() => clear("comments")} />}
-      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} onClose={() => clear("attendees")} />}
+      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} userId={userId} onClose={() => clear("attendees")} />}
     </main>
   );
 }

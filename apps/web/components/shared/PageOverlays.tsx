@@ -62,7 +62,7 @@ export function PageOverlays({ userId }: { userId: string }): JSX.Element | null
           }}
         />
       )}
-      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} onClose={() => remove("attendees")} />}
+      {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} userId={userId} onClose={() => remove("attendees")} />}
       {commentsPostId && <PostCommentsModal postId={commentsPostId} userId={userId} onClose={() => remove("comments")} />}
     </>
   );

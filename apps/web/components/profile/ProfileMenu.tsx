@@ -175,11 +175,17 @@ export function ProfileMenu({ userId }: { userId: string }): JSX.Element {
           id={menuId}
           role="menu"
           aria-label="Profile menu"
-          // right-0 anchors it under the avatar and keeps it inside the viewport
-          // at every desktop width; the max-width clamp handles narrow browsers.
-          // The width is set so Help / Terms & Conditions / Log out sit on ONE
-          // row, as in the reference, without the footer wrapping.
-          className="absolute right-0 top-[calc(100%+10px)] z-[60] w-[276px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-black/5 bg-white shadow-[0_12px_40px_rgba(0,0,0,0.16)]"
+          // md:right-0 anchors it under the avatar and keeps it inside the
+          // viewport at every DESKTOP width, where the trigger sits at the
+          // far right of the header — the max-width clamp handles narrow
+          // browsers. On phone the trigger moves to the far LEFT (AppHeader
+          // repositions it via order-1 to match native), so right-0 there
+          // would anchor the panel's right edge to the trigger's right edge
+          // and push most of its 276px width off-screen to the left —
+          // confirmed on a real device, only a sliver rendered visible.
+          // left-0 there extends it rightward from the trigger instead,
+          // staying fully on-screen.
+          className="absolute left-0 right-auto top-[calc(100%+10px)] z-[60] w-[276px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-black/5 bg-white shadow-[0_12px_40px_rgba(0,0,0,0.16)] md:left-auto md:right-0"
         >
           {/* Identity block — the avatar, the name and View profile all open the
               full profile page (spec §2). */}
