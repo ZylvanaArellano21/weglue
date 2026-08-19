@@ -188,7 +188,7 @@ function Body({ targetUserId, viewerUserId }: { targetUserId: string; viewerUser
   const locked = profile.is_private && profile.follow_status !== "following";
 
   const label = profile.is_gluemate
-    ? "Gluemates 🎉"
+    ? "Gluemate"
     : profile.follow_status === "following"
     ? "Following"
     : profile.follow_status === "pending"

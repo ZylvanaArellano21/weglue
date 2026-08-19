@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
 import { Avatar } from "../shared/Avatar";
-import { PlusIcon } from "../shared/icons";
+import { PlusIcon, ChevronLeftIcon, ChevronRightIcon } from "../shared/icons";
 import { AvatarPickerModal } from "./AvatarPickerModal";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { ToastProvider, useToast } from "../shared/Toast";
@@ -110,7 +110,8 @@ function EditProfileBody({ userId }: { userId: string }): JSX.Element {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-8">
-      <div className="relative flex items-center justify-center">
+      {/* Desktop/tablet top bar — unchanged. */}
+      <div className="relative hidden items-center justify-center md:flex">
         <button
           type="button"
           onClick={onBack}
@@ -140,6 +141,23 @@ function EditProfileBody({ userId }: { userId: string }): JSX.Element {
         </button>
       </div>
 
+      {/* Phone top bar — checked directly against native: a plain back
+          chevron next to a left-aligned title, no Save here at all. Save
+          moves to a full-width button at the end of the content instead
+          (native's exact structure), rather than squeezing three controls
+          into one row on a narrow screen. */}
+      <div className="flex items-center gap-3 md:hidden">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back"
+          className="flex h-9 w-9 items-center justify-center text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+        >
+          <ChevronLeftIcon size={24} />
+        </button>
+        <h1 className="text-xl font-bold text-gray-900">Edit Profile</h1>
+      </div>
+
       {isLoading ? (
         <div className="mt-10 flex flex-col items-center" aria-live="polite" aria-busy>
           <span className="sr-only">Loading your profile…</span>
@@ -147,7 +165,10 @@ function EditProfileBody({ userId }: { userId: string }): JSX.Element {
           <div className="mt-8 h-10 w-72 animate-pulse rounded-full bg-black/[0.06]" />
         </div>
       ) : (
-        <div className="mt-10 flex flex-col items-center">
+        <>
+        {/* Desktop/tablet content — unchanged: big centered avatar with a ⊕
+            badge, inline label + input. */}
+        <div className="mt-10 hidden flex-col items-center md:flex">
           <div className="relative">
             <Avatar
               uri={profile?.avatar_url}
@@ -187,7 +208,7 @@ function EditProfileBody({ userId }: { userId: string }): JSX.Element {
           </div>
 
           <p
-            id="display-name-help"
+            id="display-name-help-desktop"
             role={error ? "alert" : undefined}
             aria-live="polite"
             className="mt-2 min-h-[18px] text-[13px]"
@@ -196,6 +217,70 @@ function EditProfileBody({ userId }: { userId: string }): JSX.Element {
             {error ?? `${name.length}/${NAME_MAX}`}
           </p>
         </div>
+
+        {/* Phone content — checked directly against native: "Display Name"
+            label stacked above a full-width box input (not centered/inline),
+            then a "Profile Picture" section that's a navigation row opening
+            the same picker modal, not the avatar shown directly on this
+            screen. */}
+        <div className="mt-8 md:hidden">
+          <label htmlFor="display-name-phone" className="mb-1.5 block text-[15px] text-gray-500">
+            Display Name
+          </label>
+          <input
+            id="display-name-phone"
+            value={name}
+            maxLength={NAME_MAX}
+            onChange={(e) => {
+              setName(e.target.value.slice(0, NAME_MAX));
+              if (error) setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && canSave) void onSave();
+            }}
+            aria-invalid={!!error}
+            aria-describedby="display-name-help-phone"
+            className="w-full rounded-xl border border-black/15 bg-white px-4 py-3.5 text-[16px] text-gray-900 outline-none focus:border-teal focus-visible:ring-2 focus-visible:ring-teal/40"
+            placeholder="Your name"
+          />
+          <p
+            id="display-name-help-phone"
+            role={error ? "alert" : undefined}
+            aria-live="polite"
+            className="mt-1.5 text-right text-[13px]"
+            style={{ color: error ? "#F02719" : "#9CA3AF" }}
+          >
+            {error ?? `${name.length}/${NAME_MAX}`}
+          </p>
+
+          <h2 className="mb-2 mt-8 text-base font-bold text-gray-900">Profile Picture</h2>
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="flex w-full items-center justify-between rounded-xl border border-black/15 bg-white px-4 py-3.5 text-left text-[15px] text-gray-900"
+          >
+            Change Profile Picture
+            <span className="text-gray-400" aria-hidden><ChevronRightIcon size={18} /></span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void onSave()}
+            disabled={!canSave}
+            aria-busy={updateName.isPending}
+            className="mt-10 flex w-full items-center justify-center gap-2 rounded-full bg-teal py-3.5 text-[16px] font-semibold text-white transition-opacity disabled:opacity-45"
+          >
+            {updateName.isPending ? (
+              <>
+                <span aria-hidden className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Saving…
+              </>
+            ) : (
+              "Save"
+            )}
+          </button>
+        </div>
+        </>
       )}
 
       {pickerOpen && profile && (
