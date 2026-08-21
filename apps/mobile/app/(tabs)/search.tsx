@@ -253,6 +253,12 @@ const styles = StyleSheet.create({
   },
   peopleRow: {
     paddingHorizontal: searchSizes.screenPaddingH,
+    // Vertical room for searchCardShadow's spread (offset height 6 + radius
+    // 10, ~16px). A horizontal ScrollView clips its content to its own
+    // bounds, so with zero vertical padding here the shadow was hard-cut at
+    // the card's edge — the section read as a flat "cut-off strip" instead
+    // of individually raised, fully rounded cards.
+    paddingVertical: 16,
     gap: 14,
   },
   footerLoader: {

@@ -329,7 +329,7 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
         conversation.type === "direct"
           ? other
             ? displayName(other.profiles)
-            : "Deleted account"
+            : "We Glue member"
           : conversation.type === "club_group" || conversation.type === "officer_chat"
             ? `${club?.name ?? conversation.name ?? "Club"} · ${conversation.type === "officer_chat" ? "Officers" : "Members"}`
             : conversation.name?.trim() || participants.filter((p: any) => p.user_id !== userId).slice(0, 3).map((p: any) => displayName(p.profiles)).join(", ") || "Group chat";
@@ -408,7 +408,7 @@ export async function getConversationDetails(conversationId: string, currentUser
   const other = participants.find((participant) => participant.user_id !== currentUserId);
   const raw = conversation as any;
   const name = raw.type === "direct"
-    ? other ? displayName(other.profiles) : "Deleted account"
+    ? other ? displayName(other.profiles) : "We Glue member"
     : raw.type === "club_group" || raw.type === "officer_chat"
       ? `${raw.clubs?.name ?? raw.name ?? "Club"} · ${raw.type === "officer_chat" ? "Officers" : "Members"}`
       : raw.name?.trim() || "Group chat";

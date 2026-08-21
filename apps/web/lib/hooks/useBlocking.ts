@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   blockUser,
@@ -10,6 +11,7 @@ import {
   type BlockedUser,
   type BlockResult,
 } from "../blocking";
+import { subscribeBroadcast } from "../realtime";
 
 // ─── Student blocking: React Query bindings (student web) ───────────────────
 //
@@ -100,6 +102,24 @@ export function useBlockUser(userId?: string) {
       invalidateBlockSensitive(qc);
     },
   });
+}
+
+/**
+ * Cross-device restoration (Fix 8): unblocking on ONE device/session must
+ * restore real identity on every OTHER session belonging to either party too
+ * — not just the acting device's local cache. The unblock_user RPC broadcasts
+ * to `sync:block:<userId>` for both the unblocker and the unblocked; every
+ * signed-in session subscribes to its own topic here and runs the exact same
+ * broad invalidation an in-session unblock already does. Mirrors
+ * apps/mobile/hooks/useBlocking.ts's useBlockSynchronization and the existing
+ * sync:access:<userId> subscription in providers.tsx.
+ */
+export function useBlockSynchronization(userId: string | undefined): void {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeBroadcast(`sync:block:${userId}`, "invalidate", () => invalidateBlockSensitive(qc));
+  }, [userId, qc]);
 }
 
 export function useUnblockUser(userId?: string) {

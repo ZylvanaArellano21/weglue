@@ -119,11 +119,37 @@ export function ErrorBoundary({
   );
 }
 
-// Refetch stale queries in the background when the app returns to the
-// foreground (RN has no window focus events, so wire AppState manually).
+// Refetch stale queries when the app returns to the foreground (RN has no
+// window focus events, so wire AppState manually).
+//
+// Fix 9 — a delivered push notification's banner makes iOS briefly report
+// `active -> inactive -> active` WITHOUT the app ever truly backgrounding
+// (`background` is skipped entirely) — the app stays fully mounted and
+// visible the whole time. The naive version of this listener treated every
+// transition TO `active` as "the user came back", which called
+// `handleFocus(true)` on that banner blip exactly like a real refocus:
+// React Query's `refetchOnWindowFocus` then refetched every stale query
+// mounted anywhere in the app at once (staleTime is only 60s, so most
+// visible screens qualify), which is indistinguishable from the whole app
+// reloading — and since every message/photo/event send generates a
+// notification, this fired on ordinary activity from ANY other user, not
+// just genuine app switches.
+//
+// A real return from the background always passes through `background`
+// first; a banner blip never does. So only `background -> active` counts as
+// a genuine refocus worth a refetch storm — `inactive -> active` (the
+// banner's own transition) does not.
+let lastAppState: string = AppState.currentState;
 focusManager.setEventListener((handleFocus) => {
   const subscription = AppState.addEventListener("change", (status) => {
-    if (Platform.OS !== "web") handleFocus(status === "active");
+    if (Platform.OS !== "web") {
+      if (status === "active") {
+        if (lastAppState === "background") handleFocus(true);
+      } else {
+        handleFocus(false);
+      }
+    }
+    lastAppState = status;
   });
   return () => subscription.remove();
 });

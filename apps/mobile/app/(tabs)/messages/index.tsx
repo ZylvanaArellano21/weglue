@@ -281,7 +281,7 @@ export default function MessagesIndex() {
         renderItem={({ item }) => (
           <ChatListItem chat={item} currentUserId={userId} onPress={() => handlePressChat(item.id, item)} />
         )}
-        ListFooterComponent={
+        ListHeaderComponent={
           archivedChats.length > 0 ? (
             <View>
               <TouchableOpacity

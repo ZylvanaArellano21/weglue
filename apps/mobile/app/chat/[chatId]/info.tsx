@@ -754,7 +754,12 @@ export default function ChatInfo() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={chatColors.text} />
         </TouchableOpacity>
-        {(showTopOverflow || (isCustomGroup && isGroupAdmin)) && (
+        {/* Main chat's overflow menu has no items: Rename/Delete is
+            channel-only (never main), and Report is hidden for every
+            thread/channel view (the parent chat's Report already covers
+            it) — so the button opened nothing. Every other official/group
+            info screen keeps it. */}
+        {(showTopOverflow || (isCustomGroup && isGroupAdmin)) && !(isThreadInfo && isMainChat) && (
           <TouchableOpacity onPress={() => setOverflowOpen(true)} style={styles.overflowBtn} hitSlop={8}>
             <Ionicons name="ellipsis-horizontal" size={22} color={chatColors.text} />
           </TouchableOpacity>

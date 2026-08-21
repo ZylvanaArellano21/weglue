@@ -9,6 +9,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from '../lib/realtime';
 
+export type UnreadConversationCount = {
+  conversation_id: string;
+  unread_count: number;
+};
+
 export type UnreadSummary = {
   unread_notifications: number;
   /** Unread THREAD count. Still the app-icon badge source — do not repurpose. */
@@ -17,6 +22,14 @@ export type UnreadSummary = {
   unread_direct_messages: number;
   /** Unread MESSAGES in custom groups + club member/officer chats (Groups). */
   unread_group_messages: number;
+  /**
+   * Fix 10 — exactly which conversations have unread activity, so a chat-list
+   * row can show its own badge instead of only the aggregate Single/Group
+   * counts above. Same source RPC as everything else here — one summary,
+   * three levels (global → Single/Group → per-conversation), always in sync.
+   * Only entries with unread_count > 0 are present.
+   */
+  unread_conversations: UnreadConversationCount[];
 };
 
 /**
@@ -43,7 +56,17 @@ async function fetchUnreadSummary(): Promise<UnreadSummary> {
     unread_threads: Math.max(0, summary.unread_threads ?? 0),
     unread_direct_messages: Math.max(0, summary.unread_direct_messages ?? 0),
     unread_group_messages: Math.max(0, summary.unread_group_messages ?? 0),
+    unread_conversations: Array.isArray(summary.unread_conversations) ? summary.unread_conversations : [],
   };
+}
+
+/** O(1) per-conversation lookup for a chat-list row's own badge. */
+export function unreadCountForConversation(
+  summary: UnreadSummary | undefined,
+  conversationId: string | undefined,
+): number {
+  if (!summary || !conversationId) return 0;
+  return summary.unread_conversations.find((c) => c.conversation_id === conversationId)?.unread_count ?? 0;
 }
 
 /**

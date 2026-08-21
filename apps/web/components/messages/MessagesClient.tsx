@@ -405,6 +405,7 @@ function MessagesSidebar({ userId, filter, loading, conversations, suggestionsEn
             {contentLoading ? <p className="px-2 py-3 text-sm text-gray-500">Searching messages…</p> : contentResults.map((result) => <MessageSearchRow key={result.message_id} result={result} onClick={() => onOpenMessage(result)} />)}
           </div>
         )}
+        {!loading && !term && archived.length > 0 && <details className="mb-3 border-b pb-3"><summary className="cursor-pointer px-2 text-sm font-semibold text-gray-500">Archived ({archived.length})</summary>{archived.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={activeConversationId === conversation.id} onClick={() => onOpen(conversation)} />)}</details>}
         {loading ? <SidebarSkeleton /> : active.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={activeConversationId === conversation.id} onClick={() => onOpen(conversation)} />)}
         {!loading && !term && suggestionsEnabled && (
           <div className="mt-3">
@@ -417,7 +418,6 @@ function MessagesSidebar({ userId, filter, loading, conversations, suggestionsEn
             ? <GroupEmptyState onBrowseClubs={onBrowseClubs} onNewGroupChat={onNewGroupChat} />
             : <p className="px-2 py-6 text-sm text-gray-500">No conversations yet.</p>
         )}
-        {archived.length > 0 && <details className="mt-3 border-t pt-3"><summary className="cursor-pointer px-2 text-sm font-semibold text-gray-500">Archived ({archived.length})</summary>{archived.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={activeConversationId === conversation.id} onClick={() => onOpen(conversation)} />)}</details>}
       </div>
     </aside>
   );

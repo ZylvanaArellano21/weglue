@@ -1,15 +1,16 @@
 /**
  * The single app-wide push wiring (mounted once in the root layout).
  *
- *  • Foreground presentation (correction 3): while the app is genuinely
- *    active, the native OS banner is unconditionally suppressed here —
- *    ForegroundNotificationBanner (fed by the realtime notifications
- *    channel, not this push-received event) is the ONE canonical
- *    presentation in that state, so a delivered push can never double up
- *    with it. Backgrounded-but-JS-alive keeps the native banner (the custom
- *    React banner isn't visible to the user in that state anyway), gated
- *    only by the existing exact-thread check — and a fully killed app never
- *    runs this handler at all, so background push is untouched.
+ *  • Foreground presentation: the real native OS banner is now used while
+ *    the app is active whenever notification permission is granted —
+ *    identical treatment to backgrounded, gated only by the existing
+ *    exact-thread check. ForegroundNotificationBanner (fed by the realtime
+ *    notifications channel, not this push-received event) only takes over
+ *    while active AND permission is NOT granted, since native presentation
+ *    is impossible in that state (foreground or background) — see
+ *    PushNotificationsHost.tsx, which gates its render on the same check. A
+ *    fully killed app never runs this handler at all, so background push is
+ *    untouched either way.
  *  • Tap routing: background taps and cold-start taps both resolve through
  *    the route allowlist and land on the exact target with the Notifications
  *    inbox underneath (Back always returns to Notifications).
@@ -41,10 +42,16 @@ import { consumePendingRoute, storePendingRoute } from '../lib/notifications/pen
 // Module-level: must exist before any notification arrives, even pre-render.
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
-    if (AppState.currentState === 'active') {
-      // App genuinely foregrounded — ForegroundNotificationBanner is the
-      // sole presentation. shouldSetBadge stays true (harmless/idempotent
-      // alongside useUnreadSummary's own badge sync).
+    const data = notification.request.content.data as Record<string, unknown> | undefined;
+    const route = (data?.route ?? {}) as Record<string, unknown>;
+    // Silence the banner for the thread that is open on screen right now.
+    const suppress =
+      route?.screen === 'chat' && isViewingThread(route.chatId, route.channelId);
+
+    if (AppState.currentState === 'active' && (await getPermissionState()) !== 'granted') {
+      // No OS notification permission: the native banner cannot show here
+      // (or in the background) — ForegroundNotificationBanner is the sole
+      // presentation for this population while actively inside We Glue.
       return {
         shouldShowBanner: false,
         shouldShowList: false,
@@ -52,11 +59,7 @@ Notifications.setNotificationHandler({
         shouldSetBadge: true,
       };
     }
-    const data = notification.request.content.data as Record<string, unknown> | undefined;
-    const route = (data?.route ?? {}) as Record<string, unknown>;
-    // Silence the banner for the thread that is open on screen right now.
-    const suppress =
-      route?.screen === 'chat' && isViewingThread(route.chatId, route.channelId);
+
     return {
       shouldShowBanner: !suppress,
       shouldShowList: !suppress,
