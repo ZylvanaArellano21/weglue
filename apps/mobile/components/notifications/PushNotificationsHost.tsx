@@ -18,6 +18,7 @@ import { useAuthStore } from '@weglue/shared';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useUnreadSummary } from '../../hooks/useUnreadSummary';
 import { useRealtimeMessageBanners } from '../../hooks/useRealtimeMessageBanners';
+import { useBlockSynchronization } from '../../hooks/useBlocking';
 import { getPermissionState } from '../../lib/notifications/permissions';
 import { ForegroundNotificationBanner } from './ForegroundNotificationBanner';
 
@@ -30,6 +31,10 @@ export function PushNotificationsHost() {
   // own realtime source (see useRealtimeMessageBanners for why it can't
   // reuse the existing per-conversation thread sync).
   useRealtimeMessageBanners(session?.user.id);
+  // Must live inside the query provider — this is exactly why it moved here
+  // rather than being called from RootLayout's own body, which executes
+  // outside the PersistQueryClientProvider it needs.
+  useBlockSynchronization(session?.user.id);
 
   const [permissionGranted, setPermissionGranted] = useState(true);
   useEffect(() => {

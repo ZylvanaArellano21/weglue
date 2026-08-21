@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { usePathname } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -83,9 +83,25 @@ export function StudentSynchronizationHost({ userId }: { userId?: string }) {
     refresh();
   }, [pathname, refresh]);
 
+  /**
+   * Fix 9 — a delivered push notification's banner makes iOS briefly report
+   * `active -> inactive -> active` without the app ever truly backgrounding
+   * (`background` is skipped). `shouldRecoverOnMobileForeground` only checks
+   * the new status, so it fired `refresh()` — invalidating ~29 content query
+   * roots app-wide — on that same banner blip. Since every message/photo/
+   * event send generates a notification, this made ordinary activity from
+   * ANY other student invalidate the whole app's content, which read as a
+   * full reload. A real return from the background always passes through
+   * `background` first; a banner blip never does, so track that transition
+   * locally rather than trusting the current status alone.
+   */
+  const lastAppStateRef = useRef<string>(AppState.currentState);
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (status) => {
-      if (shouldRecoverOnMobileForeground(status)) refresh();
+      if (shouldRecoverOnMobileForeground(status) && lastAppStateRef.current === 'background') {
+        refresh();
+      }
+      lastAppStateRef.current = status;
     });
     return () => subscription.remove();
   }, [refresh]);
