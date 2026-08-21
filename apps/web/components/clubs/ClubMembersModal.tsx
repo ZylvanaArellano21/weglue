@@ -3,9 +3,13 @@
 import { useState } from "react";
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
-import { SearchIcon, CloseIcon, ChatBubbleOutlineIcon } from "../shared/icons";
+import { ConfirmDialog } from "../shared/ConfirmDialog";
+import { ReportModal } from "../shared/ReportModal";
+import { SearchIcon, CloseIcon, ChatBubbleOutlineIcon, EllipsisIcon } from "../shared/icons";
 import { useClubMembers, useRefreshClubMembers } from "../../lib/hooks/useClubMembers";
 import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
+import { useRemoveOfficer, useRemoveMember } from "../../lib/hooks/useClubManagement";
+import { useToast } from "../shared/Toast";
 import { CLUB_MEMBERS_PAGE_SIZE, type ClubMember } from "../../lib/clubs/clubMembersService";
 
 // Web equivalent of apps/mobile/app/club/[clubId]/members.tsx — the same list,
@@ -19,6 +23,7 @@ import { CLUB_MEMBERS_PAGE_SIZE, type ClubMember } from "../../lib/clubs/clubMem
 export function ClubMembersModal({
   clubId,
   viewerId,
+  viewerIsOfficer = false,
   filter,
   onClose,
   onOpenProfile,
@@ -26,6 +31,10 @@ export function ClubMembersModal({
 }: {
   clubId: string;
   viewerId: string;
+  /** Shows the per-row officer moderation menu (Bug 14 on mobile) — remove
+   * officer role / remove from club / report. Absent for a regular member,
+   * exactly like apps/mobile/app/club/[clubId]/members.tsx. */
+  viewerIsOfficer?: boolean;
   filter: "members" | "gluemates";
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
@@ -36,6 +45,13 @@ export function ClubMembersModal({
   const [page, setPage] = useState(0);
   const { data, isLoading, isFetching } = useClubMembers(clubId, viewerId, search, page, gluematesOnly);
   const refresh = useRefreshClubMembers(clubId);
+  const show = useToast();
+  const removeOfficer = useRemoveOfficer(clubId, viewerId);
+  const removeMember = useRemoveMember(clubId, viewerId);
+
+  const [menuMember, setMenuMember] = useState<ClubMember | null>(null);
+  const [confirm, setConfirm] = useState<{ kind: "demote" | "remove"; member: ClubMember } | null>(null);
+  const [reportMember, setReportMember] = useState<ClubMember | null>(null);
 
   const members = data?.members ?? [];
   const total = data?.total ?? 0;
@@ -48,6 +64,42 @@ export function ClubMembersModal({
   const onSearch = (value: string) => {
     setSearch(value);
     setPage(0);
+  };
+
+  const doDemote = (member: ClubMember) => {
+    setConfirm(null);
+    removeOfficer.mutate(member.id, {
+      onSuccess: () => { refresh(); show("Officer role removed"); },
+      onError: (err: unknown) => {
+        const msg = err instanceof Error ? err.message : "";
+        show(
+          msg.includes("cannot_remove_self")
+            ? "You can't remove your own officer role here."
+            : msg.includes("last_officer")
+              ? "Assign another officer first."
+              : "Could not remove officer role.",
+          "error"
+        );
+      },
+    });
+  };
+
+  const doRemove = (member: ClubMember) => {
+    setConfirm(null);
+    removeMember.mutate(member.id, {
+      onSuccess: () => { refresh(); show("Removed from club"); },
+      onError: (err: unknown) => {
+        const msg = err instanceof Error ? err.message : "";
+        show(
+          msg.includes("demote_officer_first")
+            ? "Remove their officer role first."
+            : msg.includes("use_leave_club")
+              ? "Use Leave club for your own membership."
+              : "Could not remove from club.",
+          "error"
+        );
+      },
+    });
   };
 
   return (
@@ -121,6 +173,7 @@ export function ClubMembersModal({
                   onOpenProfile={onOpenProfile}
                   onMessage={onMessage}
                   onFollowChange={refresh}
+                  onOpenMenu={viewerIsOfficer ? () => setMenuMember(member) : undefined}
                 />
               ))}
             </ul>
@@ -140,6 +193,84 @@ export function ClubMembersModal({
           )}
         </div>
       </div>
+
+      {/* Officer moderation menu — matches native's row ellipsis menu
+          exactly: Remove officer role (only when this member IS an
+          officer), Remove from club, Report. Never on your own row. */}
+      {menuMember && (
+        <div
+          role="presentation"
+          onClick={() => setMenuMember(null)}
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/35 p-8"
+        >
+          <div
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
+            className="min-w-[260px] overflow-hidden rounded-2xl bg-cream py-1.5"
+          >
+            {menuMember.role === "officer" && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { const m = menuMember; setMenuMember(null); setConfirm({ kind: "demote", member: m }); }}
+                className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium hover:bg-black/[0.03]"
+                style={{ color: "#C62828" }}
+              >
+                Remove officer role
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { const m = menuMember; setMenuMember(null); setConfirm({ kind: "remove", member: m }); }}
+              className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium hover:bg-black/[0.03]"
+              style={{ color: "#C62828" }}
+            >
+              Remove from club
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { const m = menuMember; setMenuMember(null); setReportMember(m); }}
+              className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium text-gray-900 hover:bg-black/[0.03]"
+            >
+              Report
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirm?.kind === "demote" && (
+        <ConfirmDialog
+          title="Remove officer role?"
+          message={`${confirm.member.full_name || confirm.member.username} will stay a club member but lose officer access, including the Officers chat and its channels.`}
+          confirmLabel="Remove officer role"
+          destructive
+          loading={removeOfficer.isPending}
+          onConfirm={() => doDemote(confirm.member)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+      {confirm?.kind === "remove" && (
+        <ConfirmDialog
+          title="Remove from club?"
+          message={`${confirm.member.full_name || confirm.member.username} will be removed from the club and all of its chats. Their We Glue account, posts and other clubs are not affected.`}
+          confirmLabel="Remove from club"
+          destructive
+          loading={removeMember.isPending}
+          onConfirm={() => doRemove(confirm.member)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+      {reportMember && (
+        <ReportModal
+          entityType="user"
+          entityId={reportMember.id}
+          entityName={reportMember.full_name || reportMember.username}
+          onClose={() => setReportMember(null)}
+          onSubmitted={show}
+        />
+      )}
     </Modal>
   );
 }
@@ -150,12 +281,16 @@ function MemberRow({
   onOpenProfile,
   onMessage,
   onFollowChange,
+  onOpenMenu,
 }: {
   member: ClubMember;
   viewerId: string;
   onOpenProfile: (userId: string) => void;
   onMessage: (userId: string) => void;
   onFollowChange: () => void;
+  /** Present only when the viewer is an officer; renders the row's
+   * ellipsis moderation menu trigger. Never shown on the viewer's own row. */
+  onOpenMenu?: () => void;
 }): JSX.Element {
   const isSelf = member.id === viewerId;
   const follow = useFollow(viewerId);
@@ -214,6 +349,17 @@ function MemberRow({
           }
         >
           {label}
+        </button>
+      )}
+
+      {!isSelf && onOpenMenu && (
+        <button
+          type="button"
+          onClick={onOpenMenu}
+          aria-label={`Manage ${member.full_name || member.username}`}
+          className="shrink-0 rounded-full p-1.5 text-gray-400 transition hover:bg-black/5 hover:text-gray-600"
+        >
+          <span className="inline-block rotate-90"><EllipsisIcon size={18} /></span>
         </button>
       )}
     </li>

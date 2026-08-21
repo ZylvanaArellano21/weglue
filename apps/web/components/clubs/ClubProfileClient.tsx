@@ -10,6 +10,8 @@ import { EventCard } from "../home/EventCard";
 import { ComposeEventModal } from "../home/ComposeEventModal";
 import { ComposePostModal } from "../home/ComposePostModal";
 import { ClubMediaOverlay } from "./ClubMediaOverlay";
+import { ClubEventCard } from "./ClubEventCard";
+import { ReportModal } from "../shared/ReportModal";
 import { ClubProfileHeader, type ClubTab } from "./ClubProfileHeader";
 import { ClubRightColumn } from "./ClubRightColumn";
 import { ClubHomeTab } from "./ClubHomeTab";
@@ -82,6 +84,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const [attendanceEventId, setAttendanceEventId] = useState<string | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [people, setPeople] = useState<"members" | "gluemates" | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const invalidateClubContent = () => {
     void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
@@ -194,6 +197,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onGroupChat={() => void openClubChat("club_group")}
             onOpenPeople={setPeople}
             onBack={() => router.back()}
+            onReport={() => setReportOpen(true)}
           />
 
           {/* Desktop/tablet — unchanged tab-switched content. */}
@@ -249,17 +253,12 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           <div className="md:hidden">
             <h2 className="mb-3 mt-2 text-xl font-bold text-gray-900">Upcoming Events</h2>
             {upcoming.length > 0 ? (
-              <div className="space-y-5">
+              <div>
                 {upcoming.map((e) => (
-                  <EventCard
+                  <ClubEventCard
                     key={e.id}
                     event={e}
-                    onRsvp={handleRsvp}
-                    onToggleSave={handleSave}
-                    onToggleClub={() => handleToggleMembership()}
-                    onOpenEvent={openSingleEvent}
-                    onOpenClub={() => {}}
-                    onOpenAttendees={setAttendanceEventId}
+                    onOpen={openSingleEvent}
                     onRestricted={() => show(eventRestrictionMessage("members_only", club.name) ?? "", "error")}
                   />
                 ))}
@@ -270,18 +269,12 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
 
             <h2 className="mb-3 mt-8 text-xl font-bold text-gray-900">Past Events</h2>
             {past.length > 0 ? (
-              <div className="space-y-5">
+              <div>
                 {past.map((e) => (
-                  <EventCard
+                  <ClubEventCard
                     key={e.id}
                     event={e}
-                    isPast
-                    onRsvp={handleRsvp}
-                    onToggleSave={handleSave}
-                    onToggleClub={() => handleToggleMembership()}
-                    onOpenEvent={openSingleEvent}
-                    onOpenClub={() => {}}
-                    onOpenAttendees={setAttendanceEventId}
+                    onOpen={openSingleEvent}
                     onRestricted={() => show(eventRestrictionMessage("members_only", club.name) ?? "", "error")}
                   />
                 ))}
@@ -396,6 +389,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
         <ClubMembersModal
           clubId={clubId}
           viewerId={userId}
+          viewerIsOfficer={club.is_officer}
           filter={people}
           onClose={() => setPeople(null)}
           onOpenProfile={(id) => router.push(`/u/${id}`)}
@@ -403,6 +397,16 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
         />
       )}
       {leaveOpen && <LeaveClubDialog clubId={clubId} clubName={club.name} userId={userId} onClose={() => setLeaveOpen(false)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
+      {reportOpen && (
+        <ReportModal
+          entityType="club"
+          entityId={clubId}
+          entityName={club.name}
+          clubId={clubId}
+          onClose={() => setReportOpen(false)}
+          onSubmitted={show}
+        />
+      )}
 
       {overlay?.kind === "media" && (
         <ClubMediaOverlay
@@ -439,7 +443,12 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
       )}
 
       {editing && club.is_officer && (
-        <EditClubModal club={club} userId={userId} onClose={() => setEditing(false)} />
+        <EditClubModal
+          club={club}
+          userId={userId}
+          onClose={() => setEditing(false)}
+          onEditEvent={(id) => { setEditing(false); setEditEventId(id); }}
+        />
       )}
       {managing && club.is_officer && (
         <ManageClubModal clubId={clubId} userId={userId} onClose={() => setManaging(false)} />

@@ -90,30 +90,57 @@ export function EventCard({
       </div>
 
       {/* Event image */}
-      <button
-        type="button"
-        onClick={openEvent}
-        className="relative block w-full"
-        style={{ aspectRatio: "3 / 2" }}
-        aria-label={event.can_open ? `Open ${event.title}` : `${event.title} is for club members only`}
-      >
-        {event.cover_image_url && !imageError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={event.cover_image_url}
-            alt={event.title}
-            onError={() => setImageError(true)}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span
-            className="flex h-full w-full items-center justify-center"
-            style={{ background: "#E5E7EB", color: "#9CA3AF" }}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={openEvent}
+          className="relative block w-full"
+          style={{ aspectRatio: "3 / 2" }}
+          aria-label={event.can_open ? `Open ${event.title}` : `${event.title} is for club members only`}
+        >
+          {event.cover_image_url && !imageError ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={event.cover_image_url}
+              alt={event.title}
+              onError={() => setImageError(true)}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span
+              className="flex h-full w-full items-center justify-center"
+              style={{ background: "#E5E7EB", color: "#9CA3AF" }}
+            >
+              <ImageIcon size={40} />
+            </span>
+          )}
+        </button>
+
+        {/* Phone: bookmark + audience badge float ON the image, top-right
+            and top-left — checked directly against
+            apps/mobile/components/home/EventCard.tsx, which positions both
+            `absolute` over the image (a semi-transparent cream circle
+            behind the bookmark) rather than in the body row below it.
+            Desktop keeps its original body-row placement unchanged. */}
+        {event.can_open && (
+          <button
+            type="button"
+            onClick={() => onToggleSave(event.id, event.is_saved)}
+            aria-label={event.is_saved ? "Remove from saved" : "Save event"}
+            aria-pressed={event.is_saved}
+            className="absolute right-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-full shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:hidden"
+            style={{ background: "rgba(254,255,248,0.92)", color: event.is_saved ? "#0FA6A6" : "#374151" }}
           >
-            <ImageIcon size={40} />
-          </span>
+            <BookmarkIcon size={18} filled={event.is_saved} />
+          </button>
         )}
-      </button>
+        {/* max-w caps this absolutely-positioned wrapper's shrink-to-fit
+            width explicitly — an unconstrained `absolute left-2.5` block
+            (no `right`) was overflowing the card horizontally on-device
+            even though EventAudienceBadge returns null for most events,
+            widening the whole page's scrollable area. */}
+        <div className="absolute left-2.5 top-2.5 max-w-[75%] md:hidden"><EventAudienceBadge audience={event.visibility} /></div>
+      </div>
 
       {/* Body */}
       <div className="px-3.5 pt-2.5 pb-3">
@@ -133,7 +160,7 @@ export function EventCard({
               onClick={() => onToggleSave(event.id, event.is_saved)}
               aria-label={event.is_saved ? "Remove from saved" : "Save event"}
               aria-pressed={event.is_saved}
-              className="shrink-0 rounded-full p-1.5"
+              className="hidden shrink-0 rounded-full p-1.5 md:block"
               style={{ color: event.is_saved ? "#0FA6A6" : "#374151" }}
             >
               <BookmarkIcon size={20} filled={event.is_saved} />
@@ -147,7 +174,7 @@ export function EventCard({
           </p>
         ) : null}
 
-        <div className="mt-2"><EventAudienceBadge audience={event.visibility} /></div>
+        <div className="mt-2 hidden md:block"><EventAudienceBadge audience={event.visibility} /></div>
 
         <div className="mt-2 flex items-start gap-1.5" style={{ color: "#5F5D5D" }}>
           <CalendarIcon size={17} strokeWidth={1.6} />

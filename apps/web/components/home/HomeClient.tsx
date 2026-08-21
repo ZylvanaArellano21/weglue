@@ -53,10 +53,10 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const savedOpen = params.get("saved") === "1";
   const notifOpen = params.get("notifications") === "1";
   const gluematesOpen = params.get("gluemates") === "1";
-  // Opened by the phone bottom tab bar's Calendar tab (AppHeader) — there is
-  // no standalone /calendar route, so it reuses the same overlay
-  // RightColumn's "Expand calendar" button opens, just URL-driven instead of
-  // local state so it's reachable from outside this component.
+  // The phone bottom tab bar's Calendar tab now links to the standalone
+  // /calendar route (CalendarTabClient) instead of this param. This stays
+  // wired only for desktop's RightColumn "Expand calendar" button, which
+  // still opens the same modal it always has.
   const calendarOpen = params.get("calendar") === "1";
   const compose = params.get("compose"); // "post" | "event"
 
