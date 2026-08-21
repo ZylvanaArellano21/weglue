@@ -443,7 +443,12 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
       )}
 
       {editing && club.is_officer && (
-        <EditClubModal club={club} userId={userId} onClose={() => setEditing(false)} />
+        <EditClubModal
+          club={club}
+          userId={userId}
+          onClose={() => setEditing(false)}
+          onEditEvent={(id) => { setEditing(false); setEditEventId(id); }}
+        />
       )}
       {managing && club.is_officer && (
         <ManageClubModal clubId={clubId} userId={userId} onClose={() => setManaging(false)} />
