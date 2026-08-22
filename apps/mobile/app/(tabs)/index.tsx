@@ -21,7 +21,9 @@ import { PostsFeed } from '../../components/home/PostsFeed';
 import { HomeTabletSidePanel } from '../../components/home/HomeTabletSidePanel';
 import { Avatar } from '../../components/shared/Avatar';
 import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
+import { useAppUpdateStatus } from '../../hooks/useAppUpdateStatus';
 import { CountBadge } from '../../components/shared/CountBadge';
+import { EnableNotificationsCard } from '../../components/notifications/EnableNotificationsCard';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
 // iPad / Android tablet gets the desktop-web IA (side column with Upcoming
@@ -52,6 +54,7 @@ export default function HomeScreen() {
   // PushNotificationsHost; this is a cache read, no extra subscription).
   const { data: unreadSummary } = useUnreadSummaryValue(userId);
   const unreadNotifications = unreadSummary?.unread_notifications ?? 0;
+  const { updateAvailable } = useAppUpdateStatus();
 
   // Keep officer status fresh: on mount AND every time Home regains focus, so
   // gaining/losing an officer role flips the plus-menu Event option and the
@@ -140,11 +143,38 @@ export default function HomeScreen() {
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             {/* Avatar */}
-            <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8}>
-              <HeaderAvatar
-                avatarUrl={profile?.avatar_url ?? null}
-                username={profile?.username}
-              />
+            <TouchableOpacity
+              onPress={handleAvatarPress}
+              activeOpacity={0.8}
+              style={{ flexDirection: 'row', alignItems: 'center' }}
+            >
+              <View>
+                <HeaderAvatar
+                  avatarUrl={profile?.avatar_url ?? null}
+                  username={profile?.username}
+                />
+                {/* Positioned INSIDE the button bounds: Android clips children
+                    that overhang their parent (same rule as the notifications
+                    badge below). The dot alone is easy to miss against the
+                    avatar, so "New update!" (below) is the primary signal. */}
+                <CountBadge
+                  count={updateAvailable ? 1 : 0}
+                  style={{ position: 'absolute', top: -1, right: -1 }}
+                />
+              </View>
+              {updateAvailable && (
+                <Text
+                  style={{
+                    marginLeft: 8,
+                    fontSize: 13,
+                    fontWeight: '700',
+                    color: '#EF4444',
+                    fontFamily: 'Inter_700Bold',
+                  }}
+                >
+                  New update!
+                </Text>
+              )}
             </TouchableOpacity>
 
             {/* "Personalize your Picture!" — new accounts only, and only until
@@ -340,6 +370,11 @@ export default function HomeScreen() {
             column stretched across the whole tablet width. */}
         <View style={{ flex: 1, flexDirection: isTablet ? 'row' : 'column' }}>
           <View style={{ flex: 1 }}>
+            {/* Notification-permission reminder — above the Posts/Events
+                selector, self-hiding (granted, dismissed-this-session,
+                or past the 7-day/3-dismissal cadence). */}
+            <EnableNotificationsCard variant="home" />
+
             {/* Tab Switcher — Posts | Events, each centered in its half with a
                 centered underline under the active tab (matches founder design). */}
             <View

@@ -8,6 +8,7 @@
  * external targets.
  */
 import type { Router } from 'expo-router';
+import { useSidebarStore } from '../../store/sidebarStore';
 
 export type NotificationRoute = {
   screen: string;
@@ -47,6 +48,13 @@ const ROUTE_SPECS: Record<string, RouteSpec> = {
   },
   notifications: {
     build: () => ({ pathname: '/home/notifications' }),
+  },
+  // A new public app version is available. Unlike every other type, this is
+  // not a notification-content item, so it deliberately does NOT get the
+  // Notifications-inbox underlay in navigateToNotificationTarget below — it
+  // opens Home and the profile/sidebar menu directly, on the Update row.
+  update: {
+    build: () => ({ pathname: '/(tabs)' }),
   },
 };
 
@@ -90,6 +98,14 @@ export function validateNotificationRoute(raw: unknown): ValidatedRoute | null {
  * (same contract as tapping a row inside the inbox).
  */
 export function navigateToNotificationTarget(router: Router, route: ValidatedRoute): void {
+  if (route.screen === 'update') {
+    // Do not send the user directly to the store from the push — open We
+    // Glue on Home and show the sidebar's Update row (with its badge) so the
+    // user makes the actual update decision in-app.
+    router.push('/(tabs)');
+    useSidebarStore.getState().open();
+    return;
+  }
   if (route.pathname === '/home/notifications') {
     router.push('/home/notifications');
     return;

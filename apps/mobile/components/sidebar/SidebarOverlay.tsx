@@ -14,6 +14,7 @@ import {
   TouchableWithoutFeedback,
   Animated,
   BackHandler,
+  Linking,
   Platform,
   StyleSheet,
   ScrollView,
@@ -38,14 +39,22 @@ import {
 } from '../../lib/sessionCleanup';
 import { useSidebarStore } from '../../store/sidebarStore';
 import { useOwnProfile } from '../../hooks/useOwnProfile';
+import { useAppUpdateStatus } from '../../hooks/useAppUpdateStatus';
 import { useToast } from '../Toast';
 import { ConfirmModal } from '../ConfirmModal';
 import { Avatar } from '../shared/Avatar';
+import { CountBadge } from '../shared/CountBadge';
 import { profileColors, profileFonts, profileShadow } from '../profile/profileTheme';
 
 const LABEL_OVERRIDES: Partial<Record<SidebarItemKey, string>> = {
   terms: 'Terms & Conditions',
 };
+
+// Same two literals as apps/web/app/invite/[token]/page.tsx / download/page.tsx
+// — duplicated per that file's own convention (different bundle, not shared
+// code), not imported.
+const APP_STORE_URL = 'https://apps.apple.com/app/we-glue/id6786491344';
+const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.weglue.app';
 
 const MENU_KEYS: SidebarItemKey[] = [
   'savedEvents',
@@ -53,6 +62,7 @@ const MENU_KEYS: SidebarItemKey[] = [
   'accountCenter',
   'notifications',
   'privacyCenter',
+  'update',
 ];
 // Correction 7: Delete Account is reachable ONLY through Account Center now —
 // the sidebar's own row (which used to duplicate it "for one-tap reach") is
@@ -74,6 +84,7 @@ export function SidebarOverlay() {
   const userId = session?.user.id;
 
   const { data: profile } = useOwnProfile(userId);
+  const { updateAvailable } = useAppUpdateStatus();
   const { show, ToastComponent } = useToast();
   const queryClient = useQueryClient();
 
@@ -117,6 +128,16 @@ export function SidebarOverlay() {
     });
   };
 
+  const handleUpdatePress = () => {
+    if (updateAvailable) {
+      // Skip the internal screen entirely — straight to the real store
+      // listing. No extra confirmation step inside We Glue.
+      void Linking.openURL(Platform.OS === 'ios' ? APP_STORE_URL : PLAY_STORE_URL);
+      return;
+    }
+    openSidebarDestination(router, pathname, '/account-center/update');
+  };
+
   const handleLogoutRequest = () => setLogoutConfirmVisible(true);
 
   const handleLogoutConfirm = async () => {
@@ -156,6 +177,7 @@ export function SidebarOverlay() {
   const allItems = buildSidebarItems(router, pathname, {
     onHelp: handleHelp,
     onLogout: handleLogoutRequest,
+    onUpdatePress: handleUpdatePress,
   });
   const menuItems = allItems.filter((i) => MENU_KEYS.includes(i.key));
   const footerItems = allItems.filter((i) => FOOTER_KEYS.includes(i.key));
@@ -211,7 +233,7 @@ export function SidebarOverlay() {
 
         <ScrollView showsVerticalScrollIndicator={false} style={styles.menuScroll}>
           {menuItems.map((item) => (
-            <SidebarRow key={item.key} item={item} />
+            <SidebarRow key={item.key} item={item} badge={item.key === 'update' && updateAvailable} />
           ))}
         </ScrollView>
 
@@ -249,7 +271,13 @@ export function SidebarOverlay() {
   );
 }
 
-function SidebarRow({ item }: { item: ReturnType<typeof buildSidebarItems>[number] }) {
+function SidebarRow({
+  item,
+  badge,
+}: {
+  item: ReturnType<typeof buildSidebarItems>[number];
+  badge?: boolean;
+}) {
   const label = LABEL_OVERRIDES[item.key] ?? item.label;
   return (
     <TouchableOpacity onPress={item.onPress} activeOpacity={0.7} style={styles.row} accessibilityRole="button">
@@ -259,6 +287,7 @@ function SidebarRow({ item }: { item: ReturnType<typeof buildSidebarItems>[numbe
         color={item.destructive ? profileColors.alertRed : profileColors.textDark}
       />
       <Text style={[styles.rowLabel, item.destructive && styles.rowLabelDestructive]}>{label}</Text>
+      {badge ? <CountBadge count={1} style={styles.rowBadge} /> : null}
     </TouchableOpacity>
   );
 }
@@ -284,6 +313,7 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: profileColors.border, marginBottom: 8 },
   menuScroll: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
+  rowBadge: { marginLeft: -2 },
   rowLabel: { fontFamily: profileFonts.medium, fontSize: 16, color: profileColors.textDark },
   rowLabelDestructive: { color: profileColors.alertRed },
   footer: { borderTopWidth: 1, borderTopColor: profileColors.border, paddingTop: 8 },

@@ -18,6 +18,7 @@ import { useMyClubsRealtime } from "../lib/hooks/useClubRealtime";
 import { useRealtimeMessageBanners } from "../lib/hooks/useRealtimeMessageBanners";
 import { useBlockSynchronization } from "../lib/hooks/useBlocking";
 import { ForegroundNotificationBanner } from "../components/notifications/ForegroundNotificationBanner";
+import { GetTheAppPrompt } from "../components/shared/GetTheAppPrompt";
 
 // The current session's user id, tracked once at the app root. Backs the
 // session-wide realtime hub below — each of these hooks documents that it
@@ -379,8 +380,11 @@ function SessionRealtimeHub(): JSX.Element {
   // useSearchParams(), and this hub is mounted at the root layout for every
   // page — without it, static prerendering fails build-wide.
   return (
-    <Suspense fallback={null}>
-      <ForegroundNotificationBanner userId={userId} />
-    </Suspense>
+    <>
+      <Suspense fallback={null}>
+        <ForegroundNotificationBanner userId={userId} />
+      </Suspense>
+      <GetTheAppPrompt userId={userId} />
+    </>
   );
 }

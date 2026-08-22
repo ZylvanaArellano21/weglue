@@ -10,6 +10,7 @@ export type SidebarItemKey =
   | 'accountCenter'
   | 'notifications'
   | 'privacyCenter'
+  | 'update'
   | 'help'
   | 'terms'
   | 'logout';
@@ -28,6 +29,11 @@ export interface SidebarActionHandlers {
   // hosts the modals. Navigation-only items stay here.
   onHelp: () => void;
   onLogout: () => void;
+  // Update branches on live update-availability, decided by SidebarOverlay
+  // (the only owner of useAppUpdateStatus here): available → straight to the
+  // store, no internal screen; not available → the "You're up to date"
+  // screen. Never a plain `go()` push — the destination depends on state.
+  onUpdatePress: () => void;
 }
 
 // ─── The one way an internal sidebar destination is opened ────────────────────
@@ -100,6 +106,12 @@ export function buildSidebarItems(
       label: 'Privacy Center',
       icon: 'shield-outline',
       onPress: go('/privacy-center'),
+    },
+    {
+      key: 'update',
+      label: 'Update',
+      icon: 'download-outline',
+      onPress: handlers.onUpdatePress,
     },
     {
       key: 'help',
