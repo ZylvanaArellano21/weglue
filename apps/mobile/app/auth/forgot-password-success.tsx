@@ -86,7 +86,8 @@ export default function ForgotPasswordSuccessScreen() {
         <Text style={styles.bodyText}>We sent a password reset link to</Text>
         <Text style={styles.email}>{email}</Text>
         <Text style={styles.bodyText}>
-          Open the link to set a new password, then come back and log in.
+          Check your inbox, spam, and junk folders for the email. Open the
+          link to set a new password, then come back and log in.
         </Text>
         <Text style={styles.closeHint}>
           You can close this screen and return to We Glue anytime.
@@ -97,7 +98,9 @@ export default function ForgotPasswordSuccessScreen() {
           {resendLoading ? (
             <Text style={styles.resendLoadingText}>Sending...</Text>
           ) : resendSuccess ? (
-            <Text style={styles.resendSuccessText}>Email resent! Check your inbox.</Text>
+            <Text style={styles.resendSuccessText}>
+              Email resent! Check your inbox, spam, and junk folders for the email.
+            </Text>
           ) : (
             <View style={styles.resendPromptRow}>
               <Text style={styles.resendPrompt}>Didn't get it? </Text>

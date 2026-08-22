@@ -264,7 +264,7 @@ export default function ResetPasswordClient({
               This reset link has expired or has already been used.
             </p>
             <p className="text-sm leading-relaxed mt-2" style={{ color: "#4B5563" }}>
-              Enter your school email and we&apos;ll send you a fresh link:
+              Enter your email and we&apos;ll send you a fresh link:
             </p>
 
             <form onSubmit={handleResendReset} className="mt-4 flex flex-col gap-3">
@@ -275,7 +275,7 @@ export default function ResetPasswordClient({
                   setResendEmail(e.target.value);
                   setResendResult(null);
                 }}
-                placeholder="you@school.edu"
+                placeholder="yourname@email.com"
                 className="h-[48px] rounded-xl border px-4 text-sm outline-none"
                 style={{
                   backgroundColor: "#FEFCF0",
@@ -302,7 +302,8 @@ export default function ResetPasswordClient({
 
             {resendResult === "sent" && (
               <p className="text-sm mt-3" style={{ color: "#16A34A" }}>
-                Check your inbox for the new reset link.
+                Check your inbox, spam, and junk folders for the new reset
+                link.
               </p>
             )}
             {resendResult === "error" && (

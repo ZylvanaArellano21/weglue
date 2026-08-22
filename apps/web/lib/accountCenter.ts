@@ -1,5 +1,6 @@
 "use client";
 
+import { validateEducationEmail } from "@weglue/shared";
 import { getSupabaseBrowser } from "./supabase-browser";
 
 // ─── Account Center (web) ────────────────────────────────────────────────────
@@ -32,13 +33,6 @@ export const ACCOUNT_CENTER_ERRORS = {
 
 export type AccountCenterError =
   (typeof ACCOUNT_CENTER_ERRORS)[keyof typeof ACCOUNT_CENTER_ERRORS];
-
-/** Educational email validation (mirrors onboarding isEducationalEmail). */
-export function isEducationalEmail(email: string): boolean {
-  const lower = email.toLowerCase().trim();
-  const eduPatterns = [".edu", ".edu.au", ".ac.uk", ".ac.in", ".edu.sg"];
-  return eduPatterns.some((pattern) => lower.endsWith(pattern));
-}
 
 /** Password strength: at least 8 chars, 1 uppercase, 1 number. */
 export function isStrongPassword(password: string): boolean {
@@ -171,11 +165,12 @@ export async function changeEmail(
       };
     }
 
-    if (!isEducationalEmail(trimmedEmail)) {
+    const eduCheck = validateEducationEmail(trimmedEmail);
+    if (!eduCheck.valid) {
       return {
         success: false,
         error: ACCOUNT_CENTER_ERRORS.INVALID_EMAIL,
-        message: "We Glue requires a valid .edu email address.",
+        message: eduCheck.reason!,
       };
     }
 

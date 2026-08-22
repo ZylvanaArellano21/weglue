@@ -301,12 +301,12 @@ export default function SignupPage(): JSX.Element | null {
             </p>
           )}
 
-            {/* School Email */}
+            {/* Email */}
             <label
               htmlFor="email"
               className="text-sm font-bold text-black mb-2 mt-5"
             >
-              School Email
+              Email
             </label>
             <div className="relative">
               <input
@@ -314,7 +314,7 @@ export default function SignupPage(): JSX.Element | null {
                 name="email"
                 type="email"
                 autoComplete="email"
-                placeholder="you@school.edu"
+                placeholder="yourname@email.com"
                 value={email}
                 onChange={(e) => handleEmailChange(e.target.value)}
                 className={inputClass(
@@ -354,7 +354,9 @@ export default function SignupPage(): JSX.Element | null {
               ) : errors.email ||
                 (emailFeedback !== null && !emailFeedback.valid) ? (
                 <span className="text-[#F02719]">
-                  {errors.email ?? "Use a valid school email ending in .edu."}
+                  {errors.email ??
+                    emailFeedback?.reason ??
+                    "Please enter a valid email address."}
                 </span>
               ) : null}
             </p>

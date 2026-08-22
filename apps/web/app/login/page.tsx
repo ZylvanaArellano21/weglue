@@ -197,14 +197,14 @@ function LoginContent(): JSX.Element {
         <div className="bg-[#FFFEF7] shadow-[0px_18px_60px_rgba(0,0,0,0.25)] px-6 py-7">
           <form onSubmit={handleLogin} className="flex flex-col" noValidate>
             <label htmlFor="email" className="text-sm font-bold text-black mb-2">
-              School Email
+              Email
             </label>
             <input
               id="email"
               name="email"
               type="email"
               autoComplete="email"
-              placeholder="you@school.edu"
+              placeholder="yourname@email.com"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);

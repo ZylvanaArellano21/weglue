@@ -101,7 +101,7 @@ export default function AccountCenterScreen() {
       setEmailMsg({ text: changeEmailMutation.data.message, isError: true });
     } else if (changeEmailMutation.data?.success) {
       setEmailMsg({
-        text: 'Verification sent. Your email will update after you verify it.',
+        text: 'Verification sent. Check your inbox, spam, and junk folders for the email — your email will update after you verify it.',
         isError: false,
       });
       setEmailInput('');
@@ -153,12 +153,11 @@ export default function AccountCenterScreen() {
         {/* Email */}
         <Text style={styles.sectionLabel}>Email</Text>
         <Text style={styles.currentValue}>{currentEmail}</Text>
-        <Text style={styles.note}>We Glue requires a valid .edu email address.</Text>
         <TextInput
           style={styles.input}
           value={emailInput}
           onChangeText={setEmailInput}
-          placeholder="New .edu email"
+          placeholder="New email"
           placeholderTextColor={profileColors.textLight}
           keyboardType="email-address"
           autoCapitalize="none"

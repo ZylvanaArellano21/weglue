@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { isEducationalEmail, isStrongPassword } from "../accountCenter";
+import { validateEducationEmail } from "@weglue/shared";
+import { isStrongPassword } from "../accountCenter";
 import { SUPPORT_EMAIL, SUPPORT_SUBJECT, supportMailtoUrl } from "../support";
 
 // These are the rules the mobile app enforces (apps/mobile/services/
-// accountService.ts + lib/support.ts). Web MUST accept and reject exactly the
-// same inputs, or a student is told different things on different platforms
-// about the same account.
+// accountService.ts + lib/support.ts, both of which now call the same shared
+// validateEducationEmail()). Web MUST accept and reject exactly the same
+// inputs, or a student is told different things on different platforms about
+// the same account.
 //
 // The typed-DELETE gate is deliberately NOT covered here: on web it lives
 // inside components/account/DeleteAccountClient.tsx, which owns its own copy of
 // the constant. Duplicating that constant in lib/ just to have something to
 // assert against would have shipped a module nothing imports.
 
-describe("isEducationalEmail", () => {
-  it("accepts every educational suffix the mobile app accepts", () => {
+describe("validateEducationEmail (blocks .edu, allows personal email)", () => {
+  it("blocks every school/academic suffix the app used to require", () => {
     for (const email of [
       "zarellanocampos@my.lonestar.edu",
       "someone@uni.edu.au",
@@ -21,22 +23,27 @@ describe("isEducationalEmail", () => {
       "someone@college.ac.in",
       "someone@school.edu.sg",
     ]) {
-      expect(isEducationalEmail(email)).toBe(true);
+      expect(validateEducationEmail(email).valid).toBe(false);
     }
   });
 
-  it("is case- and whitespace-insensitive", () => {
-    expect(isEducationalEmail("  Student@My.LoneStar.EDU  ")).toBe(true);
+  it("is case- and whitespace-insensitive when blocking .edu", () => {
+    expect(validateEducationEmail("  Student@My.LoneStar.EDU  ").valid).toBe(
+      false
+    );
   });
 
-  it("rejects non-educational addresses", () => {
+  it("allows ordinary personal email providers", () => {
     for (const email of [
       "someone@gmail.com",
+      "someone@outlook.com",
+      "someone@hotmail.com",
+      "someone@yahoo.com",
       "someone@edu.com",
       "someone@example.education",
       "edu@example.org",
     ]) {
-      expect(isEducationalEmail(email)).toBe(false);
+      expect(validateEducationEmail(email).valid).toBe(true);
     }
   });
 });

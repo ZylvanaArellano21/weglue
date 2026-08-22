@@ -176,7 +176,9 @@ function ForgotPasswordContent(): JSX.Element {
       const result = await sendPasswordResetEmail(sentTo);
       if (result.ok) {
         startCooldown(RESEND_COOLDOWN_SECONDS);
-        setResendFeedback("Email resent! Check your inbox.");
+        setResendFeedback(
+          "Email resent! Check your inbox, spam, and junk folders for the email."
+        );
       } else if ("cooldown" in result) {
         startCooldown(result.cooldown);
       } else {
@@ -218,7 +220,8 @@ function ForgotPasswordContent(): JSX.Element {
           </p>
           <p className="text-[16px] font-bold text-[#0FA6A6] mt-1 break-all">{sentTo}</p>
           <p className="text-[14px] text-[#4B5563] leading-relaxed mt-4">
-            Open the link to set a new password, then come back and log in.
+            Check your inbox, spam, and junk folders for the email. Open the
+            link to set a new password, then come back and log in.
           </p>
 
           <p aria-live="polite" className="mt-7 text-[13px]">
@@ -270,21 +273,21 @@ function ForgotPasswordContent(): JSX.Element {
       <div className="w-full max-w-[406px]">
         <h1 className="text-[30px] font-bold text-black mt-8">Reset your password</h1>
         <p className="text-[16px] text-[#5F5D5D] mt-1 mb-6 leading-relaxed">
-          We&apos;ll send a reset link to your school email. Check your inbox
-          after clicking send.
+          We&apos;ll send a reset link to your email. Check your inbox, spam,
+          and junk folders for the email after clicking send.
         </p>
 
         <div className="bg-[#FFFEF7] shadow-[0px_18px_60px_rgba(0,0,0,0.25)] px-6 py-7">
           <form onSubmit={handleSubmit} className="flex flex-col" noValidate>
             <label htmlFor="email" className="text-sm font-bold text-black mb-2">
-              School Email
+              Email
             </label>
             <input
               id="email"
               name="email"
               type="email"
               autoComplete="email"
-              placeholder="you@school.edu"
+              placeholder="yourname@email.com"
               value={email}
               onChange={(e) => handleEmailChange(e.target.value)}
               className={inputClass(showEmailError)}

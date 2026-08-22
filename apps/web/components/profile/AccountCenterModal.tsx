@@ -105,7 +105,7 @@ export function AccountCenterModal({
       const result = await changeEmail.mutateAsync(emailInput);
       if (result.success) {
         setEmailMsg({
-          text: "Verification sent. Your email will update after you verify it.",
+          text: "Verification sent. Check your inbox, spam, and junk folders for the email — your email will update after you verify it.",
           isError: false,
         });
         setEmailInput("");
@@ -170,17 +170,14 @@ export function AccountCenterModal({
           <p className="mb-1 break-all text-[15px] font-medium text-gray-900">
             {currentEmail || "—"}
           </p>
-          <p className="mb-2.5 text-xs leading-relaxed text-gray-500">
-            We Glue requires a valid .edu email address.
-          </p>
           <Field
             id="ac-email"
-            label="New .edu email"
+            label="New email"
             type="email"
             autoComplete="email"
             value={emailInput}
             onChange={setEmailInput}
-            placeholder="New .edu email"
+            placeholder="New email"
             disabled={changeEmail.isPending}
           />
           <Feedback msg={emailMsg} id="ac-email-msg" />

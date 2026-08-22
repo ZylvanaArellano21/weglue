@@ -22,7 +22,7 @@ import {
 
 const SUCCESS_MESSAGE_DURATION_MS = 8000;
 const RESEND_SUCCESS_MESSAGE =
-  "Verification email sent. Check your inbox — and your spam/junk folder.";
+  "Verification email sent. Check your inbox, spam, and junk folders for the email.";
 
 /**
  * Confirm Email — the last step of signup.
@@ -177,8 +177,8 @@ export default function VerifyEmailScreen() {
         <Text style={styles.email}>{email}</Text>
 
         <Text style={styles.instruction}>
-          Tap the link in the email to verify your account. Once verified, return
-          here and tap Log in.
+          Check your inbox, spam, and junk folders for the email. Tap the
+          link in it to verify your account, then return here and tap Log in.
         </Text>
 
         {expiredNotice && (
