@@ -8,12 +8,12 @@
  * (baked into the JS bundle). That distinction matters here specifically:
  * an OTA must never be able to fake or clear this badge.
  *
- * Backend contract (Codex, migration 089+): a `app_releases` table with one
- * row per platform naming the version that is currently 100% publicly
- * downloadable — never a TestFlight/internal-testing/in-review build.
- *   columns: platform ('ios' | 'android'), version (text, dotted numeric),
- *            is_public (bool), released_at (timestamptz)
- * Missing table / missing row / any query error all resolve to "no update
+ * Backend (migration 090): the `app_releases` table has one row per
+ * platform+version; a row only counts once `is_public` is true, which is
+ * only ever set by publish_app_release() — a manual, deliberate action
+ * (never inferred from a store-API poll), so this can never light up for a
+ * TestFlight/internal-testing/in-review build or a staged rollout still in
+ * progress. Missing row / any query error all resolve to "no update
  * available" — a failed check must never produce a false-positive badge.
  *
  * Refetches on every app-foreground transition ("after returning/
