@@ -190,13 +190,14 @@ export default function ForgotPasswordScreen() {
           <View style={styles.form}>
             <Text style={styles.title}>Reset your password</Text>
             <Text style={styles.subtitle}>
-              We'll send a reset link to your school email. Check your inbox after tapping send.
+              We'll send a reset link to your email. Check your inbox, spam,
+              and junk folders for the email after tapping send.
             </Text>
 
-            <Text style={styles.label}>School Email</Text>
+            <Text style={styles.label}>Email</Text>
             <TextInput
               style={[styles.input, showEmailError && styles.inputError]}
-              placeholder="you@school.edu"
+              placeholder="yourname@email.com"
               placeholderTextColor="rgba(0,0,0,0.3)"
               value={email}
               onChangeText={handleEmailChange}

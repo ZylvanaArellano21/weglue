@@ -14,7 +14,7 @@ import {
 
 const SUCCESS_MESSAGE_DURATION_MS = 8000;
 const RESEND_SUCCESS_MESSAGE =
-  "Verification email sent. Check your inbox — and your spam/junk folder.";
+  "Verification email sent. Check your inbox, spam, and junk folders for the email.";
 
 function VerifyEmailContent(): JSX.Element {
   const searchParams = useSearchParams();
@@ -132,12 +132,12 @@ function VerifyEmailContent(): JSX.Element {
           We sent a verification link to
         </p>
         <p className="text-[17px] font-bold text-[#0FA6A6] mt-1 break-all">
-          {email || "your school email"}
+          {email || "your email"}
         </p>
 
         <p className="text-[14px] text-[#5F5D5D] leading-relaxed mt-9">
-          Tap the link in the email to verify your account. Once verified,
-          return here and tap Log In.
+          Check your inbox, spam, and junk folders for the email. Tap the
+          link in it to verify your account, then return here and tap Log In.
         </p>
 
         {expiredNotice && (

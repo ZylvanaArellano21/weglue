@@ -1,59 +1,6 @@
-const CONSUMER_DOMAINS = new Set([
-  "gmail.com",
-  "googlemail.com",
-  "outlook.com",
-  "hotmail.com",
-  "hotmail.co.uk",
-  "hotmail.es",
-  "hotmail.fr",
-  "live.com",
-  "live.co.uk",
-  "live.ca",
-  "live.com.au",
-  "live.com.mx",
-  "yahoo.com",
-  "yahoo.co.uk",
-  "yahoo.es",
-  "yahoo.fr",
-  "yahoo.com.mx",
-  "yahoo.com.ar",
-  "yahoo.com.br",
-  "icloud.com",
-  "me.com",
-  "mac.com",
-  "aol.com",
-  "protonmail.com",
-  "proton.me",
-  "pm.me",
-  "zoho.com",
-  "yandex.com",
-  "yandex.ru",
-  "msn.com",
-  "mail.com",
-  "inbox.com",
-  "gmx.com",
-  "gmx.net",
-  "gmx.de",
-  "web.de",
-  "comcast.net",
-  "verizon.net",
-  "att.net",
-  "sbcglobal.net",
-  "bellsouth.net",
-  "cox.net",
-  "charter.net",
-  "earthlink.net",
-  "tutanota.com",
-  "tuta.io",
-  "fastmail.com",
-  "fastmail.fm",
-  "runbox.com",
-  "mailbox.org",
-  "hushmail.com",
-  "disroot.org",
-]);
-
-// Domain suffixes that identify educational institutions worldwide
+// Domain suffixes that identify educational institutions worldwide.
+// These are BLOCKED — We Glue now requires a personal/general email, not a
+// school-issued one.
 const EDUCATIONAL_SUFFIXES = [
   // United States
   ".edu",
@@ -131,6 +78,9 @@ const EDUCATIONAL_SUFFIXES = [
   ".edu.al",
 ];
 
+export const EDU_EMAIL_BLOCKED_MESSAGE =
+  "Please use another email. Do not use your university or college email.";
+
 export interface EmailValidationResult {
   valid: boolean;
   reason?: string;
@@ -150,24 +100,12 @@ export function validateEducationEmail(email: string): EmailValidationResult {
     return { valid: false, reason: "Please enter a valid email address." };
   }
 
-  if (CONSUMER_DOMAINS.has(domain)) {
-    return {
-      valid: false,
-      reason:
-        "Only university or college email addresses (.edu) are accepted. Please use your school email.",
-    };
-  }
-
-  const isEducational = EDUCATIONAL_SUFFIXES.some((suffix) =>
+  const isBlocked = EDUCATIONAL_SUFFIXES.some((suffix) =>
     domain.endsWith(suffix)
   );
 
-  if (!isEducational) {
-    return {
-      valid: false,
-      reason:
-        "Only university or college email addresses (.edu) are accepted. Please use your school email.",
-    };
+  if (isBlocked) {
+    return { valid: false, reason: EDU_EMAIL_BLOCKED_MESSAGE };
   }
 
   return { valid: true };
