@@ -3,14 +3,21 @@
  * the user tapping "Turn on" here first (store-policy rule: no first-launch
  * or mid-onboarding interruption).
  *
- * Shown at the top of the Notifications inbox (the meaningful moment: the
- * user is literally looking for notifications) while permission is
- * undetermined; after a permanent denial it swaps to an Open Settings path
- * and never nags again ("Not now" hides it for the session, the asked flag
- * keeps it from auto-reappearing forever).
+ * Two variants, same underlying permission logic:
+ *  - 'inbox' (default): shown at the top of the Notifications inbox (the
+ *    meaningful moment: the user is literally looking for notifications)
+ *    while permission is undetermined. Dismissal is session-only ("Not now"
+ *    hides it until the app is relaunched) — unchanged from before.
+ *  - 'home': shown above the Posts/Events selector on Home. Dismissal is
+ *    persisted (reminderDismissal.ts): hidden for 7 days, reappears if
+ *    notifications are still off, capped at 3 dismissals total.
+ *
+ * Both variants: after a permanent denial they swap to an Open Settings
+ * path and never nag again; re-checks permission on every app-foreground so
+ * enabling notifications elsewhere (Settings) hides the card immediately.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { AppState, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import {
@@ -22,24 +29,47 @@ import {
 } from '../../lib/notifications/permissions';
 import { onPermissionDecision } from '../../lib/notifications/permissionSync';
 import { registerPushTokenIfPermitted } from '../../lib/notifications/registerPush';
+import { recordDismissal, shouldShowReminder } from '../../lib/notifications/reminderDismissal';
 
-export function EnableNotificationsCard() {
+type Variant = 'inbox' | 'home';
+
+export function EnableNotificationsCard({ variant = 'inbox' }: { variant?: Variant } = {}) {
   const userId = useAuthStore((s) => s.session?.user.id);
   const [state, setState] = useState<PermissionState | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  // 'home' starts hidden until the persisted cadence check resolves, so it
+  // never flashes on screen before we know whether this account is still
+  // within its 7-day/3-dismissal window. 'inbox' never used this cadence.
+  const [reminderAllowed, setReminderAllowed] = useState(variant !== 'home');
   const [showSettingsPath, setShowSettingsPath] = useState(false);
 
-  useEffect(() => {
-    void (async () => {
-      const permission = await getPermissionState();
-      setState(permission);
-      // After an explicit earlier denial we only ever show the Settings path,
-      // and only while the user is on this screen — no nagging.
-      if (permission === 'denied' && (await hasAskedBefore())) {
-        setShowSettingsPath(true);
-      }
-    })();
+  const checkPermission = useCallback(async () => {
+    const permission = await getPermissionState();
+    setState(permission);
+    // After an explicit earlier denial we only ever show the Settings path,
+    // and never nag with the native prompt again.
+    if (permission === 'denied' && (await hasAskedBefore())) {
+      setShowSettingsPath(true);
+    }
   }, []);
+
+  useEffect(() => {
+    void checkPermission();
+  }, [checkPermission]);
+
+  useEffect(() => {
+    if (variant !== 'home' || !userId) return;
+    void shouldShowReminder(userId).then(setReminderAllowed);
+  }, [variant, userId]);
+
+  // If the user grants permission elsewhere (Settings app) while this card
+  // is on screen, the next foreground catches it and hides the card.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (status) => {
+      if (status === 'active') void checkPermission();
+    });
+    return () => sub.remove();
+  }, [checkPermission]);
 
   const handleEnable = useCallback(async () => {
     const result = await requestPermissionFromUserAction();
@@ -52,7 +82,22 @@ export function EnableNotificationsCard() {
     }
   }, [userId]);
 
-  if (dismissed || state === null || state === 'granted') return null;
+  const handleDismiss = () => {
+    setDismissed(true);
+    if (variant === 'home' && userId) {
+      void recordDismissal(userId);
+    }
+  };
+
+  if (dismissed || !reminderAllowed || state === null || state === 'granted') return null;
+
+  const title = variant === 'home' ? "Don't miss what's happening" : 'Turn on notifications';
+  const subtitle = showSettingsPath
+    ? 'Notifications are off. Enable them in Settings to hear about messages and events.'
+    : variant === 'home'
+      ? 'Get notifications for messages, events, replies, reminders, and more.'
+      : 'Know right away about messages, event reminders and your clubs.';
+  const ctaLabel = showSettingsPath ? 'Open Settings' : variant === 'home' ? 'Turn on notifications' : 'Turn on';
 
   return (
     <View
@@ -84,12 +129,10 @@ export function EnableNotificationsCard() {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
-          Turn on notifications
+          {title}
         </Text>
         <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_400Regular', marginTop: 2 }}>
-          {showSettingsPath
-            ? 'Notifications are off. Enable them in Settings to hear about messages and events.'
-            : 'Know right away about messages, event reminders and your clubs.'}
+          {subtitle}
         </Text>
       </View>
       <TouchableOpacity
@@ -103,11 +146,11 @@ export function EnableNotificationsCard() {
         }}
       >
         <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
-          {showSettingsPath ? 'Open Settings' : 'Turn on'}
+          {ctaLabel}
         </Text>
       </TouchableOpacity>
       <TouchableOpacity
-        onPress={() => setDismissed(true)}
+        onPress={handleDismiss}
         hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
         accessibilityLabel="Dismiss notifications prompt"
       >

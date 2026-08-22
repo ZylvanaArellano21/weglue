@@ -23,6 +23,7 @@ import { Avatar } from '../../components/shared/Avatar';
 import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
 import { useAppUpdateStatus } from '../../hooks/useAppUpdateStatus';
 import { CountBadge } from '../../components/shared/CountBadge';
+import { EnableNotificationsCard } from '../../components/notifications/EnableNotificationsCard';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
 // iPad / Android tablet gets the desktop-web IA (side column with Upcoming
@@ -369,6 +370,11 @@ export default function HomeScreen() {
             column stretched across the whole tablet width. */}
         <View style={{ flex: 1, flexDirection: isTablet ? 'row' : 'column' }}>
           <View style={{ flex: 1 }}>
+            {/* Notification-permission reminder — above the Posts/Events
+                selector, self-hiding (granted, dismissed-this-session,
+                or past the 7-day/3-dismissal cadence). */}
+            <EnableNotificationsCard variant="home" />
+
             {/* Tab Switcher — Posts | Events, each centered in its half with a
                 centered underline under the active tab (matches founder design). */}
             <View
