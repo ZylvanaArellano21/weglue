@@ -142,18 +142,38 @@ export default function HomeScreen() {
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             {/* Avatar */}
-            <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8}>
-              <HeaderAvatar
-                avatarUrl={profile?.avatar_url ?? null}
-                username={profile?.username}
-              />
-              {/* Positioned INSIDE the button bounds: Android clips children
-                  that overhang their parent (same rule as the notifications
-                  badge below). */}
-              <CountBadge
-                count={updateAvailable ? 1 : 0}
-                style={{ position: 'absolute', top: -1, right: -1 }}
-              />
+            <TouchableOpacity
+              onPress={handleAvatarPress}
+              activeOpacity={0.8}
+              style={{ flexDirection: 'row', alignItems: 'center' }}
+            >
+              <View>
+                <HeaderAvatar
+                  avatarUrl={profile?.avatar_url ?? null}
+                  username={profile?.username}
+                />
+                {/* Positioned INSIDE the button bounds: Android clips children
+                    that overhang their parent (same rule as the notifications
+                    badge below). The dot alone is easy to miss against the
+                    avatar, so "New update!" (below) is the primary signal. */}
+                <CountBadge
+                  count={updateAvailable ? 1 : 0}
+                  style={{ position: 'absolute', top: -1, right: -1 }}
+                />
+              </View>
+              {updateAvailable && (
+                <Text
+                  style={{
+                    marginLeft: 8,
+                    fontSize: 13,
+                    fontWeight: '700',
+                    color: '#EF4444',
+                    fontFamily: 'Inter_700Bold',
+                  }}
+                >
+                  New update!
+                </Text>
+              )}
             </TouchableOpacity>
 
             {/* "Personalize your Picture!" — new accounts only, and only until

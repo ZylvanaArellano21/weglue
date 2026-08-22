@@ -218,10 +218,7 @@ export function SidebarOverlay() {
           accessibilityRole="button"
           accessibilityLabel="Your profile"
         >
-          <View>
-            <Avatar uri={profile?.avatar_url} size={56} username={profile?.username} />
-            <CountBadge count={updateAvailable ? 1 : 0} style={styles.avatarBadge} />
-          </View>
+          <Avatar uri={profile?.avatar_url} size={56} username={profile?.username} />
           <View style={styles.headerText}>
             <Text style={styles.displayName} numberOfLines={1}>
               {profile?.full_name ?? 'Your Profile'}
@@ -310,7 +307,6 @@ const styles = StyleSheet.create({
     ...profileShadow,
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
-  avatarBadge: { position: 'absolute', top: -1, right: -1 },
   headerText: { flex: 1 },
   displayName: { fontFamily: profileFonts.bold, fontSize: 18, color: profileColors.textDark },
   username: { fontFamily: profileFonts.regular, fontSize: 13, color: profileColors.textMuted, marginTop: 2 },
