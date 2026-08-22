@@ -44,6 +44,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
 
   { label: "Data Health", href: "/admin/data-health", icon: "🩺", day: 5, ready: true, group: "System" },
   { label: "Admin Settings", href: "/admin/settings", icon: "⚙️", day: 5, ready: true, group: "System" },
+  { label: "App Releases", href: "/admin/app-releases", icon: "🚀", day: 10, ready: true, group: "System" },
 ];
 
 export const ADMIN_NAV_GROUPS: AdminNavItem["group"][] = [

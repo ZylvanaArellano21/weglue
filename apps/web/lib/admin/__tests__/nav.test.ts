@@ -6,6 +6,7 @@ describe("admin navigation", () => {
     const ready = ADMIN_NAV.filter((i) => i.ready).map((i) => i.href).sort();
     expect(ready).toEqual([
       "/admin",
+      "/admin/app-releases",
       "/admin/audit-history",
       "/admin/channels",
       "/admin/clubs",
