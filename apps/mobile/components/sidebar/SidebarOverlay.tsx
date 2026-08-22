@@ -38,9 +38,11 @@ import {
 } from '../../lib/sessionCleanup';
 import { useSidebarStore } from '../../store/sidebarStore';
 import { useOwnProfile } from '../../hooks/useOwnProfile';
+import { useAppUpdateStatus } from '../../hooks/useAppUpdateStatus';
 import { useToast } from '../Toast';
 import { ConfirmModal } from '../ConfirmModal';
 import { Avatar } from '../shared/Avatar';
+import { CountBadge } from '../shared/CountBadge';
 import { profileColors, profileFonts, profileShadow } from '../profile/profileTheme';
 
 const LABEL_OVERRIDES: Partial<Record<SidebarItemKey, string>> = {
@@ -53,6 +55,7 @@ const MENU_KEYS: SidebarItemKey[] = [
   'accountCenter',
   'notifications',
   'privacyCenter',
+  'update',
 ];
 // Correction 7: Delete Account is reachable ONLY through Account Center now —
 // the sidebar's own row (which used to duplicate it "for one-tap reach") is
@@ -74,6 +77,7 @@ export function SidebarOverlay() {
   const userId = session?.user.id;
 
   const { data: profile } = useOwnProfile(userId);
+  const { updateAvailable } = useAppUpdateStatus();
   const { show, ToastComponent } = useToast();
   const queryClient = useQueryClient();
 
@@ -196,7 +200,10 @@ export function SidebarOverlay() {
           accessibilityRole="button"
           accessibilityLabel="Your profile"
         >
-          <Avatar uri={profile?.avatar_url} size={56} username={profile?.username} />
+          <View>
+            <Avatar uri={profile?.avatar_url} size={56} username={profile?.username} />
+            <CountBadge count={updateAvailable ? 1 : 0} style={styles.avatarBadge} />
+          </View>
           <View style={styles.headerText}>
             <Text style={styles.displayName} numberOfLines={1}>
               {profile?.full_name ?? 'Your Profile'}
@@ -211,7 +218,7 @@ export function SidebarOverlay() {
 
         <ScrollView showsVerticalScrollIndicator={false} style={styles.menuScroll}>
           {menuItems.map((item) => (
-            <SidebarRow key={item.key} item={item} />
+            <SidebarRow key={item.key} item={item} badge={item.key === 'update' && updateAvailable} />
           ))}
         </ScrollView>
 
@@ -249,7 +256,13 @@ export function SidebarOverlay() {
   );
 }
 
-function SidebarRow({ item }: { item: ReturnType<typeof buildSidebarItems>[number] }) {
+function SidebarRow({
+  item,
+  badge,
+}: {
+  item: ReturnType<typeof buildSidebarItems>[number];
+  badge?: boolean;
+}) {
   const label = LABEL_OVERRIDES[item.key] ?? item.label;
   return (
     <TouchableOpacity onPress={item.onPress} activeOpacity={0.7} style={styles.row} accessibilityRole="button">
@@ -259,6 +272,7 @@ function SidebarRow({ item }: { item: ReturnType<typeof buildSidebarItems>[numbe
         color={item.destructive ? profileColors.alertRed : profileColors.textDark}
       />
       <Text style={[styles.rowLabel, item.destructive && styles.rowLabelDestructive]}>{label}</Text>
+      {badge ? <CountBadge count={1} style={styles.rowBadge} /> : null}
     </TouchableOpacity>
   );
 }
@@ -278,12 +292,14 @@ const styles = StyleSheet.create({
     ...profileShadow,
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
+  avatarBadge: { position: 'absolute', top: -1, right: -1 },
   headerText: { flex: 1 },
   displayName: { fontFamily: profileFonts.bold, fontSize: 18, color: profileColors.textDark },
   username: { fontFamily: profileFonts.regular, fontSize: 13, color: profileColors.textMuted, marginTop: 2 },
   divider: { height: 1, backgroundColor: profileColors.border, marginBottom: 8 },
   menuScroll: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
+  rowBadge: { marginLeft: -2 },
   rowLabel: { fontFamily: profileFonts.medium, fontSize: 16, color: profileColors.textDark },
   rowLabelDestructive: { color: profileColors.alertRed },
   footer: { borderTopWidth: 1, borderTopColor: profileColors.border, paddingTop: 8 },

@@ -10,6 +10,7 @@ export type SidebarItemKey =
   | 'accountCenter'
   | 'notifications'
   | 'privacyCenter'
+  | 'update'
   | 'help'
   | 'terms'
   | 'logout';
@@ -100,6 +101,12 @@ export function buildSidebarItems(
       label: 'Privacy Center',
       icon: 'shield-outline',
       onPress: go('/privacy-center'),
+    },
+    {
+      key: 'update',
+      label: 'Update',
+      icon: 'download-outline',
+      onPress: go('/account-center/update'),
     },
     {
       key: 'help',

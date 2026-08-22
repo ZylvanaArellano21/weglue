@@ -21,6 +21,7 @@ import { PostsFeed } from '../../components/home/PostsFeed';
 import { HomeTabletSidePanel } from '../../components/home/HomeTabletSidePanel';
 import { Avatar } from '../../components/shared/Avatar';
 import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
+import { useAppUpdateStatus } from '../../hooks/useAppUpdateStatus';
 import { CountBadge } from '../../components/shared/CountBadge';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
@@ -52,6 +53,7 @@ export default function HomeScreen() {
   // PushNotificationsHost; this is a cache read, no extra subscription).
   const { data: unreadSummary } = useUnreadSummaryValue(userId);
   const unreadNotifications = unreadSummary?.unread_notifications ?? 0;
+  const { updateAvailable } = useAppUpdateStatus();
 
   // Keep officer status fresh: on mount AND every time Home regains focus, so
   // gaining/losing an officer role flips the plus-menu Event option and the
@@ -144,6 +146,13 @@ export default function HomeScreen() {
               <HeaderAvatar
                 avatarUrl={profile?.avatar_url ?? null}
                 username={profile?.username}
+              />
+              {/* Positioned INSIDE the button bounds: Android clips children
+                  that overhang their parent (same rule as the notifications
+                  badge below). */}
+              <CountBadge
+                count={updateAvailable ? 1 : 0}
+                style={{ position: 'absolute', top: -1, right: -1 }}
               />
             </TouchableOpacity>
 
