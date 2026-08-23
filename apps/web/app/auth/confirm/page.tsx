@@ -5,11 +5,15 @@ import FragmentConfirm from "./FragmentConfirm";
 import { WebContinue } from "../../../components/auth/WebContinue";
 
 interface PageProps {
-  searchParams: { token_hash?: string; type?: string; code?: string };
+  searchParams: { token_hash?: string; type?: string; code?: string; flow?: string };
 }
 
 export default async function AuthConfirmPage({ searchParams }: PageProps): Promise<JSX.Element> {
-  const { token_hash, type, code } = searchParams;
+  const { token_hash, type, code, flow } = searchParams;
+  // Our own marker (set on the emailRedirectTo we pass to updateUser/resend),
+  // not Supabase's `type` — reliable across every delivery path (token_hash+
+  // type, PKCE code with no type at all, and fragment-based implicit tokens).
+  const isEmailChange = flow === "email_change";
 
   const cookieStore = cookies();
   const supabase = createServerClient(
@@ -69,7 +73,7 @@ export default async function AuthConfirmPage({ searchParams }: PageProps): Prom
         which the server cannot read. This client component reads them in the
         browser and overlays the success screen. Renders null when absent.
       */}
-      <FragmentConfirm />
+      <FragmentConfirm isEmailChange={isEmailChange} />
 
       <main className="min-h-screen bg-[#FEFCF0] flex items-center justify-center px-6">
         <div className="max-w-[400px] mx-auto text-center">
@@ -106,13 +110,51 @@ export default async function AuthConfirmPage({ searchParams }: PageProps): Prom
                 </svg>
               </div>
 
-              <p className="text-sm text-gray-600 leading-relaxed">
-                You can go back to We Glue now and click{" "}
-                <span className="text-[#0FA6A6] font-semibold">Login</span>.
+              {isEmailChange ? (
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  You can go back to We Glue now.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-600 leading-relaxed">
+                    You can go back to We Glue now and click{" "}
+                    <span className="text-[#0FA6A6] font-semibold">Login</span>.
+                  </p>
+
+                  {/* Only appears when this browser started a WEB signup. */}
+                  <WebContinue />
+                </>
+              )}
+            </>
+          ) : isEmailChange ? (
+            <>
+              <div className="w-20 h-20 rounded-full border-2 border-[#F02719] bg-red-50 flex items-center justify-center mx-auto mb-6">
+                <svg
+                  width="40"
+                  height="40"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#F02719"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </div>
+
+              <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
+                Confirmation link expired
+              </h1>
+              <p className="text-sm text-gray-400 mb-6">
+                Please request a new confirmation email
               </p>
 
-              {/* Only appears when this browser started a WEB signup. */}
-              <WebContinue />
+              <p className="text-sm text-gray-600 leading-relaxed">
+                Go back to We Glue and try changing your email again from
+                Account Center.
+              </p>
             </>
           ) : (
             <>

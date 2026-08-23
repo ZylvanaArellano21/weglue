@@ -2,6 +2,7 @@
 
 import { validateEducationEmail } from "@weglue/shared";
 import { getSupabaseBrowser } from "./supabase-browser";
+import { emailChangeRedirect } from "./authFlow";
 
 // ─── Account Center (web) ────────────────────────────────────────────────────
 //
@@ -210,7 +211,14 @@ export async function changeEmail(
       }
     }
 
-    const { error } = await supabase.auth.updateUser({ email: trimmedEmail });
+    // emailRedirectTo carries our own flow=email_change marker so the landing
+    // page never has to guess (or depend on Supabase's own `type` param,
+    // which isn't present on every delivery path) whether this confirmation
+    // came from Account Center or from signup.
+    const { error } = await supabase.auth.updateUser(
+      { email: trimmedEmail },
+      { emailRedirectTo: emailChangeRedirect() }
+    );
 
     if (error) {
       const msg = (error.message ?? "").toLowerCase();
