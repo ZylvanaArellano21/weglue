@@ -39,6 +39,11 @@ export default function OnboardingSignupScreen() {
   } = useOnboardingStore();
   const { show, ToastComponent } = useToast();
 
+  // The heading may never claim fewer than two matches; the server tops the
+  // real batch up to at least two whenever eligible clubs exist (mirrors
+  // apps/web/app/onboarding/signup/page.tsx's identical floor).
+  const displayMatchCount = Math.max(matchCount, 2);
+
   // Restore username/email from store so back navigation preserves the form
   const [username, setUsername] = useState(pendingUsername);
   const [email, setEmail] = useState(pendingEmail);
@@ -220,7 +225,7 @@ export default function OnboardingSignupScreen() {
               <Text style={styles.matchedText}>You matched with</Text>
               <Text style={styles.partyEmoji}>🎉</Text>
             </View>
-            <Text style={styles.matchCount}>+{matchCount} clubs</Text>
+            <Text style={styles.matchCount}>+{displayMatchCount} clubs</Text>
             <Text style={styles.createText}>
               Create an account so that you can see your matches!!!
             </Text>

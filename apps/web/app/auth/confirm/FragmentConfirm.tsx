@@ -5,7 +5,11 @@ import Image from "next/image";
 import { WebContinue } from "../../../components/auth/WebContinue";
 import { getSupabaseBrowser } from "../../../lib/supabase-browser";
 
-export default function FragmentConfirm(): JSX.Element | null {
+export default function FragmentConfirm({
+  isEmailChange = false,
+}: {
+  isEmailChange?: boolean;
+}): JSX.Element | null {
   const [hasTokens, setHasTokens] = useState(false);
 
   useEffect(() => {
@@ -60,13 +64,21 @@ export default function FragmentConfirm(): JSX.Element | null {
           </svg>
         </div>
 
-        <p className="text-sm text-gray-600 leading-relaxed">
-          You can go back to We Glue now and click{" "}
-          <span className="text-[#0FA6A6] font-semibold">Login</span>.
-        </p>
+        {isEmailChange ? (
+          <p className="text-sm text-gray-600 leading-relaxed">
+            You can go back to We Glue now.
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              You can go back to We Glue now and click{" "}
+              <span className="text-[#0FA6A6] font-semibold">Login</span>.
+            </p>
 
-        {/* Only appears when this browser started a WEB signup. */}
-        <WebContinue />
+            {/* Only appears when this browser started a WEB signup. */}
+            <WebContinue />
+          </>
+        )}
       </div>
     </main>
   );

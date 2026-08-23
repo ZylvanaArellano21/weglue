@@ -15,6 +15,14 @@ import { RESEND_COOLDOWN_SECONDS } from "../constants/auth";
 export const CONFIRM_EMAIL_REDIRECT = "https://weglue.app/auth/confirm";
 export const RESET_PASSWORD_REDIRECT = "https://weglue.app/auth/reset-password";
 
+/** Where the Account Center "change email" verification link lands. Carries
+ * its own `flow=email_change` marker (mirrors apps/web/lib/authFlow.ts's
+ * emailChangeRedirect) so /auth/confirm never has to guess whether a
+ * confirmation came from signup or from an existing user changing their
+ * email in Account Center. */
+export const CONFIRM_EMAIL_CHANGE_REDIRECT =
+  "https://weglue.app/auth/confirm?flow=email_change";
+
 export const PENDING_EMAIL_KEY = "@weglue/pending_confirmation_email";
 
 // ─── Pending-signup marker (survives app restarts) ───────────────────────────

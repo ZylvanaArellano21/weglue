@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
-import { ActivityIndicator, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Text, View } from "react-native";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
@@ -15,12 +15,27 @@ export default function AuthConfirmedScreen() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handledRef = useRef(false);
 
+  // Our own marker on the redirect URL (mirrors the web /auth/confirm page),
+  // not Supabase's own `type` — set by accountService.ts's changeEmail() so
+  // this screen never has to guess whether the deep link that opened it came
+  // from Account Center or from signup.
+  const { flow } = useLocalSearchParams<{ flow?: string }>();
+  const isEmailChange = flow === "email_change";
+  const [emailChangeState, setEmailChangeState] = useState<
+    "pending" | "confirmed" | "timeout"
+  >("pending");
+
   // Fallback: if no session arrives within SESSION_TIMEOUT_MS the tokens
-  // couldn't be parsed (bad link, expired, etc.) — send the user to the
-  // confirm-email screen where they can resend a fresh link.
+  // couldn't be parsed (bad link, expired, etc.). Signup sends the user to
+  // the confirm-email screen to resend; that screen is signup-specific, so an
+  // email-change link instead shows an inline message with no navigation.
   useEffect(() => {
     timerRef.current = setTimeout(() => {
       if (handledRef.current) return;
+      if (isEmailChange) {
+        setEmailChangeState("timeout");
+        return;
+      }
       show("Couldn't verify from this link. You can resend a new one.", "error");
       router.replace({ pathname: "/auth/verify-email", params: { expired: "1" } });
     }, SESSION_TIMEOUT_MS);
@@ -54,6 +69,18 @@ export default function AuthConfirmedScreen() {
       timerRef.current = null;
     }
 
+    // Email-change (Account Center): the user is presumably already using
+    // the app under their existing session — never sign them out or bounce
+    // them to Login for this. Just show the confirmed state in place.
+    if (isEmailChange) {
+      setEmailChangeState("confirmed");
+      return;
+    }
+
+    // Signup: this session exists ONLY to consume the verification token —
+    // it must never itself log the user in (see the notification-permission
+    // gating note this screen has always followed). Sign it back out and
+    // hand off to Login, prefilled, exactly as before.
     clearPendingSignup();
     const email = session.user.email ?? "";
 
@@ -63,7 +90,63 @@ export default function AuthConfirmedScreen() {
         params: { prefillEmail: email, verified: "1" },
       });
     });
-  }, [session]);
+  }, [session, isEmailChange]);
+
+  if (isEmailChange && emailChangeState !== "pending") {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#FEFCF0",
+          paddingHorizontal: 32,
+        }}
+      >
+        {ToastComponent}
+        <View
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: 40,
+            borderWidth: 2,
+            borderColor: emailChangeState === "confirmed" ? "#0FA6A6" : "#F02719",
+            alignItems: "center",
+            justifyContent: "center",
+            marginBottom: 24,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 32,
+              color: emailChangeState === "confirmed" ? "#0FA6A6" : "#F02719",
+              fontWeight: "700",
+            }}
+          >
+            {emailChangeState === "confirmed" ? "✓" : "!"}
+          </Text>
+        </View>
+        <Text
+          style={{
+            fontSize: 22,
+            fontWeight: "700",
+            color: "#000",
+            textAlign: "center",
+            marginBottom: 8,
+          }}
+        >
+          {emailChangeState === "confirmed"
+            ? "Your email has been confirmed"
+            : "Couldn't confirm from this link"}
+        </Text>
+        <Text style={{ fontSize: 14, color: "#5F5D5D", textAlign: "center" }}>
+          {emailChangeState === "confirmed"
+            ? "You can go back to We Glue now."
+            : "Go back to We Glue and try changing your email again from Account Center."}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View

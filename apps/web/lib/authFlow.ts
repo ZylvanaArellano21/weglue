@@ -25,6 +25,15 @@ export function confirmEmailRedirect(): string {
   return `${siteOrigin()}/auth/confirm`;
 }
 
+/** Where the Account Center "change email" verification link lands. Carries
+ * its own `flow=email_change` marker so /auth/confirm can reliably tell this
+ * apart from a signup confirmation — without guessing from device/platform or
+ * depending on Supabase's own `type` param, which isn't present on every
+ * delivery path (PKCE `code` links carry no `type` at all). */
+export function emailChangeRedirect(): string {
+  return `${siteOrigin()}/auth/confirm?flow=email_change`;
+}
+
 /** Where the password-reset email link lands. */
 export function resetPasswordRedirect(): string {
   return `${siteOrigin()}/auth/reset-password`;

@@ -1,5 +1,6 @@
 import { validateEducationEmail } from '@weglue/shared';
 import { supabase } from '../lib/supabase';
+import { CONFIRM_EMAIL_CHANGE_REDIRECT } from '../lib/authFlow';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -197,8 +198,13 @@ export async function changeEmail(
     }
 
     // Starts the verified email change. The current email stays active and
-    // displayed until the new address is verified.
-    const { error } = await supabase.auth.updateUser({ email: trimmedEmail });
+    // displayed until the new address is verified. emailRedirectTo carries our
+    // own flow=email_change marker so the landing page never has to guess
+    // whether this confirmation came from Account Center or from signup.
+    const { error } = await supabase.auth.updateUser(
+      { email: trimmedEmail },
+      { emailRedirectTo: CONFIRM_EMAIL_CHANGE_REDIRECT },
+    );
 
     if (error) {
       const msg = (error.message ?? '').toLowerCase();
