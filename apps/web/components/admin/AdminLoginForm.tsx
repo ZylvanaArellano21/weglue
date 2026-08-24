@@ -26,15 +26,22 @@ export function AdminLoginForm({ next, expired = false }: { next: string; expire
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
     setBusy(true);
     setError(null);
 
+    // Read the submitted controls instead of relying only on React state. Some
+    // password managers populate the DOM without dispatching React's onChange,
+    // which can leave a controlled input visibly filled while its state is stale.
+    const formData = new FormData(e.currentTarget);
+    const submittedEmail = String(formData.get("email") ?? "").trim().toLowerCase();
+    const submittedPassword = String(formData.get("password") ?? "");
+
     const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
+      email: submittedEmail,
+      password: submittedPassword,
     });
 
     if (signInError) {
@@ -78,8 +85,9 @@ export function AdminLoginForm({ next, expired = false }: { next: string; expire
             </label>
             <input
               id="admin-email"
+              name="email"
               type="email"
-              autoComplete="username"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -96,6 +104,7 @@ export function AdminLoginForm({ next, expired = false }: { next: string; expire
             </label>
             <input
               id="admin-password"
+              name="password"
               type="password"
               autoComplete="current-password"
               required
