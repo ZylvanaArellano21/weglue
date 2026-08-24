@@ -12,7 +12,7 @@ import {
   confirmEmailRedirect,
   friendlyEmailSendError,
   passwordError,
-  replacePendingSignup,
+  sendVerificationEmail,
   setPendingSignupEmail,
 } from "../../../lib/authFlow";
 import {
@@ -22,7 +22,6 @@ import {
   setTransientPassword,
   writeOnboardingState,
 } from "../../../lib/onboardingState";
-import { recordSignupConsent } from "../../actions/auth";
 import { LegalModal } from "../../../components/legal/LegalModal";
 
 const inputClass = (invalid: boolean, valid?: boolean) =>
@@ -151,22 +150,19 @@ export default function SignupPage(): JSX.Element | null {
         return;
       }
 
-      // 2. Abandoned unverified signup with this email — replace it so the
-      //    NEW password/username take effect.
+      // 2. An unverified signup already owns this email. Never delete it from
+      //    a client-supplied email: resend its confirmation instead. The
+      //    email link is the proof of control, and the existing account stays
+      //    intact until the owner verifies it.
       if (status.emailStatus === "exists_unverified") {
-        const replaced = await replacePendingSignup(normalizedEmail);
-        if (replaced === "exists_verified") {
-          setEmailExistsVerified(true);
+        const resend = await sendVerificationEmail(normalizedEmail);
+        if (!resend.ok) {
+          setGeneralError("cooldown" in resend ? `Please wait ${resend.cooldown} seconds before trying again.` : resend.message);
           return;
         }
-        if (replaced === "rate_limited") {
-          setGeneralError("Too many attempts. Wait a few minutes and try again.");
-          return;
-        }
-        if (replaced === "error") {
-          setGeneralError("Something went wrong. Please try again.");
-          return;
-        }
+        setPendingSignupEmail(normalizedEmail);
+        router.push(`/onboarding/verify-email?email=${encodeURIComponent(normalizedEmail)}`);
+        return;
       }
 
       // 3. The survey answers travel in the user's OWN signup metadata. Email
@@ -182,6 +178,7 @@ export default function SignupPage(): JSX.Element | null {
             full_name: cleanUsername,
             interests: selectedInterests,
             activities: selectedActivities,
+            agreed_to_terms: true,
           },
           emailRedirectTo: confirmEmailRedirect(),
         },
@@ -213,10 +210,6 @@ export default function SignupPage(): JSX.Element | null {
       if (!data.session && data.user?.identities?.length === 0) {
         setEmailExistsVerified(true);
         return;
-      }
-
-      if (data.user) {
-        void recordSignupConsent(data.user.id);
       }
 
       writeOnboardingState({

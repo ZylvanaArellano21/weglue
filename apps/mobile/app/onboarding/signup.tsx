@@ -20,7 +20,7 @@ import {
   CONFIRM_EMAIL_REDIRECT,
   checkSignupStatus,
   friendlyEmailSendError,
-  replacePendingSignup,
+  sendVerificationEmail,
   setPendingSignupEmail,
 } from "../../lib/authFlow";
 
@@ -124,24 +124,19 @@ export default function OnboardingSignupScreen() {
         return;
       }
 
-      // 2. Abandoned unverified signup with this email — replace it so the
-      //    NEW password/username take effect (GoTrue would otherwise keep the
-      //    old ones and only resend the stale confirmation email).
+      // 2. An unverified signup already owns this email. Never delete it from
+      //    a client-supplied email: resend its confirmation instead. The
+      //    email link is the proof of control, and the existing account stays
+      //    intact until the owner verifies it.
       if (status.emailStatus === "exists_unverified") {
-        const replaced = await replacePendingSignup(normalizedEmail);
-        if (replaced === "exists_verified") {
-          setEmailExistsVerified(true);
+        const resend = await sendVerificationEmail(normalizedEmail);
+        if (!resend.ok) {
+          show("cooldown" in resend ? `Please wait ${resend.cooldown} seconds before trying again.` : resend.message, "error");
           return;
         }
-        if (replaced === "rate_limited") {
-          show("Too many attempts. Wait a few minutes and try again.", "error");
-          return;
-        }
-        if (replaced === "error") {
-          show("Something went wrong. Please try again.", "error");
-          return;
-        }
-        // "replaced" or "not_found" → proceed with a fresh signup below.
+        await setPendingSignupEmail(normalizedEmail);
+        router.push({ pathname: "/auth/verify-email", params: { email: normalizedEmail } });
+        return;
       }
 
       // The survey answers travel in the user's OWN signup metadata. Email
@@ -159,6 +154,7 @@ export default function OnboardingSignupScreen() {
             full_name: cleanUsername,
             interests: selectedInterests,
             activities: selectedActivities,
+            agreed_to_terms: true,
           },
           emailRedirectTo: CONFIRM_EMAIL_REDIRECT,
         },

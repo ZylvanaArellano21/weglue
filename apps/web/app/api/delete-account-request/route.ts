@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "../../../lib/supabase/admin";
+import { createClient } from "../../../lib/supabase/server";
+import { checkPublicRateLimit } from "../../../lib/security/publicRateLimit";
+
+function requestKey(request: NextRequest): string {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
+  return forwarded || request.headers.get("x-real-ip")?.trim() || "unknown";
+}
 
 // Public endpoint — no auth required.
 // Inserts a row into deletion_requests and sends a notification email.
 export async function POST(request: NextRequest) {
+  const limit = checkPublicRateLimit(requestKey(request));
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please try again later." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
+    );
+  }
+
   let body: { email?: string; reason?: string | null };
 
   try {
@@ -20,7 +34,9 @@ export async function POST(request: NextRequest) {
   const reason =
     typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : null;
 
-  const supabase = createAdminClient();
+  // This endpoint only creates a request row. Use the normal server client so
+  // a browser cannot turn this public form into a service-role capability.
+  const supabase = createClient();
 
   // Insert deletion request
   const { error: insertError } = await supabase
@@ -38,12 +54,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Send notification email via Supabase Auth admin API is not ideal here.
-  // Use Resend if configured, otherwise log to console for manual processing.
-  // TODO: wire up Resend or another transactional email provider when available.
-  console.log(
-    `[delete-account-request] New request from ${email} at ${new Date().toISOString()}`,
-  );
+  // Keep operational logging free of submitted PII. Notification delivery is
+  // intentionally a separate follow-up integration, not a service-role side
+  // effect of this public endpoint.
+  console.log("[delete-account-request] request recorded");
 
   return NextResponse.json({ success: true }, { status: 200 });
 }
