@@ -300,7 +300,6 @@ export function EventsFeed() {
         windowSize={7}
         maxToRenderPerBatch={6}
         initialNumToRender={6}
-        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
