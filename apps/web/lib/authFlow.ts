@@ -258,32 +258,6 @@ export async function checkSignupStatus(
   };
 }
 
-/**
- * Deletes an abandoned UNVERIFIED signup so a fresh signUp() can recreate it
- * with the latest password/username. The backend refuses verified accounts.
- */
-export async function replacePendingSignup(
-  email: string
-): Promise<"replaced" | "not_found" | "exists_verified" | "rate_limited" | "error"> {
-  const supabase = createClient();
-  const { data, error } = await supabase.rpc("replace_pending_signup", {
-    p_email: email.trim().toLowerCase(),
-  });
-  if (error || !data) return "error";
-  switch (data.status) {
-    case "pending_signup_replaced":
-      return "replaced";
-    case "not_found":
-      return "not_found";
-    case "exists_verified":
-      return "exists_verified";
-    case "rate_limited":
-      return "rate_limited";
-    default:
-      return "error";
-  }
-}
-
 // ─── Password rules (identical to mobile signup validation) ──────────────────
 
 export interface PasswordCheck {

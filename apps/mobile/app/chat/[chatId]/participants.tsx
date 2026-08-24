@@ -144,7 +144,11 @@ export default function ChatParticipants() {
   async function makeGroupAdmin(targetUserId: string) {
     setPersonMenu(null);
     try {
-      await supabase.from('conversations').update({ created_by: targetUserId }).eq('id', chatId).eq('type', 'group');
+      const { error } = await supabase.rpc('transfer_group_admin', {
+        p_conversation_id: chatId,
+        p_new_admin: targetUserId,
+      });
+      if (error) throw error;
       invalidateAll();
       Alert.alert('Admin transferred', 'You can now leave the group if you want.');
     } catch {
