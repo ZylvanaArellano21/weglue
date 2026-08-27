@@ -22,7 +22,6 @@ import {
   setTransientPassword,
   writeOnboardingState,
 } from "../../../lib/onboardingState";
-import { recordSignupConsent } from "../../actions/auth";
 import { LegalModal } from "../../../components/legal/LegalModal";
 
 const inputClass = (invalid: boolean, valid?: boolean) =>
@@ -122,7 +121,7 @@ export default function SignupPage(): JSX.Element | null {
 
     const cleanUsername = username.trim().replace(/^@/, "");
     const normalizedEmail = email.trim().toLowerCase();
-    const { selectedInterests, selectedActivities } = readOnboardingState();
+    const { selectedInterests, selectedActivities, avatarChoice } = readOnboardingState();
     const supabase = createClient();
 
     try {
@@ -182,6 +181,20 @@ export default function SignupPage(): JSX.Element | null {
             full_name: cleanUsername,
             interests: selectedInterests,
             activities: selectedActivities,
+            agreed_to_terms: true,
+            ...(avatarChoice?.kind === "preset" && {
+              avatar_choice_type: "preset",
+              avatar_choice_value: avatarChoice.id,
+            }),
+            ...(avatarChoice?.kind === "text" && {
+              avatar_choice_type: "text",
+              avatar_choice_value: avatarChoice.value,
+            }),
+            ...(avatarChoice &&
+              (avatarChoice.kind === "photo" || avatarChoice.kind === "camera") && {
+                avatar_choice_type: avatarChoice.kind,
+                avatar_choice_value: avatarChoice.token,
+              }),
           },
           emailRedirectTo: confirmEmailRedirect(),
         },
@@ -213,10 +226,6 @@ export default function SignupPage(): JSX.Element | null {
       if (!data.session && data.user?.identities?.length === 0) {
         setEmailExistsVerified(true);
         return;
-      }
-
-      if (data.user) {
-        void recordSignupConsent(data.user.id);
       }
 
       writeOnboardingState({

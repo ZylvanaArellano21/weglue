@@ -1,5 +1,16 @@
 import { create } from "zustand";
 
+// The mandatory profile-picture onboarding step's result. Preset/text travel
+// to the server as plain signup metadata (same trust model as interests and
+// activities). Photo/camera are uploaded to the `pending-avatars` storage
+// bucket by the picture screen itself before it stores the choice here — only
+// the resulting token travels onward, never a local file uri (which can't
+// survive to a different device anyway).
+export type AvatarChoice =
+  | { kind: "preset"; id: string }
+  | { kind: "text"; value: string }
+  | { kind: "photo" | "camera"; token: string };
+
 interface OnboardingState {
   selectedInterests: string[];
   selectedActivities: string[];
@@ -9,6 +20,7 @@ interface OnboardingState {
   // Kept in memory only (never persisted) so the confirm-email screen can
   // silently sign the user in to detect verification. Wiped on reset.
   pendingPassword: string;
+  avatarChoice: AvatarChoice | null;
 
   setSelectedInterests: (interests: string[]) => void;
   toggleInterest: (interest: string) => void;
@@ -18,6 +30,7 @@ interface OnboardingState {
   setPendingUsername: (username: string) => void;
   setPendingEmail: (email: string) => void;
   setPendingPassword: (password: string) => void;
+  setAvatarChoice: (choice: AvatarChoice | null) => void;
   reset: () => void;
 }
 
@@ -28,6 +41,7 @@ const initialState = {
   pendingUsername: "",
   pendingEmail: "",
   pendingPassword: "",
+  avatarChoice: null as AvatarChoice | null,
 };
 
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
@@ -60,6 +74,8 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   setPendingEmail: (pendingEmail) => set({ pendingEmail }),
 
   setPendingPassword: (pendingPassword) => set({ pendingPassword }),
+
+  setAvatarChoice: (avatarChoice) => set({ avatarChoice }),
 
   reset: () => set(initialState),
 }));
