@@ -57,6 +57,20 @@ export function pick<T extends object, K extends keyof T>(
   return result;
 }
 
+// ─── Onboarding utilities ─────────────────────────────────────────────────────
+
+/**
+ * A 32-char lowercase hex token naming a not-yet-owned upload in the
+ * `pending-avatars` storage bucket (Camera/Photo chosen before the account
+ * exists, during onboarding). Not a security credential — just a filename
+ * discriminator — so Math.random is fine; the DB trigger that later reads it
+ * out of signup metadata validates the same shape via regex.
+ */
+export function generatePendingAvatarToken(): string {
+  const chunk = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0");
+  return chunk() + chunk() + chunk() + chunk();
+}
+
 // ─── Async utilities ──────────────────────────────────────────────────────────
 
 export function sleep(ms: number): Promise<void> {

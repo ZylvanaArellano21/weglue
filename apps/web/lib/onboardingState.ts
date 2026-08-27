@@ -12,6 +12,8 @@
  * navigation, so signup form state never needs to survive a round trip.
  */
 
+import type { AvatarChoice } from "@weglue/shared";
+
 const KEY = "weglue-web/onboarding";
 
 export interface OnboardingFlowState {
@@ -20,6 +22,7 @@ export interface OnboardingFlowState {
   matchCount: number;
   pendingUsername: string;
   pendingEmail: string;
+  avatarChoice: AvatarChoice | null;
 }
 
 const initialState: OnboardingFlowState = {
@@ -28,6 +31,7 @@ const initialState: OnboardingFlowState = {
   matchCount: 0,
   pendingUsername: "",
   pendingEmail: "",
+  avatarChoice: null,
 };
 
 export function readOnboardingState(): OnboardingFlowState {

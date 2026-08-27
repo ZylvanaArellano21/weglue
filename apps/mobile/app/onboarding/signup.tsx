@@ -30,6 +30,7 @@ export default function OnboardingSignupScreen() {
     matchCount,
     selectedInterests,
     selectedActivities,
+    avatarChoice,
     setPendingUsername,
     setPendingEmail,
     setPendingPassword,
@@ -155,6 +156,19 @@ export default function OnboardingSignupScreen() {
             interests: selectedInterests,
             activities: selectedActivities,
             agreed_to_terms: true,
+            ...(avatarChoice?.kind === "preset" && {
+              avatar_choice_type: "preset",
+              avatar_choice_value: avatarChoice.id,
+            }),
+            ...(avatarChoice?.kind === "text" && {
+              avatar_choice_type: "text",
+              avatar_choice_value: avatarChoice.value,
+            }),
+            ...(avatarChoice &&
+              (avatarChoice.kind === "photo" || avatarChoice.kind === "camera") && {
+                avatar_choice_type: avatarChoice.kind,
+                avatar_choice_value: avatarChoice.token,
+              }),
           },
           emailRedirectTo: CONFIRM_EMAIL_REDIRECT,
         },

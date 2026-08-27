@@ -81,7 +81,7 @@ export default function ActivitiesPage(): JSX.Element | null {
       writeOnboardingState({ selectedActivities: selected, matchCount: 0 });
     } finally {
       setLoading(false);
-      router.push("/onboarding/signup");
+      router.push("/onboarding/profile-picture");
     }
   }
 

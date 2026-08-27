@@ -50,7 +50,7 @@ export default function ActivitiesScreen() {
       setMatchCount(0);
     } finally {
       setLoading(false);
-      router.push("/onboarding/signup");
+      router.push("/onboarding/profile-picture");
     }
   }
 

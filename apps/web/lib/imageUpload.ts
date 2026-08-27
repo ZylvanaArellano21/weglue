@@ -65,6 +65,22 @@ export async function uploadAvatar(userId: string, file: Blob): Promise<string> 
 }
 
 /**
+ * Uploads a resized JPEG to the `pending-avatars` bucket at `${token}.jpg`,
+ * pre-authentication (Camera/Photo chosen during onboarding, before the
+ * account exists — there is no session yet). The bucket only accepts inserts
+ * shaped like `<32 hex chars>.jpg` (see migration 098); the caller is
+ * responsible for generating that token (generatePendingAvatarToken).
+ */
+export async function uploadPendingAvatar(token: string, file: Blob): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const blob = await resizeToJpeg(file, 800);
+  const { error } = await supabase.storage
+    .from("pending-avatars")
+    .upload(`${token}.jpg`, blob, { contentType: "image/jpeg", upsert: false });
+  if (error) throw error;
+}
+
+/**
  * Uploads a resized JPEG to `bucket` at `path` (no upsert — unique paths) and
  * returns its public URL. Used for post + event images (both the `posts`
  * bucket, matching mobile's createPost / uploadEventImage).
