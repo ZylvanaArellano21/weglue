@@ -68,7 +68,7 @@ export async function photoFanout(config: LoadTestConfig, args: Record<string, s
         const successful = createdIds.length;
         const caseSamples = metrics.samples.filter((sample) => sample.name === 'photo-post-db-create' && sample.meta?.size === size && sample.meta?.concurrency === concurrency);
         const notificationDelta = notificationAfter;
-        const pushDelta = Object.fromEntries(new Set([...Object.keys(pushBefore), ...Object.keys(pushAfter)]).values().map((key) => [key, (pushAfter[key] ?? 0) - (pushBefore[key] ?? 0)]));
+        const pushDelta = Object.fromEntries([...new Set([...Object.keys(pushBefore), ...Object.keys(pushAfter)])].map((key) => [key, (pushAfter[key] ?? 0) - (pushBefore[key] ?? 0)]));
         const result: CaseResult = {
           members: size, concurrency, elapsedMs: Number(elapsedMs.toFixed(2)), attempted: concurrency, successful, failed: concurrency - successful,
           postP50Ms: percentile(caseSamples.map((sample) => sample.ms), 50), postP95Ms: percentile(caseSamples.map((sample) => sample.ms), 95), postP99Ms: percentile(caseSamples.map((sample) => sample.ms), 99),

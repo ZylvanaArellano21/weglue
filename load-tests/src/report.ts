@@ -16,7 +16,7 @@ function maxObservedConnections(result: RunResult): number | null {
 }
 
 export function renderReport(result: RunResult): string {
-  const lines: string[] = [`# We Glue load-test report: ${result.scenario}`, '', `- Target: `${result.config.supabaseUrl}``, `- University: `${result.config.universityId}``, `- Started: ${result.startedAt}`, `- Ended: ${result.endedAt}`, ''];
+  const lines: string[] = [`# We Glue load-test report: ${result.scenario}`, '', `- Target: ${result.config.supabaseUrl}`, `- University: ${result.config.universityId}`, `- Started: ${result.startedAt}`, `- Ended: ${result.endedAt}`, ''];
   lines.push('## Latency percentiles', '', '| Operation | Samples | p50 ms | p95 ms | p99 ms | Error rate |', '|---|---:|---:|---:|---:|---:|');
   for (const [name, table] of Object.entries(result.metrics.tables)) lines.push(`| ${name} | ${table.count} | ${fmt(table.p50)} | ${fmt(table.p95)} | ${fmt(table.p99)} | ${fmt(table.errorRate)} |`);
   lines.push('', '## Error classes', '', '| Class | Count |', '|---|---:|');

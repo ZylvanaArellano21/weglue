@@ -97,6 +97,7 @@ export async function seed(config: LoadTestConfig, args: Record<string, string |
     const handle = `lt_${namespace}_${i}`.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 55);
     const existing = unwrap(await admin.from('clubs').select('id').eq('handle', handle).maybeSingle(), `find club ${handle}`) as { id: string } | null;
     const club = existing ?? unwrap(await admin.from('clubs').insert({ name: `Load Test Club ${i}`, handle, description: `Synthetic club ${namespace}`, university_id: config.universityId, is_seed: true, is_active: true }).select('id').single(), `create club ${i}`);
+    if (!club) throw new Error(`club ${i} not created`);
     clubIds.push(club.id);
   }
   await chunked(clubIds.flatMap((clubId, clubIndex) => userIds.map((userId, userIndex) => ({ club_id: clubId, user_id: userId, role: userIndex === 0 && clubIndex === 0 ? 'officer' : 'member' }))), 500, async (rows) => {
@@ -108,6 +109,7 @@ export async function seed(config: LoadTestConfig, args: Record<string, string |
     const marker = `LOADTEST:${namespace}:event:${i}`;
     const found = unwrap(await admin.from('events').select('id').eq('club_id', clubIds[i]).eq('title', marker).maybeSingle(), `find event ${i}`) as { id: string } | null;
     const event = found ?? unwrap(await admin.from('events').insert({ club_id: clubIds[i], created_by: userIds[0], title: marker, description: 'Synthetic load-test event', event_date: '2099-01-01', start_time: '12:00:00', end_time: '13:00:00', visibility: 'everyone', is_seed: true }).select('id').single(), `create event ${i}`);
+    if (!event) throw new Error(`event ${i} not created`);
     eventIds.push(event.id);
   }
   const postIds: string[] = [];
@@ -115,6 +117,7 @@ export async function seed(config: LoadTestConfig, args: Record<string, string |
     const marker = `LOADTEST:${namespace}:post:${i}`;
     const found = unwrap(await admin.from('posts').select('id').eq('author_id', userIds[i]).eq('caption', marker).maybeSingle(), `find post ${i}`) as { id: string } | null;
     const post = found ?? unwrap(await admin.from('posts').insert({ author_id: userIds[i], club_id: clubIds[i % clubIds.length], post_type: 'picture', image_url: `https://loadtest.invalid/${namespace}/${i}.jpg`, caption: marker }).select('id').single(), `create post ${i}`);
+    if (!post) throw new Error(`post ${i} not created`);
     postIds.push(post.id);
   }
 
@@ -123,9 +126,11 @@ export async function seed(config: LoadTestConfig, args: Record<string, string |
   for (const clubId of clubIds) {
     const existing = unwrap(await admin.from('conversations').select('id').eq('club_id', clubId).eq('type', 'club_group').maybeSingle(), 'find club conversation') as { id: string } | null;
     const conversation = existing ?? unwrap(await admin.from('conversations').insert({ type: 'club_group', club_id: clubId, name: `Load Test Club · Members` }).select('id').single(), 'create club conversation');
+    if (!conversation) throw new Error(`club conversation not created for ${clubId}`);
     conversationIds.push(conversation.id);
     const channel = unwrap(await admin.from('conversation_channels').select('id').eq('conversation_id', conversation.id).eq('name', 'Members').maybeSingle(), 'find chat channel') as { id: string } | null;
     const actualChannel = channel ?? unwrap(await admin.from('conversation_channels').insert({ conversation_id: conversation.id, name: 'Members', display_order: 0 }).select('id').single(), 'create chat channel');
+    if (!actualChannel) throw new Error('chat channel not created');
     channelIds.push(actualChannel.id);
     await chunked(userIds.map((user_id) => ({ conversation_id: conversation.id, user_id })), 500, async (rows) => {
       unwrap(await admin.from('conversation_participants').upsert(rows, { onConflict: 'conversation_id,user_id' }), 'seed conversation participants');
