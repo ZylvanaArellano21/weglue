@@ -575,32 +575,36 @@ export async function createPost(
     .select('id')
     .single();
 
+  let postId: string;
   if (error) {
-    // A retry whose first attempt actually landed: return the existing post and
-    // skip the club-tag insert (it succeeded on that first attempt too). Any
-    // other 23505 is a real error.
-    if (isClientTagConflict(error, 'uq_posts_author_client_tag')) {
-      const { data: existing, error: fetchError } = await supabase
-        .from('posts')
-        .select('id')
-        .eq('author_id', userId)
-        .eq('client_tag', clientTag)
-        .single();
-      if (fetchError || !existing) throw fetchError ?? error;
-      return existing.id;
-    }
-    throw error;
+    // A retry whose first attempt actually landed: resolve the existing post by
+    // its tag. Any other 23505 is a real error.
+    if (!isClientTagConflict(error, 'uq_posts_author_client_tag')) throw error;
+    const { data: existing, error: fetchError } = await supabase
+      .from('posts')
+      .select('id')
+      .eq('author_id', userId)
+      .eq('client_tag', clientTag)
+      .single();
+    if (fetchError || !existing) throw fetchError ?? error;
+    postId = existing.id;
+  } else {
+    if (!post) throw new Error('Failed to create post');
+    postId = post.id;
   }
-  if (!post) throw new Error('Failed to create post');
 
+  // Idempotent on both paths: a retry that lost its response before the tags
+  // landed still gets them; UNIQUE(post_id, club_id) makes the repeat a no-op.
   if (clubIds && clubIds.length > 1) {
     const additionalTags = clubIds.slice(1).map((cid) => ({
-      post_id: post.id,
+      post_id: postId,
       club_id: cid,
     }));
-    const { error: tagError } = await supabase.from('post_club_tags').insert(additionalTags);
+    const { error: tagError } = await supabase
+      .from('post_club_tags')
+      .upsert(additionalTags, { onConflict: 'post_id,club_id', ignoreDuplicates: true });
     if (tagError) throw tagError;
   }
 
-  return post.id;
+  return postId;
 }

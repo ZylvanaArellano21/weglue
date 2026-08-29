@@ -63,29 +63,34 @@ async function createPost(
     })
     .select("id")
     .single();
+  let postId: string;
   if (error) {
-    // Retry of a create that already landed: return the existing post and skip
-    // the club-tag insert (done on the first attempt). Other 23505s are real.
-    if (isClientTagConflict(error, "uq_posts_author_client_tag")) {
-      const { data: existing, error: fetchError } = await supabase
-        .from("posts")
-        .select("id")
-        .eq("author_id", userId)
-        .eq("client_tag", tag)
-        .single();
-      if (fetchError || !existing) throw fetchError ?? error;
-      return (existing as any).id;
-    }
-    throw error;
+    // Retry of a create that already landed: resolve the post by its tag. Other
+    // 23505s are real.
+    if (!isClientTagConflict(error, "uq_posts_author_client_tag")) throw error;
+    const { data: existing, error: fetchError } = await supabase
+      .from("posts")
+      .select("id")
+      .eq("author_id", userId)
+      .eq("client_tag", tag)
+      .single();
+    if (fetchError || !existing) throw fetchError ?? error;
+    postId = (existing as any).id;
+  } else {
+    if (!post) throw new Error("Failed to create post");
+    postId = (post as any).id;
   }
-  if (!post) throw new Error("Failed to create post");
 
+  // Idempotent on both paths: UNIQUE(post_id, club_id) makes a repeat a no-op,
+  // so a lost-response retry still lands the tags.
   if (clubIds.length > 1) {
-    const extra = clubIds.slice(1).map((cid) => ({ post_id: (post as any).id, club_id: cid }));
-    const { error: tagError } = await supabase.from("post_club_tags").insert(extra);
+    const extra = clubIds.slice(1).map((cid) => ({ post_id: postId, club_id: cid }));
+    const { error: tagError } = await supabase
+      .from("post_club_tags")
+      .upsert(extra, { onConflict: "post_id,club_id", ignoreDuplicates: true });
     if (tagError) throw tagError;
   }
-  return (post as any).id;
+  return postId;
 }
 
 export function useCreatePost(userId: string | undefined) {
