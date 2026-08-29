@@ -77,6 +77,20 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ─── Realtime reconnect backoff, with jitter ─────────────────────────────────
+//
+// @supabase/realtime-js reconnects on the fixed ladder [1s, 2s, 5s, 10s] then
+// 10s steady, with NO jitter. If a shared network path (a campus Wi-Fi, a
+// flaky tower) drops for every client at once, all of them reconnect in
+// lock-step waves — a thundering herd on the realtime service and, per wave,
+// an RLS re-evaluation of every subscribed channel. Adding ±50% jitter spreads
+// the reconnects out. Pass this as `realtime.reconnectAfterMs` on the client.
+export function jitteredReconnectAfterMs(tries: number): number {
+  const ladder = [1000, 2000, 5000, 10000];
+  const base = ladder[tries - 1] ?? 10000;
+  return Math.round(base * (1 + Math.random() * 0.5));
+}
+
 // ─── Bounded retry for IDEMPOTENT requests only ───────────────────────────────
 //
 // USE THIS ONLY for reads / GET-shaped RPCs (feed queries, get_unread_summary,

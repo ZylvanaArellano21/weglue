@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, type AppStateStatus } from "react-native";
 import { createClient } from "@supabase/supabase-js";
+import { jitteredReconnectAfterMs } from "@weglue/shared";
 
 // Expo injects EXPO_PUBLIC_* env vars at build time via Metro
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
@@ -13,6 +14,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     // Tokens from deep links are parsed by useAuthDeepLink hook in _layout.tsx
     detectSessionInUrl: false,
+  },
+  realtime: {
+    // Jittered reconnect so a shared-network drop doesn't reconnect every
+    // client in lock-step waves (see jitteredReconnectAfterMs).
+    reconnectAfterMs: jitteredReconnectAfterMs,
   },
 });
 
