@@ -2,9 +2,37 @@ import { randomUUID } from 'node:crypto';
 import type { LoadTestConfig } from './config.js';
 import { argNumber, argString, assertWriteApproved } from './config.js';
 import { Metrics, classifyError, percentile } from './metrics.js';
-import { serviceClient, withTimeout } from './supabase.js';
+import { anonClient, serviceClient, withTimeout } from './supabase.js';
 import { manifestPath, readManifest } from './seed.js';
-import { runScenario } from './runner.js';
+import { runScenario, sleep } from './runner.js';
+
+// Sign in `count` authors sequentially (paced, since the hosted GoTrue per-IP
+// signin burst limit is ~30 and non-customisable). Photo posts are then made
+// as these authenticated users — service_role is SELECT-only on posts
+// (migration 075), and this is the real write path anyway.
+async function signInAuthors(
+  config: LoadTestConfig,
+  manifest: ReturnType<typeof readManifest>,
+  count: number,
+): Promise<Array<{ id: string; client: ReturnType<typeof anonClient> }>> {
+  const out: Array<{ id: string; client: ReturnType<typeof anonClient> }> = [];
+  for (let i = 0; i < count; i += 1) {
+    const id = manifest.userIds[i];
+    const email = manifest.emails[i];
+    const password = manifest.passwords[i];
+    if (!id || !email || !password) throw new Error(`manifest missing author ${i}`);
+    let done = false;
+    for (let attempt = 0; attempt < 8 && !done; attempt += 1) {
+      const client = anonClient(config, `loadtest-photo-${id}`);
+      const res = await withTimeout(client.auth.signInWithPassword({ email, password }), config.requestTimeoutMs, `photo author signin ${i}`);
+      if (!res.error) { out.push({ id, client }); done = true; break; }
+      await sleep((res.error as any)?.status === 429 ? 2500 + attempt * 3000 : 800);
+    }
+    if (!done) throw new Error(`photo-fanout: author ${i} could not authenticate`);
+    await sleep(350);
+  }
+  return out;
+}
 
 type CaseResult = Record<string, unknown>;
 
@@ -41,18 +69,18 @@ export async function photoFanout(config: LoadTestConfig, args: Record<string, s
       const manifest = manifests.get(size)!;
       if (manifest.size < size) throw new Error(`Manifest ${size} contains only ${manifest.size} members`);
       for (const concurrency of concurrencies) {
-        const authors = manifest.userIds.slice(0, concurrency);
-        if (authors.length < concurrency) throw new Error(`Manifest ${size} cannot run concurrency ${concurrency}`);
+        if (manifest.userIds.length < concurrency) throw new Error(`Manifest ${size} cannot run concurrency ${concurrency}`);
         const runId = `${namespace}-${size}-${concurrency}-${Date.now()}-${randomUUID().slice(0, 6)}`;
+        const authors = await signInAuthors(config, manifest, concurrency);
         const captions = authors.map((_, i) => `LOADTEST:PHOTO:${runId}:${i}`);
         const notificationBefore = await exactCount(admin, 'notifications', 'type', ['club_post']);
         const pushBefore = await queueCounts(admin);
         const createdIds: string[] = [];
         const started = performance.now();
-        await Promise.all(authors.map(async (authorId, index) => {
+        await Promise.all(authors.map(async (author, index) => {
           const itemStarted = performance.now();
           try {
-            const result = await withTimeout(admin.from('posts').insert({ author_id: authorId, club_id: manifest.clubIds[index % manifest.clubIds.length], post_type: 'picture', image_url: `https://loadtest.invalid/photo/${runId}/${index}.jpg`, caption: captions[index] }).select('id').single(), config.requestTimeoutMs, `photo post ${size}/${concurrency}/${index}`);
+            const result = await withTimeout(author.client.from('posts').insert({ author_id: author.id, club_id: manifest.clubIds[index % manifest.clubIds.length], post_type: 'picture', image_url: `https://loadtest.invalid/photo/${runId}/${index}.jpg`, caption: captions[index] }).select('id').single(), config.requestTimeoutMs, `photo post ${size}/${concurrency}/${index}`);
             if (result.error || !result.data?.id) throw result.error ?? new Error('photo post returned no id');
             createdIds.push(result.data.id);
             metrics.add({ name: 'photo-post-db-create', ms: performance.now() - itemStarted, ok: true, meta: { size, concurrency, postId: result.data.id } });
@@ -60,6 +88,7 @@ export async function photoFanout(config: LoadTestConfig, args: Record<string, s
             metrics.add({ name: 'photo-post-db-create', ms: performance.now() - itemStarted, ok: false, errorClass: classifyError(error), meta: { size, concurrency } });
           }
         }));
+        await Promise.all(authors.map((a) => a.client.auth.signOut().catch(() => {})));
         const elapsedMs = performance.now() - started;
         if (drainWaitMs) await new Promise((resolve) => setTimeout(resolve, drainWaitMs));
         const notificationAfter = await exactCount(admin, 'notifications', 'entity_id', createdIds);
