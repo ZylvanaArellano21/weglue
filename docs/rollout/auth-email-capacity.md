@@ -1,10 +1,12 @@
 # Auth email capacity for the rollout
 
-Status: corrected live-state analysis and local parity documentation only. No hosted Supabase setting is changed here.
+Status: acceptance-spec update and local parity documentation only. No hosted Supabase setting is changed here. The email-capacity requirement is not passed by the realistic model alone.
 
 ## Current limits and first-hour budget
 
 Production is already using custom SMTP through Resend (`smtp.resend.com:465`), not Supabase's default mailer. Supabase's documented default-mailer ceiling is **2 emails/hour**, but it is **not applicable** to this project. With custom SMTP, Supabase documents a starting limit of 30 emails/hour that is adjustable through Rate Limits; the documentation states no upper bound or Free-plan restriction, and production is already set to `rate_limit_email_sent = 1000` ([Supabase Auth SMTP](https://supabase.com/docs/guides/auth/auth-smtp)).
+
+### Acceptance model A — realistic launch hour (production parity)
 
 Planning assumption for the first hour:
 
@@ -23,13 +25,45 @@ Planning assumption for the first hour:
 
 The Resend account quota is likely shared with edge-function transactional mail using `RESEND_API_KEY` / `RESEND_TRANSACTIONAL_FROM`; subtract that expected volume from the Resend daily/monthly budget.
 
+This model fits the current production Supabase `rate_limit_email_sent = 1000/hour` with 350/hour of Supabase-side headroom. It is production-parity evidence only; it does not pass the stronger email-capacity requirement below.
+
+### Acceptance model B — stress / headroom test
+
+The originally approved stronger test is 500 initial verification emails + 500 resend #1 + 500 resend #2 + 500 password resets + 500 email-change messages: approximately **2,500 Auth email-triggering requests** before any additional retry/headroom. This is a staging test only.
+
+On staging, keep custom SMTP through the current Resend configuration and attempt a higher configurable Auth email limit, targeting `rate_limit_email_sent = 5000/hour`. Record whether Supabase accepts that value with the current Free plan plus custom SMTP. Do not change production from 1,000/hour during this work. Staging must mirror production's secure-email-change state: `mailer_secure_email_change_enabled = false` / local `double_confirm_changes = false`; with secure email change disabled, each email change is one message to the new address.
+
+If staging accepts and reliably exercises 5,000/hour (or the exact lower/higher value Supabase accepts), the later founder approval request must name the exact production change: **Supabase Dashboard → Project → Authentication → Rate Limits → email-sent/hour (`rate_limit_email_sent`), from 1,000 to the accepted staging value**. That request is contingent on a Resend plan that explicitly supports the burst: Resend Free is not sufficient; at minimum Resend Pro (or a higher/explicitly quota-approved plan) and confirmation of 5,000-send burst capacity plus shared transactional headroom are prerequisites. This document does not make that production change.
+
 ## Founder answers
 
 - **Current Auth email limits:** custom SMTP is active; `rate_limit_email_sent = 1000/hour`; `smtp_max_frequency = 60s` per identity; `hook_send_email_enabled = false`; `mailer_autoconfirm = false`; `mailer_secure_email_change_enabled = false`; `security_refresh_token_reuse_interval = 10`. Production also reports `rate_limit_verify = 30` and `rate_limit_otp = 30` for verification/OTP requests.
-- **500-signup burst:** 650 events are below the Supabase cap by 350. The Resend plan is the real external constraint: Free cannot carry the burst; Pro can, assuming sufficient shared quota.
-- **Headroom:** the expected burst leaves 350 Supabase email events in the same hour for additional resends, resets, and later Auth emails. The 60-second cooldown is per identity, not a global burst limiter.
-- **Supabase Free without a paid Supabase change:** **Yes.** The Supabase side is already configured for this burst. Any paid upgrade is a separate Resend vendor decision.
-- **Outbox or Send Email Hook required:** **No** at approximately 500 burst signups and 50 concurrent active users. Custom SMTP plus a sufficient Resend plan sends synchronously. A Send Email Hook would not bypass `rate_limit_email_sent`; an outbox becomes relevant only if sustained demand exceeds 1,000 Auth email events/hour or delivery needs asynchronous retry control.
+- **Realistic 500-signup burst:** 650 events are below the current Supabase cap by 350. This production-parity model fits, but it is not the final capacity pass gate. The Resend plan is the real external constraint: Free cannot carry the burst; Pro can, assuming sufficient shared quota.
+- **Stress/headroom model:** 2,500 Auth email-triggering requests must be validated on staging against a target 5,000/hour Auth limit. Do not infer a production pass from the 650-event result.
+- **Supabase Free without a paid Supabase change:** **Yes for the realistic 650-event model only.** The stronger model still requires the staging limit-acceptance and reliability test; production remains at 1,000/hour unless separately approved later.
+- **Outbox or Send Email Hook required:** Not decided yet; this remains TEST-FIRST. Direct SMTP is PREFERRED because it is simpler, and is expected to be sufficient — but this is not yet proven.
+
+## Staging test matrix
+
+Staging must use custom SMTP through the current Resend setup, mirror `mailer_secure_email_change_enabled = false` / `double_confirm_changes = false`, and test both acceptance models independently. Capture for every row: accepted/rejected request counts, end-to-end and provider latency percentiles, error classes (including rate-limit, provider 4xx, quota, invalid-recipient, timeout, and transient 5xx), and GoTrue pool behavior/saturation.
+
+| Test | Auth email-triggering workload | Staging Auth limit | Required capture |
+| --- | ---: | ---: | --- |
+| Model A: realistic launch hour | 500 verification + 100 resends + 50 resets = **650** | Current parity value: 1,000/hour | Accept/reject counts, latency, error classes, GoTrue pool |
+| Model B: stress/headroom | 500 verification + 500 resend #1 + 500 resend #2 + 500 password reset + 500 email change = **2,500** | Attempt target **5,000/hour**; record the exact value Supabase accepts | Accept/reject counts, latency, error classes, GoTrue pool, and accepted-limit result |
+
+**PASS = both models validated on staging.** Model A fitting under 1,000/hour is necessary production-parity evidence, not a pass for the email-capacity requirement.
+
+## Direct SMTP and outbox / Send Email Hook — test-first
+
+Direct SMTP is PREFERRED because it is simpler, and is expected to be sufficient — but this is not yet proven. Staging must test all of the following:
+
+1. Burst throughput at the Model B stress workload.
+2. Provider REJECTION: Resend 4xx, quota exhaustion, and invalid recipient.
+3. Provider TIMEOUT / transient 5xx.
+4. Auth-state outcome after a FAILED email delivery: does GoTrue leave the user recoverable (unconfirmed and able to resend), or does it leave a broken/corrupt Auth state for signup confirmation, password reset, or email change?
+
+Decision rule: if direct SMTP remains reliable under all four tests, leave it alone. If an SMTP/provider failure can materially break or corrupt a required Auth flow, the remediation trigger is to return with the SMALLEST email-delivery isolation architecture. Do not design that architecture in this capacity document.
 
 ## Ranked founder actions
 
@@ -37,9 +71,9 @@ The Resend account quota is likely shared with edge-function transactional mail 
 
 In Resend, inspect the account plan and usage. If it is Free, choose between Resend Pro (**$20/month**, Resend cost) and staggered waves. In Resend's Domains area, verify that `weglue.app` remains healthy and that SPF, DKIM, and DMARC records are published. In **Supabase Dashboard → Project → Authentication → Configuration → SMTP Settings**, confirm the existing Resend host, port, sender, and SMTP key are valid; do not copy the secret into this repository. Send a small test only if the founder's operational checklist permits it.
 
-### 2. Optionally raise `rate_limit_email_sent`
+### 2. Stage, measure, and only then propose a production limit change
 
-Only if Resend Pro quota and observed demand justify it, use **Supabase Dashboard → Project → Authentication → Rate Limits** to raise the hourly email value above 1,000 with provider headroom. No raise is needed for the estimated 650-event burst.
+Use staging to attempt the Model B target of 5,000/hour and record the exact accepted Auth email limit. Do not raise production during this work. If both staging models pass and the Resend plan has confirmed burst capacity, bring the exact proposed production change (`rate_limit_email_sent`, Dashboard → Authentication → Rate Limits → email-sent/hour, 1,000 → accepted staging value) to the founder for approval later.
 
 ### 3. Stagger onboarding if a Resend upgrade is declined
 
@@ -50,5 +84,6 @@ Release controlled waves and reserve quota for resends, resets, and shared trans
 - `security_refresh_token_reuse_interval = 10` / local `refresh_token_reuse_interval = 10`.
 - `mailer_autoconfirm = false` / local `enable_confirmations = true`.
 - `mailer_secure_email_change_enabled = false`; email change is intentionally single-mail to the new address.
+- Enabling double-confirm (secure) email change is tracked as a **SEPARATE security decision** to be made before final release — out of scope for capacity work.
 - Production settings through this file. `supabase/config.toml` is local-only parity documentation; hosted Auth settings are managed in the Supabase Dashboard.
 - Any secret values such as `smtp_pass`, `jwt_secret`, or the Resend SMTP key; reference names only.
