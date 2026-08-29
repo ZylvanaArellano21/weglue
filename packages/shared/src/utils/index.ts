@@ -77,19 +77,120 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  retries = 3,
-  delayMs = 500
-): Promise<T> {
+// ─── Bounded retry for IDEMPOTENT requests only ───────────────────────────────
+//
+// USE THIS ONLY for reads / GET-shaped RPCs (feed queries, get_unread_summary,
+// my_access_state, discovery, …). NEVER for auth.signUp / auth.resend /
+// auth.updateUser / resetPasswordForEmail or any INSERT/UPDATE/side-effecting
+// RPC — a retry there can create a duplicate account, a duplicate row, or a
+// second competing token. Those must surface the error to the user with a
+// clear message and a manual retry.
+//
+// It retries only genuinely transient failures (network drop, 429, 5xx) with
+// jittered exponential backoff, honoring Retry-After when present, and caps the
+// total added latency so a slow path never hangs the UI.
+
+/** Whether an error is a transient failure worth a bounded automatic retry. */
+export function isTransientError(err: unknown): boolean {
+  if (err == null || typeof err !== "object") return false;
+  const e = err as {
+    status?: number;
+    code?: string | number;
+    name?: string;
+    message?: string;
+  };
+  if (e.status === 429 || e.status === 500 || e.status === 502 || e.status === 503 || e.status === 504) {
+    return true;
+  }
+  // Fetch-layer failures (offline, DNS, TLS, connection reset). RN and browsers
+  // phrase these differently.
+  const msg = (e.message ?? "").toLowerCase();
+  if (
+    e.name === "TypeError" ||
+    e.name === "AbortError" ||
+    msg.includes("failed to fetch") ||
+    msg.includes("network request failed") ||
+    msg.includes("network error") ||
+    msg.includes("load failed") ||
+    msg.includes("fetch failed") ||
+    msg.includes("timeout")
+  ) {
+    return true;
+  }
+  // PostgREST/PgBouncer momentary unavailability.
+  if (e.code === "PGRST002" || e.code === "57P03" || e.code === "53300") return true;
+  return false;
+}
+
+/** Retry-After (seconds or HTTP-date) from an error's headers, in ms, or null. */
+export function getRetryAfterMs(err: unknown): number | null {
+  const headers = (err as { headers?: unknown } | null)?.headers;
+  let raw: string | null = null;
+  if (headers && typeof (headers as { get?: unknown }).get === "function") {
+    raw = (headers as { get(name: string): string | null }).get("retry-after");
+  } else if (headers && typeof headers === "object") {
+    const h = headers as Record<string, string>;
+    raw = h["retry-after"] ?? h["Retry-After"] ?? null;
+  }
+  if (!raw) return null;
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber)) return Math.max(0, asNumber * 1000);
+  const asDate = Date.parse(raw);
+  return Number.isNaN(asDate) ? null : Math.max(0, asDate - Date.now());
+}
+
+export interface RetryOptions {
+  /** Max retry attempts after the first try. Default 2. */
+  retries?: number;
+  /** Base backoff before jitter. Default 400 ms. */
+  baseDelayMs?: number;
+  /** Cap on a single backoff wait. Default 2500 ms. */
+  maxDelayMs?: number;
+  /** Cap on TOTAL time spent waiting across all retries. Default 4000 ms. */
+  maxTotalDelayMs?: number;
+  /** Fraction of random jitter, ±. Default 0.5. */
+  jitter?: number;
+  /** Override which errors are retryable. Default: {@link isTransientError}. */
+  isRetryable?: (err: unknown) => boolean;
+  onRetry?: (err: unknown, attempt: number, waitMs: number) => void;
+}
+
+export async function retryIdempotent<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
+  const {
+    retries = 2,
+    baseDelayMs = 400,
+    maxDelayMs = 2500,
+    maxTotalDelayMs = 4000,
+    jitter = 0.5,
+    isRetryable = isTransientError,
+    onRetry,
+  } = opts;
+
+  let spent = 0;
   let lastError: unknown;
-  for (let i = 0; i < retries; i++) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastError = err;
-      if (i < retries - 1) await sleep(delayMs * 2 ** i);
+      if (attempt === retries || !isRetryable(err)) break;
+
+      const backoff = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+      const jittered = backoff * (1 + (Math.random() * 2 - 1) * jitter);
+      const wait = Math.max(0, Math.min(getRetryAfterMs(err) ?? jittered, maxTotalDelayMs - spent));
+      if (wait <= 0) break;
+      spent += wait;
+      onRetry?.(err, attempt + 1, wait);
+      await sleep(wait);
     }
   }
   throw lastError;
+}
+
+/**
+ * @deprecated Use {@link retryIdempotent}. Kept so any old import still resolves;
+ * now transient-only + jittered instead of retrying every error.
+ */
+export function withRetry<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 400): Promise<T> {
+  return retryIdempotent(fn, { retries, baseDelayMs });
 }

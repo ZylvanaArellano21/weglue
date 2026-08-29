@@ -21,7 +21,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { AppState, Platform, Text, TouchableOpacity, View } from "react-native";
 import type { Session } from "@supabase/supabase-js";
-import { useAuthStore } from "@weglue/shared";
+import { useAuthStore, isTransientError } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
 import { markGenuineSignIn } from "../lib/notifications/pendingRoute";
 import { useAuthDeepLink } from "../hooks/useAuthDeepLink";
@@ -162,7 +162,13 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 60 * 1000,
       gcTime: 24 * 60 * 60 * 1000,
-      retry: 1,
+      // Retry reads only on genuinely transient failures (network drop, 429,
+      // 5xx) — never a 4xx/RLS denial — up to twice, with jittered backoff so
+      // a shared-network blip doesn't produce a synchronized retry wave.
+      // Mutations keep react-query's default of NO retry.
+      retry: (failureCount, error) => failureCount < 2 && isTransientError(error),
+      retryDelay: (attempt) =>
+        Math.round(Math.min(400 * 2 ** attempt, 2500) * (1 + (Math.random() - 0.5))),
       refetchOnWindowFocus: true,
     },
   },

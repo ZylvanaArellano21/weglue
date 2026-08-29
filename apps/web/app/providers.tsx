@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
+import { isTransientError } from "@weglue/shared";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
 import { subscribeBroadcast } from "../lib/realtime";
 import {
@@ -343,7 +344,12 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
             // a profile or a post and coming straight back renders from cache
             // instead of re-running the whole query chain (Bug 8).
             gcTime: 10 * 60 * 1000,
-            retry: 1,
+            // Retry reads only on genuinely transient failures (network drop,
+            // 429, 5xx) — never a 4xx/RLS denial — up to twice, with jittered
+            // backoff. Mutations keep react-query's default of NO retry.
+            retry: (failureCount, error) => failureCount < 2 && isTransientError(error),
+            retryDelay: (attempt) =>
+              Math.round(Math.min(400 * 2 ** attempt, 2500) * (1 + (Math.random() - 0.5))),
             // Focus refresh is owned by `subscribeBrowserCanonicalRecovery`
             // above, which is also wired to `online` and visibilitychange.
             // Leaving React Query's own focus refetch on as well meant every
