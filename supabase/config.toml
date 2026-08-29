@@ -156,6 +156,12 @@ max_indexes = 5
 
 [auth]
 enabled = true
+# LOCAL ONLY — never committed as a production change; production auth settings are managed in the Supabase dashboard; these values mirror prod as of 2026-08-29 for local-dev parity.
+# Production hook_send_email_enabled = false; no local send-email hook is configured.
+# Production uses CUSTOM SMTP via Resend (smtp.resend.com:465, user `resend`,
+# sender verify@weglue.app, name "We Glue"). No SMTP secret is stored in this file.
+# Production mailer_secure_email_change_enabled = false: an email change sends one
+# confirmation email to the new address. The Resend account plan is the external ceiling.
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
 site_url = "https://weglue.app"
@@ -184,6 +190,7 @@ jwt_expiry = 3600
 enable_refresh_token_rotation = true
 # Allows refresh tokens to be reused after expiry, up to the specified interval in seconds.
 # Requires enable_refresh_token_rotation = true.
+# Production security_refresh_token_reuse_interval = 10. Do not change for rollout capacity work.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
 enable_signup = true
@@ -209,11 +216,11 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Emails per hour — ONLY applies when custom SMTP (auth.email.smtp) is enabled.
-# The current setup uses Supabase's built-in default mailer, which enforces its
-# own fixed low cap (~3-4/hr) that cannot be raised; this value stays inert
-# until a custom SMTP provider is re-enabled. The mobile Confirm-Email screen
-# additionally throttles the user with a 60s resend cooldown (no daily/max cap).
-email_sent = 100
+# Production custom SMTP is active via Resend, so this is the effective Supabase-side
+# hourly cap. Production rate_limit_email_sent = 1000, deliberately raised from the
+# custom-SMTP starting value of 30. The Resend account plan remains the external ceiling.
+# The built-in default SMTP limit of 2/hr is not applicable to production.
+email_sent = 1000
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -222,6 +229,8 @@ anonymous_users = 30
 token_refresh = 150
 # Number of sign up and sign-in requests that can be made in a 5 minute interval per IP address (excludes anonymous users).
 sign_in_sign_ups = 30
+# Production rate_limit_verify = 30 and rate_limit_otp = 30. The local schema exposes
+# one shared token_verifications bucket for these verification requests.
 # Number of OTP / Magic link verifications that can be made in a 5 minute interval per IP address.
 token_verifications = 30
 # Number of Web3 logins that can be made in a 5 minute interval per IP address.
@@ -243,11 +252,14 @@ enable_signup = true
 # double-confirmation round-trip made email changes feel painfully slow.
 double_confirm_changes = false
 # If enabled, users need to confirm their email address before signing in.
+# Production mailer_autoconfirm = false; local equivalent is enable_confirmations = true.
 enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
-max_frequency = "1s"
+# Production smtp_max_frequency = 60 seconds. This is a per-identity mailer cooldown,
+# not the project's hourly delivery capacity.
+max_frequency = "60s"
 # Number of characters used in the email OTP.
 otp_length = 6
 # Number of seconds before the email OTP expires. 24h (max) — .edu mail often
@@ -255,12 +267,11 @@ otp_length = 6
 # confirmation link "expired" by the time users tapped it.
 otp_expiry = 86400
 
-# Custom SMTP is DISABLED — reverted to Supabase's built-in mailer, whose
-# established sending reputation gets past .edu (M365) spam filters that were
-# silently quarantining mail from the new weglue.app domain.
-# NOTE: the built-in mailer is rate-limited (~3-4/hr) and not meant for high
-# volume; revisit a warmed-up custom sender before scaling.
-# Resend creds are kept here (commented) for easy re-enable later.
+# Local custom SMTP is intentionally disabled so local auth mail stays in Inbucket.
+# Production custom SMTP is already active via Resend at smtp.resend.com:465.
+# Production values: smtp_user = "resend", smtp_admin_email = "verify@weglue.app",
+# smtp_sender_name = "We Glue". The production smtp_pass is a dashboard secret and
+# is never copied into local config or documentation.
 [auth.email.smtp]
 enabled = false
 # host = "smtp.resend.com"
@@ -271,14 +282,8 @@ enabled = false
 # sender_name = "We Glue"
 
 # Branded confirm-signup email template.
-# NOTE: Supabase free tier does NOT allow custom email templates while on the
-# built-in (default) mailer — the Management API rejects template edits with
-# "not available for free tier projects using the default email provider".
-# The live project therefore uses Supabase's DEFAULT confirmation template
-# (which sends the {{ .ConfirmationURL }} verify link; the web confirm page
-# reads the returned token fragment client-side). The branded template is kept
-# at templates/confirmation-email.html and will apply once custom SMTP is
-# re-enabled or the project is upgraded to Pro.
+# The live project uses custom SMTP; these local template settings remain commented
+# because this file is local parity documentation, not a hosted dashboard change.
 # [auth.email.template.confirmation]
 # subject = "Confirm your We Glue account ✉️"
 # content_path = "./supabase/templates/confirmation-email.html"
