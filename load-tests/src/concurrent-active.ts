@@ -104,12 +104,14 @@ async function action(user: ActiveUser, index: number, manifest: ReturnType<type
 async function prewarmSessions(
   config: LoadTestConfig,
   manifest: ReturnType<typeof readManifest>,
+  offset: number,
   count: number,
   metrics: Metrics,
   perSigninDelayMs: number,
 ): Promise<ActiveUser[]> {
   const users: ActiveUser[] = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let k = 0; k < count; k += 1) {
+    const index = offset + k;
     const id = manifest.userIds[index];
     const email = manifest.emails[index];
     const password = manifest.passwords[index];
@@ -133,21 +135,35 @@ async function prewarmSessions(
 export async function concurrentActive(config: LoadTestConfig, args: Record<string, string | boolean>): Promise<string> {
   assertWriteApproved(config);
   const manifest = readManifest(config, typeof args.manifest === 'string' ? args.manifest : undefined);
-  const users = Math.min(Math.floor(argNumber(args, 'users', 50)), manifest.userIds.length);
+  const totalUsers = Math.min(Math.floor(argNumber(args, 'users', 50)), manifest.userIds.length);
   const durationMs = argNumber(args, 'duration-ms', 10 * 60_000);
   const dutyMs = Math.max(250, argNumber(args, 'duty-ms', 5_000));
   const perSigninDelayMs = Math.max(0, argNumber(args, 'signin-spacing-ms', 1200));
-  if (users < 1) throw new Error('Seed manifest does not contain active users');
+
+  // Optional sharding so N OS processes together simulate `users` clients —
+  // one Node event loop + one HTTP origin pool cannot faithfully drive 50
+  // concurrent websocket clients. `--shard i/N` runs this process's slice.
+  const shardArg = argString(args, 'shard', '0/1');
+  const [shardIdx, shardCount] = shardArg.split('/').map((n) => Math.max(0, Math.floor(Number(n))));
+  const sc = Math.max(1, shardCount || 1);
+  const si = Math.min(sc - 1, shardIdx || 0);
+  const sliceStart = Math.floor((si * totalUsers) / sc);
+  const sliceEnd = Math.floor(((si + 1) * totalUsers) / sc);
+  const users = sliceEnd - sliceStart;
+  if (users < 1) throw new Error('shard slice is empty; reduce --shard N or raise --users');
 
   return runScenario(config, 'concurrent-active', async (metrics) => {
     // --- PRE-WARM (not measured): every session must be ready before measurement ---
     const prewarmStart = Date.now();
-    const active = await prewarmSessions(config, manifest, users, metrics, perSigninDelayMs);
+    const active = await prewarmSessions(config, manifest, sliceStart, users, metrics, perSigninDelayMs);
     if (active.length !== users) throw new Error(`prewarm produced ${active.length}/${users} sessions`);
     metrics.count('prewarm_ms', Date.now() - prewarmStart);
 
-    // --- subscribe every user to the REAL always-on topology ---
-    await Promise.all(active.map((u) => subscribeRealTopology(u, metrics, () => metrics.count('realtime_events'))));
+    // --- subscribe every user to the REAL always-on topology (unless disabled for A/B) ---
+    const realtimeOff = args['no-realtime'] === true;
+    if (!realtimeOff) {
+      await Promise.all(active.map((u) => subscribeRealTopology(u, metrics, () => metrics.count('realtime_events'))));
+    }
     const channelsUp = active.reduce((n, u) => n + u.channels.length, 0);
     metrics.count('channels_subscribed', channelsUp);
     metrics.count('users_ready', active.length);
