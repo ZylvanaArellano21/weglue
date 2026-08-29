@@ -241,10 +241,13 @@ export function useHomeEventsFeed(userId: string | undefined) {
 
 // ─── RSVP ────────────────────────────────────────────────────────────────────
 
+// Explicit desired end-state, not a toggle: the caller decides the target so a
+// retry after a lost response re-applies the same state (mirrors mobile
+// eventService.rsvpToEvent).
 async function rsvpToEvent(
   userId: string,
   eventId: string,
-  status: "going" | "cant"
+  desired: "going" | "cant" | null
 ): Promise<void> {
   const supabase = getSupabaseBrowser();
   const { data: eventRow } = await supabase
@@ -256,22 +259,15 @@ async function rsvpToEvent(
     throw new Error("This event has ended");
   }
 
-  const { data: existing } = await supabase
-    .from("event_rsvps")
-    .select("status")
-    .eq("event_id", eventId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if ((existing as any)?.status === status) {
+  if (desired === null) {
     const { error } = await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
     if (error) throw error;
-  } else {
-    const { error } = await supabase
-      .from("event_rsvps")
-      .upsert({ event_id: eventId, user_id: userId, status }, { onConflict: "event_id,user_id" });
-    if (error) throw error;
+    return;
   }
+  const { error } = await supabase
+    .from("event_rsvps")
+    .upsert({ event_id: eventId, user_id: userId, status: desired }, { onConflict: "event_id,user_id" });
+  if (error) throw error;
 }
 
 export function useRsvpToEvent() {
@@ -280,13 +276,14 @@ export function useRsvpToEvent() {
     mutationFn: ({
       userId,
       eventId,
-      status, previousStatus,
+      status,
+      previousStatus,
     }: {
       userId: string;
       eventId: string;
       status: "going" | "cant";
       previousStatus: "going" | "cant" | null;
-    }) => rsvpToEvent(userId, eventId, status),
+    }) => rsvpToEvent(userId, eventId, previousStatus === status ? null : status),
     onMutate: async ({ eventId, status, previousStatus }) => {
       await queryClient.cancelQueries({ queryKey: ["eventDetail", eventId] });
       const nextStatus = previousStatus === status ? null : status;
@@ -304,30 +301,26 @@ export function useRsvpToEvent() {
 
 // ─── Save / unsave ───────────────────────────────────────────────────────────
 
-async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean> {
+// Explicit desired state (`!isSaved`), so a retry re-applies the same bookmark
+// state instead of reversing it (mirrors mobile eventService.setEventSaved).
+async function setEventSaved(userId: string, eventId: string, desired: boolean): Promise<void> {
   const supabase = getSupabaseBrowser();
-  const { data: existing } = await supabase
-    .from("saved_events")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("event_id", eventId)
-    .maybeSingle();
-
-  if (existing) {
-    const { error } = await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
+  if (desired) {
+    const { error } = await supabase
+      .from("saved_events")
+      .upsert({ user_id: userId, event_id: eventId }, { onConflict: "user_id,event_id" });
     if (error) throw error;
-    return false;
+    return;
   }
-  const { error } = await supabase.from("saved_events").insert({ user_id: userId, event_id: eventId });
+  const { error } = await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
   if (error) throw error;
-  return true;
 }
 
 export function useToggleSaveEvent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ userId, eventId }: { userId: string; eventId: string; isSaved: boolean }) =>
-      toggleSaveEvent(userId, eventId),
+    mutationFn: ({ userId, eventId, isSaved }: { userId: string; eventId: string; isSaved: boolean }) =>
+      setEventSaved(userId, eventId, !isSaved),
     onMutate: async ({ eventId, isSaved }) => {
       patchCachedEvent(queryClient, eventId, { is_saved: !isSaved });
       queryClient.setQueriesData({ queryKey: ["savedEventsCount"] }, (count: number | undefined) =>

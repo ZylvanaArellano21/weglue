@@ -58,16 +58,27 @@ export default function EventDetailScreen() {
   // leave — same behavior as Home cards and Club Profile.
 
 
-  const handleRsvp = (status: 'going' | 'cant') => {
-    rsvp(status, {
-      onSuccess: () => show(status === 'going' ? "You're going! 🎉" : "Got it, maybe next time!"),
+  const handleRsvp = (tapped: 'going' | 'cant') => {
+    // Explicit end-state: tapping the active choice again clears the RSVP.
+    const desired = event?.user_rsvp_status === tapped ? null : tapped;
+    rsvp(desired, {
+      onSuccess: () =>
+        show(
+          desired === 'going'
+            ? "You're going! 🎉"
+            : desired === 'cant'
+              ? "Got it, maybe next time!"
+              : 'RSVP removed',
+        ),
       onError: () => show('Failed to RSVP. Try again.', 'error'),
     });
   };
 
   const handleToggleSave = () => {
-    toggleSave(undefined, {
-      onSuccess: (saved) => show(saved ? 'Event saved!' : 'Removed from saved'),
+    if (!event) return;
+    const desired = !event.is_saved;
+    toggleSave(desired, {
+      onSuccess: () => show(desired ? 'Event saved!' : 'Removed from saved'),
       onError: () => show('Failed to save event.', 'error'),
     });
   };

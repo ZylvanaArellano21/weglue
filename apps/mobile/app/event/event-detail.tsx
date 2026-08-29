@@ -131,13 +131,20 @@ export default function CalendarEventDetailScreen() {
   const { mutate: rsvp, isPending: isRsvping } = useCalendarRsvp(userId);
 
   const handleRsvp = useCallback(
-    (status: 'going' | 'cant') => {
+    (tapped: 'going' | 'cant') => {
       if (!event) return;
+      const desired = event.user_rsvp_status === tapped ? null : tapped;
       rsvp(
-        { eventId: event.id, status },
+        { eventId: event.id, desired },
         {
           onSuccess: () =>
-            show(status === 'going' ? "You're going! 🎉" : "Got it, maybe next time!"),
+            show(
+              desired === 'going'
+                ? "You're going! 🎉"
+                : desired === 'cant'
+                  ? "Got it, maybe next time!"
+                  : 'RSVP removed',
+            ),
           onError: () => show('Failed to RSVP. Try again.', 'error'),
         },
       );
@@ -152,11 +159,13 @@ export default function CalendarEventDetailScreen() {
   );
 
   const handleToggleSave = useCallback(() => {
-    toggleSave(undefined, {
-      onSuccess: (saved) => show(saved ? 'Event saved!' : 'Removed from saved'),
+    if (!event) return;
+    const desired = !event.is_saved;
+    toggleSave(desired, {
+      onSuccess: () => show(desired ? 'Event saved!' : 'Removed from saved'),
       onError: () => show('Failed to save event.', 'error'),
     });
-  }, [toggleSave, show]);
+  }, [event, toggleSave, show]);
 
   // ─── Share ────────────────────────────────────────────────────────────────
 

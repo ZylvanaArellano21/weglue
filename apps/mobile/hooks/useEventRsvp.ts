@@ -3,6 +3,8 @@ import type { EventDetail, HomeEventsFeedSection } from '../services/eventServic
 import type { CalendarEvent, CalendarSection } from '../services/calendarService';
 
 export type RsvpStatus = 'going' | 'cant';
+/** The explicit end-state an RSVP action targets: a status, or null to clear. */
+export type DesiredRsvp = RsvpStatus | null;
 
 // Centralizes the cache-sync side of RSVP so Home, Event Details, Calendar,
 // and Profile → Weekly Events never disagree about whether the user is
@@ -10,38 +12,15 @@ export type RsvpStatus = 'going' | 'cant';
 // their existing call signatures) but all delegate onMutate/onError/onSuccess
 // to the helpers below.
 //
-// Mirrors the toggle semantics of eventService.rsvpToEvent: tapping the same
-// status again clears the RSVP entirely.
+// The RSVP contract is explicit desired-state, not a toggle: the component
+// computes the target here (a second tap on the active choice targets null) and
+// passes it to both the optimistic patch and the service, so a retry re-applies
+// the same end-state rather than flipping it.
 export function nextRsvpStatus(
   current: RsvpStatus | null | undefined,
   tapped: RsvpStatus,
-): RsvpStatus | null {
+): DesiredRsvp {
   return current === tapped ? null : tapped;
-}
-
-// Reads the currently-cached RSVP status for an event from whichever cache
-// has it, so onMutate can compute the correct toggle-off/toggle-on result
-// without an extra network round trip.
-export function getCurrentRsvpStatus(
-  queryClient: QueryClient,
-  eventId: string,
-): RsvpStatus | null | undefined {
-  for (const [, data] of queryClient.getQueriesData<EventDetail | null | undefined>({
-    queryKey: ['eventDetail'],
-  })) {
-    if (data && data.id === eventId) return data.user_rsvp_status;
-  }
-  for (const [, data] of queryClient.getQueriesData<
-    { pages: { sections: HomeEventsFeedSection[] }[] } | undefined
-  >({ queryKey: ['homeEventsFeed'] })) {
-    for (const page of data?.pages ?? []) {
-      for (const section of page.sections) {
-        const found = section.data.find((e) => e.id === eventId);
-        if (found) return found.user_rsvp_status;
-      }
-    }
-  }
-  return undefined;
 }
 
 export interface RsvpSnapshot {

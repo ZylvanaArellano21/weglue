@@ -17,6 +17,7 @@ import { EventCardSkeleton } from '../shared/SkeletonLoader';
 import { useToast } from '../Toast';
 import { requestLeaveClub } from '../../store/leaveClubStore';
 import type { HomeFeedEvent } from '../../services/eventService';
+import type { DesiredRsvp } from '../../hooks/useEventRsvp';
 
 type FeedItem =
   | { type: 'section_header'; id: string; label: string }
@@ -119,12 +120,13 @@ export function EventsFeed() {
   const { show, ToastComponent } = useToast();
 
   const handleRsvp = useCallback(
-    (eventId: string) => {
+    (eventId: string, desired: DesiredRsvp) => {
       if (!userId) return;
       rsvp(
-        { userId, eventId, status: 'going' },
+        { userId, eventId, desired },
         {
-          onSuccess: () => show('RSVP confirmed! 🎉'),
+          onSuccess: () =>
+            show(desired === null ? 'RSVP removed' : 'RSVP confirmed! 🎉'),
           onError: () => show('Failed to RSVP. Try again.', 'error'),
         },
       );
@@ -133,12 +135,12 @@ export function EventsFeed() {
   );
 
   const handleToggleSave = useCallback(
-    (eventId: string) => {
+    (eventId: string, desired: boolean) => {
       if (!userId) return;
       toggleSave(
-        { userId, eventId },
+        { userId, eventId, desired },
         {
-          onSuccess: (saved) => show(saved ? 'Event saved!' : 'Event removed from saved'),
+          onSuccess: () => show(desired ? 'Event saved!' : 'Event removed from saved'),
           onError: () => show('Failed to save event.', 'error'),
         },
       );

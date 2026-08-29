@@ -69,7 +69,7 @@ export function EventsFeed({
     toggleSave(
       { userId, eventId, isSaved },
       {
-        onSuccess: (saved) => show(saved ? "Event saved!" : "Event removed from saved"),
+        onSuccess: () => show(!isSaved ? "Event saved!" : "Event removed from saved"),
         onError: () => show("Failed to save event.", "error"),
       }
     );

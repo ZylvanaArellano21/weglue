@@ -126,7 +126,9 @@ export function useEventDetail(eventId: string | undefined, userId: string | und
   });
 }
 
-async function rsvpToEvent(userId: string, eventId: string, status: "going" | "cant"): Promise<void> {
+// Explicit desired end-state, not a toggle (mirrors mobile
+// eventService.rsvpToEvent): a retry re-applies the same state.
+async function rsvpToEvent(userId: string, eventId: string, desired: "going" | "cant" | null): Promise<void> {
   const supabase = getSupabaseBrowser();
   const { data: eventRow } = await supabase
     .from("events")
@@ -136,28 +138,22 @@ async function rsvpToEvent(userId: string, eventId: string, status: "going" | "c
   if (eventRow && isEventPastAt((eventRow as any).event_end_at)) {
     throw new Error("This event has ended");
   }
-  const { data: existing } = await supabase
-    .from("event_rsvps")
-    .select("status")
-    .eq("event_id", eventId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if ((existing as any)?.status === status) {
+  if (desired === null) {
     const { error } = await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
     if (error) throw error;
-  } else {
-    const { error } = await supabase
-      .from("event_rsvps")
-      .upsert({ event_id: eventId, user_id: userId, status }, { onConflict: "event_id,user_id" });
-    if (error) throw error;
+    return;
   }
+  const { error } = await supabase
+    .from("event_rsvps")
+    .upsert({ event_id: eventId, user_id: userId, status: desired }, { onConflict: "event_id,user_id" });
+  if (error) throw error;
 }
 
 export function useRsvpMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ eventId, status }: { eventId: string; status: "going" | "cant"; previousStatus: "going" | "cant" | null }) =>
-      rsvpToEvent(userId!, eventId, status),
+    mutationFn: ({ eventId, status, previousStatus }: { eventId: string; status: "going" | "cant"; previousStatus: "going" | "cant" | null }) =>
+      rsvpToEvent(userId!, eventId, previousStatus === status ? null : status),
     onMutate: ({ eventId, status, previousStatus }) => {
       const nextStatus = previousStatus === status ? null : status;
       const delta = (nextStatus === "going" ? 1 : 0) - (previousStatus === "going" ? 1 : 0);
@@ -171,28 +167,24 @@ export function useRsvpMutation(userId: string | undefined) {
   });
 }
 
-async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean> {
+// Explicit desired state (`!isSaved`) — a retry re-applies, never reverses.
+async function setEventSaved(userId: string, eventId: string, desired: boolean): Promise<void> {
   const supabase = getSupabaseBrowser();
-  const { data: existing } = await supabase
-    .from("saved_events")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("event_id", eventId)
-    .maybeSingle();
-  if (existing) {
-    const { error } = await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
+  if (desired) {
+    const { error } = await supabase
+      .from("saved_events")
+      .upsert({ user_id: userId, event_id: eventId }, { onConflict: "user_id,event_id" });
     if (error) throw error;
-    return false;
+    return;
   }
-  const { error } = await supabase.from("saved_events").insert({ user_id: userId, event_id: eventId });
+  const { error } = await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
   if (error) throw error;
-  return true;
 }
 
 export function useSaveEventMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ eventId }: { eventId: string; isSaved: boolean }) => toggleSaveEvent(userId!, eventId),
+    mutationFn: ({ eventId, isSaved }: { eventId: string; isSaved: boolean }) => setEventSaved(userId!, eventId, !isSaved),
     onMutate: ({ eventId, isSaved }) => {
       patchCachedEvent(queryClient, eventId, { is_saved: !isSaved });
       queryClient.setQueriesData({ queryKey: ["savedEventsCount"] }, (count: number | undefined) =>

@@ -212,10 +212,16 @@ export async function getHomeEventsFeed(
   return { sections, hasMore: (rawEvents as any[]).length === EVENTS_PAGE_SIZE };
 }
 
+/**
+ * Set the viewer's RSVP to an explicit desired end-state — `'going'`, `'cant'`,
+ * or `null` to clear it. NOT a toggle: the caller decides the target (a second
+ * tap on the active choice passes `null`), so a retry after a lost response
+ * re-applies the SAME end-state instead of flipping it back. Idempotent.
+ */
 export async function rsvpToEvent(
   userId: string,
   eventId: string,
-  status: 'going' | 'cant',
+  desired: 'going' | 'cant' | null,
 ): Promise<void> {
   // Attendance on ended events is immutable from EVERY entry point (club
   // profile, home, calendar, deep links) — the UI hides the buttons, this is
@@ -229,57 +235,52 @@ export async function rsvpToEvent(
     throw new Error('This event has ended');
   }
 
-  const { data: existing } = await supabase
-    .from('event_rsvps')
-    .select('status')
-    .eq('event_id', eventId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (existing?.status === status) {
-    await supabase
+  if (desired === null) {
+    const { error } = await supabase
       .from('event_rsvps')
       .delete()
       .eq('event_id', eventId)
       .eq('user_id', userId);
-  } else {
-    await supabase.from('event_rsvps').upsert(
-      { event_id: eventId, user_id: userId, status },
-      { onConflict: 'event_id,user_id' },
-    );
+    if (error) throw error;
+    return;
   }
+
+  // upsert to the exact status: re-applying the same status is a no-op success,
+  // so a double-tap or a lost-response retry can't trip UNIQUE(event_id, user_id)
+  // or land the user on the wrong choice.
+  const { error } = await supabase.from('event_rsvps').upsert(
+    { event_id: eventId, user_id: userId, status: desired },
+    { onConflict: 'event_id,user_id' },
+  );
+  if (error) throw error;
 }
 
-// Returns the resulting saved state. Every step throws on error: a save that
-// the database rejected must NOT report success, or the bookmark fills in while
-// nothing was written and Saved Events legitimately comes back empty.
-export async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean> {
-  const { data: existing, error: readError } = await supabase
-    .from('saved_events')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('event_id', eventId)
-    .maybeSingle();
-  if (readError) throw readError;
-
-  if (existing) {
+/**
+ * Set whether the viewer has this event saved to an explicit desired boolean.
+ * NOT a toggle — the caller passes the target state (`!currentlySaved`), so a
+ * retry after an uncertain success re-applies the same state instead of
+ * reversing the bookmark. Every step throws on error: a save the database
+ * rejected must NOT report success.
+ */
+export async function setEventSaved(
+  userId: string,
+  eventId: string,
+  desired: boolean,
+): Promise<void> {
+  if (desired) {
+    // upsert, not insert: re-saving an already-saved event is a no-op success.
     const { error } = await supabase
       .from('saved_events')
-      .delete()
-      .eq('user_id', userId)
-      .eq('event_id', eventId);
+      .upsert({ user_id: userId, event_id: eventId }, { onConflict: 'user_id,event_id' });
     if (error) throw error;
-    return false;
+    return;
   }
-
-  // upsert, not insert: a double-tap (or a row hidden from the read above)
-  // would otherwise trip the UNIQUE(user_id, event_id) constraint and surface
-  // as a failed save even though the event is saved.
   const { error } = await supabase
     .from('saved_events')
-    .upsert({ user_id: userId, event_id: eventId }, { onConflict: 'user_id,event_id' });
+    .delete()
+    .eq('user_id', userId)
+    .eq('event_id', eventId);
   if (error) throw error;
-  return true;
 }
 
 export interface CreateEventInput {

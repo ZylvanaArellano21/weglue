@@ -80,11 +80,13 @@ export function EventDetailModal({
       }
     );
 
-  const doSave = () =>
+  const doSave = () => {
+    const willBeSaved = !(event?.is_saved ?? false);
     toggleSave({ eventId, isSaved: event?.is_saved ?? false }, {
-      onSuccess: (savedNow) => show(savedNow ? "Event saved!" : "Removed from saved"),
+      onSuccess: () => show(willBeSaved ? "Event saved!" : "Removed from saved"),
       onError: () => show("Failed to save event.", "error"),
     });
+  };
 
   return (
     <>

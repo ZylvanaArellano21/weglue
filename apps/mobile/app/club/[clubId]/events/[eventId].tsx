@@ -83,17 +83,27 @@ export default function ClubEventDetailScreen() {
     prevJoinedRef.current = joined;
   }, [event?.user_has_joined_club]);
 
-  const handleRsvp = (status: 'going' | 'cant') => {
-    rsvp(status, {
+  const handleRsvp = (tapped: 'going' | 'cant') => {
+    const desired = event?.user_rsvp_status === tapped ? null : tapped;
+    rsvp(desired, {
       onSuccess: () =>
-        show(status === 'going' ? "You're going! 🎉" : "Got it, maybe next time!", 'success'),
+        show(
+          desired === 'going'
+            ? "You're going! 🎉"
+            : desired === 'cant'
+              ? "Got it, maybe next time!"
+              : 'RSVP removed',
+          'success',
+        ),
       onError: () => show('Failed to RSVP. Try again.', 'error'),
     });
   };
 
   const handleToggleSave = () => {
-    toggleSave(undefined, {
-      onSuccess: (saved: boolean) => show(saved ? 'Event saved!' : 'Removed from saved'),
+    if (!event) return;
+    const desired = !event.is_saved;
+    toggleSave(desired, {
+      onSuccess: () => show(desired ? 'Event saved!' : 'Removed from saved'),
       onError: () => show('Failed to save event.', 'error'),
     });
   };
