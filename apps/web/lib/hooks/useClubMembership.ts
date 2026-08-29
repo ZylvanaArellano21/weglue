@@ -16,11 +16,14 @@ import { invalidateEventState } from "./eventSync";
 
 async function joinClub(userId: string, clubId: string): Promise<void> {
   const supabase = getSupabaseBrowser();
+  // "Ensure joined": ignoreDuplicates so a retry — or a stale "not joined" UI —
+  // is a safe no-op. Plain upsert would REWRITE role to 'member' on conflict and
+  // silently demote an officer who double-taps / retries.
   const { error } = await supabase
     .from("club_members")
     .upsert(
       { user_id: userId, club_id: clubId, role: "member" },
-      { onConflict: "club_id,user_id" }
+      { onConflict: "club_id,user_id", ignoreDuplicates: true }
     );
   if (error) throw error;
 }

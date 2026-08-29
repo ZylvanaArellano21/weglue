@@ -1,4 +1,5 @@
 import * as ImageManipulator from 'expo-image-manipulator';
+import { isClientTagConflict } from '@weglue/shared';
 import { supabase } from '../lib/supabase';
 
 export interface PostAuthor {
@@ -495,12 +496,30 @@ export async function getPostComments(postId: string): Promise<PostComment[]> {
   }));
 }
 
-export async function addComment(postId: string, userId: string, content: string): Promise<void> {
+export async function addComment(
+  postId: string,
+  userId: string,
+  content: string,
+  // Stable per-submit tag so a double-tap / lost-response retry does not post
+  // the same comment twice (migration 100).
+  clientTag: string,
+): Promise<void> {
   const { error } = await supabase
     .from('post_comments')
-    .insert({ post_id: postId, user_id: userId, content });
+    .insert({ post_id: postId, user_id: userId, content, client_tag: clientTag });
 
-  if (error) throw error;
+  if (!error) return;
+  // Retry of a comment that already landed under this tag — confirm and succeed.
+  if (isClientTagConflict(error, 'uq_post_comments_user_client_tag')) {
+    const { data: existing } = await supabase
+      .from('post_comments')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('client_tag', clientTag)
+      .maybeSingle();
+    if (existing) return;
+  }
+  throw error;
 }
 
 async function compressImage(uri: string): Promise<string> {
@@ -515,8 +534,11 @@ async function compressImage(uri: string): Promise<string> {
 export async function createPost(
   userId: string,
   imageUri: string,
-  caption?: string,
-  clubIds?: string[],
+  caption: string | undefined,
+  clubIds: string[] | undefined,
+  // Stable per-compose tag: a double-tap or a lost-response retry of the SAME
+  // New Post reuses it and collapses to one row (migration 100).
+  clientTag: string,
 ): Promise<string> {
   const compressedUri = await compressImage(imageUri);
 
@@ -548,11 +570,28 @@ export async function createPost(
       post_type: 'picture',
       image_url: publicUrl,
       caption: caption ?? null,
+      client_tag: clientTag,
     })
     .select('id')
     .single();
 
-  if (error || !post) throw error ?? new Error('Failed to create post');
+  if (error) {
+    // A retry whose first attempt actually landed: return the existing post and
+    // skip the club-tag insert (it succeeded on that first attempt too). Any
+    // other 23505 is a real error.
+    if (isClientTagConflict(error, 'uq_posts_author_client_tag')) {
+      const { data: existing, error: fetchError } = await supabase
+        .from('posts')
+        .select('id')
+        .eq('author_id', userId)
+        .eq('client_tag', clientTag)
+        .single();
+      if (fetchError || !existing) throw fetchError ?? error;
+      return existing.id;
+    }
+    throw error;
+  }
+  if (!post) throw new Error('Failed to create post');
 
   if (clubIds && clubIds.length > 1) {
     const additionalTags = clubIds.slice(1).map((cid) => ({

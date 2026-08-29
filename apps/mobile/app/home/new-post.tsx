@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
 import { useAuthStore } from '@weglue/shared';
 import { createPost } from '../../services/postService';
+import { clientUuid } from '../../lib/chatAttachments';
 import { getAllClubs, UserClub } from '../../services/clubService';
 import { useToast } from '../../components/Toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -52,6 +53,10 @@ export default function NewPostScreen() {
   const [clubSelectorVisible, setClubSelectorVisible] = useState(false);
   const [clubSearch, setClubSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // One idempotency tag per logical compose. Reused across double-taps and
+  // lost-response retries of the same draft; regenerated only when a genuinely
+  // new draft starts (a new photo is chosen) or after a post succeeds.
+  const composeTagRef = useRef(clientUuid());
 
   const { data: allClubs = [], isLoading: loadingClubs } = useQuery<UserClub[]>({
     queryKey: ['allClubs'],
@@ -64,12 +69,20 @@ export default function NewPostScreen() {
     c.name.toLowerCase().includes(clubSearch.toLowerCase()),
   );
 
+  // Choosing a new photo starts a genuinely new draft, so it also starts a new
+  // idempotency tag — a later retry can't be deduped against a post made from a
+  // different image.
+  const applyPickedImage = (uri: string) => {
+    setImageUri(uri);
+    composeTagRef.current = clientUuid();
+  };
+
   // Android routes through the shared We Glue flow; iOS keeps its existing
   // expo-image-picker path. Posts keep their free-form (uncropped) image.
   const handlePickFromLibrary = async () => {
     if (useWeGlueMediaFlow) {
       const picked = await pickMedia({ source: 'library', quality: 0.8 });
-      if (picked) setImageUri(picked.uri);
+      if (picked) applyPickedImage(picked.uri);
       return;
     }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -83,14 +96,14 @@ export default function NewPostScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      setImageUri(result.assets[0].uri);
+      applyPickedImage(result.assets[0].uri);
     }
   };
 
   const handlePickFromCamera = async () => {
     if (useWeGlueMediaFlow) {
       const picked = await pickMedia({ source: 'camera', quality: 0.8 });
-      if (picked) setImageUri(picked.uri);
+      if (picked) applyPickedImage(picked.uri);
       return;
     }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -103,7 +116,7 @@ export default function NewPostScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      setImageUri(result.assets[0].uri);
+      applyPickedImage(result.assets[0].uri);
     }
   };
 
@@ -134,7 +147,10 @@ export default function NewPostScreen() {
         imageUri,
         caption.trim() || undefined,
         clubIds.length > 0 ? clubIds : undefined,
+        composeTagRef.current,
       );
+      // Post landed — the next compose (if the user comes back) is a new draft.
+      composeTagRef.current = clientUuid();
       // Refetch the Home posts feed so the new post is present, then land the
       // user on Home → Posts with the feed scrolled to the post they just
       // created (PostsFeed picks up pendingScrollPostId once the post is in

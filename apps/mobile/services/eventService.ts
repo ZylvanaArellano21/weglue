@@ -1,3 +1,4 @@
+import { isClientTagConflict } from '@weglue/shared';
 import { supabase } from '../lib/supabase';
 import { todayInAppTz } from '../lib/timezone';
 import { isEventPastAt } from '../lib/eventDisplay';
@@ -302,6 +303,9 @@ export interface CreateEventInput {
 export async function createEvent(
   userId: string,
   eventData: CreateEventInput,
+  // Stable per-compose tag: a double-tap / lost-response retry of the same
+  // "Create Event" reuses it and collapses to one row (migration 100).
+  clientTag: string,
 ): Promise<string> {
   const { data: officerCheck } = await supabase
     .from('club_members')
@@ -334,11 +338,27 @@ export async function createEvent(
       specific_user_ids: eventData.specific_user_ids?.length
         ? eventData.specific_user_ids
         : null,
+      client_tag: clientTag,
     })
     .select('id')
     .single();
 
-  if (error || !event) throw error ?? new Error('Failed to create event');
+  if (error) {
+    // Retry of an event create that already landed under this tag: return the
+    // existing event and skip the tag inserts (done on the first attempt).
+    if (isClientTagConflict(error, 'uq_events_created_by_client_tag')) {
+      const { data: existing, error: fetchError } = await supabase
+        .from('events')
+        .select('id')
+        .eq('created_by', userId)
+        .eq('client_tag', clientTag)
+        .single();
+      if (fetchError || !existing) throw fetchError ?? error;
+      return existing.id;
+    }
+    throw error;
+  }
+  if (!event) throw new Error('Failed to create event');
 
   if (eventData.interest_tags?.length) {
     await supabase.from('event_interests').insert(

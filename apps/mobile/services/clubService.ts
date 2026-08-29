@@ -260,9 +260,16 @@ async function getClubGluemates(clubId: string, userId: string): Promise<ClubGlu
 }
 
 export async function joinClub(userId: string, clubId: string): Promise<void> {
-  await supabase
+  // "Ensure joined": ignoreDuplicates so a double-tap / retry is a safe no-op.
+  // A plain upsert would REWRITE role to 'member' on conflict and silently
+  // demote an officer. A rejected join must surface, not report false success.
+  const { error } = await supabase
     .from('club_members')
-    .upsert({ user_id: userId, club_id: clubId, role: 'member' }, { onConflict: 'club_id,user_id' });
+    .upsert(
+      { user_id: userId, club_id: clubId, role: 'member' },
+      { onConflict: 'club_id,user_id', ignoreDuplicates: true },
+    );
+  if (error) throw error;
 }
 
 export type LeaveClubResult = 'left' | 'blocked_only_officer' | 'not_member';

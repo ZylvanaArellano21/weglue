@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
+
+const source = (rel: string) =>
+  readFileSync(decodeURIComponent(new URL(rel, import.meta.url).pathname), "utf8");
 
 // ============================================================================
 // Unread-summary fallback poll — regression test (rollout task 12)
@@ -102,5 +106,32 @@ describe("a poll tick heals a missed realtime update", () => {
 
     stop();
     client.clear();
+  });
+});
+
+describe("returning to the foreground heals a stale badge without waiting for the poll", () => {
+  // A missed realtime event otherwise stays visible until the 5-minute poll.
+  // The self-heal on refocus comes from two pieces of always-on wiring, pinned
+  // here by source assertion (this repo's convention for RN app-shell wiring —
+  // see useInvitePushPermission.test.ts):
+  //   1. _layout.tsx bridges react-query's focusManager to AppState, counting a
+  //      genuine `background -> active` return as a refocus;
+  //   2. the query keeps the app-wide `refetchOnWindowFocus: true` default and
+  //      goes stale after 15s, so that refocus refetches it right away.
+  const layoutSrc = source("../../app/_layout.tsx");
+  const hookSrc = source("../useUnreadSummary.ts");
+
+  it("_layout wires focusManager to a real AppState background->active return", () => {
+    expect(layoutSrc).toMatch(/focusManager\.setEventListener/);
+    expect(layoutSrc).toMatch(/AppState\.addEventListener\(\s*["']change["']/);
+    expect(layoutSrc).toMatch(/lastAppState === "background"[\s\S]*handleFocus\(true\)/);
+    expect(layoutSrc).toMatch(/refetchOnWindowFocus:\s*true/);
+  });
+
+  it("the unread-summary query does not opt out of refetch-on-focus and stays briefly stale", () => {
+    expect(hookSrc).not.toMatch(/refetchOnWindowFocus:\s*false/);
+    // 15s stale window: long enough to dedupe render churn, short enough that a
+    // refocus (or the next poll) always refetches.
+    expect(UNREAD_SUMMARY_STALE_MS).toBeLessThanOrEqual(30 * 1000);
   });
 });

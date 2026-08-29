@@ -10,7 +10,7 @@
  * Journey: Post → Comments → Commenter Profile → Message
  *   Back: Message → Profile → (same) Comments → close → (same) Post.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -33,6 +33,7 @@ import { usePostComments, useAddComment, usePostDetail } from '../../hooks/useHo
 import { timeAgo } from '../../components/home/PostCard';
 import type { PostComment } from '../../services/postService';
 import { openReportFlow } from '../../components/shared/ReportButton';
+import { clientUuid } from '../../lib/chatAttachments';
 
 export default function CommentsScreen() {
   const router = useRouter();
@@ -45,6 +46,9 @@ export default function CommentsScreen() {
   // Bottom breathing room, painted INSIDE the opaque sheet in both states.
   const composerBottomInset = useComposerBottomInset();
   const [draft, setDraft] = useState('');
+  // One idempotency tag per comment; reused if a send has to be retried,
+  // regenerated after a comment is posted (migration 100).
+  const commentTagRef = useRef(clientUuid());
   const { data: post, isLoading: isPostLoading } = usePostDetail(postId, viewerUserId);
   const { data: comments = [], isLoading } = usePostComments(postId);
   const { mutate: submitComment, isPending } = useAddComment();
@@ -63,7 +67,15 @@ export default function CommentsScreen() {
   const handleSend = () => {
     const content = draft.trim();
     if (!content || isPending) return;
-    submitComment({ postId, userId: viewerUserId, content }, { onSuccess: () => setDraft('') });
+    submitComment(
+      { postId, userId: viewerUserId, content, clientTag: commentTagRef.current },
+      {
+        onSuccess: () => {
+          setDraft('');
+          commentTagRef.current = clientUuid();
+        },
+      },
+    );
   };
 
   // A Comments sheet with NO post id is never a legitimate state — this screen

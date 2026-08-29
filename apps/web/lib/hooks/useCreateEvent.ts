@@ -1,9 +1,12 @@
 "use client";
 
+import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isClientTagConflict } from "@weglue/shared";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { uploadToBucket } from "../imageUpload";
 import { invalidateEventState } from "./eventSync";
+import { clientTag } from "../messages/service";
 import type { TagClub } from "./useCreatePost";
 
 // Web port of the New Event flow (apps/mobile/app/home/new-event.tsx +
@@ -71,7 +74,7 @@ export interface CreateEventInput {
   specific_user_ids: string[];
 }
 
-async function createEvent(userId: string, input: CreateEventInput): Promise<string> {
+async function createEvent(userId: string, input: CreateEventInput, tag: string): Promise<string> {
   const supabase = getSupabaseBrowser();
 
   // Defence-in-depth officer check (RLS also enforces this server-side).
@@ -104,18 +107,38 @@ async function createEvent(userId: string, input: CreateEventInput): Promise<str
         input.visibility === "specific" && input.specific_user_ids.length
           ? input.specific_user_ids
           : null,
+      client_tag: tag,
     })
     .select("id")
     .single();
-  if (error || !event) throw error ?? new Error("Failed to create event");
+  if (error) {
+    if (isClientTagConflict(error, "uq_events_created_by_client_tag")) {
+      const { data: existing, error: fetchError } = await supabase
+        .from("events")
+        .select("id")
+        .eq("created_by", userId)
+        .eq("client_tag", tag)
+        .single();
+      if (fetchError || !existing) throw fetchError ?? error;
+      return (existing as any).id;
+    }
+    throw error;
+  }
+  if (!event) throw new Error("Failed to create event");
   return (event as any).id;
 }
 
 export function useCreateEvent(userId: string | undefined) {
   const queryClient = useQueryClient();
+  // One tag per New Event form; reused across retries, regenerated after a
+  // successful create (migration 100).
+  const tagRef = useRef(clientTag());
   return useMutation({
-    mutationFn: (input: CreateEventInput) => createEvent(userId!, input),
-    onSuccess: () => invalidateEventState(queryClient, userId),
+    mutationFn: (input: CreateEventInput) => createEvent(userId!, input, tagRef.current),
+    onSuccess: () => {
+      tagRef.current = clientTag();
+      invalidateEventState(queryClient, userId);
+    },
   });
 }
 

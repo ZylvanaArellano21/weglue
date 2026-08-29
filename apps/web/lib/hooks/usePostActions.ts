@@ -1,7 +1,10 @@
 "use client";
 
+import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isClientTagConflict } from "@weglue/shared";
 import { getSupabaseBrowser } from "../supabase-browser";
+import { clientTag } from "../messages/service";
 
 // Post interactions for the media overlay: comments (list + add), author-only
 // caption editing, and reporting — all on the SAME tables mobile uses, so a
@@ -63,11 +66,27 @@ function invalidatePost(qc: ReturnType<typeof useQueryClient>, postId: string) {
 
 export function useAddComment() {
   const qc = useQueryClient();
+  // One tag per comment; reused if a submit is retried, regenerated once a
+  // comment lands (migration 100).
+  const tagRef = useRef(clientTag());
   return useMutation({
     mutationFn: async ({ postId, userId, content }: { postId: string; userId: string; content: string }) => {
       const supabase = getSupabaseBrowser();
-      const { error } = await supabase.from("post_comments").insert({ post_id: postId, user_id: userId, content: content.trim() });
-      if (error) throw error;
+      const { error } = await supabase
+        .from("post_comments")
+        .insert({ post_id: postId, user_id: userId, content: content.trim(), client_tag: tagRef.current });
+      if (!error) return;
+      // Retry of a comment that already posted under this tag — succeed quietly.
+      if (isClientTagConflict(error, "uq_post_comments_user_client_tag")) {
+        const { data: existing } = await supabase
+          .from("post_comments")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("client_tag", tagRef.current)
+          .maybeSingle();
+        if (existing) return;
+      }
+      throw error;
     },
     onMutate: async ({ postId, userId, content }) => {
       await qc.cancelQueries({ queryKey: ["postComments", postId] });
@@ -91,7 +110,10 @@ export function useAddComment() {
       else qc.setQueryData<PostComment[]>(["postComments", postId], (current) => current?.filter((c) => c.id !== context?.optimisticId));
       invalidatePost(qc, postId);
     },
-    onSuccess: (_d, { postId }) => invalidatePost(qc, postId),
+    onSuccess: (_d, { postId }) => {
+      tagRef.current = clientTag();
+      invalidatePost(qc, postId);
+    },
   });
 }
 

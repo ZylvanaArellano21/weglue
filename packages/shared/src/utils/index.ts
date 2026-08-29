@@ -91,6 +91,34 @@ export function jitteredReconnectAfterMs(tries: number): number {
   return Math.round(base * (1 + Math.random() * 0.5));
 }
 
+// ─── client_tag write idempotency ────────────────────────────────────────────
+//
+// Direct-write creates (post, event, comment) carry a caller-generated
+// `client_tag` UUID that is STABLE across double-taps and lost-response retries
+// of one logical compose action. Migration 100 adds a partial unique index per
+// table on (owner, client_tag). A retry then raises 23505 from THAT index, and
+// the caller resolves the already-created row by the same tag instead of
+// inserting a duplicate.
+//
+// This helper keeps that path precise: a 23505 from a DIFFERENT constraint
+// (e.g. a genuine duplicate business key) is still a real error and must not be
+// swallowed as success.
+
+/**
+ * True only when a Postgres unique-violation is the client_tag idempotency
+ * index firing — a safe retry of the same logical write. Pass the exact index
+ * name for the table being written; the check also accepts a generic
+ * "client_tag" mention so it stays correct if PostgREST phrases the error
+ * without the index name.
+ */
+export function isClientTagConflict(err: unknown, indexName: string): boolean {
+  if (err == null || typeof err !== "object") return false;
+  const e = err as { code?: string | number; message?: string; details?: string; hint?: string };
+  if (String(e.code) !== "23505") return false;
+  const haystack = `${e.message ?? ""} ${e.details ?? ""} ${e.hint ?? ""}`.toLowerCase();
+  return haystack.includes(indexName.toLowerCase()) || haystack.includes("client_tag");
+}
+
 // ─── Bounded retry for IDEMPOTENT requests only ───────────────────────────────
 //
 // USE THIS ONLY for reads / GET-shaped RPCs (feed queries, get_unread_summary,
