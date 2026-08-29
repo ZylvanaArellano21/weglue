@@ -1,0 +1,25 @@
+{
+  "name": "@weglue/load-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "seed": "node dist/cli.js seed",
+    "teardown": "node dist/cli.js teardown",
+    "signup-burst": "node dist/cli.js signup-burst",
+    "email-reliability": "node dist/cli.js email-reliability",
+    "concurrent-active": "node dist/cli.js concurrent-active",
+    "photo-fanout": "node dist/cli.js photo-fanout",
+    "idempotency": "node dist/cli.js idempotency",
+    "report": "node dist/cli.js report"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/pg": "^8.15.5",
+    "typescript": "^5.4.5"
+  }
+}

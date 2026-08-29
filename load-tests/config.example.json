@@ -1,0 +1,13 @@
+{
+  "supabaseUrl": "https://abcdefghijklmnopqrst.supabase.co",
+  "stagingRef": "abcdefghijklmnopqrst",
+  "anonKey": "YOUR-STAGING-ANON-KEY",
+  "serviceKey": "YOUR-STAGING-SERVICE-ROLE-KEY",
+  "universityId": "00000000-0000-4000-8000-000000000001",
+  "emailDomain": "staging.example.edu",
+  "databaseUrl": "postgresql://postgres.YOUR-STAGING-REF:PASSWORD@aws-0-us-west-2.pooler.supabase.com:5432/postgres",
+  "resultsDir": "load-tests/results",
+  "seedNamespace": "burst",
+  "requestTimeoutMs": 20000,
+  "observeIntervalMs": 5000
+}
