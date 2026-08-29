@@ -47,7 +47,16 @@ export function messageBadgeCounts(summary: UnreadSummary | undefined): {
   return { single, groups, total: single + groups };
 }
 
-async function fetchUnreadSummary(): Promise<UnreadSummary> {
+/**
+ * Freshness knobs, shared by both hooks and pinned by a regression test.
+ * The realtime `notifications` subscription + the `sync:message-inbox`
+ * broadcast are what keep this live; `UNREAD_SUMMARY_POLL_MS` is only the
+ * self-heal for a missed realtime event (channel drop, long background).
+ */
+export const UNREAD_SUMMARY_STALE_MS = 15 * 1000;
+export const UNREAD_SUMMARY_POLL_MS = 5 * 60 * 1000;
+
+export async function fetchUnreadSummary(): Promise<UnreadSummary> {
   const { data, error } = await supabase.rpc('get_unread_summary');
   if (error) throw error;
   const summary = (data ?? {}) as Partial<UnreadSummary>;
@@ -80,7 +89,7 @@ export function useUnreadSummaryValue(userId: string | undefined) {
     queryKey: ['unreadSummary', userId],
     queryFn: fetchUnreadSummary,
     enabled: !!userId,
-    staleTime: 15 * 1000,
+    staleTime: UNREAD_SUMMARY_STALE_MS,
   });
 }
 
@@ -91,12 +100,8 @@ export function useUnreadSummary(userId: string | undefined) {
     queryKey: ['unreadSummary', userId],
     queryFn: fetchUnreadSummary,
     enabled: !!userId,
-    staleTime: 15 * 1000,
-    // The realtime notifications subscription + the message-inbox broadcast
-    // below keep this fresh in real time. This poll is only a self-heal for a
-    // missed realtime event (channel drop, long background); 5 min is enough
-    // for that without adding a per-client request/minute at scale.
-    refetchInterval: 5 * 60 * 1000,
+    staleTime: UNREAD_SUMMARY_STALE_MS,
+    refetchInterval: UNREAD_SUMMARY_POLL_MS,
   });
 
   // Realtime: notification INSERT/UPDATE (cross-device read sync) plus the
