@@ -92,7 +92,11 @@ export function useUnreadSummary(userId: string | undefined) {
     queryFn: fetchUnreadSummary,
     enabled: !!userId,
     staleTime: 15 * 1000,
-    refetchInterval: 60 * 1000,
+    // The realtime notifications subscription + the message-inbox broadcast
+    // below keep this fresh in real time. This poll is only a self-heal for a
+    // missed realtime event (channel drop, long background); 5 min is enough
+    // for that without adding a per-client request/minute at scale.
+    refetchInterval: 5 * 60 * 1000,
   });
 
   // Realtime: notification INSERT/UPDATE (cross-device read sync) plus the
