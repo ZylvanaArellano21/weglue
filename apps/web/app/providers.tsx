@@ -59,18 +59,34 @@ function useSessionRealtimeHub(): string | undefined {
   return userId;
 }
 
+// How long a fresh `my_access_state` result is trusted for a *navigation*
+// re-check. Real access changes arrive out-of-band (the `sync:access:` opaque
+// broadcast, a 42501 on any protected query, and auth events), each of which
+// forces an immediate check. A route transition is only belt-and-suspenders, so
+// within this window it reuses the last result instead of re-firing the RPC on
+// every page the user clicks through.
+const ACCESS_RECHECK_MS = 15_000;
+
+// A navigation-triggered student-content invalidation is belt-and-suspenders
+// against a stale cached query resurfacing (staleTime + refetchOnMount already
+// cover a genuinely stale one). Coalesce it so rapid tab-switching doesn't
+// re-invalidate 27 query roots on every hop.
+const STUDENT_NAV_INVALIDATE_MS = 10_000;
+
 function useApplicationAccessGate(queryClient: QueryClient): void {
   const pathname = usePathname();
-  const checkRef = useRef<() => void>(() => {});
+  const checkRef = useRef<(opts?: { force?: boolean }) => void>(() => {});
   const [timedSuspensionFallback, setTimedSuspensionFallback] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseBrowser();
     let checking = false;
+    let lastCheckAt = 0;
     let removeAccessSync: (() => void) | null = null;
     let accessSyncUserId: string | null = null;
-    const check = async () => {
+    const check = async ({ force = true }: { force?: boolean } = {}) => {
       if (checking) return;
+      if (!force && Date.now() - lastCheckAt < ACCESS_RECHECK_MS) return;
       checking = true;
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -79,6 +95,7 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
           return;
         }
         const { data, error } = await supabase.rpc("my_access_state");
+        if (!error) lastCheckAt = Date.now();
         const accessState = data as { state?: string; suspended_until?: string | null } | null;
         const state = accessState?.state;
         if (!error && state) {
@@ -102,7 +119,7 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
         }
       } finally { checking = false; }
     };
-    checkRef.current = () => void check();
+    checkRef.current = (opts) => void check(opts);
     const subscribeAccessSync = (session: Session | null) => {
       const nextUserId = session?.user.id ?? null;
       if (nextUserId === accessSyncUserId) return;
@@ -160,8 +177,11 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
 
   useEffect(() => {
     // Navigation is a canonical recovery point: a direct client transition
-    // cannot inherit an older access decision from the prior route.
-    checkRef.current();
+    // cannot inherit an older access decision from the prior route. But a real
+    // access change always arrives through the broadcast / 42501 / auth paths
+    // (all forced), so this one reuses a result newer than ACCESS_RECHECK_MS
+    // instead of re-firing my_access_state on every page click.
+    checkRef.current({ force: false });
   }, [pathname]);
 }
 
@@ -208,6 +228,7 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
   }, [queryClient]);
 
   const firstPathRef = useRef(true);
+  const lastNavInvalidateRef = useRef(0);
   useEffect(() => {
     // A route TRANSITION can reveal an inactive cached query. Mark all relevant
     // surfaces stale so it cannot keep serving an earlier lifecycle state.
@@ -236,6 +257,13 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
       firstPathRef.current = false;
       return;
     }
+    // Coalesce bursts of navigation. A query that genuinely went stale still
+    // refetches on remount (60s staleTime + refetchOnMount); a real
+    // permission change still arrives unthrottled through the university
+    // broadcast and the focus-recovery path below. So clicking rapidly through
+    // tabs no longer fires a 27-root invalidation per hop.
+    if (Date.now() - lastNavInvalidateRef.current < STUDENT_NAV_INVALIDATE_MS) return;
+    lastNavInvalidateRef.current = Date.now();
     invalidateStudentContentQueries(queryClient);
   }, [pathname, queryClient]);
 
