@@ -125,6 +125,70 @@ export async function sendVerificationEmail(email: string): Promise<ResendResult
   return { ok: true };
 }
 
+// ─── Password-reset cooldown (same claim-first pattern, own key) ─────────────
+//
+// GoTrue's per-identity mailer cooldown (smtp_max_frequency, 60s) is shared
+// across email types for one address, so a verification send and a reset send
+// hold each other off server-side. The client keeps a SEPARATE key per purpose
+// anyway: it's the clearer mental model for the two screens, and being a touch
+// conservative (a reset waits out a just-sent verification) only ever prevents
+// a request the server would reject.
+
+const RESET_COOLDOWN_KEY = "@weglue/reset_cooldown_until";
+
+export async function getResetCooldownRemaining(email: string): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(RESET_COOLDOWN_KEY);
+    if (!raw) return 0;
+    const { email: storedEmail, until } = JSON.parse(raw) as { email: string; until: number };
+    if (storedEmail !== email.trim().toLowerCase()) return 0;
+    const remaining = Math.ceil((until - Date.now()) / 1000);
+    return remaining > 0 ? Math.min(remaining, RESEND_COOLDOWN_SECONDS) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Sends exactly ONE password-reset email and opens the 60s cooldown. Same
+ * contract as {@link sendVerificationEmail}: the cooldown is claimed BEFORE the
+ * network call so a double tap can't put two emails in flight; a throttle keeps
+ * it, any other failure releases it.
+ */
+export async function sendPasswordResetEmail(email: string): Promise<ResendResult> {
+  const userEmail = email.trim().toLowerCase();
+  if (!userEmail) return { ok: false, message: "Enter your email address first." };
+
+  const remaining = await getResetCooldownRemaining(userEmail);
+  if (remaining > 0) return { ok: false, cooldown: remaining };
+
+  await AsyncStorage.setItem(
+    RESET_COOLDOWN_KEY,
+    JSON.stringify({ email: userEmail, until: Date.now() + RESEND_COOLDOWN_SECONDS * 1000 }),
+  );
+
+  const { error } = await supabase.auth.resetPasswordForEmail(userEmail, {
+    redirectTo: RESET_PASSWORD_REDIRECT,
+  });
+
+  if (error) {
+    const code = (error.code ?? "").toLowerCase();
+    const msg = (error.message ?? "").toLowerCase();
+    const throttled =
+      code === "over_email_send_rate_limit" ||
+      error.status === 429 ||
+      msg.includes("rate limit") ||
+      msg.includes("too many") ||
+      msg.includes("you can only request this after");
+
+    if (!throttled) await AsyncStorage.removeItem(RESET_COOLDOWN_KEY);
+
+    return { ok: false, message: friendlyEmailSendError(error) };
+  }
+
+  return { ok: true };
+}
+
 // ─── Backend status probes (SECURITY DEFINER RPCs, rate-limited) ─────────────
 
 export type EmailStatus = "available" | "exists_verified" | "exists_unverified";
