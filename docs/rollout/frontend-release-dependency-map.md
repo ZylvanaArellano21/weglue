@@ -1,6 +1,6 @@
 # Frontend rollout stack — commit → backend-dependency map
 
-Branch: `claude/rollout-reliability-frontend` (11 commits on top of `main` `dc4228d6`).
+Branch: `claude/rollout-reliability-frontend` (12 commits on top of `main` `dc4228d6`).
 Intended production scope: **the whole stack** (integrated reliability stack).
 
 **Release rule (founder):** no frontend commit ships to production before its
@@ -24,11 +24,12 @@ and 103/104 are NOT on production).
 | 8 | `76cf8a4e` | RSVP + save are explicit desired-state, not blind toggles | `event_rsvps` upsert `{event_id,user_id,status}` — column `status` (CHECK `IN ('going','cant')`) and unique index `event_rsvps_event_id_user_id_key` **both present on prod**. `saved_events` upsert `{user_id,event_id}` — unique index present. Deletes for the "unset" path. | none (uses existing schema) | — | ✅ clear |
 | 9 | `42cd0a4c` | Coalesce per-navigation `my_access_state` RPC + student-content invalidation | Reduces call frequency of the existing `my_access_state` RPC and the `sync:access:<uid>` broadcast — both already on prod. No new surface. | none | — | ✅ clear |
 | 10 | `c889a162` | Claim-first password-reset cooldown + live countdown | `supabase.auth.resetPasswordForEmail` (GoTrue); AsyncStorage cooldown key. No DB. | none | — | ✅ clear |
+| 12 | `2daf34c4` | Distinguish `over_request_rate_limit` (per-IP request throttle) from the email quota in sign-up / login error copy | Client-side error-message branching on `error.code` only. No DB. | none | — | ✅ clear |
 | 11 | `1115cab4` | Realtime approach A/B/C — consolidate 4 → 2 always-on channels | **A** (notif channel merge): existing `notifications` table only — no dep. **B** (deletes `useRealtimeMessageBanners`; the foreground banner now comes from a `new_message` broadcast on `sync:message-inbox:<uid>`): needs the `messages` AFTER INSERT trigger to emit that event. **C** (my-clubs): unchanged. Also removes web `useMessagesRealtime`'s own `sync:message-inbox` subscription (the `invalidate` half is covered by 067, already on prod). | **103** — `new_message` emission added to `handle_message_push()`. Recommended alongside: **104** (conversation-size gate). | **NO** (prod `handle_message_push` is the 089 version — verified) | ⛔ **BLOCKED on 103** — without it, no foreground banner on an incoming message while the app is open (push + unread badge unaffected) |
 
 ## Bottom line
 
-- **9 of 11 commits have no unmet backend dependency** and could ship today on their own.
+- **10 of 12 commits have no unmet backend dependency** and could ship today on their own.
 - **The whole stack requires, on production first:**
   - **migration 100** (client_tag idempotency) — unblocks `bb8f4391` + `eec87771`
   - **migration 103** (message-banner broadcast) — unblocks `1115cab4`
@@ -40,6 +41,6 @@ and 103/104 are NOT on production).
 
 1. Apply + verify **100** on production → commits 6, 7 unblocked.
 2. Apply + verify **103** (+ **104**) on production → commit 11 unblocked.
-3. Then merge `claude/rollout-reliability-frontend` → `main` and deploy (web + `eas update` mobile JS). No native build required — all 11 commits are JS-only.
+3. Then merge `claude/rollout-reliability-frontend` → `main` and deploy (web + `eas update` mobile JS). No native build required — all 12 commits are JS-only.
 
 Migrations 100, 103, 104 are each their own founder decision and their own staging verification; this document only asserts the code dependency.
