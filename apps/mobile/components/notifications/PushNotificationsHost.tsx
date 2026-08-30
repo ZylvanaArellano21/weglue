@@ -17,7 +17,6 @@ import { AppState, Platform } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useUnreadSummary } from '../../hooks/useUnreadSummary';
-import { useRealtimeMessageBanners } from '../../hooks/useRealtimeMessageBanners';
 import { useBlockSynchronization } from '../../hooks/useBlocking';
 import { getPermissionState } from '../../lib/notifications/permissions';
 import { ForegroundNotificationBanner } from './ForegroundNotificationBanner';
@@ -25,12 +24,11 @@ import { ForegroundNotificationBanner } from './ForegroundNotificationBanner';
 export function PushNotificationsHost() {
   const { session } = useAuthStore();
   usePushNotifications();
+  // Owns the single `sync:message-inbox:<uid>` broadcast subscription, which
+  // now also carries the `new_message` foreground-banner signal for push-only
+  // message types (dm_message/group_message/club_chat_message) — replacing the
+  // old broad `messages` INSERT postgres_changes subscription.
   useUnreadSummary(session?.user.id);
-  // Push-only types (dm_message/group_message/club_chat_message) never
-  // reach the notifications-table-driven banner feed below — this is their
-  // own realtime source (see useRealtimeMessageBanners for why it can't
-  // reuse the existing per-conversation thread sync).
-  useRealtimeMessageBanners(session?.user.id);
   // Must live inside the query provider — this is exactly why it moved here
   // rather than being called from RootLayout's own body, which executes
   // outside the PersistQueryClientProvider it needs.

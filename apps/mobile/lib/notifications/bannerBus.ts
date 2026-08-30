@@ -1,9 +1,12 @@
 /**
- * Tiny pub/sub bridging the ONE existing `notifications:<userId>` realtime
- * subscription (owned by useRealtimeNotifications, mounted once in
- * (tabs)/_layout.tsx) to the foreground banner UI, without opening a second
- * subscription to the same topic. useRealtimeNotifications publishes every
- * INSERT here; ForegroundNotificationBanner is the sole subscriber.
+ * Tiny pub/sub feeding the foreground banner UI from the session's always-on
+ * realtime subscriptions, without any banner-specific subscription of its own:
+ *   • useRealtimeNotifications (`notifications:<uid>`, mounted in
+ *     (tabs)/_layout.tsx) publishes every notification-table INSERT here;
+ *   • useUnreadSummary (`sync:message-inbox:<uid>`, mounted in
+ *     PushNotificationsHost) publishes a row built from each `new_message`
+ *     broadcast payload for push-only message types.
+ * ForegroundNotificationBanner is the sole subscriber.
  */
 export type BannerNotificationRow = {
   id: string;

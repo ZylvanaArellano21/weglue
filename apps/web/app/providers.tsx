@@ -16,7 +16,6 @@ import {
 import { useUnreadSummary } from "../lib/hooks/useUnreadSummary";
 import { useRealtimeNotifications } from "../lib/hooks/useNotifications";
 import { useMyClubsRealtime } from "../lib/hooks/useClubRealtime";
-import { useRealtimeMessageBanners } from "../lib/hooks/useRealtimeMessageBanners";
 import { useBlockSynchronization } from "../lib/hooks/useBlocking";
 import { ForegroundNotificationBanner } from "../components/notifications/ForegroundNotificationBanner";
 import { GetTheAppPrompt } from "../components/shared/GetTheAppPrompt";
@@ -48,13 +47,13 @@ function useCurrentUserId(): string | undefined {
 // subscriptions for the whole session, instead of each page remounting them.
 function useSessionRealtimeHub(): string | undefined {
   const userId = useCurrentUserId();
+  // useUnreadSummary owns the single `sync:message-inbox:<uid>` broadcast, which
+  // now also carries the `new_message` foreground-banner signal for push-only
+  // message types (dm_message/group_message/club_chat_message) — replacing the
+  // old broad `messages` INSERT postgres_changes subscription.
   useUnreadSummary(userId);
   useRealtimeNotifications(userId);
   useMyClubsRealtime(userId);
-  // Push-only message types never reach the notifications-table-driven
-  // banner feed — their own realtime source (see the hook for why it can't
-  // reuse the existing per-conversation thread sync).
-  useRealtimeMessageBanners(userId);
   useBlockSynchronization(userId);
   return userId;
 }

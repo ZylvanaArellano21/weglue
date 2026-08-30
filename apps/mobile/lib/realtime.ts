@@ -68,6 +68,61 @@ export function removeSafeChannel(channel: RealtimeChannel | null): void {
   }
 }
 
+// One private-broadcast subscription carrying SEVERAL events on one channel —
+// e.g. `sync:message-inbox:<uid>` delivers both `invalidate` (deletion/read
+// sync) and `new_message` (foreground banner). One socket subscription instead
+// of one per event. Each handler receives the broadcast payload. Same
+// authorization contract as subscribeBroadcast: never treat a payload as
+// authorization; refetch canonical state where it matters.
+export function subscribeBroadcastEvents(
+  topic: string,
+  handlers: Record<string, (payload: any) => void>,
+  onSubscribed?: () => void,
+): () => void {
+  let channel: RealtimeChannel | null = null;
+  let cancelled = false;
+
+  void (async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) await supabase.realtime.setAuth(token);
+      if (cancelled) return;
+
+      let ch = supabase.channel(topic, { config: { private: true } });
+      for (const [event, handler] of Object.entries(handlers)) {
+        ch = ch.on('broadcast', { event }, (message: any) => {
+          try {
+            handler(message?.payload ?? message);
+          } catch (e) {
+            console.warn(`[realtime] ${topic}/${event} broadcast callback error`, e);
+          }
+        });
+      }
+      channel = ch.subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          try {
+            onSubscribed?.();
+          } catch (e) {
+            console.warn(`[realtime] ${topic} subscribe callback error`, e);
+          }
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`[realtime] ${topic} ${status}`, err?.message ?? '');
+        }
+      });
+    } catch (e) {
+      console.warn(`[realtime] failed to subscribe broadcast ${topic}`, e);
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+    removeSafeChannel(channel);
+  };
+}
+
 // Private Broadcast is used only for opaque invalidation pings. The database
 // authorizes the exact topic through realtime.messages RLS; callers must still
 // refetch canonical state and must never treat a broadcast as authorization.

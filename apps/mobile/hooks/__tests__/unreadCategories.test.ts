@@ -11,6 +11,7 @@ vi.mock('../../lib/realtime', () => ({
   createSafeChannel: vi.fn(),
   removeSafeChannel: vi.fn(),
   subscribeBroadcast: vi.fn(),
+  subscribeBroadcastEvents: vi.fn(() => () => {}),
 }));
 
 import { messageBadgeCounts, unreadCountForConversation, type UnreadSummary } from '../useUnreadSummary';

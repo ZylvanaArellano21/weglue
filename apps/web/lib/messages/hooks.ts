@@ -209,12 +209,14 @@ export function useMessagesRealtime(conversationId: string | null, userId: strin
       { event: "INSERT", schema: "public", table: "conversation_participants", callback: invalidateInbox },
       { event: "UPDATE", schema: "public", table: "conversation_participants", callback: invalidateInbox },
     ]);
-    // Never subscribe to raw messages here: an UPDATE event can include a
-    // pre-scrub OLD row. The database sends an authorized opaque ping instead.
-    const removeMessageSync = subscribeBroadcast(`sync:message-inbox:${userId}`, "invalidate", invalidateInbox, invalidateInbox);
+    // The `sync:message-inbox:<uid>` broadcast (message deletion / read sync)
+    // is owned session-long by useUnreadSummary — it shares this one Realtime
+    // channel instance by topic, and a `removeChannel` here on unmount tore
+    // down that shared subscription (and, since approach B, the foreground
+    // message-banner feed). useUnreadSummary's `invalidate` handler now also
+    // refreshes messageKeys.conversations(userId), so the list stays live.
     return () => {
       removeSafeChannel(inbox);
-      removeMessageSync();
     };
   }, [queryClient, userId]);
 

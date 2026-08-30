@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 vi.mock('@tanstack/react-query', () => ({ useQuery: vi.fn(), useQueryClient: vi.fn() }));
 vi.mock('../supabase-browser', () => ({ getSupabaseBrowser: vi.fn() }));
-vi.mock('../realtime', () => ({ subscribeBroadcast: vi.fn() }));
+vi.mock('../realtime', () => ({ subscribeBroadcast: vi.fn(), subscribeBroadcastEvents: vi.fn(() => () => {}) }));
 
 import { messageBadgeCounts, type UnreadSummary } from '../hooks/useUnreadSummary';
 

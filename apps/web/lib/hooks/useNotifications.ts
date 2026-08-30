@@ -334,6 +334,12 @@ export async function unfollowUser(followerId: string, followingId: string): Pro
 
 // ─── Realtime: new notifications refresh the list + badges live ──────────────
 
+// The single always-on `notifications` subscription for the session. Sole owner
+// of `notifications:<uid>` — `useUnreadSummary` used to open a second
+// `notifications` INSERT channel (`unread-summary:<uid>`) for the same rows,
+// doubling the free-plan Realtime per-row RLS-evaluation cost per active user.
+// That channel is gone; this one carries INSERT (list + badge + banner +
+// relationship refresh) and UPDATE (cross-device read sync).
 export function useRealtimeNotifications(userId: string | undefined) {
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -350,6 +356,15 @@ export function useRealtimeNotifications(userId: string | undefined) {
           // Correction 3: the ONE feed for the foreground banner — no second
           // realtime subscription.
           if (payload.new) publishNotificationInsert(payload.new);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
+        () => {
+          // A read on another device must flip this device's badge + list rows.
+          void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
+          void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
         }
       )
       .subscribe();
