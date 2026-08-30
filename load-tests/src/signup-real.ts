@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { LoadTestConfig } from './config.js';
 import { argNumber, argString, assertWriteApproved } from './config.js';
 import { Metrics, percentile } from './metrics.js';
-import { anonClient, withTimeout } from './supabase.js';
+import { anonClient, serviceClient, withTimeout } from './supabase.js';
 import { runScenario, sleep } from './runner.js';
 
 // ============================================================================
@@ -63,7 +63,8 @@ function cls(err: any): string {
 
 export async function signupReal(config: LoadTestConfig, args: Record<string, string | boolean>): Promise<string> {
   assertWriteApproved(config);
-  const mode = argString(args, 'mode', 'paced') === 'burst' ? 'burst' : 'paced';
+  const rawMode = argString(args, 'mode', 'paced');
+  const mode = (rawMode === 'burst' ? 'burst' : rawMode === 'classroom' ? 'classroom' : 'paced') as 'paced' | 'burst' | 'classroom';
   const runId = `${Date.now().toString(36)}${randomUUID().slice(0, 4)}`;
   const domain = argString(args, 'recipient-domain', 'resend.dev');
   const count = Math.floor(argNumber(args, 'count', mode === 'burst' ? 80 : 500));
@@ -104,8 +105,122 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
 
     let recovery: Record<string, unknown> | undefined;
     let collateral: Record<string, unknown> | undefined;
+    let classroom: Record<string, unknown> | undefined;
 
-    if (mode === 'paced') {
+    if (mode === 'classroom') {
+      // The real We Glue classroom journey on ONE public IP:
+      //   signup -> (read email) -> verify -> (return to app) -> login
+      // signup and sign-in SHARE the per-IP over_request_rate_limit bucket, so
+      // the login wave draws on a bucket the signup wave already spent.
+      const admin = serviceClient(config);
+      const students = Math.floor(argNumber(args, 'count', 30));
+      const signupGapMs = argNumber(args, 'signup-gap-ms', 6000);   // instructor: "sign up now" — ~3 min for 30
+      const readEmailMs = argNumber(args, 'read-email-ms', 90_000); // students check their inbox
+      const verifyGapMs = argNumber(args, 'verify-gap-ms', 4000);
+      const returnMs = argNumber(args, 'return-ms', 30_000);        // "now log back in"
+      const loginGapMs = argNumber(args, 'login-gap-ms', 5000);
+
+      type S = { i: number; email: string; password: string; client: ReturnType<typeof anonClient>; verifySession: boolean; loginOk: boolean };
+      const roster: S[] = [];
+
+      // --- wave 1: signup ---
+      const w1 = Date.now();
+      for (let i = 0; i < students; i += 1) {
+        if (i > 0) { const w = w1 + i * signupGapMs - Date.now(); if (w > 0) await sleep(w); }
+        const client = anonClient(config, `cr-${runId}-${i}`);
+        const password = pw();
+        const t0 = performance.now();
+        try {
+          await withTimeout(client.rpc('auth_signup_status', { p_email: email(i), p_username: uname(i) }), config.requestTimeoutMs, `status ${i}`).catch(() => {});
+          const r = await withTimeout(client.auth.signUp({
+            email: email(i), password,
+            options: { data: { username: uname(i), full_name: uname(i), interests: INTERESTS, activities: ACTIVITIES, agreed_to_terms: true }, emailRedirectTo: 'https://staging.weglue.app/auth/confirm' },
+          }), config.requestTimeoutMs, `signup ${i}`);
+          const k = cls(r.error);
+          metrics.add({ name: 'cr_signup', ms: performance.now() - t0, ok: !r.error, errorClass: r.error ? k : undefined });
+          metrics.count(r.error ? `cr_signup_${k}` : 'cr_signup_ok');
+          if (!r.error) roster.push({ i, email: email(i), password, client, verifySession: false, loginOk: false });
+        } catch (e) { metrics.add({ name: 'cr_signup', ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`cr_signup_${cls(e)}`); }
+      }
+      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom signup ${roster.length}/${students} ok, 429ip=${metrics.counters.get('cr_signup_429_per_ip_request') ?? 0}\n`);
+
+      await sleep(readEmailMs);
+
+      // --- wave 2: verify (email link -> /verify). verifyOtp returns a session. ---
+      const w2 = Date.now();
+      for (let n = 0; n < roster.length; n += 1) {
+        if (n > 0) { const w = w2 + n * verifyGapMs - Date.now(); if (w > 0) await sleep(w); }
+        const s = roster[n]!;
+        const t0 = performance.now();
+        try {
+          const link = await admin.auth.admin.generateLink({ type: 'signup', email: s.email, password: s.password });
+          const th = link.data?.properties?.hashed_token;
+          if (!th) { metrics.add({ name: 'cr_verify', ms: performance.now() - t0, ok: false, errorClass: 'no_token' }); metrics.count('cr_verify_no_token'); continue; }
+          const vClient = anonClient(config, `cr-${runId}-v-${n}`);
+          const vo = await withTimeout(vClient.auth.verifyOtp({ type: 'signup', token_hash: th }), config.requestTimeoutMs, `verify ${n}`);
+          const k = cls(vo.error);
+          const gotSession = !vo.error && !!vo.data.session;
+          metrics.add({ name: 'cr_verify', ms: performance.now() - t0, ok: !vo.error, errorClass: vo.error ? k : undefined });
+          metrics.count(vo.error ? `cr_verify_${k}` : 'cr_verify_ok');
+          s.verifySession = gotSession;
+          if (gotSession) metrics.count('cr_verify_session_established');
+        } catch (e) { metrics.add({ name: 'cr_verify', ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`cr_verify_${cls(e)}`); }
+      }
+      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom verify ${metrics.counters.get('cr_verify_ok') ?? 0}/${roster.length} ok, session_established=${metrics.counters.get('cr_verify_session_established') ?? 0}, 429verify=${metrics.counters.get('cr_verify_429_other') ?? 0}\n`);
+
+      await sleep(returnMs);
+
+      // --- wave 3: the REDUNDANT login (current app signs the verify session
+      // out and forces this). Shares the per-IP bucket with wave 1. ---
+      const w3 = Date.now();
+      const needRetry: S[] = [];
+      for (let n = 0; n < roster.length; n += 1) {
+        if (n > 0) { const w = w3 + n * loginGapMs - Date.now(); if (w > 0) await sleep(w); }
+        const s = roster[n]!;
+        const t0 = performance.now();
+        try {
+          const li = await withTimeout(anonClient(config, `cr-${runId}-l-${n}`).auth.signInWithPassword({ email: s.email, password: s.password }), config.requestTimeoutMs, `login ${n}`);
+          const k = cls(li.error);
+          metrics.add({ name: 'cr_login', ms: performance.now() - t0, ok: !li.error, errorClass: li.error ? k : undefined });
+          metrics.count(li.error ? `cr_login_${k}` : 'cr_login_ok');
+          if (!li.error) s.loginOk = true;
+          else if (k === '429_per_ip_request') needRetry.push(s);
+        } catch (e) { metrics.add({ name: 'cr_login', ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`cr_login_${cls(e)}`); }
+      }
+      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom login ${metrics.counters.get('cr_login_ok') ?? 0}/${roster.length} ok, 429ip=${metrics.counters.get('cr_login_429_per_ip_request') ?? 0}\n`);
+
+      // --- wave 4: retry the throttled logins after a pause ---
+      let retryOk = 0;
+      if (needRetry.length) {
+        await sleep(45_000);
+        for (const s of needRetry) {
+          const li = await anonClient(config, `cr-${runId}-r-${s.i}`).auth.signInWithPassword({ email: s.email, password: s.password }).catch(() => ({ error: { code: 'threw' } } as any));
+          if (!li.error) { retryOk += 1; s.loginOk = true; }
+          await sleep(4000);
+        }
+      }
+
+      // --- recovery time: how long after wave 3 until a fresh signup works ---
+      const recStart = Date.now();
+      let recoveredMs = -1;
+      for (let a = 0; a < 25; a += 1) {
+        const r = await anonClient(config, `cr-${runId}-rec-${a}`).auth.signUp({ email: `sr-${runId}-rec${a}@${domain}`, password: pw() });
+        if (!r.error) { recoveredMs = Date.now() - recStart; break; }
+        await sleep(3000);
+      }
+
+      classroom = {
+        students,
+        signup: { ok: metrics.counters.get('cr_signup_ok') ?? 0, per_ip_429: metrics.counters.get('cr_signup_429_per_ip_request') ?? 0, email_429: metrics.counters.get('cr_signup_429_email_bucket') ?? 0, ...metrics.table('cr_signup') },
+        verify: { ok: metrics.counters.get('cr_verify_ok') ?? 0, session_established: metrics.counters.get('cr_verify_session_established') ?? 0, rate_limit_verify_429: metrics.counters.get('cr_verify_429_other') ?? 0, ...metrics.table('cr_verify') },
+        login_redundant: { ok: metrics.counters.get('cr_login_ok') ?? 0, per_ip_429: metrics.counters.get('cr_login_429_per_ip_request') ?? 0, ...metrics.table('cr_login') },
+        retry: { attempted: needRetry.length, succeeded: retryOk },
+        finalLoggedIn: roster.filter((s) => s.loginOk).length,
+        wouldBeLoggedInIfVerifySessionKept: roster.filter((s) => s.verifySession).length,
+        recoveryAfterLoginWaveMs: recoveredMs,
+        interpretation: 'verify.session_established students are ALREADY logged in after clicking the link; the login_redundant wave is the app deliberately signing that session out and re-authenticating, spending the shared per-IP bucket a second time.',
+      };
+    } else if (mode === 'paced') {
       const start = Date.now();
       let done = 0;
       for (let i = 0; i < count; i += 1) {
@@ -198,10 +313,12 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
         },
         authSignupStatusRpc: metrics.table('auth_signup_status'),
         triggerVerification: v[0] ?? {},
-        recovery, collateral,
+        recovery, collateral, classroom,
         note: mode === 'paced'
           ? 'Paced at the single-origin per-IP ceiling. triggerVerification.profiles must equal auth_users; profiles_launch_campus / onboarding_completed / agreed_terms must equal profiles; orphaned_auth_users and dup_usernames must be 0.'
-          : 'Shared-NAT / campus-dorm burst. recovery.recoveredAfterMs and collateral.legitBlocked quantify the blast radius of the per-IP over_request_rate_limit.',
+          : mode === 'burst'
+            ? 'Shared-NAT / campus-dorm burst. recovery.recoveredAfterMs and collateral.legitBlocked quantify the blast radius of the per-IP over_request_rate_limit.'
+            : 'Classroom journey on one IP. Compare classroom.verify.session_established (students already logged in after the link) vs classroom.login_redundant.per_ip_429 (the app forcing a second auth on the shared bucket).',
       },
     };
   });
