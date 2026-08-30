@@ -67,9 +67,9 @@ to 50 participants each), 3-minute measurement window, single process.
 | banner follow-up reads | 1,102 | **0** |
 
 Same methodology, pre-migration baseline (legacy, realtime ON): p50 ~7,700 ms,
-p95 ~57,000 ms. So **reduced vs the fair baseline is ~12× on p50**; vs this
-run's legacy control (which now also carries 103's DB-side fan-out on every chat
-message) it is ~64×.
+p95 ~57,000 ms. The **rested clean re-run below** is the definitive number:
+reduced-ON p50 **229 ms** vs the pre-migration legacy p50 7,726 ms = **34×**,
+and within ~55 ms of the no-realtime floor.
 
 Per-action p50 in the reduced run: feed-read 390 ms, search 517 ms, club-view
 477 ms, comment 443 ms, rsvp 575 ms, like 583 ms, event-view 580 ms — all
@@ -84,22 +84,32 @@ them; the p50 / throughput improvement is unambiguous either way.
 **Verdict: the 4 → 2 channel cut fixes the free-plan Realtime bottleneck at 50
 active users. Recommend applying the frontend A/B/C branch to production.**
 
-### Caveat on the exact tail latency
+### Clean re-run on rested staging (definitive)
 
-A follow-up sharded run (5 processes × 10 users, reduced) came back p50 6.1 s /
-p95 103 s — *worse* than the single-process reduced run above, and the
-same-session legacy control (40 s p50) is also worse than the earlier
-pre-migration legacy baseline (7.7 s). Both point to **cumulative degradation of
-the free-tier staging project under ~4 hours of sustained load tonight**, plus
-the known single-Mac multi-process contention (5 Node event loops + 5 HTTP
-origin pools). The staging DB itself was healthy throughout (≤ 2 active
-connections, 0 idle-in-transaction).
+Staging rested ~6 h, then `--topology reduced` vs `--no-realtime` back to back,
+single process, 50/50, 3-min window:
 
-The trustworthy comparison is the **first** single-process reduced run (626 ms,
-staging fresh) against the **prior-session** single-process pre-migration legacy
-baseline (7,726 ms, staging fresh) — same methodology, ~12×. The *direction and
-magnitude* are solid; a definitive 50-active p95 needs a clean run on a rested
-staging project, ideally sharded across real machines / distinct IPs.
+| | REDUCED (2 ch + broadcast) | NO-REALTIME (floor) |
+| --- | ---: | ---: |
+| ops / 3 min | 1,074 | 1,533 |
+| all-ops **p50** | **229 ms** | 174 ms |
+| all-ops p90 | 18,991 ms | 3,880 ms |
+| all-ops p95 | 23,402 ms | 6,007 ms |
+| `chat` p50 | 337 ms | 276 ms |
+
+- **Reduced-ON adds only ~55 ms at p50 over having no realtime at all.** Every
+  per-action p50 is 160–340 ms; `chat` is barely above the rest (337 ms vs the
+  1,660 ms seen in the contaminated earlier run).
+- vs the pre-migration legacy baseline (p50 7,726 ms): **p50 34×**.
+- The p90/p95 tail is still elevated (19 s / 23 s) — but the no-realtime floor
+  itself has a p95 of 6 s and p90 of 3.9 s on this free-tier box, so ~10 % of
+  ops are multi-second regardless of realtime. The reduced topology adds ~13–17 s
+  to the tail; that residual is real but the p50 — what most operations
+  experience — is now essentially at the floor.
+
+The earlier same-session sharded run (p50 6 s) and legacy control (40 s) were
+contaminated by ~4 h of cumulative free-tier degradation plus single-Mac
+multi-process contention; this rested clean run supersedes them.
 
 ## 3. Migration 103 — message-banner broadcast
 
