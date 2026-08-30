@@ -8,18 +8,27 @@ import { runScenario, sleep } from './runner.js';
 
 type ActiveUser = { id: string; email: string; password: string; client: ReturnType<typeof anonClient>; channels: RealtimeChannel[] };
 
-// EXACT always-on per-user realtime topology of the real We Glue clients
-// (apps/*/lib/hooks + the session hub in providers.tsx / mobile _layout.tsx):
+export type Topology = 'legacy' | 'reduced';
+
+// Two always-on per-user realtime topologies:
+//
+// legacy  — pre-realtime-load-reduction (4 postgres_changes channels):
 //   notifications:<uid>      notifications INSERT   filter user_id=eq.<uid>
 //   unread-summary:<uid>     notifications INSERT + UPDATE  filter user_id=eq.<uid>
 //   message-banners:<uid>    messages INSERT  filter sender_id=neq.<uid>   <-- broad
 //   my-clubs:<uid>           club_members *  filter user_id=eq.<uid>
-// The message-banners handler in the real client then does two follow-up reads
-// (conversations + profiles) per delivered row — replicated here as real load.
+//   + the message-banners handler does two follow-up reads per delivered row.
+//
+// reduced — post migrations 102/103 + FE approach A/B/C (2 postgres_changes + 1 broadcast):
+//   notifications:<uid>          notifications INSERT + UPDATE  filter user_id=eq.<uid>
+//   my-clubs:<uid>               club_members *  filter user_id=eq.<uid>
+//   sync:message-inbox:<uid>     PRIVATE BROADCAST — 'invalidate' + 'new_message'
+//                                (banner built straight from payload, no reads)
 async function subscribeRealTopology(
   user: ActiveUser,
   metrics: Metrics,
   onEvent: (kind: string) => void,
+  topology: Topology = 'legacy',
 ): Promise<void> {
   const { client, id } = user;
 
@@ -39,35 +48,66 @@ async function subscribeRealTopology(
       setTimeout(() => { if (!settled) { settled = true; metrics.count('realtime_join_timeout'); resolve(null); } }, 15_000);
     });
 
-  const bannerHandler = async (payload: any) => {
-    onEvent('message-banner');
-    const row = payload?.new;
-    if (!row || row.deleted_at) return;
-    // The real client's two follow-up reads per delivered banner row.
-    try {
-      await Promise.all([
-        client.from('conversations').select('type').eq('id', row.conversation_id).maybeSingle(),
-        client.from('profiles').select('username, full_name').eq('id', row.sender_id).maybeSingle(),
-      ]);
-      metrics.count('banner_followup_reads');
-    } catch { metrics.count('banner_followup_read_errors'); }
-  };
+  const mkBroadcast = (topic: string, events: string[], cb: (event: string, payload: any) => void): Promise<RealtimeChannel | null> =>
+    new Promise((resolve) => {
+      let settled = false;
+      let ch = client.channel(topic, { config: { private: true } });
+      for (const ev of events) ch = ch.on('broadcast' as any, { event: ev }, (m: any) => cb(ev, m?.payload ?? m));
+      ch.subscribe((status, error) => {
+        if (status === 'SUBSCRIBED') { metrics.count('realtime_joins'); if (!settled) { settled = true; resolve(ch); } }
+        else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && !settled) {
+          settled = true; metrics.count(`realtime_${status.toLowerCase()}`); if (error) metrics.count('realtime_join_errors'); resolve(null);
+        }
+      });
+      setTimeout(() => { if (!settled) { settled = true; metrics.count('realtime_join_timeout'); resolve(null); } }, 15_000);
+    });
 
-  const channels = await Promise.all([
-    mkChannel(`notifications:${id}`, [
-      { event: 'INSERT', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('notification') },
-    ]),
-    mkChannel(`unread-summary:${id}`, [
-      { event: 'INSERT', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('unread-insert') },
-      { event: 'UPDATE', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('unread-update') },
-    ]),
-    mkChannel(`message-banners:${id}`, [
-      { event: 'INSERT', table: 'messages', filter: `sender_id=neq.${id}`, cb: (p) => void bannerHandler(p) },
-    ]),
-    mkChannel(`my-clubs:${id}`, [
-      { event: '*', table: 'club_members', filter: `user_id=eq.${id}`, cb: () => onEvent('my-clubs') },
-    ]),
-  ]);
+  let channels: Array<RealtimeChannel | null>;
+
+  if (topology === 'reduced') {
+    // Post-102/103: 2 postgres_changes channels + 1 private broadcast. The
+    // banner is built straight from the `new_message` payload — no follow-up reads.
+    await client.realtime.setAuth((await client.auth.getSession()).data.session?.access_token ?? null);
+    channels = await Promise.all([
+      mkChannel(`notifications:${id}`, [
+        { event: 'INSERT', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('notification') },
+        { event: 'UPDATE', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('notification-update') },
+      ]),
+      mkChannel(`my-clubs:${id}`, [
+        { event: '*', table: 'club_members', filter: `user_id=eq.${id}`, cb: () => onEvent('my-clubs') },
+      ]),
+      mkBroadcast(`sync:message-inbox:${id}`, ['invalidate', 'new_message'], (ev) => onEvent(ev === 'new_message' ? 'message-banner' : 'inbox-invalidate')),
+    ]);
+  } else {
+    const bannerHandler = async (payload: any) => {
+      onEvent('message-banner');
+      const row = payload?.new;
+      if (!row || row.deleted_at) return;
+      // The real legacy client's two follow-up reads per delivered banner row.
+      try {
+        await Promise.all([
+          client.from('conversations').select('type').eq('id', row.conversation_id).maybeSingle(),
+          client.from('profiles').select('username, full_name').eq('id', row.sender_id).maybeSingle(),
+        ]);
+        metrics.count('banner_followup_reads');
+      } catch { metrics.count('banner_followup_read_errors'); }
+    };
+    channels = await Promise.all([
+      mkChannel(`notifications:${id}`, [
+        { event: 'INSERT', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('notification') },
+      ]),
+      mkChannel(`unread-summary:${id}`, [
+        { event: 'INSERT', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('unread-insert') },
+        { event: 'UPDATE', table: 'notifications', filter: `user_id=eq.${id}`, cb: () => onEvent('unread-update') },
+      ]),
+      mkChannel(`message-banners:${id}`, [
+        { event: 'INSERT', table: 'messages', filter: `sender_id=neq.${id}`, cb: (p) => void bannerHandler(p) },
+      ]),
+      mkChannel(`my-clubs:${id}`, [
+        { event: '*', table: 'club_members', filter: `user_id=eq.${id}`, cb: () => onEvent('my-clubs') },
+      ]),
+    ]);
+  }
   user.channels = channels.filter((c): c is RealtimeChannel => c !== null);
 }
 
@@ -139,6 +179,7 @@ export async function concurrentActive(config: LoadTestConfig, args: Record<stri
   const durationMs = argNumber(args, 'duration-ms', 10 * 60_000);
   const dutyMs = Math.max(250, argNumber(args, 'duty-ms', 5_000));
   const perSigninDelayMs = Math.max(0, argNumber(args, 'signin-spacing-ms', 1200));
+  const topology: Topology = argString(args, 'topology', 'legacy') === 'reduced' ? 'reduced' : 'legacy';
 
   // Optional sharding so N OS processes together simulate `users` clients —
   // one Node event loop + one HTTP origin pool cannot faithfully drive 50
@@ -162,8 +203,9 @@ export async function concurrentActive(config: LoadTestConfig, args: Record<stri
     // --- subscribe every user to the REAL always-on topology (unless disabled for A/B) ---
     const realtimeOff = args['no-realtime'] === true;
     if (!realtimeOff) {
-      await Promise.all(active.map((u) => subscribeRealTopology(u, metrics, () => metrics.count('realtime_events'))));
+      await Promise.all(active.map((u) => subscribeRealTopology(u, metrics, () => metrics.count('realtime_events'), topology)));
     }
+    metrics.count(`topology_${topology}`);
     const channelsUp = active.reduce((n, u) => n + u.channels.length, 0);
     metrics.count('channels_subscribed', channelsUp);
     metrics.count('users_ready', active.length);
@@ -195,15 +237,18 @@ export async function concurrentActive(config: LoadTestConfig, args: Record<stri
         usersReady: active.length,
         acceptanceMet: active.length === users,
         prewarmMs: metrics.counters.get('prewarm_ms') ?? 0,
+        topology,
         channelsSubscribed: channelsUp,
-        channelsExpected: users * 4,
+        channelsExpected: users * (topology === 'reduced' ? 3 : 4),
         durationMs,
         dutyMs,
         realtimeJoins: metrics.counters.get('realtime_joins') ?? 0,
         realtimeEvents: metrics.counters.get('realtime_events') ?? 0,
         realtimeEventRatePerSecond: Number(((metrics.counters.get('realtime_events') ?? 0) / measuredSeconds).toFixed(2)),
         bannerFollowupReads: metrics.counters.get('banner_followup_reads') ?? 0,
-        topologyNote: 'Per user: 4 postgres_changes channels matching the real We Glue session hub (notifications x2 user-filtered, message-banners sender_id!=self, my-clubs user-filtered). message-banners handler runs its 2 real follow-up reads.',
+        topologyNote: topology === 'reduced'
+          ? 'Per user (post-102/103): 2 postgres_changes channels (notifications INSERT+UPDATE user-filtered, my-clubs user-filtered) + 1 private broadcast sync:message-inbox (invalidate + new_message, banner from payload, no follow-up reads).'
+          : 'Per user (legacy): 4 postgres_changes channels matching the pre-reduction We Glue session hub (notifications x2 user-filtered, message-banners sender_id!=self broad, my-clubs user-filtered). message-banners handler runs its 2 real follow-up reads.',
       },
     };
   });

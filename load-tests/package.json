@@ -10,6 +10,7 @@
     "email-reliability": "node dist/cli.js email-reliability",
     "concurrent-active": "node dist/cli.js concurrent-active",
     "photo-fanout": "node dist/cli.js photo-fanout",
+    "message-fanout": "node dist/cli.js message-fanout",
     "idempotency": "node dist/cli.js idempotency",
     "report": "node dist/cli.js report"
   },
