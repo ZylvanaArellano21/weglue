@@ -2,6 +2,7 @@ import { loadConfig, parseArgs } from './config.js';
 import { seed, teardown } from './seed.js';
 import { signupBurst } from './signup-burst.js';
 import { emailReliability } from './email-reliability.js';
+import { authEmail } from './auth-email.js';
 import { concurrentActive } from './concurrent-active.js';
 import { photoFanout } from './photo-fanout.js';
 import { messageFanout } from './message-fanout.js';
@@ -20,6 +21,7 @@ async function main(): Promise<void> {
   else if (command === 'teardown') { await teardown(config, args); output = 'teardown complete'; }
   else if (command === 'signup-burst') output = await signupBurst(config, args);
   else if (command === 'email-reliability') output = await emailReliability(config, args);
+  else if (command === 'auth-email') output = await authEmail(config, args);
   else if (command === 'concurrent-active') output = await concurrentActive(config, args);
   else if (command === 'photo-fanout') output = await photoFanout(config, args);
   else if (command === 'message-fanout') output = await messageFanout(config, args);
