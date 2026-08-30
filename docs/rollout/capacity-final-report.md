@@ -15,6 +15,27 @@ address (`delivered+…@resend.dev` / `sr-…@resend.dev`) — no real inboxes.
 
 ---
 
+## Read this first: staging-proven ≠ production-deployed
+
+Everything in §§1–6 below is **capacity proven on the staging project** with the
+full `001 → 104` chain and the held frontend behaviour. **It is not the current
+state of production.**
+
+| On **production** right now | On **staging** (test bench) |
+| --- | --- |
+| migrations `001 → 098`, **`100`**, **`102`** | migrations `001 → 104` |
+| photo fan-out async (**102**) — live, monitored | + message-banner broadcast (**103**), banner ≤50 gate (**104**) |
+| client_tag columns present (**100**) but **inert** — no writer deployed | client_tag write paths exercised by the frontend branch |
+| pre-reduction realtime client (4 always-on channels/user) | — |
+| **no** frontend reliability stack | — |
+
+So: the §5 "50 active users PASS" and the §1–3 "email/signup PASS" describe what
+**will** hold once the migrations and the held frontend are on production. The
+only category that is *also* a statement about production today is §7 (photo
+fan-out) and the schema half of §3 (migration 100 is applied).
+
+---
+
 ## Two platform ceilings that shape everything below
 
 | Ceiling | Applies to | Value | Customizable? |
@@ -28,7 +49,7 @@ campus building or dorm behind one NAT during a rush, or any server-side proxy.
 
 ---
 
-## 1. Realistic Auth / email — Model A: **PASS**
+## 1. Realistic Auth / email — Model A: **PASS** (staging-proven)
 
 500 verification-path emails + 24 real `auth.signUp` + 24 resends + 100 password
 resets, paced as a realistic launch (~650 emails/hr) against `rate_limit_email_sent = 1,000`.
@@ -40,7 +61,7 @@ resets, paced as a realistic launch (~650 emails/hr) against `rate_limit_email_s
 
 **A realistic launch day's email volume fits comfortably under the production 1,000/hr cap.**
 
-## 2. Stress email — Model B: **PASS (throughput only)**
+## 2. Stress email — Model B: **PASS — throughput only** (staging-proven)
 
 2,500 verification-path emails as a burst + 200 resets + 200 email-changes,
 against `rate_limit_email_sent = 5,000`.
@@ -53,7 +74,7 @@ against `rate_limit_email_sent = 5,000`.
 SMTP/email throughput and the 5,000/hr configuration — nothing about student
 account creation at 500 scale (that is §3).
 
-## 3. 500 real signup path: **PASS WITH EXPECTED SAME-IP RATE LIMITING**
+## 3. 500 real signup path: **PASS WITH EXPECTED SAME-IP RATE LIMITING** (staging-proven; migration 100 schema now on production)
 
 Not 500 simultaneous same-IP users, and not 500 distinct IPs directly tested.
 500 executions of the exact shipped signup path (`auth_signup_status` RPC →
@@ -133,7 +154,7 @@ your details are saved" (no precise duration), and onboarding form state is
 preserved. `over_email_send_rate_limit` keeps the hourly message.
 **No onboarding change; this is error-copy only.**
 
-## 5. 50 concurrent active users: **PASS**
+## 5. 50 concurrent active users: **PASS** (staging-proven; production still runs the pre-reduction client)
 
 `concurrent-active` scenario, 50/50 pre-warmed sessions, the real We Glue
 session-hub realtime topology, 3-minute window, staging carrying migrations
@@ -173,7 +194,7 @@ foreground tab, plus a stale-deep-link guard in `useAuthDeepLink`.
 release — not yet performed. The staging reproduction + fix are code-verified;
 device verification remains required.
 
-## 7. Photo notification fan-out (migration 102) — **PASS, LIVE ON PRODUCTION**
+## 7. Photo notification fan-out (migration 102) — **PASS — LIVE ON PRODUCTION**
 
 `notify_photo_post_university()`'s synchronous O(campus) recipient loop
 (measured post-INSERT p95 **12 s** at 500 members × 50 concurrent posts) was
@@ -190,30 +211,41 @@ replaced by an O(1) outbox enqueue + a cursor-based pg_cron worker.
 
 ## Migration & deployment status
 
-| | Staging | Production |
-| --- | --- | --- |
-| 100 (client_tag idempotency) | applied | **not applied** |
-| 102 (async photo fan-out) | applied | **applied + live + monitored** |
-| 103 (message-banner broadcast) | applied | not applied |
-| 104 (banner ≤ 50-participant gate) | applied | not applied |
-| Frontend reliability stack (12 commits) | n/a | **held** — needs 100 + 103 on prod first (`frontend-release-dependency-map.md`) |
+| | Staging | Production | Decision |
+| --- | --- | --- | --- |
+| **100** (client_tag idempotency) | applied | **APPLIED 2026-08-30** — inert (no writer deployed) | approved, prod-only |
+| **102** (async photo fan-out) | applied | **live + monitored** | shipped |
+| **103** (message-banner broadcast) | applied | **not applied** | **HOLD** — large-conversation synchronous fan-out cliff unresolved; DM/small-group path only is validated |
+| **104** (banner ≤ 50-participant gate) | applied | **not applied** | **NOT the accepted final product behaviour** — may stay staging-only as a test/safety mechanism; "conversation > 50 participants loses foreground banners" must not ship as permanent |
+| Frontend reliability stack (12 commits) | n/a | **held** | needs the final message-banner backend + physical-device logout QA |
+
+## Remaining release gates (founder)
+
+1. **Final large-club foreground-banner solution** — a design that does not
+   drop the banner for large conversations and does not carry the synchronous
+   O(participants) `realtime.send` cliff. 103 + 104 are held on this.
+2. **Staging regression** of that solution.
+3. **Physical-device logout / session QA** (BE-7 fix is code-verified only).
+4. **Mandatory `WE_GLUE_BEFORE_DONE_RULES.md` triple-check.**
+5. **Final dependency / deployment-order review.**
+
+Then return for production / release approval.
 
 ## Bottom line
 
-The free plan supports the 500-student launch and 50 active users **with the
-migrations and the held frontend stack applied**:
+**On the free plan, staging demonstrates that the 500-student launch and 50
+active users are supported** — once the migrations and the held frontend are on
+production. Email capacity fits (§1, §2), account creation is correct at 500
+scale (§3), realtime at 50 active sits at the no-realtime floor (§5), photo
+fan-out is fixed and already live (§7).
 
-- Email capacity fits (§1, §2).
-- Account creation is correct at 500 scale (§3).
-- Realtime at 50 active is at the floor (§5).
-- Photo fan-out is fixed and live (§7).
-- The one genuine risk is the **shared-campus-NAT signup rush** (§4b) — a
-  platform limit, not a We Glue defect. Under an aggressive 60-student rush on
-  one NAT, ~35% are blocked on the first pass, but **100% get in on a retry**
-  after a ~60 s pause, recovery is ~1 s, and zero data is corrupted. The error
-  copy now tells the student to retry rather than wait an hour. At any human
-  pace with a natural email-check pause, the limit is not hit at all.
+**Production today** carries only migrations 100 (inert) and 102 (live); it still
+runs the pre-reduction realtime client and none of the reliability frontend. The
+capacity numbers above are a forecast of the deployed system, not a measurement
+of it.
 
-Remaining gates before release: apply 100 + 103 (+ 104) to production, then
-deploy the frontend stack; physical-device logout/session QA; the We Glue
-before-done triple-check.
+The one genuine open risk is the **shared-campus-NAT signup rush** (§4b) — a
+platform limit, not a We Glue defect. Under an aggressive 60-student rush on one
+NAT, ~35 % are blocked on the first pass, but **100 % get in on a retry** after a
+~60 s pause, recovery is ~1 s, and zero data is corrupted. At any human pace with
+a natural email-check pause the limit is not reached at all.
