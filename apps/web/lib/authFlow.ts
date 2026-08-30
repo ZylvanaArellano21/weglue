@@ -293,6 +293,17 @@ export function friendlyEmailSendError(error: {
   const code = (error.code ?? "").toLowerCase();
   const msg = (error.message ?? "").toLowerCase();
 
+  // Per-IP REQUEST throttle (Supabase `over_request_rate_limit`). Hits sign-up
+  // and sign-in when many devices share one public IP — a classroom or dorm
+  // behind one campus NAT during a rush. It clears quickly (well under a
+  // minute) and the form state is preserved, so a retry succeeds. This is NOT
+  // the hourly email quota, and must not tell the user to wait an hour.
+  if (code === "over_request_rate_limit") {
+    return "Too many sign-ups from your network right now. Wait a moment, then try again — your details are saved.";
+  }
+
+  // Per-project hourly email quota (`over_email_send_rate_limit`). A bare 429
+  // with no specific code in an email-send call is treated the same way.
   if (
     code === "over_email_send_rate_limit" ||
     error.status === 429 ||

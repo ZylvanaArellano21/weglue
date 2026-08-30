@@ -149,6 +149,16 @@ export default function LoginScreen() {
       const msg = error.message.toLowerCase();
       const code = (error.code ?? "").toLowerCase();
 
+      if (code === "over_request_rate_limit") {
+        // Per-IP request throttle (Supabase shares this bucket between sign-up
+        // and sign-in). Hits when many devices log in from one public IP right
+        // after a classroom sign-up rush. It clears quickly; the password is
+        // still in the field, so a retry works.
+        setLoading(false);
+        show("Too many sign-ins from your network right now. Wait a moment and try again.", "error");
+        return;
+      }
+
       if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
         // GoTrue validates the password BEFORE issuing this error, so the
         // account exists, the password is right, and verification is the only
