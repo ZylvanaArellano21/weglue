@@ -108,10 +108,12 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
     let classroom: Record<string, unknown> | undefined;
 
     if (mode === 'classroom') {
-      // The real We Glue classroom journey on ONE public IP:
-      //   signup -> (read email) -> verify -> (return to app) -> login
-      // signup and sign-in SHARE the per-IP over_request_rate_limit bucket, so
-      // the login wave draws on a bucket the signup wave already spent.
+      // The SHIPPED We Glue journey on ONE public IP, tested exactly as-is:
+      //   signup -> (read email) -> verify via email link -> congrats ->
+      //   (return to app) -> MANUAL login with credentials -> app.
+      // signup and sign-in share the per-IP over_request_rate_limit bucket, so
+      // the manual-login wave draws on a bucket the signup wave already spent.
+      // This measures the impact; it does not motivate an onboarding change.
       const admin = serviceClient(config);
       const students = Math.floor(argNumber(args, 'count', 30));
       const signupGapMs = argNumber(args, 'signup-gap-ms', 6000);   // instructor: "sign up now" — ~3 min for 30
@@ -146,7 +148,9 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
 
       await sleep(readEmailMs);
 
-      // --- wave 2: verify (email link -> /verify). verifyOtp returns a session. ---
+      // --- wave 2: verify — the student clicks the email link (/verify). The
+      //     shipped app then shows the congrats screen and (via confirmed.tsx)
+      //     signs any session out; the student returns and logs in manually. ---
       const w2 = Date.now();
       for (let n = 0; n < roster.length; n += 1) {
         if (n > 0) { const w = w2 + n * verifyGapMs - Date.now(); if (w > 0) await sleep(w); }
@@ -170,10 +174,11 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
 
       await sleep(returnMs);
 
-      // --- wave 3: the REDUNDANT login (current app signs the verify session
-      // out and forces this). Shares the per-IP bucket with wave 1. ---
+      // --- wave 3: the MANUAL login the shipped flow requires after
+      //     verification. Shares the per-IP bucket with wave 1 (signup). ---
       const w3 = Date.now();
       const needRetry: S[] = [];
+      let loginOnset429 = -1;
       for (let n = 0; n < roster.length; n += 1) {
         if (n > 0) { const w = w3 + n * loginGapMs - Date.now(); if (w > 0) await sleep(w); }
         const s = roster[n]!;
@@ -181,10 +186,10 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
         try {
           const li = await withTimeout(anonClient(config, `cr-${runId}-l-${n}`).auth.signInWithPassword({ email: s.email, password: s.password }), config.requestTimeoutMs, `login ${n}`);
           const k = cls(li.error);
-          metrics.add({ name: 'cr_login', ms: performance.now() - t0, ok: !li.error, errorClass: li.error ? k : undefined });
+          metrics.add({ name: 'cr_login', ms: performance.now() - t0, ok: !li.error, errorClass: li.error ? k : undefined, meta: { n } });
           metrics.count(li.error ? `cr_login_${k}` : 'cr_login_ok');
           if (!li.error) s.loginOk = true;
-          else if (k === '429_per_ip_request') needRetry.push(s);
+          else if (k === '429_per_ip_request') { needRetry.push(s); if (loginOnset429 < 0) loginOnset429 = n; }
         } catch (e) { metrics.add({ name: 'cr_login', ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`cr_login_${cls(e)}`); }
       }
       process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom login ${metrics.counters.get('cr_login_ok') ?? 0}/${roster.length} ok, 429ip=${metrics.counters.get('cr_login_429_per_ip_request') ?? 0}\n`);
@@ -211,14 +216,14 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
 
       classroom = {
         students,
+        shippedFlow: 'signup -> verify via email link -> congrats -> return -> manual login. Tested exactly as shipped; onboarding unchanged.',
         signup: { ok: metrics.counters.get('cr_signup_ok') ?? 0, per_ip_429: metrics.counters.get('cr_signup_429_per_ip_request') ?? 0, email_429: metrics.counters.get('cr_signup_429_email_bucket') ?? 0, ...metrics.table('cr_signup') },
-        verify: { ok: metrics.counters.get('cr_verify_ok') ?? 0, session_established: metrics.counters.get('cr_verify_session_established') ?? 0, rate_limit_verify_429: metrics.counters.get('cr_verify_429_other') ?? 0, ...metrics.table('cr_verify') },
-        login_redundant: { ok: metrics.counters.get('cr_login_ok') ?? 0, per_ip_429: metrics.counters.get('cr_login_429_per_ip_request') ?? 0, ...metrics.table('cr_login') },
-        retry: { attempted: needRetry.length, succeeded: retryOk },
-        finalLoggedIn: roster.filter((s) => s.loginOk).length,
-        wouldBeLoggedInIfVerifySessionKept: roster.filter((s) => s.verifySession).length,
+        verify: { ok: metrics.counters.get('cr_verify_ok') ?? 0, rate_limit_verify_429: metrics.counters.get('cr_verify_429_other') ?? 0, ...metrics.table('cr_verify') },
+        manualLogin: { ok: metrics.counters.get('cr_login_ok') ?? 0, per_ip_429: metrics.counters.get('cr_login_429_per_ip_request') ?? 0, onsetAtStudentIndex: loginOnset429, otherFail: (metrics.samples.filter((s) => s.name === 'cr_login' && !s.ok).length) - (metrics.counters.get('cr_login_429_per_ip_request') ?? 0), ...metrics.table('cr_login') },
+        loginRetry: { attempted: needRetry.length, succeeded: retryOk },
+        studentsInAppAfterFullJourney: roster.filter((s) => s.loginOk).length,
         recoveryAfterLoginWaveMs: recoveredMs,
-        interpretation: 'verify.session_established students are ALREADY logged in after clicking the link; the login_redundant wave is the app deliberately signing that session out and re-authenticating, spending the shared per-IP bucket a second time.',
+        note: 'manualLogin.per_ip_429 = students blocked at the required post-verification login because signup already drew down the shared per-IP bucket. onset = which student index in the login wave first 429s. Reports impact only.',
       };
     } else if (mode === 'paced') {
       const start = Date.now();
@@ -277,11 +282,13 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
     // ---- server-side trigger verification ----
     await sleep(4000);
     const v = await mgmt(config, `
-      with u as (select id, email, confirmation_sent_at from auth.users where email like '${emailLike}'),
+      with u as (select id, email, confirmation_sent_at, email_confirmed_at from auth.users where email like '${emailLike}'),
       p as (select * from public.profiles where id in (select id from u))
       select
         (select count(*) from u)::int                                          as auth_users,
+        (select count(distinct lower(email)) from u)::int                       as distinct_emails,
         (select count(*) from u where confirmation_sent_at is not null)::int    as confirmation_sent,
+        (select count(*) from u where email_confirmed_at is not null)::int      as email_confirmed,
         (select count(*) from p)::int                                           as profiles,
         (select count(*) from u where id not in (select id from p))::int        as orphaned_auth_users,
         (select count(*) from p where university_id = '75398568-867d-4cf9-b688-78e6bfbedb01')::int as profiles_launch_campus,
