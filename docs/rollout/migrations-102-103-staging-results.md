@@ -84,6 +84,23 @@ them; the p50 / throughput improvement is unambiguous either way.
 **Verdict: the 4 → 2 channel cut fixes the free-plan Realtime bottleneck at 50
 active users. Recommend applying the frontend A/B/C branch to production.**
 
+### Caveat on the exact tail latency
+
+A follow-up sharded run (5 processes × 10 users, reduced) came back p50 6.1 s /
+p95 103 s — *worse* than the single-process reduced run above, and the
+same-session legacy control (40 s p50) is also worse than the earlier
+pre-migration legacy baseline (7.7 s). Both point to **cumulative degradation of
+the free-tier staging project under ~4 hours of sustained load tonight**, plus
+the known single-Mac multi-process contention (5 Node event loops + 5 HTTP
+origin pools). The staging DB itself was healthy throughout (≤ 2 active
+connections, 0 idle-in-transaction).
+
+The trustworthy comparison is the **first** single-process reduced run (626 ms,
+staging fresh) against the **prior-session** single-process pre-migration legacy
+baseline (7,726 ms, staging fresh) — same methodology, ~12×. The *direction and
+magnitude* are solid; a definitive 50-active p95 needs a clean run on a rested
+staging project, ideally sharded across real machines / distinct IPs.
+
 ## 3. Migration 103 — message-banner broadcast
 
 `message-fanout` scenario, `pf-500` manifest, fresh club_group conversation per
@@ -138,6 +155,15 @@ club "member" chats. Options:
 
 Recommendation: **option 1**. Ship 102 + FE A/B/C now; hold 103 for the size
 gate, or ship it with the gate in the same release.
+
+**Migration 104** (`104_message_banner_size_gate.sql`, committed review-only)
+implements option 1: keeps 103's exact body, wraps only the `new_message` send
+in `IF v_participant_count <= v_banner_max`, where `v_banner_max` is the
+`notification_config` row `banner.max_participants` (default 50, tunable with a
+one-line `UPDATE`, no redeploy). Above the threshold: `enqueue_message_push`
+still runs and the 067 `invalidate` still fires; only the instant banner pop is
+suppressed. If approved: commit 104, apply to staging, re-run `message-fanout`
+to confirm > 50-participant sends drop back to the pre-103 ~300 ms.
 
 ## Staging state left behind
 
