@@ -122,14 +122,12 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
       const returnMs = argNumber(args, 'return-ms', 30_000);        // "now log back in"
       const loginGapMs = argNumber(args, 'login-gap-ms', 5000);
 
-      type S = { i: number; email: string; password: string; client: ReturnType<typeof anonClient>; verifySession: boolean; loginOk: boolean };
+      type S = { i: number; email: string; password: string; client: ReturnType<typeof anonClient>; verifySession: boolean; verifyOk: boolean; loginOk: boolean };
       const roster: S[] = [];
+      const signupBlocked: number[] = []; // indices that got over_request_rate_limit at signup
 
-      // --- wave 1: signup ---
-      const w1 = Date.now();
-      for (let i = 0; i < students; i += 1) {
-        if (i > 0) { const w = w1 + i * signupGapMs - Date.now(); if (w > 0) await sleep(w); }
-        const client = anonClient(config, `cr-${runId}-${i}`);
+      const doOneSignup = async (i: number, isRetry: boolean): Promise<S | null> => {
+        const client = anonClient(config, `cr-${runId}-${isRetry ? 'rs' : ''}${i}`);
         const password = pw();
         const t0 = performance.now();
         try {
@@ -139,11 +137,52 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
             options: { data: { username: uname(i), full_name: uname(i), interests: INTERESTS, activities: ACTIVITIES, agreed_to_terms: true }, emailRedirectTo: 'https://staging.weglue.app/auth/confirm' },
           }), config.requestTimeoutMs, `signup ${i}`);
           const k = cls(r.error);
-          metrics.add({ name: 'cr_signup', ms: performance.now() - t0, ok: !r.error, errorClass: r.error ? k : undefined });
-          metrics.count(r.error ? `cr_signup_${k}` : 'cr_signup_ok');
-          if (!r.error) roster.push({ i, email: email(i), password, client, verifySession: false, loginOk: false });
-        } catch (e) { metrics.add({ name: 'cr_signup', ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`cr_signup_${cls(e)}`); }
+          metrics.add({ name: isRetry ? 'cr_signup_retry' : 'cr_signup', ms: performance.now() - t0, ok: !r.error, errorClass: r.error ? k : undefined });
+          metrics.count(r.error ? `${isRetry ? 'cr_signup_retry' : 'cr_signup'}_${k}` : (isRetry ? 'cr_signup_retry_ok' : 'cr_signup_ok'));
+          if (!r.error) { const s: S = { i, email: email(i), password, client, verifySession: false, verifyOk: false, loginOk: false }; roster.push(s); return s; }
+          if (!isRetry && k === '429_per_ip_request') signupBlocked.push(i);
+          return null;
+        } catch (e) {
+          metrics.add({ name: isRetry ? 'cr_signup_retry' : 'cr_signup', ms: performance.now() - t0, ok: false, errorClass: cls(e) });
+          metrics.count(`${isRetry ? 'cr_signup_retry' : 'cr_signup'}_${cls(e)}`);
+          return null;
+        }
+      };
+
+      const doOneVerify = async (s: S, tag: string): Promise<void> => {
+        const t0 = performance.now();
+        try {
+          const link = await admin.auth.admin.generateLink({ type: 'signup', email: s.email, password: s.password });
+          const th = link.data?.properties?.hashed_token;
+          if (!th) { metrics.add({ name: tag, ms: performance.now() - t0, ok: false, errorClass: 'no_token' }); metrics.count(`${tag}_no_token`); return; }
+          const vo = await withTimeout(anonClient(config, `cr-${runId}-v-${tag}-${s.i}`).auth.verifyOtp({ type: 'signup', token_hash: th }), config.requestTimeoutMs, `verify ${s.i}`);
+          const k = cls(vo.error);
+          metrics.add({ name: tag, ms: performance.now() - t0, ok: !vo.error, errorClass: vo.error ? k : undefined });
+          metrics.count(vo.error ? `${tag}_${k}` : `${tag}_ok`);
+          if (!vo.error) { s.verifyOk = true; s.verifySession = !!vo.data.session; if (s.verifySession) metrics.count('cr_verify_session_established'); }
+        } catch (e) { metrics.add({ name: tag, ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`${tag}_${cls(e)}`); }
+      };
+
+      const doOneLogin = async (s: S, tag: string): Promise<void> => {
+        const t0 = performance.now();
+        try {
+          const li = await withTimeout(anonClient(config, `cr-${runId}-l-${tag}-${s.i}`).auth.signInWithPassword({ email: s.email, password: s.password }), config.requestTimeoutMs, `login ${s.i}`);
+          const k = cls(li.error);
+          metrics.add({ name: tag, ms: performance.now() - t0, ok: !li.error, errorClass: li.error ? k : undefined });
+          metrics.count(li.error ? `${tag}_${k}` : `${tag}_ok`);
+          if (!li.error) s.loginOk = true;
+        } catch (e) { metrics.add({ name: tag, ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`${tag}_${cls(e)}`); }
+      };
+
+      // --- wave 1: signup ---
+      const w1 = Date.now();
+      for (let i = 0; i < students; i += 1) {
+        if (i > 0) { const w = w1 + i * signupGapMs - Date.now(); if (w > 0) await sleep(w); }
+        await doOneSignup(i, false);
       }
+      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom signup ${roster.length}/${students} ok, 429ip=${metrics.counters.get('cr_signup_429_per_ip_request') ?? 0}\n`);
+
+      const signupWaveRoster = [...roster];
       process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom signup ${roster.length}/${students} ok, 429ip=${metrics.counters.get('cr_signup_429_per_ip_request') ?? 0}\n`);
 
       await sleep(readEmailMs);
@@ -152,78 +191,85 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
       //     shipped app then shows the congrats screen and (via confirmed.tsx)
       //     signs any session out; the student returns and logs in manually. ---
       const w2 = Date.now();
-      for (let n = 0; n < roster.length; n += 1) {
+      for (let n = 0; n < signupWaveRoster.length; n += 1) {
         if (n > 0) { const w = w2 + n * verifyGapMs - Date.now(); if (w > 0) await sleep(w); }
-        const s = roster[n]!;
-        const t0 = performance.now();
-        try {
-          const link = await admin.auth.admin.generateLink({ type: 'signup', email: s.email, password: s.password });
-          const th = link.data?.properties?.hashed_token;
-          if (!th) { metrics.add({ name: 'cr_verify', ms: performance.now() - t0, ok: false, errorClass: 'no_token' }); metrics.count('cr_verify_no_token'); continue; }
-          const vClient = anonClient(config, `cr-${runId}-v-${n}`);
-          const vo = await withTimeout(vClient.auth.verifyOtp({ type: 'signup', token_hash: th }), config.requestTimeoutMs, `verify ${n}`);
-          const k = cls(vo.error);
-          const gotSession = !vo.error && !!vo.data.session;
-          metrics.add({ name: 'cr_verify', ms: performance.now() - t0, ok: !vo.error, errorClass: vo.error ? k : undefined });
-          metrics.count(vo.error ? `cr_verify_${k}` : 'cr_verify_ok');
-          s.verifySession = gotSession;
-          if (gotSession) metrics.count('cr_verify_session_established');
-        } catch (e) { metrics.add({ name: 'cr_verify', ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`cr_verify_${cls(e)}`); }
+        await doOneVerify(signupWaveRoster[n]!, 'cr_verify');
       }
-      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom verify ${metrics.counters.get('cr_verify_ok') ?? 0}/${roster.length} ok, session_established=${metrics.counters.get('cr_verify_session_established') ?? 0}, 429verify=${metrics.counters.get('cr_verify_429_other') ?? 0}\n`);
+      const verifyBlocked = signupWaveRoster.filter((s) => !s.verifyOk);
+      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom verify ${metrics.counters.get('cr_verify_ok') ?? 0}/${signupWaveRoster.length} ok, 429ip=${metrics.counters.get('cr_verify_429_per_ip_request') ?? 0}\n`);
 
       await sleep(returnMs);
 
       // --- wave 3: the MANUAL login the shipped flow requires after
       //     verification. Shares the per-IP bucket with wave 1 (signup). ---
       const w3 = Date.now();
-      const needRetry: S[] = [];
       let loginOnset429 = -1;
-      for (let n = 0; n < roster.length; n += 1) {
+      for (let n = 0; n < signupWaveRoster.length; n += 1) {
         if (n > 0) { const w = w3 + n * loginGapMs - Date.now(); if (w > 0) await sleep(w); }
-        const s = roster[n]!;
-        const t0 = performance.now();
-        try {
-          const li = await withTimeout(anonClient(config, `cr-${runId}-l-${n}`).auth.signInWithPassword({ email: s.email, password: s.password }), config.requestTimeoutMs, `login ${n}`);
-          const k = cls(li.error);
-          metrics.add({ name: 'cr_login', ms: performance.now() - t0, ok: !li.error, errorClass: li.error ? k : undefined, meta: { n } });
-          metrics.count(li.error ? `cr_login_${k}` : 'cr_login_ok');
-          if (!li.error) s.loginOk = true;
-          else if (k === '429_per_ip_request') { needRetry.push(s); if (loginOnset429 < 0) loginOnset429 = n; }
-        } catch (e) { metrics.add({ name: 'cr_login', ms: performance.now() - t0, ok: false, errorClass: cls(e) }); metrics.count(`cr_login_${cls(e)}`); }
+        const before = metrics.counters.get('cr_login_429_per_ip_request') ?? 0;
+        await doOneLogin(signupWaveRoster[n]!, 'cr_login');
+        if (loginOnset429 < 0 && (metrics.counters.get('cr_login_429_per_ip_request') ?? 0) > before) loginOnset429 = n;
       }
-      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom login ${metrics.counters.get('cr_login_ok') ?? 0}/${roster.length} ok, 429ip=${metrics.counters.get('cr_login_429_per_ip_request') ?? 0}\n`);
+      const needRetry = signupWaveRoster.filter((s) => !s.loginOk && s.verifyOk);
+      const firstPassInApp = signupWaveRoster.filter((s) => s.loginOk).length;
+      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom login ${metrics.counters.get('cr_login_ok') ?? 0}/${signupWaveRoster.length} ok, 429ip=${metrics.counters.get('cr_login_429_per_ip_request') ?? 0}\n`);
 
-      // --- wave 4: retry the throttled logins after a pause ---
-      let retryOk = 0;
-      if (needRetry.length) {
-        await sleep(45_000);
-        for (const s of needRetry) {
-          const li = await anonClient(config, `cr-${runId}-r-${s.i}`).auth.signInWithPassword({ email: s.email, password: s.password }).catch(() => ({ error: { code: 'threw' } } as any));
-          if (!li.error) { retryOk += 1; s.loginOk = true; }
-          await sleep(4000);
-        }
+      // --- wave 4: RETRY the students the per-IP limit actually blocked, after
+      //     a real pause, at a gentle pace — did their retry succeed? ---
+      const retryPauseMs = argNumber(args, 'retry-pause-ms', 60_000);
+      const retryGapMs = argNumber(args, 'retry-gap-ms', 8000);
+      let signupRetryOk = 0; let verifyRetryOk = 0; let loginRetryOk = 0;
+      await sleep(retryPauseMs);
+      // 4a: retry the blocked signups (then verify + login the ones that now go through)
+      for (let j = 0; j < signupBlocked.length; j += 1) {
+        if (j > 0) await sleep(retryGapMs);
+        const s = await doOneSignup(signupBlocked[j]!, true);
+        if (s) { signupRetryOk += 1; await sleep(retryGapMs); await doOneVerify(s, 'cr_verify_retry'); if (s.verifyOk) { verifyRetryOk += 1; await sleep(retryGapMs); await doOneLogin(s, 'cr_login_retry'); if (s.loginOk) loginRetryOk += 1; } }
       }
+      // 4b: retry the blocked verifies (then login)
+      for (let j = 0; j < verifyBlocked.length; j += 1) {
+        if (j > 0) await sleep(retryGapMs);
+        const s = verifyBlocked[j]!;
+        await doOneVerify(s, 'cr_verify_retry');
+        if (s.verifyOk) { verifyRetryOk += 1; await sleep(retryGapMs); await doOneLogin(s, 'cr_login_retry'); if (s.loginOk) loginRetryOk += 1; }
+      }
+      // 4c: retry any per-IP-blocked logins
+      for (let j = 0; j < needRetry.length; j += 1) {
+        if (j > 0) await sleep(retryGapMs);
+        await doOneLogin(needRetry[j]!, 'cr_login_retry');
+        if (needRetry[j]!.loginOk) loginRetryOk += 1;
+      }
+      process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] classroom retry: signupBlocked ${signupRetryOk}/${signupBlocked.length} back in, verifyBlocked ${verifyRetryOk} verified, loginRetryOk=${loginRetryOk}\n`);
 
-      // --- recovery time: how long after wave 3 until a fresh signup works ---
+      // --- separate bucket-recovery PROBE: how long until a brand-new signup
+      //     from this origin succeeds again (NOT a retry of a blocked student). ---
       const recStart = Date.now();
-      let recoveredMs = -1;
+      let bucketRecoveredMs = -1;
       for (let a = 0; a < 25; a += 1) {
-        const r = await anonClient(config, `cr-${runId}-rec-${a}`).auth.signUp({ email: `sr-${runId}-rec${a}@${domain}`, password: pw() });
-        if (!r.error) { recoveredMs = Date.now() - recStart; break; }
+        const r = await anonClient(config, `cr-${runId}-probe-${a}`).auth.signUp({ email: `sr-${runId}-probe${a}@${domain}`, password: pw() });
+        if (!r.error) { bucketRecoveredMs = Date.now() - recStart; break; }
         await sleep(3000);
       }
 
+      const signupPerIp = metrics.counters.get('cr_signup_429_per_ip_request') ?? 0;
+      const verifyPerIp = metrics.counters.get('cr_verify_429_per_ip_request') ?? 0;
+      const loginPerIp = metrics.counters.get('cr_login_429_per_ip_request') ?? 0;
       classroom = {
         students,
         shippedFlow: 'signup -> verify via email link -> congrats -> return -> manual login. Tested exactly as shipped; onboarding unchanged.',
-        signup: { ok: metrics.counters.get('cr_signup_ok') ?? 0, per_ip_429: metrics.counters.get('cr_signup_429_per_ip_request') ?? 0, email_429: metrics.counters.get('cr_signup_429_email_bucket') ?? 0, ...metrics.table('cr_signup') },
-        verify: { ok: metrics.counters.get('cr_verify_ok') ?? 0, rate_limit_verify_429: metrics.counters.get('cr_verify_429_other') ?? 0, ...metrics.table('cr_verify') },
-        manualLogin: { ok: metrics.counters.get('cr_login_ok') ?? 0, per_ip_429: metrics.counters.get('cr_login_429_per_ip_request') ?? 0, onsetAtStudentIndex: loginOnset429, otherFail: (metrics.samples.filter((s) => s.name === 'cr_login' && !s.ok).length) - (metrics.counters.get('cr_login_429_per_ip_request') ?? 0), ...metrics.table('cr_login') },
-        loginRetry: { attempted: needRetry.length, succeeded: retryOk },
-        studentsInAppAfterFullJourney: roster.filter((s) => s.loginOk).length,
-        recoveryAfterLoginWaveMs: recoveredMs,
-        note: 'manualLogin.per_ip_429 = students blocked at the required post-verification login because signup already drew down the shared per-IP bucket. onset = which student index in the login wave first 429s. Reports impact only.',
+        signup: { ok: metrics.counters.get('cr_signup_ok') ?? 0, per_ip_429: signupPerIp, email_429: metrics.counters.get('cr_signup_429_email_bucket') ?? 0, ...metrics.table('cr_signup') },
+        verify: { ok: metrics.counters.get('cr_verify_ok') ?? 0, per_ip_429: verifyPerIp, rate_limit_verify_429: metrics.counters.get('cr_verify_429_other') ?? 0, ...metrics.table('cr_verify') },
+        manualLogin: { ok: metrics.counters.get('cr_login_ok') ?? 0, per_ip_429: loginPerIp, onsetAtStudentIndex: loginOnset429, emailNotConfirmed: metrics.counters.get('cr_login_4xx_email_not_confirmed') ?? 0, ...metrics.table('cr_login') },
+        blockedThenRetried: {
+          signup: { blocked: signupBlocked.length, retriedBackIn: signupRetryOk },
+          verify: { blocked: verifyBlocked.length, retriedVerified: verifyRetryOk },
+          login: { perIpBlocked: needRetry.length, retriedIn: loginRetryOk },
+          retryPauseMs, retryGapMs,
+        },
+        firstPassInApp,
+        finalInAppAfterRetryWave: roster.filter((s) => s.loginOk).length,
+        bucketRecoveryProbeMs: bucketRecoveredMs,
+        note: 'per_ip_429 counts = students hit by over_request_rate_limit at that step. blockedThenRetried = whether those EXACT students succeeded on a paced retry after retryPauseMs. bucketRecoveryProbeMs is a SEPARATE measurement: how long until a brand-new signup works again (not a blocked student).',
       };
     } else if (mode === 'paced') {
       const start = Date.now();
