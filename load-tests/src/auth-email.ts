@@ -103,6 +103,9 @@ export async function authEmail(config: LoadTestConfig, args: Record<string, str
   const signupIntervalMs = Math.max(0, argNumber(args, 'signup-interval-ms', 9000)); // just under the per-IP burst
   const resetCount = Math.floor(argNumber(args, 'resets', isA ? 100 : 500));
   const changeCount = Math.floor(argNumber(args, 'changes', isA ? 0 : 500));
+  // resetPasswordForEmail / updateUser share the per-IP over_request_rate_limit
+  // family — a burst from one origin 429s. Pace them (default ~12/min).
+  const antiPerIpRatePerMin = argNumber(args, 'anon-rate-per-min', 12);
   const cooldownWaitMs = Math.max(0, argNumber(args, 'cooldown-wait-ms', 75_000));
   const rateLimitTarget = argNumber(args, 'rate-limit-email-sent', isA ? 1000 : 5000);
 
@@ -192,7 +195,7 @@ export async function authEmail(config: LoadTestConfig, args: Record<string, str
       try { const r = await admin.auth.admin.createUser({ email, password: pw(), email_confirm: true, user_metadata: { username: `lt_m_${runId}_rst${i}`.slice(0, 40) } }); if (!r.error) resetEmails.push(email); }
       catch { /* ignore */ }
     }, () => {});
-    await paced(resetEmails.length, 0, 8, async (i) => {
+    await paced(resetEmails.length, antiPerIpRatePerMin, 1, async (i) => {
       const t0 = performance.now();
       try { const r = await withTimeout(anonClient(config, `lt-rst-${runId}-${i}`).auth.resetPasswordForEmail(resetEmails[i]!), config.requestTimeoutMs, `reset ${i}`); rec(metrics, 'reset', t0, r.error, {}); }
       catch (e) { rec(metrics, 'reset', t0, e); }
@@ -215,7 +218,7 @@ export async function authEmail(config: LoadTestConfig, args: Record<string, str
           if (!si.error) changeCohort.push({ client });
         } catch { /* ignore */ }
       }, () => {});
-      await paced(changeCohort.length, 0, 8, async (i) => {
+      await paced(changeCohort.length, antiPerIpRatePerMin, 1, async (i) => {
         const t0 = performance.now();
         try { const r = await withTimeout(changeCohort[i]!.client.auth.updateUser({ email: addr('cnew', i) }), config.requestTimeoutMs, `change ${i}`); rec(metrics, 'change-email', t0, r.error, {}); }
         catch (e) { rec(metrics, 'change-email', t0, e); }
