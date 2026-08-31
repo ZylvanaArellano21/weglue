@@ -2,17 +2,16 @@ import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-q
 import {
   getHomeEventsFeed,
   rsvpToEvent,
-  toggleSaveEvent,
+  setEventSaved,
   type HomeEventsFeedSection,
 } from '../services/eventService';
 import {
   applyOptimisticRsvp,
-  getCurrentRsvpStatus,
   invalidateRsvpQueries,
   invalidateSaveQueries,
-  nextRsvpStatus,
   restoreRsvpSnapshot,
   snapshotRsvpQueries,
+  type DesiredRsvp,
   type RsvpSnapshot,
 } from './useEventRsvp';
 import { timedQuery } from '../lib/timedQuery';
@@ -52,20 +51,21 @@ export function useHomeEventsFeed(userId: string | undefined) {
   });
 }
 
+// `desired` is the explicit end-state the card computed
+// (`event.user_rsvp_status === tapped ? null : tapped`).
 export function useRsvpToEvent() {
   const queryClient = useQueryClient();
   return useMutation<
     void,
     Error,
-    { userId: string; eventId: string; status: 'going' | 'cant' },
+    { userId: string; eventId: string; desired: DesiredRsvp },
     RsvpSnapshot
   >({
-    mutationFn: ({ userId, eventId, status }) => rsvpToEvent(userId, eventId, status),
-    onMutate: async ({ eventId, status }) => {
+    mutationFn: ({ userId, eventId, desired }) => rsvpToEvent(userId, eventId, desired),
+    onMutate: async ({ eventId, desired }) => {
       await queryClient.cancelQueries({ queryKey: ['homeEventsFeed'] });
       const snapshot = snapshotRsvpQueries(queryClient);
-      const current = getCurrentRsvpStatus(queryClient, eventId);
-      applyOptimisticRsvp(queryClient, eventId, nextRsvpStatus(current, status));
+      applyOptimisticRsvp(queryClient, eventId, desired);
       return snapshot;
     },
     onError: (_err, _vars, snapshot) => {
@@ -75,11 +75,11 @@ export function useRsvpToEvent() {
   });
 }
 
+// `desired` is the target saved state (`!event.is_saved`).
 export function useToggleSaveEvent() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ userId, eventId }: { userId: string; eventId: string }) =>
-      toggleSaveEvent(userId, eventId),
+  return useMutation<void, Error, { userId: string; eventId: string; desired: boolean }>({
+    mutationFn: ({ userId, eventId, desired }) => setEventSaved(userId, eventId, desired),
     // Refresh Saved Events too — not just the feed the bookmark was tapped in.
     onSettled: () => invalidateSaveQueries(queryClient),
   });

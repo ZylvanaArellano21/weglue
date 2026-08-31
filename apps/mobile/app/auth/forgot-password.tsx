@@ -14,12 +14,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { supabase } from "../../lib/supabase";
 import { useOnboardingStore } from "@weglue/shared";
-import { RESEND_COOLDOWN_SECONDS } from "../../constants/auth";
 import {
-  RESET_PASSWORD_REDIRECT,
   checkSignupStatus,
+  sendPasswordResetEmail,
   sendVerificationEmail,
   setPendingSignupEmail,
 } from "../../lib/authFlow";
@@ -130,21 +128,18 @@ export default function ForgotPasswordScreen() {
 
   async function sendResetLink(trimmed: string) {
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-      redirectTo: RESET_PASSWORD_REDIRECT,
-    });
+    // Shared claim-first cooldown: a double tap, or coming back to this screen
+    // within 60s, can't put a second reset email in flight or hit the server's
+    // per-identity mailer throttle.
+    const result = await sendPasswordResetEmail(trimmed);
     setLoading(false);
 
-    if (error) {
-      const msg = error.message.toLowerCase();
-      if (msg.includes("rate") || msg.includes("too many")) {
-        setSubmitError(
-          `Rate limited. Wait ${RESEND_COOLDOWN_SECONDS} seconds and try again.`
-        );
-        setEmailState("idle");
-        return;
-      }
-      setSubmitError("Something went wrong. Please try again.");
+    if (!result.ok) {
+      setSubmitError(
+        "cooldown" in result
+          ? `Wait ${result.cooldown} second${result.cooldown === 1 ? "" : "s"} before requesting another email.`
+          : result.message,
+      );
       setEmailState("idle");
       return;
     }

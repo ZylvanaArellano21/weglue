@@ -10,11 +10,10 @@ import {
 import { rsvpToEvent } from '../services/eventService';
 import {
   applyOptimisticRsvp,
-  getCurrentRsvpStatus,
   invalidateRsvpQueries,
-  nextRsvpStatus,
   restoreRsvpSnapshot,
   snapshotRsvpQueries,
+  type DesiredRsvp,
   type RsvpSnapshot,
 } from './useEventRsvp';
 import { timedQuery } from '../lib/timedQuery';
@@ -79,15 +78,14 @@ export function useCalendarDayEvents(
 export function useCalendarRsvp(userId: string | undefined) {
   const queryClient = useQueryClient();
 
-  return useMutation<void, Error, { eventId: string; status: 'going' | 'cant' }, RsvpSnapshot>({
-    mutationFn: ({ eventId, status }) => rsvpToEvent(userId!, eventId, status),
+  return useMutation<void, Error, { eventId: string; desired: DesiredRsvp }, RsvpSnapshot>({
+    mutationFn: ({ eventId, desired }) => rsvpToEvent(userId!, eventId, desired),
 
-    onMutate: async ({ eventId, status }) => {
+    onMutate: async ({ eventId, desired }) => {
       await queryClient.cancelQueries({ queryKey: ['calendarEvents'] });
       await queryClient.cancelQueries({ queryKey: ['calendarDayEvents'] });
       const snapshot = snapshotRsvpQueries(queryClient);
-      const current = getCurrentRsvpStatus(queryClient, eventId);
-      applyOptimisticRsvp(queryClient, eventId, nextRsvpStatus(current, status));
+      applyOptimisticRsvp(queryClient, eventId, desired);
       return snapshot;
     },
 

@@ -141,26 +141,23 @@ export function useSavedEvents(userId: string | undefined) {
   });
 }
 
-async function toggleSaveEvent(userId: string, eventId: string): Promise<boolean> {
+// This screen only ever removes a save; explicit desired-state so a retry is an
+// idempotent no-op, and the delete is error-checked (a rejected unsave must not
+// report success).
+async function unsaveEvent(userId: string, eventId: string): Promise<void> {
   const supabase = getSupabaseBrowser();
-  const { data: existing } = await supabase
+  const { error } = await supabase
     .from("saved_events")
-    .select("id")
+    .delete()
     .eq("user_id", userId)
-    .eq("event_id", eventId)
-    .maybeSingle();
-  if (existing) {
-    await supabase.from("saved_events").delete().eq("user_id", userId).eq("event_id", eventId);
-    return false;
-  }
-  await supabase.from("saved_events").insert({ user_id: userId, event_id: eventId });
-  return true;
+    .eq("event_id", eventId);
+  if (error) throw error;
 }
 
 export function useUnsaveEvent(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (eventId: string) => toggleSaveEvent(userId!, eventId),
+    mutationFn: (eventId: string) => unsaveEvent(userId!, eventId),
     onMutate: (eventId) => {
       queryClient.setQueriesData({ queryKey: ["savedEventsCount", userId] }, (count: number | undefined) =>
         typeof count === "number" ? Math.max(0, count - 1) : count

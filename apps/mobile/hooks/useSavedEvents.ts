@@ -3,7 +3,7 @@ import {
   getSavedEventsUpcoming,
   getSavedEventsPast,
 } from '../services/savedEventsService';
-import { toggleSaveEvent } from '../services/eventService';
+import { setEventSaved } from '../services/eventService';
 import { invalidateSaveQueries } from './useEventRsvp';
 import type { CalendarEvent, CalendarSection } from '../services/calendarService';
 
@@ -37,8 +37,9 @@ interface UnsaveSnapshot {
 // backend call fails, the snapshot restores it and the screen shows an error.
 export function useUnsaveEvent(userId: string | undefined) {
   const queryClient = useQueryClient();
-  return useMutation<boolean, Error, string, UnsaveSnapshot>({
-    mutationFn: (eventId: string) => toggleSaveEvent(userId!, eventId),
+  return useMutation<void, Error, string, UnsaveSnapshot>({
+    // This screen only ever removes a save.
+    mutationFn: (eventId: string) => setEventSaved(userId!, eventId, false),
     onMutate: async (eventId) => {
       await queryClient.cancelQueries({ queryKey: ['savedEventsUpcoming', userId] });
       await queryClient.cancelQueries({ queryKey: ['savedEventsPast', userId] });

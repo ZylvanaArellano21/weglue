@@ -7,14 +7,15 @@ import { AvatarStack } from '../shared/AvatarStack';
 import { Pill } from '../shared/Pill';
 import { EventAudienceBadge } from '../events/EventAudienceBadge';
 import type { HomeFeedEvent } from '../../services/eventService';
+import type { DesiredRsvp } from '../../hooks/useEventRsvp';
 import { getResizedImageUrl } from '../../lib/imageResize';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 interface EventCardTodayProps {
   event: HomeFeedEvent;
-  onRsvp: (eventId: string) => void;
-  onToggleSave: (eventId: string) => void;
+  onRsvp: (eventId: string, desired: DesiredRsvp) => void;
+  onToggleSave: (eventId: string, desired: boolean) => void;
   onJoinClub?: (clubId: string) => void;
   onRequestLeaveClub?: (clubId: string, clubName: string) => void;
 }
@@ -138,7 +139,7 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
           )}
           {/* Bookmark */}
           <TouchableOpacity
-            onPress={() => onToggleSave(event.id)}
+            onPress={() => onToggleSave(event.id, !event.is_saved)}
             activeOpacity={0.8}
             style={{
               position: 'absolute',
@@ -249,7 +250,7 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
           )}
           <View style={{ flex: 1 }} />
           <TouchableOpacity
-            onPress={() => onRsvp(event.id)}
+            onPress={() => onRsvp(event.id, event.user_rsvp_status === 'going' ? null : 'going')}
             activeOpacity={0.8}
             style={{
               backgroundColor:

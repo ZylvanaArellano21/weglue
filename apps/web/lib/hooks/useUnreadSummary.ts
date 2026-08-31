@@ -2,8 +2,10 @@
 
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { buildMessageBanner, type NewMessageBroadcastPayload } from "@weglue/shared";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { subscribeBroadcast } from "../realtime";
+import { subscribeBroadcastEvents } from "../realtime";
+import { publishNotificationInsert } from "../notifications/bannerBus";
 
 // Web port of apps/mobile/hooks/useUnreadSummary.ts. Same `get_unread_summary`
 // RPC, same two counts — so web badges and mobile badges are driven by the
@@ -97,44 +99,43 @@ export function useUnreadSummary(userId: string | undefined) {
     queryFn: fetchUnreadSummary,
     enabled: !!userId,
     staleTime: 15 * 1000,
-    refetchInterval: 60 * 1000,
+    // The realtime notifications subscription + the message-inbox broadcast
+    // below keep this fresh in real time. This poll is only a self-heal for a
+    // missed realtime event (channel drop, long background); 5 min is enough
+    // for that without adding a per-client request/minute at scale.
+    refetchInterval: 5 * 60 * 1000,
   });
 
   useEffect(() => {
     if (!userId) return;
-    const supabase = getSupabaseBrowser();
     const invalidate = () => {
       void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
+      // The Messages screen no longer opens its own `sync:message-inbox`
+      // subscription (it shared this exact channel instance and tore it down on
+      // unmount). The conversation-list prefix — messageKeys.conversations(userId)
+      // without the trailing limit — is refreshed here instead.
+      void queryClient.invalidateQueries({ queryKey: ["messages", "conversations", userId] });
     };
-    // One uniquely-named channel (mirrors mobile's `unread-summary:<id>`),
-    // torn down on unmount so we never double-subscribe.
-    const channel = supabase
-      .channel(`unread-summary:${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
-        invalidate
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
-        () => {
-          invalidate();
-          void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
-        }
-      )
-      .subscribe();
-    const removeMessageSync = subscribeBroadcast(
+    // Realtime freshness comes from ONE server-authorized private broadcast on
+    // `sync:message-inbox:<uid>`, carrying two events:
+    //   • `invalidate`  — opaque deletion/read-sync ping (migrations 067/077/082)
+    //   • `new_message` — payload-carrying foreground-banner signal for an
+    //                     incoming message (replaces the old broad `messages`
+    //                     INSERT postgres_changes subscription)
+    // The `notifications` INSERT/UPDATE rows are handled by the single
+    // `useRealtimeNotifications` channel, which invalidates `['unreadSummary']`.
+    return subscribeBroadcastEvents(
       `sync:message-inbox:${userId}`,
-      "invalidate",
-      invalidate,
+      {
+        invalidate,
+        new_message: (payload: NewMessageBroadcastPayload) => {
+          invalidate();
+          const banner = buildMessageBanner(payload, userId);
+          if (banner) publishNotificationInsert(banner);
+        },
+      },
       invalidate,
     );
-
-    return () => {
-      void supabase.removeChannel(channel);
-      removeMessageSync();
-    };
   }, [userId, queryClient]);
 
   return query;

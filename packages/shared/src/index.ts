@@ -9,3 +9,4 @@ export * from "./avatarCatalog";
 export * from "./notificationVisuals";
 export * from "./messaging/threadVisibility";
 export * from "./messaging/attachmentPresentation";
+export * from "./messaging/messageBanner";

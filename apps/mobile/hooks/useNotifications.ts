@@ -20,9 +20,57 @@ export function useNotifications(userId: string | undefined) {
   });
 }
 
-// Live inserts: a new notification lands (follow request, accept, like…) →
-// refresh the list immediately, and refresh profile relationship state so
-// Requested → Following flips in under a second after an accept.
+// The single always-on `notifications` subscription for the session. It is the
+// sole owner of `notifications:<uid>` — `useUnreadSummary` used to open a second
+// `notifications` INSERT channel (`unread-summary:<uid>`) for the same rows,
+// which on the free-plan Realtime service doubled the per-row RLS-evaluation
+// cost for every active user. That channel is gone; this one now also refreshes
+// the unread badge, and carries the UPDATE binding for cross-device read sync.
+//
+// INSERT: a new notification (follow request, accept, like, club/officer
+// change…) refreshes the list + badge, feeds the foreground banner, and
+// refreshes any relationship/permission state a change implies.
+// UPDATE: a read elsewhere (another device) marks rows read here too.
+export function applyNotificationInsert(
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
+  row: BannerNotificationRow | null,
+) {
+  queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+  queryClient.invalidateQueries({ queryKey: ['unreadSummary', userId] });
+  const type = row?.type;
+  // Correction 3: the ONE feed for the foreground banner — no second realtime
+  // subscription. actor-safe by construction (domain triggers never insert a
+  // row where user_id = actor_id), but a defensive check lives in the banner's
+  // own decision function too.
+  if (row) publishNotificationInsert(row);
+  if (type === 'follow_accepted' || type === 'gluemate' || type === 'new_follower') {
+    // Relationship changed — profiles the viewer has open must update.
+    queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+    queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
+  }
+  if (
+    type === 'club_chat_added' ||
+    type === 'officer_chat_added' ||
+    type === 'officer_role' ||
+    type === 'officer_removed' ||
+    type === 'club_joined'
+  ) {
+    // Membership/officer change: group chats appear/disappear in Messages,
+    // officer-gated UI unlocks or revokes, and the role badge on profiles
+    // updates in under a second, app-wide — including on the affected user's
+    // own device.
+    queryClient.invalidateQueries({ queryKey: ['myChats'] });
+    queryClient.invalidateQueries({ queryKey: ['chatDetails'] });
+    queryClient.invalidateQueries({ queryKey: ['myClubs'] });
+    queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
+    queryClient.invalidateQueries({ queryKey: ['officerClubs'] });
+    queryClient.invalidateQueries({ queryKey: ['ownProfile'] });
+    queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+    void refreshOfficerStatus(userId);
+  }
+}
+
 export function useRealtimeNotifications(userId: string | undefined) {
   const queryClient = useQueryClient();
 
@@ -36,39 +84,18 @@ export function useRealtimeNotifications(userId: string | undefined) {
         table: 'notifications',
         filter: `user_id=eq.${userId}`,
         callback: (payload) => {
+          applyNotificationInsert(queryClient, userId, payload.new as BannerNotificationRow | null);
+        },
+      },
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+        callback: () => {
+          // A read on another device must flip this device's badge + list rows.
+          queryClient.invalidateQueries({ queryKey: ['unreadSummary', userId] });
           queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
-          const row = payload.new as BannerNotificationRow | null;
-          const type = row?.type;
-          // Correction 3: the ONE feed for the foreground banner — no second
-          // realtime subscription. actor-safe by construction (domain
-          // triggers never insert a row where user_id = actor_id), but a
-          // defensive check lives in the banner's own decision function too.
-          if (row) publishNotificationInsert(row);
-          if (type === 'follow_accepted' || type === 'gluemate' || type === 'new_follower') {
-            // Relationship changed — profiles the viewer has open must update.
-            queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-            queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
-          }
-          if (
-            type === 'club_chat_added' ||
-            type === 'officer_chat_added' ||
-            type === 'officer_role' ||
-            type === 'officer_removed' ||
-            type === 'club_joined'
-          ) {
-            // Membership/officer change: group chats appear/disappear in
-            // Messages, officer-gated UI unlocks or revokes, and the role
-            // badge on profiles updates in under a second, app-wide —
-            // including on the affected user's own device.
-            queryClient.invalidateQueries({ queryKey: ['myChats'] });
-            queryClient.invalidateQueries({ queryKey: ['chatDetails'] });
-            queryClient.invalidateQueries({ queryKey: ['myClubs'] });
-            queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
-            queryClient.invalidateQueries({ queryKey: ['officerClubs'] });
-            queryClient.invalidateQueries({ queryKey: ['ownProfile'] });
-            queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-            void refreshOfficerStatus(userId);
-          }
         },
       },
     ]);

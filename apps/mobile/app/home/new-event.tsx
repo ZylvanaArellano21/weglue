@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { useAuthStore } from '@weglue/shared';
 import { createEvent, updateEvent, getEventForEdit, searchEventAudienceMembers, type EventAudienceMember } from '../../services/eventService';
 import { getUserOfficerClubs, UserClub } from '../../services/clubService';
 import { invalidateClubDataEverywhere } from '../../lib/clubCache';
+import { clientUuid } from '../../lib/chatAttachments';
 import { useToast } from '../../components/Toast';
 import { supabase } from '../../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -111,6 +112,9 @@ export default function NewEventScreen() {
   const [userSelectorVisible, setUserSelectorVisible] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
+  // One idempotency tag per compose; reused across retries of this create,
+  // regenerated only after a successful create (migration 100).
+  const composeTagRef = useRef(clientUuid());
 
   // Hosting-by can only be a club where the current user is an officer — never
   // a club they merely joined (task 5). Sourced from the real club_members role.
@@ -284,7 +288,8 @@ export default function NewEventScreen() {
         visibility,
         specific_user_ids:
           visibility === 'specific' ? specificUsers.map((u) => u.id) : undefined,
-      });
+      }, composeTagRef.current);
+      composeTagRef.current = clientUuid();
       queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
       useHomeTabStore.getState().setActiveTab('events');
       // Land Home → Events exactly on the new small event card (located by

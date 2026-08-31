@@ -23,6 +23,10 @@ type LoginError =
   // already been checked — so this state can never leak account existence.
   | "unverified"
   | "invalid"
+  // Per-IP request throttle (Supabase shares this bucket between sign-up and
+  // sign-in). Hits when many devices sign in from one public IP right after a
+  // classroom sign-up rush. Clears quickly; the password is still in the field.
+  | "rate_limited"
   | "generic";
 
 const inputClass = (invalid: boolean) =>
@@ -98,6 +102,10 @@ function LoginContent(): JSX.Element {
       const code = (error.code ?? "").toLowerCase();
       setLoading(false);
 
+      if (code === "over_request_rate_limit") {
+        setLoginError("rate_limited");
+        return;
+      }
       if (msg.includes("email not confirmed") || code === "email_not_confirmed") {
         // GoTrue validates the password BEFORE issuing this error, so the
         // account exists, the password is right, and verification is the only
@@ -272,6 +280,11 @@ function LoginContent(): JSX.Element {
               {loginError === "invalid" && (
                 <p className="text-[13px] text-[#F02719]">
                   The email or password is incorrect.
+                </p>
+              )}
+              {loginError === "rate_limited" && (
+                <p className="text-[13px] text-[#F02719]">
+                  Too many sign-ins from your network right now. Wait a moment and try again.
                 </p>
               )}
               {loginError === "generic" && (

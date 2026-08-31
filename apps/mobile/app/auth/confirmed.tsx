@@ -5,6 +5,7 @@ import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 import { clearPendingSignup } from "../../lib/authFlow";
+import { authLinkRecentlyConsumed } from "../../hooks/useAuthDeepLink";
 
 const SESSION_TIMEOUT_MS = 12_000;
 
@@ -67,6 +68,18 @@ export default function AuthConfirmedScreen() {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
+    }
+
+    // Stale / already-consumed SIGNUP link opened while the user is already
+    // signed in: useAuthDeepLink did not consume any credential (no
+    // `authLinkRecentlyConsumed`), so this session is the user's own
+    // pre-existing one, not a throwaway verification session. Signing it out
+    // here is the unexpected-logout path — instead just send them into the
+    // app. A genuine first-time verification always consumes a credential,
+    // and email-change is handled below, so neither is affected.
+    if (!isEmailChange && !authLinkRecentlyConsumed()) {
+      router.replace("/(tabs)");
+      return;
     }
 
     // Email-change (Account Center): the user is presumably already using

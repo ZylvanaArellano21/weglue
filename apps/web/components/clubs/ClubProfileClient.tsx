@@ -122,7 +122,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
     toggleSave(
       { userId, eventId, isSaved },
       {
-        onSuccess: (saved) => show(saved ? "Event saved!" : "Removed from saved"),
+        onSuccess: () => show(!isSaved ? "Event saved!" : "Removed from saved"),
         onError: () => show("Failed to save event.", "error"),
       }
     );

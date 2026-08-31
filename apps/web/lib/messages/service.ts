@@ -88,6 +88,14 @@ export interface ConversationPreview {
   archived: boolean;
   /** Number of recent messages visible to the viewer; used only for ranking. */
   message_count: number;
+  /**
+   * Backend-owned banner-delivery state (migration 105). When active, the
+   * conversation's foreground `new_message` banner arrives on
+   * `sync:message-inbox-conv:<id>:<banner_epoch>` — the client must hold that
+   * subscription (useConversationBannerChannels). Read-only.
+   */
+  banner_broadcast_active: boolean;
+  banner_epoch: number | null;
 }
 
 export interface ConversationDetails {
@@ -294,6 +302,7 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
       `conversation_id, last_read_at, joined_at, hidden_at, cleared_before, muted_at, archived_at,
        conversations!inner(
          id, type, name, avatar_url, club_id, created_by, deleted_at,
+         banner_broadcast_active, banner_epoch,
          clubs(id, name, handle, avatar_url),
          conversation_participants(user_id, profiles!user_id(username, full_name, avatar_url)),
          messages(id, sender_id, content, message_type, created_at, profiles!sender_id(username, full_name))
@@ -360,6 +369,8 @@ export async function getMyConversations(userId: string, limit = 30): Promise<Co
         muted: !!row.muted_at,
         archived: !!row.archived_at,
         message_count: messages.length,
+        banner_broadcast_active: !!conversation.banner_broadcast_active,
+        banner_epoch: conversation.banner_epoch ?? null,
       } satisfies ConversationPreview];
     })
     .sort((a, b) => {
@@ -950,6 +961,12 @@ export async function uploadGroupAvatar(conversationId: string, file: File): Pro
 export async function setChannelMuted(channelId: string, muted: boolean): Promise<void> {
   const { error } = await getSupabaseBrowser().rpc("set_channel_muted", { p_channel_id: channelId, p_muted: muted });
   if (error) throw error;
+}
+
+/** Every channel the viewer has muted (RLS already scopes to auth.uid()). */
+export async function getMutedChannelIds(userId: string): Promise<string[]> {
+  const { data } = await getSupabaseBrowser().from("channel_mutes").select("channel_id").eq("user_id", userId);
+  return ((data ?? []) as { channel_id: string }[]).map((r) => r.channel_id);
 }
 
 export async function getChannelMuted(channelId: string, userId: string): Promise<boolean> {

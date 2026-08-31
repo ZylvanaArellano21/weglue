@@ -45,6 +45,16 @@ export interface ChatPreview {
    * must NOT unarchive). */
   muted: boolean;
   archived: boolean;
+  /**
+   * Backend-owned banner-delivery state (migration 105). When
+   * `banner_broadcast_active` is true the server delivers this conversation's
+   * foreground `new_message` banner on the conversation-scoped topic
+   * `sync:message-inbox-conv:<id>:<banner_epoch>` instead of the per-user
+   * topic — the client must hold that subscription (useConversationBannerChannels).
+   * Read-only on the client; never set from the app.
+   */
+  banner_broadcast_active: boolean;
+  banner_epoch: number | null;
 }
 
 export interface ChatDetails {
@@ -228,6 +238,7 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       `conversation_id, last_read_at, joined_at, hidden_at, cleared_before, muted_at, archived_at,
        conversations!inner(
          id, type, name, avatar_url, club_id, created_by, deleted_at,
+         banner_broadcast_active, banner_epoch,
          clubs(id, name, avatar_url),
          conversation_participants(user_id, profiles!user_id(username, full_name, avatar_url)),
          conversation_channels(id, name, is_default, display_order),
@@ -321,6 +332,8 @@ export async function getMyChats(userId: string): Promise<ChatPreview[]> {
       default_channel_id: defaultChannel?.id ?? null,
       muted: !!row.muted_at,
       archived: !!row.archived_at,
+      banner_broadcast_active: !!conv.banner_broadcast_active,
+      banner_epoch: conv.banner_epoch ?? null,
     } as ChatPreview;
   });
 }

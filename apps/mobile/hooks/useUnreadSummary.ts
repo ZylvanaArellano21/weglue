@@ -6,8 +6,10 @@
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { buildMessageBanner, type NewMessageBroadcastPayload } from '@weglue/shared';
 import { supabase } from '../lib/supabase';
-import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from '../lib/realtime';
+import { subscribeBroadcastEvents } from '../lib/realtime';
+import { publishNotificationInsert } from '../lib/notifications/bannerBus';
 
 export type UnreadConversationCount = {
   conversation_id: string;
@@ -47,7 +49,18 @@ export function messageBadgeCounts(summary: UnreadSummary | undefined): {
   return { single, groups, total: single + groups };
 }
 
-async function fetchUnreadSummary(): Promise<UnreadSummary> {
+/**
+ * Freshness knobs, shared by both hooks and pinned by a regression test.
+ * The always-on `notifications` subscription (useRealtimeNotifications, which
+ * invalidates `['unreadSummary']` on every INSERT/UPDATE) + the
+ * `sync:message-inbox` broadcast are what keep this live; `UNREAD_SUMMARY_POLL_MS`
+ * is only the self-heal for a missed realtime event (channel drop, long
+ * background).
+ */
+export const UNREAD_SUMMARY_STALE_MS = 15 * 1000;
+export const UNREAD_SUMMARY_POLL_MS = 5 * 60 * 1000;
+
+export async function fetchUnreadSummary(): Promise<UnreadSummary> {
   const { data, error } = await supabase.rpc('get_unread_summary');
   if (error) throw error;
   const summary = (data ?? {}) as Partial<UnreadSummary>;
@@ -80,7 +93,7 @@ export function useUnreadSummaryValue(userId: string | undefined) {
     queryKey: ['unreadSummary', userId],
     queryFn: fetchUnreadSummary,
     enabled: !!userId,
-    staleTime: 15 * 1000,
+    staleTime: UNREAD_SUMMARY_STALE_MS,
   });
 }
 
@@ -91,48 +104,44 @@ export function useUnreadSummary(userId: string | undefined) {
     queryKey: ['unreadSummary', userId],
     queryFn: fetchUnreadSummary,
     enabled: !!userId,
-    staleTime: 15 * 1000,
-    refetchInterval: 60 * 1000,
+    staleTime: UNREAD_SUMMARY_STALE_MS,
+    refetchInterval: UNREAD_SUMMARY_POLL_MS,
   });
 
-  // Realtime: notification INSERT/UPDATE (cross-device read sync) plus the
-  // opaque, server-authorized message-inbox signal. Message rows themselves
-  // are never used as a synchronization payload.
+  // Realtime freshness comes from ONE server-authorized private broadcast on
+  // `sync:message-inbox:<uid>`, carrying two events:
+  //   • `invalidate`   — opaque deletion/read-sync ping (migrations 067/077/082)
+  //   • `new_message`  — payload-carrying foreground-banner signal for an
+  //                      incoming message (replaces the old broad `messages`
+  //                      INSERT `postgres_changes` subscription)
+  // The `notifications` INSERT/UPDATE rows are handled by the single
+  // `useRealtimeNotifications` channel, which invalidates `['unreadSummary']`.
+  // A message row is never used as a synchronization payload; the `new_message`
+  // payload is presentation-only.
   useEffect(() => {
     if (!userId) return;
     const invalidate = () => {
       queryClient.invalidateQueries({ queryKey: ['unreadSummary', userId] });
+      // A conversation activating / bumping its banner epoch (migration 105)
+      // fires this `invalidate` on the per-user topic — refetch the chat list
+      // so useConversationBannerChannels picks up the new `banner_epoch`.
+      queryClient.invalidateQueries({ queryKey: ['myChats', userId] });
     };
-    const channel = createSafeChannel(`unread-summary:${userId}`, [
+    return subscribeBroadcastEvents(
+      `sync:message-inbox:${userId}`,
       {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${userId}`,
-        callback: invalidate,
-      },
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${userId}`,
-        callback: () => {
+        invalidate,
+        new_message: (payload: NewMessageBroadcastPayload) => {
           invalidate();
-          // A read elsewhere must update this device's inbox rows too.
-          queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+          // The per-user `new_message` path is already server-filtered by
+          // `muted_at` / `channel_mutes`; the conv-scoped path (which is not)
+          // applies the mute filter in useConversationBannerChannels.
+          const banner = buildMessageBanner(payload, userId);
+          if (banner) publishNotificationInsert(banner);
         },
       },
-    ]);
-    const removeMessageSync = subscribeBroadcast(
-      `sync:message-inbox:${userId}`,
-      'invalidate',
-      invalidate,
       invalidate,
     );
-    return () => {
-      removeSafeChannel(channel);
-      removeMessageSync();
-    };
   }, [userId, queryClient]);
 
   // App icon badge mirrors total unread; clears when everything is read.

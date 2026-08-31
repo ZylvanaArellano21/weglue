@@ -75,6 +75,61 @@ export function removeSafeChannel(channel: RealtimeChannel | null): void {
 // degrades to a console warning while the UI keeps working via refetch. One
 // channel per topic; the caller invokes the returned cleanup on unmount / id
 // change.
+// One private-broadcast subscription carrying SEVERAL events on one channel —
+// e.g. `sync:message-inbox:<uid>` delivers both `invalidate` (deletion/read
+// sync) and `new_message` (foreground banner). One socket subscription instead
+// of one per event; each handler receives the broadcast payload. Same
+// authorization contract as subscribeBroadcast: a payload is never treated as
+// authorization; refetch canonical state where it matters.
+export function subscribeBroadcastEvents(
+  topic: string,
+  handlers: Record<string, (payload: any) => void>,
+  onSubscribed?: () => void
+): () => void {
+  let channel: RealtimeChannel | null = null;
+  let cancelled = false;
+
+  void (async () => {
+    try {
+      const supabase = getSupabaseBrowser();
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) await supabase.realtime.setAuth(token);
+      if (cancelled) return;
+      let ch = supabase.channel(topic, { config: { private: true } });
+      for (const [event, handler] of Object.entries(handlers)) {
+        ch = ch.on("broadcast", { event }, (message: any) => {
+          try {
+            handler(message?.payload ?? message);
+          } catch (e) {
+            console.warn(`[realtime] ${topic}/${event} broadcast callback error`, e);
+          }
+        });
+      }
+      channel = ch.subscribe((status: string, err?: Error) => {
+        if (status === "SUBSCRIBED") {
+          try {
+            onSubscribed?.();
+          } catch (e) {
+            console.warn(`[realtime] ${topic} subscribe callback error`, e);
+          }
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`[realtime] ${topic} ${status}`, err?.message ?? "");
+        }
+      });
+    } catch (e) {
+      console.warn(`[realtime] failed to subscribe broadcast ${topic}`, e);
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+    removeSafeChannel(channel);
+  };
+}
+
 export function subscribeBroadcast(
   topic: string,
   event: string,

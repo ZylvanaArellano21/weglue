@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
+import { isTransientError } from "@weglue/shared";
 import { getSupabaseBrowser } from "../lib/supabase-browser";
 import { subscribeBroadcast } from "../lib/realtime";
 import {
@@ -13,9 +14,9 @@ import {
   subscribeBrowserCanonicalRecovery,
 } from "../lib/studentSynchronization";
 import { useUnreadSummary } from "../lib/hooks/useUnreadSummary";
+import { useConversationBannerChannels } from "../lib/hooks/useConversationBannerChannels";
 import { useRealtimeNotifications } from "../lib/hooks/useNotifications";
 import { useMyClubsRealtime } from "../lib/hooks/useClubRealtime";
-import { useRealtimeMessageBanners } from "../lib/hooks/useRealtimeMessageBanners";
 import { useBlockSynchronization } from "../lib/hooks/useBlocking";
 import { ForegroundNotificationBanner } from "../components/notifications/ForegroundNotificationBanner";
 import { GetTheAppPrompt } from "../components/shared/GetTheAppPrompt";
@@ -47,29 +48,46 @@ function useCurrentUserId(): string | undefined {
 // subscriptions for the whole session, instead of each page remounting them.
 function useSessionRealtimeHub(): string | undefined {
   const userId = useCurrentUserId();
+  // useUnreadSummary owns the single `sync:message-inbox:<uid>` broadcast, which
+  // now also carries the `new_message` foreground-banner signal for push-only
+  // message types (dm_message/group_message/club_chat_message) — replacing the
+  // old broad `messages` INSERT postgres_changes subscription.
   useUnreadSummary(userId);
+  useConversationBannerChannels(userId);
   useRealtimeNotifications(userId);
   useMyClubsRealtime(userId);
-  // Push-only message types never reach the notifications-table-driven
-  // banner feed — their own realtime source (see the hook for why it can't
-  // reuse the existing per-conversation thread sync).
-  useRealtimeMessageBanners(userId);
   useBlockSynchronization(userId);
   return userId;
 }
 
+// How long a fresh `my_access_state` result is trusted for a *navigation*
+// re-check. Real access changes arrive out-of-band (the `sync:access:` opaque
+// broadcast, a 42501 on any protected query, and auth events), each of which
+// forces an immediate check. A route transition is only belt-and-suspenders, so
+// within this window it reuses the last result instead of re-firing the RPC on
+// every page the user clicks through.
+const ACCESS_RECHECK_MS = 15_000;
+
+// A navigation-triggered student-content invalidation is belt-and-suspenders
+// against a stale cached query resurfacing (staleTime + refetchOnMount already
+// cover a genuinely stale one). Coalesce it so rapid tab-switching doesn't
+// re-invalidate 27 query roots on every hop.
+const STUDENT_NAV_INVALIDATE_MS = 10_000;
+
 function useApplicationAccessGate(queryClient: QueryClient): void {
   const pathname = usePathname();
-  const checkRef = useRef<() => void>(() => {});
+  const checkRef = useRef<(opts?: { force?: boolean }) => void>(() => {});
   const [timedSuspensionFallback, setTimedSuspensionFallback] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseBrowser();
     let checking = false;
+    let lastCheckAt = 0;
     let removeAccessSync: (() => void) | null = null;
     let accessSyncUserId: string | null = null;
-    const check = async () => {
+    const check = async ({ force = true }: { force?: boolean } = {}) => {
       if (checking) return;
+      if (!force && Date.now() - lastCheckAt < ACCESS_RECHECK_MS) return;
       checking = true;
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -78,6 +96,7 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
           return;
         }
         const { data, error } = await supabase.rpc("my_access_state");
+        if (!error) lastCheckAt = Date.now();
         const accessState = data as { state?: string; suspended_until?: string | null } | null;
         const state = accessState?.state;
         if (!error && state) {
@@ -101,7 +120,7 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
         }
       } finally { checking = false; }
     };
-    checkRef.current = () => void check();
+    checkRef.current = (opts) => void check(opts);
     const subscribeAccessSync = (session: Session | null) => {
       const nextUserId = session?.user.id ?? null;
       if (nextUserId === accessSyncUserId) return;
@@ -159,8 +178,11 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
 
   useEffect(() => {
     // Navigation is a canonical recovery point: a direct client transition
-    // cannot inherit an older access decision from the prior route.
-    checkRef.current();
+    // cannot inherit an older access decision from the prior route. But a real
+    // access change always arrives through the broadcast / 42501 / auth paths
+    // (all forced), so this one reuses a result newer than ACCESS_RECHECK_MS
+    // instead of re-firing my_access_state on every page click.
+    checkRef.current({ force: false });
   }, [pathname]);
 }
 
@@ -207,6 +229,7 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
   }, [queryClient]);
 
   const firstPathRef = useRef(true);
+  const lastNavInvalidateRef = useRef(0);
   useEffect(() => {
     // A route TRANSITION can reveal an inactive cached query. Mark all relevant
     // surfaces stale so it cannot keep serving an earlier lifecycle state.
@@ -235,6 +258,13 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
       firstPathRef.current = false;
       return;
     }
+    // Coalesce bursts of navigation. A query that genuinely went stale still
+    // refetches on remount (60s staleTime + refetchOnMount); a real
+    // permission change still arrives unthrottled through the university
+    // broadcast and the focus-recovery path below. So clicking rapidly through
+    // tabs no longer fires a 27-root invalidation per hop.
+    if (Date.now() - lastNavInvalidateRef.current < STUDENT_NAV_INVALIDATE_MS) return;
+    lastNavInvalidateRef.current = Date.now();
     invalidateStudentContentQueries(queryClient);
   }, [pathname, queryClient]);
 
@@ -343,7 +373,12 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
             // a profile or a post and coming straight back renders from cache
             // instead of re-running the whole query chain (Bug 8).
             gcTime: 10 * 60 * 1000,
-            retry: 1,
+            // Retry reads only on genuinely transient failures (network drop,
+            // 429, 5xx) — never a 4xx/RLS denial — up to twice, with jittered
+            // backoff. Mutations keep react-query's default of NO retry.
+            retry: (failureCount, error) => failureCount < 2 && isTransientError(error),
+            retryDelay: (attempt) =>
+              Math.round(Math.min(400 * 2 ** attempt, 2500) * (1 + (Math.random() - 0.5))),
             // Focus refresh is owned by `subscribeBrowserCanonicalRecovery`
             // above, which is also wired to `online` and visibilitychange.
             // Leaving React Query's own focus refetch on as well meant every

@@ -11,8 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { supabase } from "../../lib/supabase";
-import { RESET_PASSWORD_REDIRECT } from "../../lib/authFlow";
+import { getResetCooldownRemaining, sendPasswordResetEmail } from "../../lib/authFlow";
 
 export default function ForgotPasswordSuccessScreen() {
   const router = useRouter();
@@ -27,10 +26,32 @@ export default function ForgotPasswordSuccessScreen() {
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
   const [resendError, setResendError] = useState<string | null>(null);
+  // Live countdown of the shared 60s reset cooldown, so "Resend" shows exactly
+  // how long is left instead of letting the user spam it into the server throttle.
+  const [cooldown, setCooldown] = useState(0);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Seed the countdown from the cooldown the previous send (on forgot-password)
+  // already started, and tick it down.
+  useEffect(() => {
+    if (!email) return;
+    let active = true;
+    void getResetCooldownRemaining(email).then((s) => {
+      if (active) setCooldown(s);
+    });
+    return () => {
+      active = false;
+    };
+  }, [email]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setInterval(() => setCooldown((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [cooldown]);
+
   async function handleResend() {
-    if (resendLoading || !email) return;
+    if (resendLoading || cooldown > 0 || !email) return;
 
     if (successTimerRef.current) {
       clearTimeout(successTimerRef.current);
@@ -41,20 +62,22 @@ export default function ForgotPasswordSuccessScreen() {
     setResendSuccess(false);
     setResendError(null);
 
-    const { error } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase(),
-      { redirectTo: RESET_PASSWORD_REDIRECT }
-    );
+    const result = await sendPasswordResetEmail(email);
 
     setResendLoading(false);
 
-    if (error) {
-      setResendError("Couldn't resend. Try again.");
+    if (!result.ok) {
+      if ("cooldown" in result) {
+        setCooldown(result.cooldown);
+      } else {
+        setResendError(result.message);
+      }
       return;
     }
 
+    setCooldown(60);
     setResendSuccess(true);
-    // Reset after 5 s so the user can resend again if needed
+    // Reset the success text after 5s; the countdown keeps the button disabled.
     successTimerRef.current = setTimeout(() => {
       setResendSuccess(false);
       successTimerRef.current = null;
@@ -100,6 +123,10 @@ export default function ForgotPasswordSuccessScreen() {
           ) : resendSuccess ? (
             <Text style={styles.resendSuccessText}>
               Email resent! Check your inbox, spam, and junk folders for the email.
+            </Text>
+          ) : cooldown > 0 ? (
+            <Text style={styles.resendPrompt}>
+              Resend available in {cooldown} second{cooldown === 1 ? "" : "s"}
             </Text>
           ) : (
             <View style={styles.resendPromptRow}>

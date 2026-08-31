@@ -218,7 +218,9 @@ export function useCalendarDayEvents(userId: string | undefined, date: string | 
 
 // ─── RSVP from calendar (kept in sync with feed/detail via invalidateEventState)
 
-async function rsvpToEvent(userId: string, eventId: string, status: "going" | "cant"): Promise<void> {
+// Explicit desired end-state, not a toggle (mirrors mobile
+// eventService.rsvpToEvent): a retry re-applies the same state.
+async function rsvpToEvent(userId: string, eventId: string, desired: "going" | "cant" | null): Promise<void> {
   const supabase = getSupabaseBrowser();
   const { data: eventRow } = await supabase
     .from("events")
@@ -228,28 +230,29 @@ async function rsvpToEvent(userId: string, eventId: string, status: "going" | "c
   if (eventRow && isEventPastAt((eventRow as any).event_end_at)) {
     throw new Error("This event has ended");
   }
-  const { data: existing } = await supabase
-    .from("event_rsvps")
-    .select("status")
-    .eq("event_id", eventId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if ((existing as any)?.status === status) {
+  if (desired === null) {
     const { error } = await supabase.from("event_rsvps").delete().eq("event_id", eventId).eq("user_id", userId);
     if (error) throw error;
-  } else {
-    const { error } = await supabase
-      .from("event_rsvps")
-      .upsert({ event_id: eventId, user_id: userId, status }, { onConflict: "event_id,user_id" });
-    if (error) throw error;
+    return;
   }
+  const { error } = await supabase
+    .from("event_rsvps")
+    .upsert({ event_id: eventId, user_id: userId, status: desired }, { onConflict: "event_id,user_id" });
+  if (error) throw error;
 }
 
 export function useCalendarRsvp(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ eventId, status }: { eventId: string; status: "going" | "cant" }) =>
-      rsvpToEvent(userId!, eventId, status),
+    mutationFn: ({
+      eventId,
+      status,
+      previousStatus,
+    }: {
+      eventId: string;
+      status: "going" | "cant";
+      previousStatus: "going" | "cant" | null;
+    }) => rsvpToEvent(userId!, eventId, previousStatus === status ? null : status),
     onSuccess: () => invalidateEventState(queryClient, userId),
   });
 }
