@@ -57,8 +57,15 @@ ALTER TABLE public.conversations
 --    until the participant trigger next fires or the activation sweep runs.
 --    Seed only when absent so an operator value is never overwritten.
 -- ---------------------------------------------------------------------------
+-- T = 50 and grace = 90s were fixed from the staging hybrid-banner benchmark
+-- (docs/rollout/hybrid-conversation-banner-design.md §Benchmark): per-user
+-- INSERT p95 stays under the 800ms UX budget for conversations <= 50 even at
+-- 10 concurrent senders, and crosses it above; conv-scoped INSERT is flat
+-- 105-260ms p50 at every size with one realtime.messages row per message
+-- (~500x fewer than per-user at 500 participants). grace = 90s had zero missed
+-- banners for retained members across membership changes in the churn test.
 INSERT INTO public.notification_config (key, value)
-VALUES ('banner.broadcast_threshold', to_jsonb(40)),   -- provisional; finalized from the staging benchmark
+VALUES ('banner.broadcast_threshold', to_jsonb(50)),
        ('banner.epoch_grace_seconds', to_jsonb(90))
 ON CONFLICT (key) DO NOTHING;
 
@@ -133,9 +140,9 @@ BEGIN
   SELECT * INTO v_conv FROM public.conversations WHERE id = p_conv_id;
   IF NOT FOUND OR v_conv.deleted_at IS NOT NULL THEN RETURN; END IF;
 
-  SELECT COALESCE((value #>> '{}')::int, 40) INTO v_threshold
+  SELECT COALESCE((value #>> '{}')::int, 50) INTO v_threshold
     FROM public.notification_config WHERE key = 'banner.broadcast_threshold';
-  v_threshold := COALESCE(v_threshold, 40);
+  v_threshold := COALESCE(v_threshold, 50);
 
   SELECT count(*) INTO v_count
     FROM public.conversation_participants WHERE conversation_id = p_conv_id;
@@ -434,9 +441,9 @@ DECLARE
   v_conv_id uuid;
   v_n int := 0;
 BEGIN
-  SELECT COALESCE((value #>> '{}')::int, 40) INTO v_threshold
+  SELECT COALESCE((value #>> '{}')::int, 50) INTO v_threshold
     FROM public.notification_config WHERE key = 'banner.broadcast_threshold';
-  v_threshold := COALESCE(v_threshold, 40);
+  v_threshold := COALESCE(v_threshold, 50);
 
   FOR v_conv_id IN
     SELECT c.id
