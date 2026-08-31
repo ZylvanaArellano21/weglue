@@ -18,6 +18,8 @@ Last updated after the hybrid-banner design rev 2
 | Migration 102 (`async_photo_fanout`) | **APPLIED.** Both cron jobs (`notification-fanout`, `notification-fanout-reaper`) scheduled + active + healthy. Photo-post INSERT p95 12,000ms → 990ms at 500×50. |
 | Migration 103 (`message_banner_broadcast`) | **NOT on prod.** Staging-only. Superseded by 105 (rev 2). |
 | Migration 104 (`message_banner_size_gate`) | **NOT on prod.** Staging-only. Not approved as final behavior. Superseded by 105. |
+| Migration 105 (`hybrid_conversation_banner`) | **NOT on prod.** Applied to staging 2026-08-31, benchmarked, sweep run. Pending production decision. |
+| Migration 107 (`signup_survey_reconciliation`) | **NOT on prod.** Applied to staging 2026-08-31 (from the distributed-500-Auth hardening). Additive functions only; pending production decision. |
 | `handle_message_push()` on prod | the **089** definition (no `new_message` broadcast) |
 | `broadcast_message_sync()` on prod | the **067** definition (per-participant `invalidate` loop) |
 | Frontend reliability stack | **NOT deployed / not merged.** `claude/rollout-reliability-frontend`, 12 commits on `main`. |
