@@ -1,160 +1,387 @@
-# Final large-club foreground-banner design — hybrid private Broadcast
+# Final large-club foreground-banner design — hybrid private Broadcast (rev 2)
 
-**Status: design for founder approval. Nothing built. Benchmark required before
-production.** Supersedes migration 104 (the `>50 = no banner` gate is removed).
+**Status: revised design for founder approval. No code. Migration 105 not
+written. Benchmark required before implementation is approved.**
 
-## Required outcome (founder)
+Rev 2 incorporates the founder's five revision points: (1) no
+threshold-transition missed banners, backend owns the threshold, clients hold
+subscriptions independently of it; (2) server-enforced membership revocation via
+a versioned topic; (3) T is a controlled backend release setting, not
+hot-tunable; (4) full UX/security preservation incl. cross-device mute; (5)
+expanded benchmark.
 
-Messages send quickly and foreground banners are **effectively instant at every
-conversation size**. No `>50 = no banner`. No ~5 s worker as the default. No
-`postgres_changes` path that recreates the measured Realtime bottleneck.
+Migrations 103 and 104 remain **staging-only**. 105 is authored standalone from
+the current production definitions (089 `handle_message_push`, 067
+`broadcast_message_sync`) and does not depend on 103/104 reaching production.
 
-## The design in one paragraph
+---
 
-Every conversation delivers its foreground-banner signal through a **private
-Broadcast**, but the *topic shape* depends on size:
+## Product requirement (unchanged)
 
-- **≤ T participants** — the existing **per-user** topic `sync:message-inbox:<uid>`.
-  The trigger sends one `realtime.send` per recipient (cheap at small N; this is
-  what ships on staging today via migration 103).
-- **> T participants** — one **conversation-scoped** topic
-  `sync:message-inbox-conv:<conversation_id>`. The trigger sends **exactly one**
-  `realtime.send`; Supabase's Realtime service fans it out to every connected
-  member subscribed to that topic. The per-message DB cost is O(1) regardless of
-  conversation size.
+Message-send latency and foreground-banner latency stay **effectively instant
+regardless of conversation size**. No `>N = no banner`. No worker-delay banner.
+No `postgres_changes` path that recreates the measured Realtime bottleneck.
 
-`T` is the crossover point, **determined from the benchmark below**, stored as a
-`notification_config` row and served to the client by a tiny RPC (so it can be
-re-tuned with a one-line `UPDATE`, no redeploy).
+---
 
-## Topic + authorization
+## Architecture
 
-New topic: `sync:message-inbox-conv:<uuid>` (uuid = `conversations.id`).
+### Two delivery topics, one always valid
 
-`realtime.messages` RLS is unchanged — the existing policy
-`weglue_receive_message_sync` already delegates to
-`private.can_receive_message_sync(realtime.topic())`. That function gets one new
-branch:
+| Topic | Auth | Lifetime | Carries |
+| --- | --- | --- | --- |
+| `sync:message-inbox:<user_id>` (exists, 067) | `auth.uid() = <user_id>` — **never stale** | permanent, one per user | `invalidate` today; rev 2 adds `new_message` for the per-user path |
+| `sync:message-inbox-conv:<conversation_id>:<banner_epoch>` (**new**) | `is_conversation_participant(<conversation_id>) AND conversations.banner_epoch = <banner_epoch>` | per (conversation, epoch); a new epoch = a new topic string | `new_message` and `invalidate` for large active conversations |
 
-```sql
-WHEN p_topic ~ '^sync:message-inbox-conv:<uuid>$'
-  THEN public.current_student_can_access_app()
-   AND public.is_conversation_participant(<uuid>)   -- ACTUAL membership
+The per-user topic is the **safety net**: its authorization can never go stale,
+so every member always has one guaranteed-valid delivery path. The
+conversation topic is the **scale optimization**: one `realtime.send` per
+message instead of one per recipient.
+
+### Backend-owned conversation state (new columns on `conversations`)
+
+```
+banner_broadcast_active  boolean     NOT NULL DEFAULT false
+banner_epoch             integer     NOT NULL DEFAULT 0
+banner_epoch_changed_at  timestamptz NOT NULL DEFAULT now()
 ```
 
-`is_conversation_participant(p_conv_id)` is `EXISTS (SELECT 1 FROM
-conversation_participants WHERE conversation_id = p_conv_id AND user_id =
-auth.uid())` — **actual conversation membership is required**, checked at channel
-JOIN time (once), not per message. A non-member cannot subscribe.
+- **`banner_broadcast_active`** — false→true (one-way in normal operation) when
+  participant count first reaches `T`. Never auto-reverts (a club chat that
+  drops from 60 to 45 stays conv-scoped; costs nothing, avoids flapping).
+  Deactivation only via the controlled T-change runbook (§ "T").
+- **`banner_epoch`** — bumped on **activation** and on **any participant
+  removal** while active. Not bumped on joins (a new member simply subscribes to
+  the current epoch topic).
+- **`banner_epoch_changed_at`** — start of the grace window.
 
-## How every preservation requirement is met
+These three columns are returned by `getMyChats` / `getMyConversations` (both
+already `SELECT conversations.*`). **Clients read only these columns** — they
+never learn `T`.
+
+### The send rule (in `handle_message_push`, rev 105)
+
+```
+v_stable := v_conv.banner_broadcast_active
+        AND (now() - v_conv.banner_epoch_changed_at) > v_grace;   -- v_grace from notification_config, default 90s
+
+IF v_stable THEN
+    -- one send, O(1), independent of participant count
+    PERFORM realtime.send(payload, 'new_message',
+        'sync:message-inbox-conv:' || NEW.conversation_id || ':' || v_conv.banner_epoch, true);
+ELSE
+    -- the migration-103 per-user path over a FRESH participant list
+    FOR v_recipient IN
+        SELECT cp.user_id FROM conversation_participants cp
+        WHERE cp.conversation_id = NEW.conversation_id
+          AND cp.user_id <> NEW.sender_id
+          AND cp.muted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM channel_mutes chm
+                          WHERE NEW.channel_id IS NOT NULL
+                            AND chm.channel_id = NEW.channel_id
+                            AND chm.user_id = cp.user_id)
+    LOOP
+        PERFORM realtime.send(payload, 'new_message',
+            'sync:message-inbox:' || v_recipient.user_id, true);
+    END LOOP;
+END IF;
+```
+
+The `enqueue_message_push` loop is **byte-for-byte from 089** and runs on every
+message at every size — push notifications are completely unchanged.
+
+`broadcast_message_sync` (067, rev 105) gets the **same `v_stable` branch** for
+its `invalidate` fan-out: stable → one `invalidate` on the conv topic; otherwise
+the existing per-participant `invalidate` on each `sync:message-inbox:<uid>`. The
+`sync:message:<conversation_id>` open-thread ping is unchanged.
+
+---
+
+## Point 1 — no missed banner at the per-user ↔ conv-scoped transition
+
+The client does **not** need to learn `T` at the instant the backend switches a
+conversation. The switch is a two-phase, backend-driven sequence:
+
+1. **Activation.** Participant count reaches `T`. The
+   `conversation_participants` trigger sets `banner_broadcast_active = true`,
+   bumps `banner_epoch`, sets `banner_epoch_changed_at = now()`, and fires an
+   `invalidate` to **every current participant's** `sync:message-inbox:<uid>`
+   (their always-valid topic).
+2. **Grace window (`v_grace`, default 90s).** `v_stable` is still false, so
+   `handle_message_push` keeps using the **per-user path** — no banner is
+   delivered through a topic any client has not joined yet. Meanwhile each
+   client's `invalidate` handler refetches `getMyChats`, sees
+   `banner_broadcast_active = true` + the new `banner_epoch`, and subscribes to
+   `sync:message-inbox-conv:<id>:<epoch>`.
+3. **Steady state.** After `v_grace`, `v_stable` becomes true and delivery moves
+   to the conversation topic — which every online client already joined during
+   the grace window.
+
+A client that was offline for the whole grace window resubscribes on reconnect
+(`refetchOnReconnect`) and, while it was offline, received its real **push
+notification** through the unchanged `enqueue_message_push` path — no regression
+versus today (a killed app never shows a foreground banner).
+
+**`message_realtime_config()` RPC is removed from the design.** The client's
+entire rule is: always hold `sync:message-inbox:<myId>`; additionally hold
+`sync:message-inbox-conv:<id>:<epoch>` for every conversation where
+`banner_broadcast_active` is true, re-keyed on `banner_epoch`. `T` lives only in
+the backend activation check.
+
+---
+
+## Point 2 — server-enforced membership revocation
+
+Supabase authorizes a private channel **at join time and caches the result**.
+Removing a student from `conversation_participants` does **not** close their open
+subscription. Today this is tolerable for `sync:message:<conv_id>` only because
+its payload is empty and every refetch is RLS-guarded. The `new_message` banner
+payload is **self-contained** (sender name, preview) — it must not reach a
+removed member. It also cannot become a fetch-on-receive design (that is exactly
+the per-message fan-out read that approach B removed).
+
+### Mechanism: versioned topic + fresh-list grace
+
+- **The topic string carries `banner_epoch`.** On any removal
+  (`conversation_participants` DELETE — covers leave, kick, block, club-leave),
+  the trigger **bumps `banner_epoch`** and sets `banner_epoch_changed_at =
+  now()`.
+- **The backend never sends to the old epoch topic again.** Future
+  `new_message` / `invalidate` for that conversation address
+  `sync:message-inbox-conv:<id>:<new_epoch>`. The removed member's cached
+  subscription to `:<old_epoch>` is now a dead topic — it receives nothing.
+- **The removed member cannot follow.** Their client drops the conversation from
+  `getMyChats` (they are no longer a participant) and tears the channel down. If
+  a buggy or hostile client attempts `:<new_epoch>` directly, authorization is
+  `is_conversation_participant(<id>) AND conversations.banner_epoch =
+  <new_epoch>` — both checked server-side in one indexed query; a non-member
+  fails the first term.
+- **No valid member misses a banner during the change.** The epoch bump also
+  resets the grace window, so for `v_grace` seconds `handle_message_push`
+  delivers that conversation per-user over a **freshly-read participant list**
+  (removed member already excluded). Remaining members resubscribe to
+  `:<new_epoch>` within that window, nudged by the `invalidate` the trigger
+  sends to each of their `sync:message-inbox:<uid>` topics.
+
+### Bulk-removal safety
+
+A mass removal (club deleted, 500 rows deleted in one statement) must not fire
+500 epoch bumps and 500 per-user grace fan-outs. The epoch-bump trigger is
+**`AFTER DELETE ... FOR EACH STATEMENT`** with a transition table: it bumps each
+affected conversation's epoch **once** per statement. When the conversation
+itself is soft-deleted (`conversations.deleted_at`), `handle_message_push`
+already early-returns — no banner work at all.
+
+### Why not rely on join-time auth alone
+
+Plain `is_conversation_participant` on an **unversioned** conv topic would leave
+the removed member joined to the live topic forever (cached auth, never
+re-evaluated) and every subsequent message would leak to them. The epoch is what
+moves the backend's sends to a topic string the removed member is not on and
+cannot join.
+
+### Optional hardening (not core scope)
+
+Extend the existing `sync:message:<conversation_id>` open-thread case in
+`can_receive_message_sync` to also require current membership. Deferred to avoid
+disturbing open-thread sync for legitimate users mid-churn; noted for a later
+pass.
+
+---
+
+## Point 3 — T is a controlled release setting, not hot-tunable
+
+- `T` is stored as `notification_config` key `banner.broadcast_threshold`, read
+  **only** by the backend activation check. `v_grace` is
+  `banner.epoch_grace_seconds` (default 90), also backend-only.
+- Changing `T` does **not** instantly re-route any conversation. A conversation
+  activates only when its `conversation_participants` trigger next recomputes and
+  sees `count >= T`.
+- To apply a lowered `T` to conversations that already qualify, run a **one-time
+  sweep** (a migration step or an ops runbook entry): for each conversation with
+  `count >= T AND NOT banner_broadcast_active`, activate + bump epoch +
+  `changed_at = now()` + `invalidate` its participants. Every swept conversation
+  gets its own 90s grace window, so **no client misses a banner** during the
+  sweep.
+- The design therefore does **not** promise a one-line live `UPDATE`. `T`
+  changes are deliberate, versioned, and always transition clients through the
+  grace mechanism.
+- Initial `T` value: chosen from the benchmark below and written into migration
+  105.
+
+---
+
+## Point 4 — UX / security preservation
 
 | Requirement | Mechanism |
 | --- | --- |
-| **Mute behaviour** | Muted members stay *authorised* on the conversation topic (they still need `invalidate` for unread state), but the client's `new_message` handler drops the banner when the conversation/channel is in the viewer's muted set. `buildMessageBanner` gains a `mutedConversationIds` / `mutedChannelIds` argument. For ≤ T this is unchanged (trigger already skips muted recipients). |
-| **Sender exclusion** | `buildMessageBanner` already returns `null` when `payload.sender_id === userId`. The sender's own client receives the conversation broadcast (it is a member) and drops it. No change. |
-| **No duplicate banners** | `ForegroundNotificationBanner` already keeps a session-lived `shownIds` Set keyed by `message_id`. A conversation is in exactly one mode per message; the only overlap is a mode flip mid-session (a conv crossing `T` as members join/leave), and the id Set collapses that to one banner. |
-| **Existing push notifications** | `handle_message_push`'s `enqueue_message_push` loop is **untouched** — it still iterates participants (minus sender, minus muted, minus channel-muted) and enqueues one push each, at every size. Only the `new_message` *broadcast* differs. |
-| **Unread recovery** | `private.broadcast_message_sync` (067) gets the same size branch: ≤ T → per-participant `invalidate` loop (existing); > T → one `invalidate` on `sync:message-inbox-conv:<id>`. The client's conversation-topic subscription handles both `new_message` and `invalidate`. The 5-minute `useUnreadSummary` poll remains the backstop. |
-| **Message RLS** | The broadcast payload is presentation-only; the message body is still fetched through `messages` RLS on every real read. The conversation-topic auth (`is_conversation_participant`) is a subset of message visibility. No change. |
-| **Immediate banner UX** | > T: one `realtime.send` in the trigger → Realtime fan-out to connected sockets, same latency profile as any Broadcast (sub-second). ≤ T: unchanged from today. |
+| **Mute** | Per-user path: `handle_message_push` already filters `muted_at IS NULL` and `channel_mutes` — muted members get no `new_message` (server-enforced). Conv-scoped path: the single broadcast reaches all joined members, so the **client** drops the banner when the conversation/channel is in the viewer's muted set — `buildMessageBanner(payload, userId, { mutedConversationIds, mutedChannelIds })` returns `null`. The mute sets come from `getMyChats` (which already selects `muted_at`) + the channel-mutes query. |
+| **Cross-device mute/unmute** | New trigger `trg_conversation_mute_sync`: `AFTER UPDATE OF muted_at ON conversation_participants` and `AFTER INSERT OR DELETE ON channel_mutes` → `realtime.send('{}', 'invalidate', 'sync:message-inbox:' || user_id, true)`. Every one of that user's devices refetches `getMyChats`, updates its mute set, and the banner filter is immediately consistent. Verified explicitly in the benchmark (mute on device A → device B stops bannering within one round-trip). |
+| **Sender exclusion** | Per-user path: loop excludes `sender_id`. Conv-scoped path: `buildMessageBanner` already returns `null` when `payload.sender_id === userId`; the sender is a member and receives its own broadcast, then drops it. |
+| **No duplicate banners** | Each message takes exactly one path (`v_stable` true or false), delivered on exactly one topic per client. `ForegroundNotificationBanner` keeps a session `shownIds` Set keyed by `message_id` as belt-and-suspenders for reconnect replay. |
+| **No missed banners during size/membership changes** | The grace window (§ Points 1 & 2): every activation and every removal keeps delivery on the always-valid per-user path over a fresh list until clients have joined the new epoch topic. |
+| **Push notifications** | `enqueue_message_push` loop unchanged from 089 — runs every message, every size, fresh participant list. |
+| **Unread recovery** | `broadcast_message_sync` (067) gets the same `v_stable` branch; clients handle `invalidate` identically on the per-user and conv topics; the 60–90s `useUnreadSummary` poll remains the backstop. |
+| **Message RLS** | Broadcast payload is presentation-only; message bodies are still read through `messages` RLS on every real fetch. Conv-topic auth (`is_conversation_participant`) is a subset of message-read visibility. |
+| **No cross-conversation leakage** | Topic is per-conversation; auth requires membership in **that** conversation and the current epoch. |
+| **Onboarding** | Untouched. No onboarding file is in scope. |
 
-## Client subscription model
+---
 
-`getMyChats` / `getMyConversations` **already fetch the full participant list per
-conversation**, so the client computes `participantCount` with no schema change.
+## Migration 105 — schema + functions (outline, not code)
 
-- `useUnreadSummary` (mobile + web) keeps its `sync:message-inbox:<uid>`
-  subscription.
-- A new hook `useConversationInboxBroadcasts(userId, conversations, threshold)`
-  (mounted in the same host — `PushNotificationsHost` / `SessionRealtimeHub`)
-  subscribes to `sync:message-inbox-conv:<id>` for each conversation where
-  `participantCount > threshold`. Both `new_message` and `invalidate` are
-  wired to the same handlers `useUnreadSummary` already uses.
-- `threshold` comes from a new RPC `public.message_realtime_config()` →
-  `jsonb` `{ "banner_broadcast_threshold": T }`, `SECURITY DEFINER`, granted to
-  `authenticated`, fetched once per session (react-query, 1 h stale). A stale
-  client threshold is non-fatal — a boundary conversation just uses one path or
-  the other, and the id-dedup Set covers any overlap.
+Authored standalone from production definitions. One `BEGIN/COMMIT`.
 
-Channel budget: a heavy user in ~10 large club chats holds ~10 conversation
-channels + notifications + my-clubs + the per-user inbox ≈ 13, against the free
-plan's `max_channels_per_client: 100`.
+1. **`ALTER TABLE conversations`** — add the three `banner_*` columns above
+   (defaults make it a metadata-only change; existing rows all start inactive).
+2. **`public.can_receive_conv_banner(p_conv_id uuid, p_epoch int) RETURNS boolean`**
+   — `STABLE SECURITY DEFINER`, single query:
+   `EXISTS (SELECT 1 FROM conversation_participants cp JOIN conversations c ON
+   c.id = cp.conversation_id WHERE cp.conversation_id = p_conv_id AND cp.user_id
+   = auth.uid() AND c.banner_epoch = p_epoch)`.
+3. **`private.can_receive_message_sync(text)`** — add a case:
+   `WHEN p_topic ~ '^sync:message-inbox-conv:<uuid>:<int>$' THEN
+   public.current_student_can_access_app() AND
+   public.can_receive_conv_banner(<uuid>, <int>)`. Existing two cases unchanged.
+4. **`public.handle_message_push()`** — replace from the 089 body: keep the
+   `enqueue_message_push` loop exactly; replace the in-loop `new_message` send
+   with the `v_stable` branch above; resolve `v_grace` from `notification_config`.
+5. **`private.broadcast_message_sync()`** — replace from the 067 body: keep the
+   `sync:message:<conv_id>` ping; wrap the per-participant `invalidate` loop in
+   the same `v_stable` branch.
+6. **`public.refresh_conversation_banner_state(p_conv_id uuid)`** — recompute
+   count; activate + bump epoch on first crossing of `T`; bump epoch on removal
+   while active; always set `banner_epoch_changed_at` and `invalidate` current
+   participants when it changes anything.
+7. **Triggers on `conversation_participants`:**
+   - `AFTER INSERT ... FOR EACH ROW` → `refresh_conversation_banner_state(NEW.conversation_id)` (activation only; no bump).
+   - `AFTER DELETE ... FOR EACH STATEMENT` (transition table) → one
+     `refresh_conversation_banner_state` per affected conversation (epoch bump).
+8. **`trg_conversation_mute_sync`** — `AFTER UPDATE OF muted_at ON
+   conversation_participants` + `AFTER INSERT OR DELETE ON channel_mutes` →
+   `invalidate` to the affected user's `sync:message-inbox:<uid>`.
+9. **`notification_config`** — insert `banner.broadcast_threshold` = `<T>` and
+   `banner.epoch_grace_seconds` = `90` (`ON CONFLICT DO NOTHING`). Replaces
+   104's `banner.max_participants`.
+10. Grants: `can_receive_conv_banner` / `refresh_conversation_banner_state`
+    `REVOKE FROM PUBLIC, anon, authenticated`; `EXECUTE` to the roles that own
+    the triggers, matching 067's pattern.
 
-## Exact file scope
+Blast radius: steps 4 and 5 each `CREATE OR REPLACE` one hot trigger function;
+each is reviewed as a single hunk against its production baseline. Nothing is
+dropped.
 
-### Backend — new migration `105_hybrid_conversation_banner.sql`
+---
 
-1. `CREATE OR REPLACE FUNCTION private.can_receive_message_sync(text)` — add the
-   `sync:message-inbox-conv:<uuid>` branch (membership check).
-2. `CREATE OR REPLACE FUNCTION public.handle_message_push()` — from the current
-   (post-103/104) body: keep the recipient loop for `enqueue_message_push`;
-   replace the `IF v_participant_count <= v_banner_max` per-user `new_message`
-   send with `IF v_participant_count <= v_threshold` (per-user, in loop) `ELSE`
-   one `realtime.send(payload, 'new_message', 'sync:message-inbox-conv:'||NEW.conversation_id, true)`
-   after the loop. Resolve `v_threshold` from `notification_config`.
-3. `CREATE OR REPLACE FUNCTION private.broadcast_message_sync()` — same size
-   branch for the `invalidate` fan-out.
-4. `notification_config`: replace `banner.max_participants` with
-   `banner.broadcast_threshold` = `<T>` (from the benchmark).
-5. `CREATE FUNCTION public.message_realtime_config() RETURNS jsonb` + `GRANT
-   EXECUTE TO authenticated`.
-6. Drop nothing else; 104's gate logic is replaced in step 2.
+## Client scope
 
-Blast radius note: step 3 edits a `067` (deleted-message-privacy) function.
-Its body is otherwise copied verbatim; the change is one `IF/ELSE` around the
-existing loop. Reviewed as its own hunk.
+Relative to the `claude/rollout-reliability-frontend` branch state (where the
+A/B/C realtime refactor already lives). Backend 105 must be live on the target
+environment before any of this ships.
 
-### Frontend (held with the reliability stack — needs 105 live first)
+- **`packages/shared/src/messaging/messageBanner.ts`** —
+  `buildMessageBanner(payload, userId, opts?)` gains
+  `opts.mutedConversationIds` / `opts.mutedChannelIds`; returns `null` when the
+  message's conversation or channel is muted for the viewer. Sender exclusion
+  unchanged.
+- **`apps/mobile/hooks/useConversationBannerChannels.ts`** +
+  **`apps/web/lib/hooks/useConversationBannerChannels.ts`** — **new.** Input:
+  the `myChats` / conversations list + the viewer's mute sets. For each
+  conversation with `banner_broadcast_active === true`, subscribe
+  `sync:message-inbox-conv:<id>:<banner_epoch>` (channel key includes the
+  epoch, so an epoch bump re-subscribes and drops the stale channel). On
+  `new_message` → `buildMessageBanner(...)` → `publishNotificationInsert`. On
+  `invalidate` → the same unread/conversations invalidation `useUnreadSummary`
+  uses. Joins are staggered ~100–300ms after the critical channels
+  (`notifications`, `sync:message-inbox:<uid>`) to protect Realtime joins/sec on
+  reconnect.
+- **`apps/mobile/hooks/useUnreadSummary.ts`** +
+  **`apps/web/lib/hooks/useUnreadSummary.ts`** — the `sync:message-inbox:<uid>`
+  `new_message` handler (per-user path) passes the viewer's mute sets into
+  `buildMessageBanner` for symmetry; the `invalidate` handler additionally
+  invalidates `['myChats', userId]` / the conversations query so a
+  `banner_epoch` change propagates to `useConversationBannerChannels`.
+- **`apps/mobile/components/notifications/PushNotificationsHost.tsx`** +
+  **`apps/web/app/providers.tsx`** — mount `useConversationBannerChannels`.
+- **`apps/mobile/services/chatService.ts` (`getMyChats`)** +
+  **`apps/web/lib/messages/service.ts` (`getMyConversations`)** — include the
+  three `banner_*` conversation columns in the existing select (no new query;
+  `conversations.*` already selected — confirm the explicit column lists carry
+  them).
+- **`apps/mobile/hooks/useChats.ts` / `apps/web/lib/messages/hooks.ts`** —
+  expose `participantCount` per conversation from the already-fetched
+  `conversation_participants` (used only for benchmark instrumentation and
+  future UI; not required for the subscription rule).
+- Tests: `messageBanner.test.ts` extended for the mute args; a new test for the
+  `banner_broadcast_active` / epoch subscription-selection logic.
+- **No `message_realtime_config()` RPC. No client knowledge of `T`. No
+  onboarding file touched.**
 
-- `packages/shared/src/messaging/messageBanner.ts` — `buildMessageBanner(payload,
-  userId, opts?)` gains `opts.mutedConversationIds` / `opts.mutedChannelIds`;
-  returns `null` when the message's conversation/channel is muted for the viewer.
-- `packages/shared` — a `messageRealtimeConfig` query key + fetch helper.
-- `apps/mobile/hooks/useConversationInboxBroadcasts.ts` + `apps/web/lib/hooks/useConversationInboxBroadcasts.ts` — **new**. Subscribes to
-  `sync:message-inbox-conv:<id>` for `> threshold` conversations; wires
-  `new_message` → `buildMessageBanner` (+ mute set) → `publishNotificationInsert`,
-  and `invalidate` → unread-summary invalidation.
-- `apps/mobile/hooks/useUnreadSummary.ts` + `apps/web/lib/hooks/useUnreadSummary.ts` — pass the viewer's muted-conversation set into the existing
-  `new_message` handler (per-user path) for symmetry; otherwise unchanged.
-- `apps/mobile/components/notifications/PushNotificationsHost.tsx` +
-  `apps/web/app/providers.tsx` — mount the new hook (reads `myChats` +
-  the threshold RPC).
-- `apps/mobile/hooks/useChats.ts` / `apps/web/lib/messages/hooks.ts` — expose
-  `participantCount` per conversation (compute from the already-fetched
-  `conversation_participants`); no query change.
-- Tests: `messageBanner.test.ts` extended for the mute argument; a new test for
-  the mode-selection logic.
+---
 
-### Load harness — `weglue-lt`
+## Benchmark plan (expanded)
 
-`message-fanout.ts` gains `--mode hybrid`: build conversations at 10 / 50 / 100 /
-300 / 500 participants, run both topic modes, and for each measure:
+Harness on `codex/rollout-reliability-loadtests` (`weglue-lt`). Two scenarios.
 
-- message-INSERT p50 / p95 / p99 at concurrency 1 / 10 / 50
-- delivery: sample subscribers on `sync:message-inbox-conv:<id>` receive
-  `new_message`; count vs expected (participants − sender − muted)
-- sender-self banner leak = 0; muted-participant banner leak = 0 (client filter)
-- no duplicate `message_id` at a sample client
-- `push_queue` delta unchanged from the pre-105 path
-- `realtime.messages` row growth per message (1 for > T vs N for ≤ T)
+### A. `message-fanout.ts --mode hybrid-v2` — steady-state cost
 
-## Determining T (from the benchmark, not chosen here)
+Matrix: participant counts **10 / 50 / 100 / 300 / 500** × sender concurrency
+**1 / 10 / 50**, each in **per-user mode** and **conv-scoped mode**.
 
-Per-user mode's send cost scales with N; conversation mode's is flat. `T` is the
-smallest participant count where conversation mode's message-INSERT p95 at 10×
-concurrency is **materially** below per-user mode's **and** comfortably under a
-UX budget (target: p95 < 800 ms). From the existing `message-fanout` data,
-per-user mode is ~600–900 ms at 50 participants / 10× and ~2 s at 300 / 10×, so
-`T` is expected to land in the 20–75 range — the benchmark fixes it.
+Additionally, subscriber-side load: test with sampled users belonging to
+**1 / 5 / 10 / 20+ conversations** (distinguishing total conversations from
+large/active conversations, since only active ones get a dedicated channel).
+
+### B. `conv-membership-churn.ts` — transitions & revocation (new)
+
+- A conversation crossing `T` upward while messages are posted continuously —
+  assert **zero missed banners** for every retained member across the grace
+  window.
+- Members removed (single and bulk / whole-statement) from an active
+  conversation while messages are posted — assert the removed member receives
+  **zero** `new_message` payloads after the removal commit (including during
+  grace), and retained members miss **zero**.
+- Cross-device mute: mute on client A, assert client B stops delivering banners
+  for that conversation within one round-trip; unmute reverses it.
+
+### Metrics (both scenarios)
+
+- message INSERT **p50 / p95 / p99**
+- foreground-banner delivery **p50 / p95** (send → client receives)
+- channel **join latency**
+- **cold-start / reconnect time** (join all channels for a 1 / 5 / 10 / 20+
+  conversation user)
+- Realtime **joins/sec** sustained before errors
+- Realtime **events/sec** sustained
+- **authorization failures** (must be 0 for valid members/epoch; must be 100%
+  for removed members and stale epochs)
+- **DB authorization pressure** — `can_receive_conv_banner` calls/sec, query
+  time, `connection_pool: 2` saturation on join storms
+- **mute leaks** (0)
+- **removed-member leaks** (0, including during grace)
+- **duplicate banners** (0)
+- **missed banners** (0, including across size/membership transitions)
+
+### Determining T
+
+`T` = the smallest participant count where conv-scoped INSERT p95 at 10×
+concurrency is materially below per-user mode **and** under a p95 < 800ms UX
+budget, cross-checked against the reconnect/join-storm cost of the extra
+per-conversation channels at that threshold. Expected range 20–75; the benchmark
+fixes the number, which is written into migration 105.
+
+---
 
 ## Rollout
 
-1. Benchmark on staging → fix `T`.
-2. Apply `105` to staging; re-run the §5 50-active regression and the hybrid
-   `message-fanout` at 10/50/100/300/500.
-3. Founder approval → apply `105` to production, then the frontend stack
-   (subject to the other release gates: device logout QA, before-done
-   triple-check, dependency-order review).
+1. Benchmark (A + B) on staging → fix `T` and `v_grace`.
+2. Write migration 105; apply to staging; re-run scenario B + the 50-active
+   regression against the reduced Realtime topology.
+3. Founder approval → apply 105 to production, then release the frontend stack
+   (still gated on physical-device logout QA, `WE_GLUE_BEFORE_DONE_RULES.md`
+   triple-check, and the dependency-order review).
 
-Migration 104 stays staging-only until 105 replaces it; it is not shipped.
+103 and 104 stay staging-only and are never bound for production; the
+production ledger path for this work is `… 098 → 100 → 102 → 105`, and 105's
+function bodies derive from the current production definitions, not from
+103/104.
