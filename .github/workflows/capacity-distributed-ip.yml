@@ -56,7 +56,7 @@ jobs:
       measure_at: ${{ steps.t.outputs.measure_at }}
     steps:
       - id: t
-        run: echo "measure_at=$(( $(date +%s) + 540 ))" >> "$GITHUB_OUTPUT"
+        run: echo "measure_at=$(( $(date +%s) + 780 ))" >> "$GITHUB_OUTPUT"
 
   active-50:
     needs: [guard, sync]
@@ -65,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+        shard: [0,1,2,3,4,5,6,7,8,9]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -87,7 +87,7 @@ jobs:
           cd load-tests
           node dist/cli.js concurrent-active \
             --manifest results/seed-s50-50.json \
-            --users 50 --shard ${{ matrix.shard }}/17 \
+            --users 50 --shard ${{ matrix.shard }}/10 \
             --topology reduced --duration-ms 420000 \
             --signin-spacing-ms 1500 \
             --measure-at ${{ needs.sync.outputs.measure_at }}
