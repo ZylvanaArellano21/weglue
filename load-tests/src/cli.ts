@@ -7,6 +7,7 @@ import { signupReal } from './signup-real.js';
 import { concurrentActive } from './concurrent-active.js';
 import { photoFanout } from './photo-fanout.js';
 import { messageFanout } from './message-fanout.js';
+import { hybridBanner } from './hybrid-banner.js';
 import { idempotency } from './idempotency.js';
 import { report } from './report.js';
 
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   else if (command === 'concurrent-active') output = await concurrentActive(config, args);
   else if (command === 'photo-fanout') output = await photoFanout(config, args);
   else if (command === 'message-fanout') output = await messageFanout(config, args);
+  else if (command === 'hybrid-banner') output = await hybridBanner(config, args);
   else if (command === 'idempotency') output = await idempotency(config, args);
   else throw new Error(`Unknown command: ${command}`);
   if (output) console.log(output);
