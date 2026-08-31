@@ -35,7 +35,7 @@ runner jobs (1 job could not verify its IP; 45/46). All GitHub Azure ranges.
 | # | Cell | Result | Evidence |
 | --- | --- | --- | --- |
 | 1 | **500 Auth — same IP** | **PASS w/ expected same-IP throttle** | `signup-real --mode burst`, 500 `/signup` from one origin. 490/500; the 10 failures were late `over_request_rate_limit` 429s. `handle_new_user` integrity perfect for all 490. |
-| 2 | **500 Auth — distributed IPs** | **PASS** — DIRECTLY TESTED | 25 runners × 20 signups across **24 distinct verified IPs**. 472/500 OK. **`over_request_rate_limit` (per-IP 429): 0** (vs 10 same-IP). Email-bucket 429: 0. The 28 failures were all `5xx` — free-tier server strain, spread across ~11 different IPs, **not** correlated with any IP. Local DB check of the successes: 520/520 auth users → profiles, **0 orphans**, all Lone Star university, 0 duplicate usernames; interests/activities ~96% complete (the rest lost to `handle_new_user`'s silent-partial-failure guard under 5xx strain — a free-tier-under-burst artifact, not a topology effect). |
+| 2 | **500 Auth — distributed IPs** | **PASS** — DIRECTLY TESTED (rerun 2026-08-31) | 25 runners × 20 signups across **25 distinct verified IPs**, all with the retry path a real client has. **`over_request_rate_limit` (per-IP 429): 0** on every IP (vs 10 same-IP). Email-bucket 429: 0. 41 first-pass `5xx` (free-tier strain, spread across 14 IPs, uncorrelated) — **all 41 recovered on retry, 0 still failed on any shard**. Local DB check of the 500 real onboarding signups: **500 auth users = 500 profiles, 0 orphan auth, 0 orphan profiles, 0 null university, 500 onboarding_completed, 500 agreed_terms + agreed_at, 0 duplicate usernames; interest rows 1,500 = 1,500 expected, activity rows 1,000 = 1,000 expected, 0 users with a wrong count**. The migration-107 reconciliation sweep found **0 rows to repair** — `handle_new_user` held under all 41 transient `5xx`. (The first run's apparent "~4 % missing interests" was a load-harness scoping error — it counted the harness's metadata-less `-probe0` recovery-probe signups as onboarding flows; all 501 real signups in that run were also complete.) |
 | 3 | **50 active — same IP** | **PASS** | `concurrent-active --topology reduced`, 50 sessions from one origin, repeatedly (post-105 2026-08-31: op p50 96–153 ms, ~0.03% timeout). |
 | 4 | **50 active — distributed IPs** | **PASS** — DIRECTLY TESTED | 6 runners × ~8 users = **50 users across 6 distinct verified IPs**, barrier-synced to one absolute measurement window (all shards waited ~500 s to align). **0 per-IP rate-limiting on the 50 prewarm sign-ins** (50 sign-ins from one origin *would* hit `over_request_rate_limit`). All 50 stayed connected; 0 auth failures. Operation p50 0.3–3 s, p95 22–64 s — degraded vs the same-IP run, attributable to (a) the free-tier project being heavily load-fatigued from a full day of testing, (b) GitHub Azure → Supabase us-west-2 round-trip latency, (c) the barrier forcing a true simultaneous 50-user spike rather than a ramp. None of those is IP topology — there is no per-IP limit on any operation an active user performs. |
 | 5 | **~30 classroom — same IP** | **PASS** | `signup-real --mode classroom`, 30 students on one IP: 30/30 into the app, 0 `over_request_rate_limit` 429s. (Harsher 60-student rush = expected per-IP throttling with full retry recovery.) |
@@ -47,12 +47,15 @@ runner jobs (1 job could not verify its IP; 45/46). All GitHub Azure ranges.
   effect.** Spread the identical load across distinct IPs and it disappears —
   0 per-IP 429s in all three distributed scenarios, where the same-IP versions
   saw 10 (auth-500) and 35 % (classroom-60).
-- **The remaining failures are a free-tier compute ceiling, not a topology
-  effect** — `5xx` errors under a 500-signup burst plus a full day's prior
-  load, uncorrelated with any IP, and a matching small trigger-partial-failure
-  rate. On a healthy project these would be lower; they are a statement about
-  free-plan burst capacity, which the launch plan already accounts for (organic
-  500-student signup is spread over hours, not a 5-minute burst).
+- **Transient `5xx` errors under a burst are recoverable.** The 500-signup
+  rerun saw 41 first-pass `5xx` (free-plan compute strain, uncorrelated with
+  IP) and **every one recovered on a client retry** — the design requirement.
+- **No silent corruption or incomplete state.** All 500 accounts ended with a
+  profile, correct university, complete interests/activities, terms recorded,
+  and 0 orphans in either direction. Migration 107
+  (`reconcile_signup_survey` / `reconcile_recent_signup_surveys`) is a durable
+  idempotent safety net for the latent risk that `handle_new_user`'s
+  best-effort survey insert could ever drop a row; it found nothing to repair.
 - **The active-user data plane is IP-independent**, as predicted: 50 users from
   6 IPs behaved like 50 from one IP except for the sign-in phase, which
   *improved* (no shared bucket).
@@ -86,10 +89,11 @@ egress at $0.
 - All 8 GitHub Actions secrets deleted.
 - The `capacity/dist-ip` trigger branch deleted (the workflow file remains on
   `codex/rollout-reliability-loadtests` for the record).
-- **Outstanding:** the staging service-role key was transmitted to GitHub and to
-  ~46 runner logs (masked). Treat it as exposed — rotate it, or fold it into the
-  planned deletion of the whole `weglue-staging` project once 105's
-  pre-production verification is complete.
+- **Service-role key rotated.** The legacy service_role key used in the first
+  run was retired by disabling `weglue-staging`'s legacy API keys entirely
+  (`PUT /api-keys/legacy?enabled=false` — verified: the old key now returns
+  HTTP 401). Staging + the harness moved to the modern `sb_secret_` /
+  `sb_publishable_` keys. Production keys untouched.
 
 ## Outcome
 

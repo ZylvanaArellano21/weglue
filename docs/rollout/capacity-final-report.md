@@ -296,7 +296,7 @@ GitHub-hosted runner with its own public IP, cross-checked against 4 services.
 | Cell | Result |
 | --- | --- |
 | 500 Auth — **same IP** | **PASS w/ expected same-IP throttle** (§3: 490/500, 10 late per-IP 429s, integrity perfect) |
-| 500 Auth — **distributed IPs** | **PASS** — 24 distinct IPs, 472/500 OK, **0 per-IP 429**, 0 email 429; the 28 misses were `5xx` free-tier strain spread across 11 IPs; local DB check 520/520 profiles, 0 orphans, 0 dup usernames |
+| 500 Auth — **distributed IPs** | **PASS** (rerun 2026-08-31) — 25 distinct IPs, **0 per-IP 429** on any IP, 0 email 429; 41 first-pass `5xx` (free-tier strain) **all recovered on retry, 0 still failed**; local DB check: **500/500** auth users = profiles, 0 orphan auth, 0 orphan profiles, 0 null university, 500 onboarding/terms, interest rows 1,500 = expected, activity rows 1,000 = expected, 0 wrong counts, 0 dup usernames; migration 107 reconciliation sweep found **0** to repair |
 | 50 active — **same IP** | **PASS** (§5, incl. the post-105 runs) |
 | 50 active — **distributed IPs** | **PASS** — 50 users across 6 distinct IPs, barrier-synced, **0 per-IP rate-limiting on the 50 sign-ins** (same-IP would throttle); latency degraded (p50 0.3–3 s, p95 22–64 s) from free-tier fatigue + Azure↔us-west-2 RTT + a true simultaneous spike, not IP topology |
 | ~30 classroom — **same IP** | **PASS** (§4a: 30/30, 0 rate-limits) |
@@ -304,14 +304,19 @@ GitHub-hosted runner with its own public IP, cross-checked against 4 services.
 
 **Finding:** the per-IP `over_request_rate_limit` is purely a
 same-IP-concentration effect — it vanishes when identical load is spread across
-distinct IPs (0 per-IP 429s in all three distributed runs). The residual
-distributed-run failures are a free-plan compute ceiling under a 5-minute burst
-(`5xx`, uncorrelated with IP), not a topology effect; organic launch signup is
-spread over hours.
+distinct IPs (0 per-IP 429s in all three distributed runs). Transient `5xx`
+under a burst (free-plan compute strain, uncorrelated with IP) are **fully
+recoverable on client retry** — the 500-signup rerun recovered all 41. No
+orphans, no incomplete onboarding data, no corrupted state. **Migration 107**
+(`reconcile_signup_survey` and a cron sweep) is the durable idempotent safety
+net against `handle_new_user` ever silently dropping a survey row; it found 0 to
+repair on the rerun.
 
-Cleanup done: staging email limit reverted to 1000, all 8 GitHub secrets
-deleted, trigger branch deleted. The staging service-role key was exposed to CI
-and should be rotated or retired with the `weglue-staging` project.
+Cleanup done: staging email limit reverted to 1000, all GitHub secrets and the
+trigger branch deleted, the ~2,000 test users purged. **Service-role key
+rotated** — `weglue-staging`'s legacy API keys were disabled entirely (the key
+used in the first run now returns HTTP 401); staging + harness moved to modern
+`sb_secret_` / `sb_publishable_` keys. Production keys untouched.
 
 ---
 
@@ -324,6 +329,7 @@ and should be rotated or retired with the `weglue-staging` project.
 | **103** (message-banner broadcast) | applied | **not applied** | **superseded by 105** — staging-only, never bound for production |
 | **104** (banner ≤ 50-participant gate) | applied | **not applied** | **superseded by 105** — the "> 50 = no banner" behaviour it encoded is not shipping |
 | **105** (hybrid conversation banner, T = 50) | **applied 2026-08-31** (`supabase db push --linked`; sweep run; benchmarked) | **not applied** | **pending production decision** — standalone from prod 089/067; ledger path `098 → 100 → 102 → 105` |
+| **107** (signup-survey reconciliation safety net) | **applied 2026-08-31** (`supabase db push --linked`; fault-injection tested) | **not applied** | **pending production decision** — additive functions only, does not touch the signup transaction or onboarding; operator schedules the cron sweep after apply |
 | Frontend reliability stack (12 commits + FE-13) | n/a | **held** | needs 105 on production + physical-device logout QA + FE-13 (the 105 client work, not yet written) |
 
 ## Remaining release gates (founder)
