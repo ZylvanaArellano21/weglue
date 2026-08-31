@@ -210,6 +210,16 @@ export async function concurrentActive(config: LoadTestConfig, args: Record<stri
     metrics.count('channels_subscribed', channelsUp);
     metrics.count('users_ready', active.length);
 
+    // --- BARRIER: distributed shards align their measurement window on one
+    //     absolute wall-clock time so the load is genuinely simultaneous. ---
+    const measureAt = Math.floor(argNumber(args, 'measure-at', 0));
+    if (measureAt > 0) {
+      const waitMs = measureAt * 1000 - Date.now();
+      metrics.count('barrier_wait_ms', Math.max(0, waitMs));
+      if (waitMs > 0) await sleep(waitMs);
+      if (waitMs < -120_000) throw new Error(`measure-at was ${Math.round(-waitMs / 1000)}s in the past — shard missed the window`);
+    }
+
     // --- MEASUREMENT WINDOW ---
     const measureStart = Date.now();
     const until = measureStart + durationMs;

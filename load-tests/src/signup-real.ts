@@ -297,18 +297,22 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
       // recovery probe: how long until a signup succeeds again from this origin
       const recStart = Date.now();
       let recovered = -1;
-      for (let attempt = 0; attempt < 30; attempt += 1) {
+      const runProbes = argString(args, 'probes', 'true') !== 'false';
+      for (let attempt = 0; runProbes && attempt < 30; attempt += 1) {
         const c = anonClient(config, `sr-${runId}-rec-${attempt}`);
         const r = await c.auth.signUp({ email: `sr-${runId}-rec${attempt}@${domain}`, password: pw() });
         if (!r.error) { recovered = Date.now() - recStart; break; }
         await sleep(3000);
       }
-      recovery = { recoveredAfterMs: recovered, note: recovered < 0 ? 'did not recover within 90s' : `first success ${(recovered / 1000).toFixed(0)}s after burst` };
+      recovery = runProbes
+        ? { recoveredAfterMs: recovered, note: recovered < 0 ? 'did not recover within 90s' : `first success ${(recovered / 1000).toFixed(0)}s after burst` }
+        : { note: 'probes disabled (--probes false)' };
 
       // collateral: during a fresh identical burst, does an interleaved single
       // "legit" signup from the same origin get blocked?
-      await sleep(20000);
       let legitOk = 0; let legitBlocked = 0;
+      if (runProbes) {
+      await sleep(20000);
       const bstart = Date.now();
       const bg = (async () => {
         let n = 0;
@@ -323,6 +327,7 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
       }
       await bg;
       collateral = { legitOk, legitBlocked, of: 5, note: 'a legit signup interleaved with a same-origin burst' };
+      }
     }
 
     // ---- server-side trigger verification ----

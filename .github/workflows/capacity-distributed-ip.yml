@@ -1,0 +1,182 @@
+name: capacity-distributed-ip
+
+# Distributed-public-IP capacity tests against STAGING ONLY.
+# Each matrix job runs on a GitHub-hosted runner with its own public egress IP
+# and records that IP (cross-checked against 3 services). An aggregate job counts
+# the unique verified IPs and summarises every scenario.
+#
+# Scenarios (all against weglue-staging cwwmuxxqxovhcnnardlj):
+#   active-50    50 concurrent active users, sliced across 17 runners, barrier-
+#                synced measurement window  (anon key + seeded manifest)
+#   auth-500     500 /signup calls, 20 per runner across 25 runners
+#   classroom-30 the shipped signup -> verify -> login journey, 2 students per
+#                runner across 15 runners
+#
+# The harness config.ts hard-refuses the production project ref, so these
+# secrets cannot be pointed at production through this tooling.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: "which scenarios (all | active | auth | classroom)"
+        default: "all"
+  push:
+    branches: ["capacity/dist-ip"]
+
+concurrency:
+  group: capacity-distributed-ip
+  cancel-in-progress: false
+
+env:
+  LOADTEST_SUPABASE_URL: ${{ secrets.LT_URL }}
+  LOADTEST_SUPABASE_ANON_KEY: ${{ secrets.LT_ANON }}
+  LOADTEST_SUPABASE_SERVICE_KEY: ${{ secrets.LT_SERVICE }}
+  LOADTEST_STAGING_REF: ${{ secrets.LT_REF }}
+  LOADTEST_CONFIRM_WRITES: ${{ secrets.LT_CONFIRM }}
+  LOADTEST_UNIVERSITY_ID: ${{ secrets.LT_UNIV }}
+  LOADTEST_EMAIL_DOMAIN: ${{ secrets.LT_DOMAIN }}
+  LOADTEST_SEED_NAMESPACE: distci
+  LOADTEST_RESULTS_DIR: load-tests/results
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to run against production
+        run: |
+          if [ -z "${{ secrets.LT_REF }}" ]; then echo "LT_REF secret missing"; exit 1; fi
+          if [ "${{ secrets.LT_REF }}" = "yoozrnosmqtaiksgcixc" ]; then echo "LT_REF is the PRODUCTION ref"; exit 1; fi
+          echo "target staging ref: ${{ secrets.LT_REF }}"
+
+  sync:
+    needs: guard
+    runs-on: ubuntu-latest
+    outputs:
+      measure_at: ${{ steps.t.outputs.measure_at }}
+    steps:
+      - id: t
+        run: echo "measure_at=$(( $(date +%s) + 540 ))" >> "$GITHUB_OUTPUT"
+
+  active-50:
+    needs: [guard, sync]
+    if: ${{ github.event.inputs.scenarios == '' || github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'active' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: load-tests/package-lock.json
+      - name: Record egress IP
+        run: bash .github/workflows/record-ip.sh "active-50" "${{ matrix.shard }}"
+      - name: Build harness
+        run: cd load-tests && npm ci --no-audit --no-fund && npx tsc -p tsconfig.json
+      - name: Restore seeded manifest
+        run: |
+          mkdir -p load-tests/results
+          echo "${{ secrets.S50_MANIFEST_B64 }}" | base64 -d > load-tests/results/seed-s50-50.json
+          node -e "const m=require('./load-tests/results/seed-s50-50.json');if(m.userIds.length<50)throw new Error('manifest short');console.log('manifest users',m.userIds.length)"
+      - name: Run 50-active slice (barrier-synced)
+        run: |
+          cd load-tests
+          node dist/cli.js concurrent-active \
+            --manifest results/seed-s50-50.json \
+            --users 50 --shard ${{ matrix.shard }}/17 \
+            --topology reduced --duration-ms 420000 \
+            --signin-spacing-ms 1500 \
+            --measure-at ${{ needs.sync.outputs.measure_at }}
+      - name: Collect result
+        if: always()
+        run: cp load-tests/results/*concurrent-active.json out/result.json || echo '{"error":"no result"}' > out/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: active-50-${{ matrix.shard }}
+          path: out/
+
+  auth-500:
+    needs: [guard, active-50]
+    if: ${{ always() && (github.event.inputs.scenarios == '' || github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'auth') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: load-tests/package-lock.json
+      - name: Record egress IP
+        run: bash .github/workflows/record-ip.sh "auth-500" "${{ matrix.shard }}"
+      - name: Build harness
+        run: cd load-tests && npm ci --no-audit --no-fund && npx tsc -p tsconfig.json
+      - name: Run 20-signup slice
+        run: |
+          cd load-tests
+          node dist/cli.js signup-real --mode burst --count 20 --burst-concurrency 6 --probes false
+      - name: Collect result
+        if: always()
+        run: cp load-tests/results/*signup-real-burst.json out/result.json || echo '{"error":"no result"}' > out/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: auth-500-${{ matrix.shard }}
+          path: out/
+
+  classroom-30:
+    needs: [guard, active-50]
+    if: ${{ always() && (github.event.inputs.scenarios == '' || github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'classroom') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: load-tests/package-lock.json
+      - name: Record egress IP
+        run: bash .github/workflows/record-ip.sh "classroom-30" "${{ matrix.shard }}"
+      - name: Build harness
+        run: cd load-tests && npm ci --no-audit --no-fund && npx tsc -p tsconfig.json
+      - name: Run 2-student classroom journey
+        run: |
+          cd load-tests
+          node dist/cli.js signup-real --mode classroom --count 2 \
+            --signup-gap-ms 3000 --read-email-ms 20000 --verify-gap-ms 3000 \
+            --return-ms 8000 --login-gap-ms 3000
+      - name: Collect result
+        if: always()
+        run: cp load-tests/results/*signup-real-classroom.json out/result.json || echo '{"error":"no result"}' > out/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: classroom-30-${{ matrix.shard }}
+          path: out/
+
+  aggregate:
+    needs: [active-50, auth-500, classroom-30]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: all }
+      - name: Build combined report
+        run: bash .github/workflows/aggregate.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: COMBINED-REPORT
+          path: combined-report.md
