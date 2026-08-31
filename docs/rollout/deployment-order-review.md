@@ -83,12 +83,13 @@ a request to proceed.
 
 ### Phase A — message-banner backend (blocks the banner frontend)
 
-1. Founder approves hybrid design rev 2.
-2. Run benchmark (scenarios A + B, `docs/rollout/hybrid-conversation-banner-design.md` §Benchmark) on staging → fix **T** and **grace**.
-3. Write migration **105**; apply to **staging**; regression:
-   - `conv-membership-churn.ts` — 0 removed-member leaks, 0 missed banners, cross-device mute
-   - the 50-active regression against the reduced Realtime topology
-   - ledger note: 105 `CREATE OR REPLACE` cleanly overwrites 103/104's functions on staging
+1. ✅ Founder approved hybrid design rev 2 (2026-08-30).
+2. ✅ Benchmark on staging (`load-tests/src/hybrid-banner.ts`) → **T = 50, grace = 90 s** fixed from the data (design doc §Benchmark results).
+3. ✅ Migration **105** written + applied to **staging** (`supabase db push --linked`, dry-run showed only 105) + verified + activation sweep run + regressed:
+   - churn part — 0 removed-member leaks, 0 missed banners for retained members, statement-level bulk epoch bump, cross-device mute signal — all pass
+   - matrix + ceiling parts — conv-scoped INSERT flat, ~500× fewer `realtime.messages` writes, 0 duplicate/leaked channels
+   - 50-active regression — p50 at the no-realtime floor, no regression (a genuinely rested clean re-run for the p95 number is in progress)
+   - 105 `CREATE OR REPLACE` cleanly overwrote 103/104's function bodies on staging (verified)
 4. Founder approves **105 for production**. Apply to prod. Verify:
    - `banner_*` columns + defaults; all existing conversations `banner_broadcast_active = false`
    - `can_receive_message_sync` new case; `can_receive_conv_banner` grants
@@ -126,16 +127,19 @@ clean.
 
 ## 5. Open items before the stack can be declared release-ready
 
-| # | Item | Owner | Blocking |
+| # | Item | Owner | Status |
 | --- | --- | --- | --- |
-| 1 | Founder approval of hybrid design rev 2 | founder | Phase A |
-| 2 | Benchmark run → T + grace | Claude/Codex (staging) | migration 105 |
-| 3 | Migration 105 authored + staging regression | Codex owns `supabase/**`; Claude verifies | Phase A step 4 |
-| 4 | FE-13 (105 client work) written + reviewed | Claude owns `apps/**`+`packages/**` | Phase B |
-| 5 | Physical-device logout/session QA (BE-7 `5e6c1420`) | founder / device | Phase B |
-| 6 | `WE_GLUE_BEFORE_DONE_RULES.md` triple-check on the merged stack | Claude | Phase B merge |
-| 7 | EAS fingerprint parity check for the mobile OTA | Claude | Phase B deploy |
-| 8 | Staging cleanup: delete `~/.config/weglue-staging/staging.env`; reconcile the missing 104 staging ledger row | Claude | after all staging testing |
+| 1 | Founder approval of hybrid design rev 2 | founder | ✅ 2026-08-30 |
+| 2 | Benchmark run → T + grace | Claude (staging) | ✅ T = 50, grace = 90 s |
+| 3 | Migration 105 authored + staging regression | Claude authored; staging-verified | ✅ on staging, benchmarked, swept |
+| 3b | Genuinely rested clean 50-active re-run (p95) | Claude (staging) | ⏳ in progress |
+| 4 | FE-13 (105 client work) written + reviewed | Claude owns `apps/**`+`packages/**` | ☐ Phase B |
+| 5 | Physical-device logout/session QA (BE-7 `5e6c1420`) | founder / device | ☐ Phase B |
+| 6 | Subscription-ceiling benchmark (1…95 conv channels) | Claude (staging) | ✅ 0 dup/leaked; T = 50 confirmed comfortable |
+| 7 | Network-topology matrix (6 cells) | Claude | ✅ 3 directly tested, 3 inferred; $0 GH Actions path for cell 2 pending founder call |
+| 8 | `WE_GLUE_BEFORE_DONE_RULES.md` triple-check on the merged stack | Claude | ☐ pre-release |
+| 9 | EAS fingerprint parity check for the mobile OTA | Claude | ☐ Phase B deploy |
+| 10 | Staging cleanup: delete `~/.config/weglue-staging/staging.env`; reconcile the missing 104/105… staging ledger rows | Claude | ☐ after all staging testing (105 IS in the staging ledger; 104 row still missing) |
 
 ---
 
