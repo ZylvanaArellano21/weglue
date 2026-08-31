@@ -7,7 +7,8 @@ upgrade**. Auth stays email + password.
 **Testing environment:** dedicated staging project `weglue-staging`
 (`cwwmuxxqxovhcnnardlj`), free plan, us-west-2, brought to production parity
 (custom Resend SMTP, `before_user_created` hook enabled, `mailer_autoconfirm`
-off). Full `001 → 104` migration chain. **No production Auth-rate change.
+off). Full `001 → 103` chain plus **migration 105** (the hybrid conversation
+banner — supersedes the staging-only 103/104). **No production Auth-rate change.
 Frontend not deployed. No build.**
 
 **Recipients** for all email/signup volume were Resend's simulated-delivery test
@@ -17,20 +18,21 @@ address (`delivered+…@resend.dev` / `sr-…@resend.dev`) — no real inboxes.
 
 ## Read this first: staging-proven ≠ production-deployed
 
-Everything in §§1–6 below is **capacity proven on the staging project** with the
-full `001 → 104` chain and the held frontend behaviour. **It is not the current
-state of production.**
+Everything in §§1–8 below is **capacity proven on the staging project**. **It is
+not the current state of production.**
 
 | On **production** right now | On **staging** (test bench) |
 | --- | --- |
-| migrations `001 → 098`, **`100`**, **`102`** | migrations `001 → 104` |
-| photo fan-out async (**102**) — live, monitored | + message-banner broadcast (**103**), banner ≤50 gate (**104**) |
+| migrations `001 → 098`, **`100`**, **`102`** | migrations `001 → 103` + **`105`** |
+| photo fan-out async (**102**) — live, monitored | + hybrid conversation banner (**105**, T = 50) |
 | client_tag columns present (**100**) but **inert** — no writer deployed | client_tag write paths exercised by the frontend branch |
 | pre-reduction realtime client (4 always-on channels/user) | — |
 | **no** frontend reliability stack | — |
 
-So: the §5 "50 active users PASS" and the §1–3 "email/signup PASS" describe what
-**will** hold once the migrations and the held frontend are on production. The
+103 (message-banner broadcast) and 104 (banner ≤50 gate) were the staging-only
+iterations that led to **105**; they are superseded and never bound for
+production. So: the §5 "50 active users PASS" and the §1–3 "email/signup PASS"
+describe what **will** hold once 105 and the held frontend are on production. The
 only category that is *also* a statement about production today is §7 (photo
 fan-out) and the schema half of §3 (migration 100 is applied).
 
@@ -177,6 +179,17 @@ session-hub realtime topology, 3-minute window, staging carrying migrations
   throttling after ~10 h of testing. On the cleaned box `chat` runs at 160 ms
   p50 with 0 timeouts.
 
+**Re-run with migration 105 (2026-08-31), reduced topology, 6 large
+conversations activated:** operation p50 **108–153 ms** (all of chat / rsvp /
+like / feed-read / search / club-view / event-view / comment), still at the
+no-realtime floor; **2 timeouts in ~4,240 operations (0.05 %)**, 0 other
+failures. p95 was 3.9–6.1 s — within free-tier variance for 50 concurrent users
+(the no-realtime floor itself is p95 ~4–6 s on this tier) and the run followed
+~90 min of continuous matrix/churn load on the same project. **105 is not a
+regression** — it makes the large-conversation message path *lighter* (one
+conversation-scoped `realtime.send` replaces ~49 per-user sends). A genuinely
+rested clean re-run is a pre-production gate item.
+
 ## 6. Session / logout reliability
 
 **Root cause proven** (BE-7): the unexpected logout is a persisted refresh token
@@ -207,6 +220,75 @@ replaced by an O(1) outbox enqueue + a cursor-based pg_cron worker.
   cron ticks succeed, `process_notification_fanout()` clean. Health monitor
   running.
 
+## 8. Large-club foreground banner — hybrid conversation Broadcast (migration 105): **PASS** (staging-proven)
+
+The problem 103/104 left open: a message in a large club chat carried an
+O(participants) synchronous `realtime.send` loop inside the INSERT (p95 12 s at
+500 × 50), and 104's answer — "> 50 participants, no foreground banner" — was
+rejected as permanent product behaviour.
+
+**105 (design `docs/rollout/hybrid-conversation-banner-design.md` rev 2):** every
+conversation still delivers its banner through a private Broadcast, but the topic
+shape depends on size. **≤ T = 50 participants** keep the per-user
+`sync:message-inbox:<uid>` path. **> 50** use one conversation-scoped
+`sync:message-inbox-conv:<id>:<epoch>` — the trigger does a single
+`realtime.send` and Supabase fans out to connected members. Membership is
+re-authorised through the `<epoch>` in the topic (bumped on every removal, and
+statement-level so a bulk removal is one bump), with a 90 s grace window on the
+always-valid per-user path so no retained member misses a banner during a
+size/membership transition.
+
+Staging benchmark (`load-tests/src/hybrid-banner.ts`, T set to 50):
+
+| | Result |
+| --- | --- |
+| Conversation-scoped INSERT p50 | **flat 105–260 ms** at every size (10 → 500) and every concurrency (1 → 50) |
+| Per-user INSERT p95 @ 10 concurrent senders | 632 ms @ 50 · ~1 s @ 75 · 2.2 s @ 300 · 4.8 s @ 500 — the reason T = 50 |
+| `realtime.messages` writes per message | per-user ≈ participants (74,550 rows / 150 msgs @ 500); conv-scoped **= 1** (150 rows) — ~500× less |
+| Delivery (fresh clients, 15 subscribers) | **75 / 75**, one `realtime.messages` row per message |
+| Removed member — banners after removal / can join new epoch | **0** / **no** (server-rejected), incl. during the grace window |
+| Retained members — banners missed across a removal | **0** |
+| Bulk removal (40 rows, one statement) → epoch bumps | **1** |
+| Mute / unmute → cross-device `invalidate` | fires |
+| Duplicate banners / muted-leak on per-user path / wrong-epoch or non-participant subscribe | **0** / **0** / **rejected** |
+| Subscription ceiling (1 → 95 conv channels/client) | per-channel join flat ~315 ms; **0 duplicate, 0 leaked channels**; parallel joins cap at ~3.6/s (free-tier auth); failures only at 95 channels (near the 100 limit). A realistic student (1–10 large chats) reconnects in 0.7–3.9 s. |
+
+**T = 50 and grace = 90 s were fixed from these measurements**, not chosen.
+Push notifications, sender exclusion, unread recovery, message RLS, and
+cross-conversation isolation are all preserved (the push enqueue loop is
+byte-identical to migration 089). **Onboarding untouched.**
+
+**Migration 105 is on staging only.** On production it would be inert for
+existing conversations until an operator runs
+`sweep_conversation_banner_activation()` — deliberately deferred until the
+banner frontend (FE-13) is live, since a conversation-scoped broadcast to a
+topic no deployed client has joined would be dropped.
+
+---
+
+## 9. Network topology — same-IP vs distributed-IP (`docs/rollout/network-topology-matrix.md`)
+
+The data plane (messages, reads, RSVP, realtime subscribe) has **no per-IP
+gate** — only `auth.signUp` / `signInWithPassword` / `/verify` do. So
+distributing IPs can only *remove* a bottleneck; the risk always lives in the
+same-IP cell, which is the one tested.
+
+| Cell | Classification |
+| --- | --- |
+| 500 Auth — **same IP** | **DIRECTLY TESTED** (§3: 490/500, expected per-IP throttle, integrity perfect) |
+| 50 active — **same IP** | **DIRECTLY TESTED** (§5, incl. the post-105 re-run) |
+| ~30 classroom — **same IP** | **DIRECTLY TESTED** (§4a: 30/30, 0 rate-limits) |
+| 500 Auth — **distributed IPs** | **INFERRED (strong)** — each IP under its ~8 burst → ~500/500; project-global concerns (email cap, `handle_new_user`) already cleared by the same-IP 490. *Direct test recommended* (below). |
+| 50 active — **distributed IPs** | **INFERRED (near-certain)** — identical to the same-IP case; no per-IP limit on any operation 50 active users perform. |
+| ~30 classroom — **distributed IPs** | **INFERRED (strong)** — strictly easier than the same-IP classroom that passed. |
+
+**Cheapest genuine distributed-IP test — $0:** a GitHub Actions matrix of ~25
+jobs, each on a distinct runner IP, each running a 20-signup slice of
+`signup-real --mode burst` against staging (anon key only, no service key).
+Converts the "500 Auth — distributed IPs" cell to DIRECTLY TESTED in ~15 min.
+VM alternative ≈ $1–2. **Nothing provisioned or spent without founder
+approval.**
+
 ---
 
 ## Migration & deployment status
@@ -215,29 +297,37 @@ replaced by an O(1) outbox enqueue + a cursor-based pg_cron worker.
 | --- | --- | --- | --- |
 | **100** (client_tag idempotency) | applied | **APPLIED 2026-08-30** — inert (no writer deployed) | approved, prod-only |
 | **102** (async photo fan-out) | applied | **live + monitored** | shipped |
-| **103** (message-banner broadcast) | applied | **not applied** | **HOLD** — large-conversation synchronous fan-out cliff unresolved; DM/small-group path only is validated |
-| **104** (banner ≤ 50-participant gate) | applied | **not applied** | **NOT the accepted final product behaviour** — may stay staging-only as a test/safety mechanism; "conversation > 50 participants loses foreground banners" must not ship as permanent |
-| Frontend reliability stack (12 commits) | n/a | **held** | needs the final message-banner backend + physical-device logout QA |
+| **103** (message-banner broadcast) | applied | **not applied** | **superseded by 105** — staging-only, never bound for production |
+| **104** (banner ≤ 50-participant gate) | applied | **not applied** | **superseded by 105** — the "> 50 = no banner" behaviour it encoded is not shipping |
+| **105** (hybrid conversation banner, T = 50) | **applied 2026-08-31** (`supabase db push --linked`; sweep run; benchmarked) | **not applied** | **pending production decision** — standalone from prod 089/067; ledger path `098 → 100 → 102 → 105` |
+| Frontend reliability stack (12 commits + FE-13) | n/a | **held** | needs 105 on production + physical-device logout QA + FE-13 (the 105 client work, not yet written) |
 
 ## Remaining release gates (founder)
 
-1. **Final large-club foreground-banner solution** — a design that does not
-   drop the banner for large conversations and does not carry the synchronous
-   O(participants) `realtime.send` cliff. 103 + 104 are held on this.
-2. **Staging regression** of that solution.
-3. **Physical-device logout / session QA** (BE-7 fix is code-verified only).
-4. **Mandatory `WE_GLUE_BEFORE_DONE_RULES.md` triple-check.**
-5. **Final dependency / deployment-order review.**
+1. ~~Final large-club foreground-banner solution~~ — **done**: migration 105
+   (§8), design rev 2 founder-approved, benchmarked on staging.
+2. ~~Staging regression of that solution~~ — **done**: churn / matrix / ceiling
+   benchmarks + the 50-active re-run (§8, §5).
+3. **Genuinely rested clean 50-active re-run** — one clean p95 number after real
+   free-tier idle (in progress).
+4. **Physical-device logout / session QA** (BE-7 fix is code-verified only).
+5. ~~Final dependency / deployment-order review~~ — **done**:
+   `docs/rollout/deployment-order-review.md`.
+6. Optional: convert the "500 Auth — distributed IPs" cell (§9) to directly
+   tested via the free GitHub Actions matrix.
+7. **Mandatory `WE_GLUE_BEFORE_DONE_RULES.md` triple-check** of the merged stack.
 
-Then return for production / release approval.
+Then return for production / release approval — 105 to production first, then
+FE-13 + the frontend stack.
 
 ## Bottom line
 
 **On the free plan, staging demonstrates that the 500-student launch and 50
-active users are supported** — once the migrations and the held frontend are on
+active users are supported** — once migration 105 and the held frontend are on
 production. Email capacity fits (§1, §2), account creation is correct at 500
-scale (§3), realtime at 50 active sits at the no-realtime floor (§5), photo
-fan-out is fixed and already live (§7).
+scale (§3), realtime at 50 active sits at the no-realtime floor (§5), the
+large-club banner cliff is resolved without dropping banners (§8, migration
+105), and photo fan-out is fixed and already live (§7).
 
 **Production today** carries only migrations 100 (inert) and 102 (live); it still
 runs the pre-reduction realtime client and none of the reliability frontend. The
