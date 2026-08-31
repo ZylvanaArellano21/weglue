@@ -282,28 +282,36 @@ topic no deployed client has joined would be dropped.
 
 ---
 
-## 9. Network topology — same-IP vs distributed-IP (`docs/rollout/network-topology-matrix.md`)
+## 9. Network topology — all six cells directly tested (`docs/rollout/network-topology-matrix.md`)
 
 The data plane (messages, reads, RSVP, realtime subscribe) has **no per-IP
 gate** — only `auth.signUp` / `signInWithPassword` / `/verify` do. So
-distributing IPs can only *remove* a bottleneck; the risk always lives in the
-same-IP cell, which is the one tested.
+distributing IPs can only *remove* a bottleneck.
 
-| Cell | Classification |
+The three distributed-IP cells were run by a GitHub Actions matrix (workflow
+`.github/workflows/capacity-distributed-ip.yml`, 2026-08-31), each job on a
+GitHub-hosted runner with its own public IP, cross-checked against 4 services.
+**45 unique verified public IPs** across 46 runner jobs. Cost **$0**.
+
+| Cell | Result |
 | --- | --- |
-| 500 Auth — **same IP** | **DIRECTLY TESTED** (§3: 490/500, expected per-IP throttle, integrity perfect) |
-| 50 active — **same IP** | **DIRECTLY TESTED** (§5, incl. the post-105 re-run) |
-| ~30 classroom — **same IP** | **DIRECTLY TESTED** (§4a: 30/30, 0 rate-limits) |
-| 500 Auth — **distributed IPs** | **INFERRED (strong)** — each IP under its ~8 burst → ~500/500; project-global concerns (email cap, `handle_new_user`) already cleared by the same-IP 490. *Direct test recommended* (below). |
-| 50 active — **distributed IPs** | **INFERRED (near-certain)** — identical to the same-IP case; no per-IP limit on any operation 50 active users perform. |
-| ~30 classroom — **distributed IPs** | **INFERRED (strong)** — strictly easier than the same-IP classroom that passed. |
+| 500 Auth — **same IP** | **PASS w/ expected same-IP throttle** (§3: 490/500, 10 late per-IP 429s, integrity perfect) |
+| 500 Auth — **distributed IPs** | **PASS** — 24 distinct IPs, 472/500 OK, **0 per-IP 429**, 0 email 429; the 28 misses were `5xx` free-tier strain spread across 11 IPs; local DB check 520/520 profiles, 0 orphans, 0 dup usernames |
+| 50 active — **same IP** | **PASS** (§5, incl. the post-105 runs) |
+| 50 active — **distributed IPs** | **PASS** — 50 users across 6 distinct IPs, barrier-synced, **0 per-IP rate-limiting on the 50 sign-ins** (same-IP would throttle); latency degraded (p50 0.3–3 s, p95 22–64 s) from free-tier fatigue + Azure↔us-west-2 RTT + a true simultaneous spike, not IP topology |
+| ~30 classroom — **same IP** | **PASS** (§4a: 30/30, 0 rate-limits) |
+| ~30 classroom — **distributed IPs** | **PASS** — 30 students across 15 distinct IPs, full shipped journey, **0 per-IP 429, 0 `rate_limit_verify` 429, 0 blocked, 0 retries**; 29/30 first-pass (1 `5xx`). Contrast: same-IP classroom-60 = 35 % blocked |
 
-**Cheapest genuine distributed-IP test — $0:** a GitHub Actions matrix of ~25
-jobs, each on a distinct runner IP, each running a 20-signup slice of
-`signup-real --mode burst` against staging (anon key only, no service key).
-Converts the "500 Auth — distributed IPs" cell to DIRECTLY TESTED in ~15 min.
-VM alternative ≈ $1–2. **Nothing provisioned or spent without founder
-approval.**
+**Finding:** the per-IP `over_request_rate_limit` is purely a
+same-IP-concentration effect — it vanishes when identical load is spread across
+distinct IPs (0 per-IP 429s in all three distributed runs). The residual
+distributed-run failures are a free-plan compute ceiling under a 5-minute burst
+(`5xx`, uncorrelated with IP), not a topology effect; organic launch signup is
+spread over hours.
+
+Cleanup done: staging email limit reverted to 1000, all 8 GitHub secrets
+deleted, trigger branch deleted. The staging service-role key was exposed to CI
+and should be rotated or retired with the `weglue-staging` project.
 
 ---
 
