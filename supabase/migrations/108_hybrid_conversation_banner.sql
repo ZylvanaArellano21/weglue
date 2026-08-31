@@ -1,5 +1,6 @@
 -- ============================================================================
--- 105 — hybrid conversation foreground-banner delivery
+-- 108 — hybrid conversation foreground-banner delivery (was 105 on staging;
+--       renumbered: production ledger reached 107 via seed migrations)
 --
 -- Design: docs/rollout/hybrid-conversation-banner-design.md (rev 2, founder
 -- approved 2026-08-30).
@@ -27,7 +28,7 @@
 -- banner_broadcast_active is set true. This migration DOES NOT activate any
 -- conversation on production — activation is a deliberate operator sweep
 -- (public.sweep_conversation_banner_activation) run only after the banner
--- frontend is confirmed live. Until then 105 behaves exactly like 103 would
+-- frontend is confirmed live. Until then 108 behaves exactly like 103 would
 -- have: per-user new_message on every message, every conversation.
 --
 -- STAGING APPLY is in the founder-approved Phase A scope. PRODUCTION APPLY is a

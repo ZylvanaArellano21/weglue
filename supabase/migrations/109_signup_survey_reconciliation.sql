@@ -1,10 +1,10 @@
 -- ============================================================================
--- 107 — idempotent reconciliation of signup survey data (interests / activities)
+-- 109 — idempotent reconciliation of signup survey data (interests / activities)
 --
--- (106 is a local seed-club WIP; this hardening is numbered 107 to avoid
---  colliding with it. Ledger gaps are already present on production.)
+-- (was 107 on staging; renumbered to 109 — production reached 107 via the
+--  seed-club migration seed_asap_club. Ledger gaps are already present.)
 --
--- Context: handle_new_user() (migration 099) inserts user_interests /
+-- Context: handle_new_user() (migration 099 on staging; the pre-099 version on production — the reconciliation is version-agnostic) inserts user_interests /
 -- user_activities from the signup metadata INSIDE GoTrue's auth.users INSERT,
 -- wrapped in `EXCEPTION WHEN OTHERS THEN RAISE WARNING` so a transient failure
 -- can never block a signup. If that best-effort insert ever drops rows under

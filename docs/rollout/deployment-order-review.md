@@ -7,6 +7,19 @@ document for the eventual production/release approval.
 Last updated after the hybrid-banner design rev 2
 (`docs/rollout/hybrid-conversation-banner-design.md`).
 
+> **Renumber note (2026-08-31):** production's migration ledger had independently
+> reached `107` via two seed-club migrations (`106_seed_accounting_club_and_chess_president`,
+> `107_seed_asap_club`). The two migrations these docs call **105** (hybrid
+> conversation banner) and **107** (signup-survey reconciliation) were therefore
+> renumbered for the production apply:
+> - "migration 105" → file **`108_hybrid_conversation_banner.sql`**
+> - "migration 107" → file **`109_signup_survey_reconciliation.sql`**
+>
+> Staging migrations `099`, `101`, `103`, `104` were staging-only exploration
+> (`103`/`104` superseded by the hybrid banner; `099`/`101` never approved) and
+> are **not** carried to `main` or production. Production ledger after this
+> release: `… 098, 100, 102, 106, 107, 108, 109`.
+
 ---
 
 ## 1. Production state (verified this session)
