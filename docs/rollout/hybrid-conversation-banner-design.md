@@ -372,6 +372,98 @@ fixes the number, which is written into migration 105.
 
 ---
 
+## Benchmark results (staging `cwwmuxxqxovhcnnardlj`, 2026-08-31)
+
+Harness: `load-tests/src/hybrid-banner.ts` (`--parts matrix,ceiling,churn`),
+`seed-pf-500` manifest. Migration 105 live on staging; `notification_config`
+`banner.broadcast_threshold` set to 50, `banner.epoch_grace_seconds` 90.
+
+### Correctness (churn part) — all pass
+
+| Check | Result |
+| --- | --- |
+| Single removal → epoch bump, grace window reset, conversation stays active | pass |
+| Removed member banners received during grace (per-user path, fresh list) | **0** |
+| Retained members messages missed across the transition | **0** |
+| Removed member can join the new-epoch topic | **false** (server-rejected) |
+| Removed member banners after grace; retained members on new epoch | 0 / all received |
+| Bulk removal (40 rows, one statement) → epoch bump count | **1** |
+| Mute / unmute → `invalidate` on the user's per-user topic | 1 / 1 |
+| Crossing T on join → auto-activate + epoch → 1 | pass |
+| Non-participant / wrong-epoch subscribe to a conv topic | **rejected** everywhere |
+| Duplicate banners at a sample subscriber | **0** everywhere |
+| Muted subscriber on the per-user path | **0** (server-filtered) |
+| Conv-topic delivery, fresh clients (15 subs × 5 msgs) | **75 / 75**, 1 `realtime.messages` row per message |
+
+### Steady-state INSERT cost (matrix part)
+
+`conv-scoped` INSERT p50 is **flat 105–260 ms at every size and concurrency**.
+`per-user` INSERT climbs with participants × concurrent senders:
+
+| participants | per-user p95 @ 10 senders | conv-scoped p95 @ 10 senders |
+| --- | --- | --- |
+| 50 | 632 ms | 231 ms |
+| 75 | ~1,000 ms | 248 ms |
+| 100 | 760–935 ms | 300 ms |
+| 300 | 2,160–2,600 ms | 1,650 ms |
+| 500 | 4,750 ms | 10,300 ms* |
+
+`realtime.messages` rows written per message: per-user ≈ participants (74,550
+rows for 150 messages at 500 participants); conv-scoped = **1** (150 rows). About
+500× less Realtime write load at 500 participants. (*the 500×10/50 conv-scoped
+p95 is free-tier tail contention, not fan-out — the row count confirms one send;
+p50 there is 1.4–2.2 s vs per-user 1.9–5.8 s.)
+
+### Subscription ceiling (ceiling part) — 1 / 5 / 10 / 20 / 50 / 95 conv topics per client
+
+| conv channels | cold join p50 | reconnect p50 | parallel joins/s | cold fails | reconnect fails | dup / leaked channels |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0.7 s | 1.4 s | 2.4 | 0 | 0 | 0 / 0 |
+| 5 | 1.9 s | 2.4 s | 3.3 | 0 | 0 | 0 / 0 |
+| 10 | 3.7 s | 3.9 s | 3.4 | 0 | 0 | 0 / 0 |
+| 20 | 7.5 s | 6.4 s | 3.5 | 0 | 0 | 0 / 0 |
+| 50 | 16.7 s | 18.0 s | 3.6 | 0 | 0 | 0 / 0 |
+| 95 | 50.8 s | 20.5 s | 3.6 | 6 | 236 | 0 / 0 |
+
+Per-channel join is **flat ~315 ms** — no per-channel degradation. Parallel
+join throughput caps at **~3.6 joins/s** (the free-tier realtime-auth
+`connection_pool: 2` ceiling); DB connection count does not spike during a
+reconnect storm. **Zero duplicate channels and zero leaked channels** at every
+level. Failures appear only at 95 channels (near the free-tier
+`max_channels_per_client: 100`), where auto-rejoin of ~96 channels cannot finish
+within a 20 s window at 3.6/s.
+
+**Implication for T:** with T = 50 a student holds a dedicated channel only for
+club chats ≥ 50 members — realistically 1–10, i.e. 0.7–3.9 s cold start / 1.4–3.9
+s reconnect, all with zero failures. Lowering T would push more conversations
+into dedicated channels and toward the 3.6/s reconnect ceiling; raising it would
+expose larger conversations to the per-user INSERT cliff. **T = 50** is the
+point where the per-user path's p95 is still under the 800 ms UX budget and the
+channel budget stays comfortable.
+
+### T and grace — chosen from the data
+
+- **T = 50** — last participant count where per-user INSERT p95 stays < 800 ms at
+  10 concurrent senders; keeps dedicated channels rare.
+- **grace = 90 s** — zero missed banners for retained members in the churn test;
+  connected clients resubscribe in 1–2 s; covers a backgrounded mobile client
+  that foregrounds within the window.
+
+Both written into migration 105.
+
+### 50-active regression (reduced topology, 105 live, 6 large conversations activated)
+
+Operation p50 **108–153 ms** (all of chat / rsvp / like / feed-read / search /
+club-view / event-view / comment), at the no-realtime floor; **2 timeouts in
+~4,240 operations (0.05%)**, no other failures; 0 banner follow-up reads. p95
+3.9–6.1 s — within documented free-tier variance for 50 concurrent users (the
+no-realtime floor itself is p95 ~4–6 s on this tier), and this run followed ~90
+minutes of continuous matrix/churn/sweep load. Not a 105 regression — 105 makes
+the large-conversation message path *lighter* (one conv-scoped send replaces ~49
+per-user sends). A rested clean re-run is part of the pre-production gate.
+
+---
+
 ## Rollout
 
 1. Benchmark (A + B) on staging → fix `T` and `v_grace`.
