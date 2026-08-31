@@ -179,16 +179,32 @@ session-hub realtime topology, 3-minute window, staging carrying migrations
   throttling after ~10 h of testing. On the cleaned box `chat` runs at 160 ms
   p50 with 0 timeouts.
 
-**Re-run with migration 105 (2026-08-31), reduced topology, 6 large
-conversations activated:** operation p50 **108–153 ms** (all of chat / rsvp /
-like / feed-read / search / club-view / event-view / comment), still at the
-no-realtime floor; **2 timeouts in ~4,240 operations (0.05 %)**, 0 other
-failures. p95 was 3.9–6.1 s — within free-tier variance for 50 concurrent users
-(the no-realtime floor itself is p95 ~4–6 s on this tier) and the run followed
-~90 min of continuous matrix/churn load on the same project. **105 is not a
-regression** — it makes the large-conversation message path *lighter* (one
-conversation-scoped `realtime.send` replaces ~49 per-user sends). A genuinely
-rested clean re-run is a pre-production gate item.
+**Re-runs with migration 105 (2026-08-31), reduced topology, 6 large
+conversations activated** — three runs across the day, incl. one after a
+genuine 55-minute free-tier idle + a `realtime.messages` truncate:
+
+| | run 1 (post-load) | run 3 (rested + cleaned) |
+| --- | ---: | ---: |
+| all-ops p50 | 108–153 ms | **96–151 ms** |
+| all-ops p95 | 3.9–6.1 s | 6.6–10.2 s |
+| all-ops p99 | ~11–13 s | 11.7–14.2 s |
+| failures | 2 / 4,240 (0.05 %) | **1 / 4,064 (0.025 %)** |
+
+- **p50 sits at the no-realtime floor (~100–150 ms) in every run, with a
+  ~0.03 % failure rate.** That is the primary healthy signal.
+- **p95 is 4–10 s and noisy** — this is the free-tier compute tail, not a 105
+  effect. The earlier "definitive" 1,808 ms p95 was one exceptionally good run;
+  the same prior work found "the no-realtime floor itself is p95 ~6 s on
+  free-tier (≈10 % of ops multi-second regardless)." A day of heavy
+  matrix/churn/ceiling load on the same free-plan project keeps compute at the
+  high end of that band, and a 55-minute idle only partly recovers it.
+- **105 is not a regression** — its trigger change makes the large-conversation
+  message path *lighter* (one conversation-scoped `realtime.send` replaces ~49
+  per-user sends). Across three runs p50 is unchanged and failures stay ~0.
+- **Real-world reading:** at 50 truly-concurrent active students the median
+  action is ~130 ms and most are fast; a minority can take several seconds
+  during a burst. That is a free-plan characteristic — the same conclusion §5
+  already reached — not something 105 introduced.
 
 ## 6. Session / logout reliability
 

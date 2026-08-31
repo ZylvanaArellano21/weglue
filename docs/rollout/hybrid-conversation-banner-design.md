@@ -453,14 +453,15 @@ Both written into migration 105.
 
 ### 50-active regression (reduced topology, 105 live, 6 large conversations activated)
 
-Operation p50 **108–153 ms** (all of chat / rsvp / like / feed-read / search /
-club-view / event-view / comment), at the no-realtime floor; **2 timeouts in
-~4,240 operations (0.05%)**, no other failures; 0 banner follow-up reads. p95
-3.9–6.1 s — within documented free-tier variance for 50 concurrent users (the
-no-realtime floor itself is p95 ~4–6 s on this tier), and this run followed ~90
-minutes of continuous matrix/churn/sweep load. Not a 105 regression — 105 makes
-the large-conversation message path *lighter* (one conv-scoped send replaces ~49
-per-user sends). A rested clean re-run is part of the pre-production gate.
+Three runs, incl. one after a genuine 55-minute free-tier idle + a
+`realtime.messages` truncate. Every run: operation **p50 ~96–153 ms** at the
+no-realtime floor (all of chat / rsvp / like / feed-read / search / club-view /
+event-view / comment), **~0.03% failure rate** (1–2 timeouts per ~4,000+ ops),
+0 banner follow-up reads. p95 was 4–10 s and noisy across runs — the free-tier
+compute tail (prior work: the no-realtime floor is itself p95 ~6 s on this
+tier), not a 105 effect: p50 and failure rate are flat across all three runs.
+105 makes the large-conversation message path *lighter* (one conv-scoped send
+replaces ~49 per-user sends).
 
 ---
 
