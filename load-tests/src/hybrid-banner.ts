@@ -14,8 +14,9 @@ import { runScenario, sleep } from './runner.js';
 //                    per-user   : sync:message-inbox:<uid>          (loop)
 //                    conv-scoped : sync:message-inbox-conv:<id>:<e> (one send)
 //                  -> the crossover that fixes T.
-//   PART reconnect cold-start channel-join cost for a user in 1/5/10/20 active
-//                  conversations (protects Realtime joins/sec on foreground).
+//   PART ceiling    subscription ceiling: cold join / reconnect / joins-per-sec /
+//                  duplicate+leaked channels / auth pressure at 1/5/10/20/50/~95
+//                  conv topics per client (free-tier max_channels_per_client=100).
 //   PART churn     membership add / single + bulk removal / mute — proves
 //                  zero missed banners for retained members, zero leak to a
 //                  removed member, one epoch bump per bulk statement, and the
@@ -367,62 +368,136 @@ async function partMatrix(
   return cases;
 }
 
-// --- PART reconnect ----------------------------------------------------------
+// --- PART ceiling — subscription ceiling: 1/5/10/20/50/~95 conv topics/client -
 
-async function partReconnect(
+async function pgActivity(config: LoadTestConfig): Promise<{ conns: number; active: number; waiting: number; authr: number }> {
+  const r = await mgmt(config, `
+    select
+      (select count(*)::int from pg_stat_activity where datname = current_database()) as conns,
+      (select count(*)::int from pg_stat_activity where datname = current_database() and state = 'active') as active,
+      (select count(*)::int from pg_stat_activity where datname = current_database() and wait_event is not null) as waiting,
+      (select count(*)::int from pg_stat_activity where datname = current_database() and usename = 'authenticator') as authr
+  `).catch(() => [{}]);
+  return { conns: Number(r[0]?.conns ?? 0), active: Number(r[0]?.active ?? 0), waiting: Number(r[0]?.waiting ?? 0), authr: Number(r[0]?.authr ?? 0) };
+}
+
+async function partCeiling(
   config: LoadTestConfig,
   manifest: SeedManifest,
   pool: Session[],
   metrics: any,
-  membershipCounts: number[],
+  counts: number[],
   repeats: number,
 ): Promise<Record<string, unknown>[]> {
   const cases: Record<string, unknown>[] = [];
   const user = pool[0];
-  const others = manifest.userIds.slice(1, 60); // padding participants so each conv is "active"
+  const others = manifest.userIds.slice(1, 60);
   if (!user) return cases;
 
-  const maxN = Math.max(...membershipCounts);
+  const maxN = Math.max(...counts);
   const fixtures: Fixture[] = [];
   try {
     for (let i = 0; i < maxN; i += 1) {
       const runId = `${Date.now().toString(36)}${randomUUID().slice(0, 3)}${i}`;
-      const parts = [user.id, ...others.slice(0, 49)]; // 50 -> above the provisional threshold
-      const fx = await createConversation(config, manifest, parts, runId, `rc${i}`);
+      const parts = [user.id, ...others.slice(0, 49)]; // 50 participants -> auto-activates at T=50
+      const fx = await createConversation(config, manifest, parts, runId, `cl${i}`);
       await setActive(config, fx.conversationId, 1, 600);
       fixtures.push(fx);
     }
 
-    for (const n of membershipCounts) {
+    for (const n of counts) {
       const convTopics = fixtures.slice(0, n).map((fx) => `sync:message-inbox-conv:${fx.conversationId}:1`);
       const allTopics = [`sync:message-inbox:${user.id}`, ...convTopics];
-      const totals: number[] = [];
-      const perJoin: number[] = [];
-      let failures = 0;
+
+      const coldTotals: number[] = [];
+      const coldPerJoin: number[] = [];
+      const reconnectTotals: number[] = [];
+      const parallelJoinsPerSec: number[] = [];
+      let coldFailures = 0;
+      let reconnectFailures = 0;
+      let leakedChannels = 0;
+      let duplicateChannels = 0;
+      const authPressure: Record<string, number>[] = [];
+
       for (let rep = 0; rep < repeats; rep += 1) {
+        await user.client.realtime.setAuth(user.token);
+
+        // (a) COLD JOIN — sequential
         const teardowns: Array<() => Promise<void>> = [];
-        const t0 = performance.now();
+        const c0 = performance.now();
         for (const topic of allTopics) {
-          const res = await subscribe(user, topic, newRecv(), 12_000);
-          perJoin.push(res.joinMs);
-          if (!res.ok) failures += 1;
+          const res = await subscribe(user, topic, newRecv(), 15_000);
+          coldPerJoin.push(res.joinMs);
+          if (!res.ok) coldFailures += 1;
           teardowns.push(res.teardown);
         }
-        totals.push(performance.now() - t0);
+        coldTotals.push(performance.now() - c0);
+
+        // channel accounting: how many channels does the client hold now?
+        const held = (user.client.getChannels?.() ?? []).length;
+        if (held > allTopics.length) duplicateChannels += held - allTopics.length;
+
+        // (b) RECONNECT — drop the socket, let realtime-js auto-rejoin all channels
+        const beforeAct = await pgActivity(config);
+        const r0 = performance.now();
+        try { user.client.realtime.disconnect(); } catch { /* ignore */ }
+        await sleep(400);
+        try { user.client.realtime.connect(); } catch { /* ignore */ }
+        // wait until every channel is joined again, or timeout
+        const rejoinDeadline = performance.now() + 20_000;
+        let joinedBack = 0;
+        while (performance.now() < rejoinDeadline) {
+          joinedBack = (user.client.getChannels?.() ?? []).filter((ch: any) => ch.state === 'joined').length;
+          if (joinedBack >= allTopics.length) break;
+          await sleep(250);
+        }
+        reconnectTotals.push(performance.now() - r0);
+        if (joinedBack < allTopics.length) reconnectFailures += allTopics.length - joinedBack;
+        const duringAct = await pgActivity(config);
+        authPressure.push({ connsBefore: beforeAct.conns, connsDuring: duringAct.conns, activeDuring: duringAct.active, waitingDuring: duringAct.waiting });
+
+        // (c) PARALLEL JOIN burst -> joins/sec (fresh client to avoid instance reuse)
+        const burstClient = anonClient(config, `hb-burst-${user.id}-${rep}`);
+        await burstClient.realtime.setAuth(user.token);
+        const p0 = performance.now();
+        const results = await Promise.all(allTopics.map((topic) => new Promise<boolean>((resolve) => {
+          const ch = burstClient.channel(topic, { config: { private: true } });
+          let settled = false;
+          ch.subscribe((st: string) => { if (!settled && (st === 'SUBSCRIBED' || st === 'CHANNEL_ERROR' || st === 'TIMED_OUT')) { settled = true; resolve(st === 'SUBSCRIBED'); } });
+          setTimeout(() => { if (!settled) { settled = true; resolve(false); } }, 15_000);
+        })));
+        const burstSec = (performance.now() - p0) / 1000;
+        const okJoins = results.filter(Boolean).length;
+        parallelJoinsPerSec.push(okJoins / Math.max(0.001, burstSec));
+        try { await burstClient.removeAllChannels(); await burstClient.realtime.disconnect(); } catch { /* ignore */ }
+
+        // teardown + leak check
         await Promise.all(teardowns.map((t) => t().catch(() => {})));
-        await sleep(800);
+        await sleep(300);
+        const remaining = (user.client.getChannels?.() ?? []).length;
+        leakedChannels = Math.max(leakedChannels, remaining);
+        if (remaining) { try { await user.client.removeAllChannels(); } catch { /* ignore */ } }
+        await sleep(700);
       }
+
       cases.push({
         conversations: n,
-        channelsJoined: allTopics.length,
-        coldStartP50Ms: percentile(totals, 50),
-        coldStartP95Ms: percentile(totals, 95),
-        perJoinP50Ms: percentile(perJoin, 50),
-        perJoinP95Ms: percentile(perJoin, 95),
-        joinFailures: failures,
+        channelsTotal: allTopics.length,
+        coldJoinP50Ms: percentile(coldTotals, 50),
+        coldJoinP95Ms: percentile(coldTotals, 95),
+        perChannelJoinP50Ms: percentile(coldPerJoin, 50),
+        perChannelJoinP95Ms: percentile(coldPerJoin, 95),
+        reconnectP50Ms: percentile(reconnectTotals, 50),
+        reconnectP95Ms: percentile(reconnectTotals, 95),
+        parallelJoinsPerSecP50: Number(percentile(parallelJoinsPerSec, 50).toFixed(1)),
+        coldJoinFailures: coldFailures,
+        reconnectFailures,
+        duplicateChannels,     // MUST be 0
+        leakedChannelsAfterTeardown: leakedChannels, // MUST be 0
+        authPressure: authPressure[authPressure.length - 1] ?? null,
         repeats,
       });
-      metrics.count(`reconnect_${n}`);
+      metrics.count(`ceiling_${n}`);
     }
   } finally {
     await dropFixtures(config, fixtures);
@@ -591,15 +666,15 @@ export async function hybridBanner(config: LoadTestConfig, args: Record<string, 
   assertWriteApproved(config);
   const namespace = argString(args, 'namespace', config.seedNamespace);
   const manifest = readManifest(config, argString(args, 'manifest', manifestPath(config, namespace, argNumber(args, 'manifest-size', 500))));
-  const parts = argString(args, 'parts', 'matrix,reconnect,churn').split(',').map((p) => p.trim());
+  const parts = argString(args, 'parts', 'matrix,ceiling,churn').split(',').map((p) => p.trim());
   const sizes = argString(args, 'sizes', '10,50,100,300,500').split(',').map(Number).filter((n) => n >= 2);
   const concurrencies = argString(args, 'concurrency', '1,10,50').split(',').map(Number).filter((n) => n > 0);
   const messagesPerSender = Math.max(1, argNumber(args, 'messages-per-sender', 3));
   const sampleSubs = Math.max(2, argNumber(args, 'sample-subs', 12));
   const poolSize = Math.max(10, argNumber(args, 'pool-size', 80));
   const poolSpacingMs = argNumber(args, 'pool-spacing-ms', 5000);
-  const membershipCounts = argString(args, 'membership-counts', '1,5,10,20').split(',').map(Number).filter((n) => n > 0);
-  const reconnectRepeats = Math.max(1, argNumber(args, 'reconnect-repeats', 5));
+  const ceilingCounts = argString(args, 'ceiling-counts', '1,5,10,20,50,95').split(',').map(Number).filter((n) => n > 0);
+  const ceilingRepeats = Math.max(1, argNumber(args, 'ceiling-repeats', 4));
 
   return runScenario(config, 'hybrid-banner', async (metrics) => {
     const t0 = performance.now();
@@ -611,8 +686,8 @@ export async function hybridBanner(config: LoadTestConfig, args: Record<string, 
     if (parts.includes('matrix')) {
       details.matrix = await partMatrix(config, manifest, pool, metrics, sizes, concurrencies, messagesPerSender, sampleSubs);
     }
-    if (parts.includes('reconnect')) {
-      details.reconnect = await partReconnect(config, manifest, pool, metrics, membershipCounts, reconnectRepeats);
+    if (parts.includes('ceiling')) {
+      details.ceiling = await partCeiling(config, manifest, pool, metrics, ceilingCounts, ceilingRepeats);
     }
     if (parts.includes('churn')) {
       details.churn = await partChurn(config, manifest, pool, metrics);
