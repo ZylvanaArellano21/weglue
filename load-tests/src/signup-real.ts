@@ -70,16 +70,24 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
   const count = Math.floor(argNumber(args, 'count', mode === 'burst' ? 80 : 500));
   const intervalMs = Math.max(0, argNumber(args, 'interval-ms', mode === 'burst' ? 0 : 9000));
   const burstConcurrency = Math.max(1, Math.floor(argNumber(args, 'burst-concurrency', 10)));
-  const emailLike = `sr-${runId}-%@${domain}`;
+  // Match ONLY real signup/onboarding attempts: sr-<runId>-<digits>@domain.
+  // Excludes the -probe0 / -rec / -bg / -legit diagnostic signups (which are
+  // fired without onboarding metadata by design) so verification counts reflect
+  // actual onboarding flows, not harness instrumentation.
+  const emailRe = `^sr-${runId}-[0-9]+@${domain.replace(/\./g, '\\.')}$`;
 
   const email = (i: number) => `sr-${runId}-${i}@${domain}`.toLowerCase();
   const uname = (i: number) => `sr_${runId}_${i}`.replace(/[^a-z0-9_]/gi, '_').slice(0, 30);
   const pw = () => `Signup-${randomUUID().replace(/-/g, '').slice(0, 16)}a!1`;
 
+  // transient / recoverable classes that a real client would retry
+  const TRANSIENT = new Set(['5xx', 'timeout', '429_other']);
+
   return runScenario(config, `signup-real-${mode}`, async (metrics) => {
-    const doSignup = async (i: number): Promise<void> => {
-      const client = anonClient(config, `sr-${runId}-${i}`);
+    const doSignup = async (i: number, attempt = 0): Promise<{ ok: boolean; klass: string }> => {
+      const client = anonClient(config, `sr-${runId}-${i}-${attempt}`);
       const t0 = performance.now();
+      const sampleName = attempt === 0 ? 'signup' : 'signup_retry';
       try {
         // step 1: the real app's pre-check RPC
         const st0 = performance.now();
@@ -94,18 +102,42 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
           },
         }), config.requestTimeoutMs, `signup ${i}`);
         const klass = cls(r.error);
+        // a re-signup of an already-created email returns no identities — for a
+        // retry that means the first attempt actually landed: treat as success.
         const fakeSuccess = !r.error && (r.data.user?.identities?.length ?? 0) === 0;
-        metrics.add({ name: 'signup', ms: performance.now() - t0, ok: !r.error && !fakeSuccess, errorClass: r.error ? klass : (fakeSuccess ? 'fake_success_existing' : undefined), meta: { i } });
+        const ok = !r.error && (!fakeSuccess || attempt > 0);
+        metrics.add({ name: sampleName, ms: performance.now() - t0, ok, errorClass: r.error ? klass : (fakeSuccess && attempt === 0 ? 'fake_success_existing' : undefined), meta: { i, attempt } });
         metrics.count(r.error ? klass : (fakeSuccess ? 'fake_success' : 'signup_ok'));
+        return { ok, klass: r.error ? klass : 'ok' };
       } catch (e) {
-        metrics.add({ name: 'signup', ms: performance.now() - t0, ok: false, errorClass: cls(e), meta: { i } });
-        metrics.count(cls(e));
+        const klass = cls(e);
+        metrics.add({ name: sampleName, ms: performance.now() - t0, ok: false, errorClass: klass, meta: { i, attempt } });
+        metrics.count(klass);
+        return { ok: false, klass };
       }
+    };
+
+    // retry the transient failures of a completed wave, up to `rounds` times,
+    // paced so a real client's backoff is represented. Returns the still-failed.
+    const retryTransient = async (results: Map<number, string>, rounds = 3, gapMs = 4000): Promise<Map<number, string>> => {
+      let pending = new Map([...results].filter(([, k]) => TRANSIENT.has(k)));
+      for (let round = 0; round < rounds && pending.size > 0; round += 1) {
+        await sleep(gapMs);
+        const next = new Map<number, string>();
+        for (const [i] of pending) {
+          const res = await doSignup(i, round + 1);
+          if (!res.ok) next.set(i, res.klass);
+          await sleep(400);
+        }
+        pending = new Map([...next].filter(([, k]) => TRANSIENT.has(k)));
+      }
+      return pending;
     };
 
     let recovery: Record<string, unknown> | undefined;
     let collateral: Record<string, unknown> | undefined;
     let classroom: Record<string, unknown> | undefined;
+    let retryRecovery: Record<string, unknown> | undefined;
 
     if (mode === 'classroom') {
       // The SHIPPED We Glue journey on ONE public IP, tested exactly as-is:
@@ -141,6 +173,13 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
           metrics.count(r.error ? `${isRetry ? 'cr_signup_retry' : 'cr_signup'}_${k}` : (isRetry ? 'cr_signup_retry_ok' : 'cr_signup_ok'));
           if (!r.error) { const s: S = { i, email: email(i), password, client, verifySession: false, verifyOk: false, loginOk: false }; roster.push(s); return s; }
           if (!isRetry && k === '429_per_ip_request') signupBlocked.push(i);
+          // transient server error → one immediate in-place retry, as a real
+          // student would tap "sign up" again
+          if (!isRetry && TRANSIENT.has(k)) {
+            await sleep(2500);
+            metrics.count('cr_signup_transient_retry');
+            return await doOneSignup(i, true);
+          }
           return null;
         } catch (e) {
           metrics.add({ name: isRetry ? 'cr_signup_retry' : 'cr_signup', ms: performance.now() - t0, ok: false, errorClass: cls(e) });
@@ -274,24 +313,41 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
     } else if (mode === 'paced') {
       const start = Date.now();
       let done = 0;
+      const firstPass = new Map<number, string>();
       for (let i = 0; i < count; i += 1) {
         if (intervalMs && i > 0) {
           const wait = start + i * intervalMs - Date.now();
           if (wait > 0) await sleep(wait);
         }
-        await doSignup(i);
+        const res = await doSignup(i);
+        if (!res.ok) firstPass.set(i, res.klass);
         done += 1;
         if (done % 25 === 0 || done === count) {
           process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] signup ${done}/${count} ok=${metrics.counters.get('signup_ok') ?? 0} 429ip=${metrics.counters.get('429_per_ip_request') ?? 0} 429email=${metrics.counters.get('429_email_bucket') ?? 0} 5xx=${metrics.counters.get('5xx') ?? 0}\n`);
         }
       }
+      const stillFailed = await retryTransient(firstPass);
+      retryRecovery = {
+        firstPassTransientFailures: [...firstPass].filter(([, k]) => TRANSIENT.has(k)).length,
+        recoveredOnRetry: [...firstPass].filter(([, k]) => TRANSIENT.has(k)).length - stillFailed.size,
+        stillFailedAfterRetry: [...stillFailed.entries()].map(([i, k]) => ({ i, k })),
+      };
     } else {
       // burst: K signups from one origin as fast as the pool allows
       const start = Date.now();
       let next = 0;
-      const worker = async () => { while (next < count) { const i = next++; await doSignup(i); } };
+      const firstPass = new Map<number, string>();
+      const worker = async () => { while (next < count) { const i = next++; const res = await doSignup(i); if (!res.ok) firstPass.set(i, res.klass); } };
       await Promise.all(Array.from({ length: burstConcurrency }, worker));
       const burstMs = Date.now() - start;
+      // recover transient (5xx / timeout) failures — a real client retries these
+      const stillFailed = await retryTransient(firstPass);
+      retryRecovery = {
+        firstPassTransientFailures: [...firstPass].filter(([, k]) => TRANSIENT.has(k)).length,
+        recoveredOnRetry: [...firstPass].filter(([, k]) => TRANSIENT.has(k)).length - stillFailed.size,
+        stillFailedAfterRetry: [...stillFailed.entries()].map(([i, k]) => ({ i, k })),
+        perIp429FirstPass: [...firstPass].filter(([, k]) => k === '429_per_ip_request').length,
+      };
       metrics.count('burst_ms', burstMs);
 
       // recovery probe: how long until a signup succeeds again from this origin
@@ -333,7 +389,12 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
     // ---- server-side trigger verification ----
     await sleep(4000);
     const v = await mgmt(config, `
-      with u as (select id, email, confirmation_sent_at, email_confirmed_at from auth.users where email like '${emailLike}'),
+      with u as (
+        select id, email, confirmation_sent_at, email_confirmed_at,
+               coalesce(jsonb_array_length(raw_user_meta_data->'interests'), 0) as meta_ni,
+               coalesce(jsonb_array_length(raw_user_meta_data->'activities'), 0) as meta_na
+        from auth.users where email ~ '${emailRe}'
+      ),
       p as (select * from public.profiles where id in (select id from u))
       select
         (select count(*) from u)::int                                          as auth_users,
@@ -342,14 +403,19 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
         (select count(*) from u where email_confirmed_at is not null)::int      as email_confirmed,
         (select count(*) from p)::int                                           as profiles,
         (select count(*) from u where id not in (select id from p))::int        as orphaned_auth_users,
+        (select count(*) from p where id not in (select id from u))::int        as orphaned_profiles,
         (select count(*) from p where university_id = '75398568-867d-4cf9-b688-78e6bfbedb01')::int as profiles_launch_campus,
         (select count(*) from p where university_id is null)::int               as profiles_null_university,
         (select count(*) from p where onboarding_completed)::int                as onboarding_completed,
         (select count(*) from p where agreed_to_terms and agreed_at is not null)::int as agreed_terms,
         (select count(*) from p where coalesce(username,'') <> '')::int         as username_set,
         (select count(*) from p where email_domain = 'resend.dev')::int         as email_domain_ok,
+        (select coalesce(sum(meta_ni),0) from u)::int                           as interests_expected,
+        (select coalesce(sum(meta_na),0) from u)::int                           as activities_expected,
         (select count(*) from public.user_interests where user_id in (select id from u))::int  as interest_rows,
         (select count(*) from public.user_activities where user_id in (select id from u))::int as activity_rows,
+        (select count(*) from u where (select count(*) from public.user_interests ui where ui.user_id = u.id) <> u.meta_ni)::int as users_wrong_interest_count,
+        (select count(*) from u where (select count(*) from public.user_activities ua where ua.user_id = u.id) <> u.meta_na)::int as users_wrong_activity_count,
         (select count(*) from (select username from p group by username having count(*)>1) d)::int as dup_usernames
     `).catch((e) => [{ error: String(e) }]);
 
@@ -371,12 +437,9 @@ export async function signupReal(config: LoadTestConfig, args: Record<string, st
         },
         authSignupStatusRpc: metrics.table('auth_signup_status'),
         triggerVerification: v[0] ?? {},
-        recovery, collateral, classroom,
-        note: mode === 'paced'
-          ? 'Paced at the single-origin per-IP ceiling. triggerVerification.profiles must equal auth_users; profiles_launch_campus / onboarding_completed / agreed_terms must equal profiles; orphaned_auth_users and dup_usernames must be 0.'
-          : mode === 'burst'
-            ? 'Shared-NAT / campus-dorm burst. recovery.recoveredAfterMs and collateral.legitBlocked quantify the blast radius of the per-IP over_request_rate_limit.'
-            : 'Classroom journey on one IP. Compare classroom.verify.session_established (students already logged in after the link) vs classroom.login_redundant.per_ip_429 (the app forcing a second auth on the shared bucket).',
+        recovery, collateral, classroom, retryRecovery,
+        signupRetry: metrics.table('signup_retry'),
+        note: 'triggerVerification is scoped to REAL onboarding signups only (sr-<runId>-<digits>), not the -probe0/-rec/-bg/-legit diagnostic signups. PASS requires: auth_users == profiles; orphaned_auth_users == 0; orphaned_profiles == 0; profiles_null_university == 0; onboarding_completed == agreed_terms == profiles; dup_usernames == 0; interest_rows == interests_expected; activity_rows == activities_expected; users_wrong_interest_count == 0; users_wrong_activity_count == 0. Migration 107 reconcile_recent_signup_surveys() is the safety net if a transient handle_new_user survey-insert ever drops rows.'
       },
     };
   });

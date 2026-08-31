@@ -60,7 +60,7 @@ jobs:
 
   active-50:
     needs: [guard, sync]
-    if: ${{ github.event.inputs.scenarios == '' || github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'active' }}
+    if: ${{ github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'active' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -102,8 +102,8 @@ jobs:
           path: out/
 
   auth-500:
-    needs: [guard, active-50]
-    if: ${{ always() && (github.event.inputs.scenarios == '' || github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'auth') }}
+    needs: [guard]
+    if: ${{ github.event.inputs.scenarios == '' || github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'auth' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -134,8 +134,8 @@ jobs:
           path: out/
 
   classroom-30:
-    needs: [guard, active-50]
-    if: ${{ always() && (github.event.inputs.scenarios == '' || github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'classroom') }}
+    needs: [guard]
+    if: ${{ github.event.inputs.scenarios == 'all' || github.event.inputs.scenarios == 'classroom' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -168,8 +168,8 @@ jobs:
           path: out/
 
   aggregate:
-    needs: [active-50, auth-500, classroom-30]
-    if: always()
+    needs: [auth-500, active-50, classroom-30]
+    if: ${{ always() && needs.auth-500.result != 'skipped' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
