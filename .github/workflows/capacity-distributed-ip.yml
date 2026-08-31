@@ -37,7 +37,7 @@ env:
   LOADTEST_UNIVERSITY_ID: ${{ secrets.LT_UNIV }}
   LOADTEST_EMAIL_DOMAIN: ${{ secrets.LT_DOMAIN }}
   LOADTEST_SEED_NAMESPACE: distci
-  LOADTEST_RESULTS_DIR: load-tests/results
+  LOADTEST_RESULTS_DIR: ${{ github.workspace }}/ltresults
 
 jobs:
   guard:
@@ -56,7 +56,7 @@ jobs:
       measure_at: ${{ steps.t.outputs.measure_at }}
     steps:
       - id: t
-        run: echo "measure_at=$(( $(date +%s) + 780 ))" >> "$GITHUB_OUTPUT"
+        run: echo "measure_at=$(( $(date +%s) + 540 ))" >> "$GITHUB_OUTPUT"
 
   active-50:
     needs: [guard, sync]
@@ -65,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9]
+        shard: [0,1,2,3,4,5]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -80,20 +80,21 @@ jobs:
       - name: Restore seeded manifest
         run: |
           mkdir -p load-tests/results
-          echo "${{ secrets.S50_MANIFEST_B64 }}" | base64 -d > load-tests/results/seed-s50-50.json
-          node -e "const m=require('./load-tests/results/seed-s50-50.json');if(m.userIds.length<50)throw new Error('manifest short');console.log('manifest users',m.userIds.length)"
+          mkdir -p "$GITHUB_WORKSPACE/ltresults"
+          echo "${{ secrets.S50_MANIFEST_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/ltresults/seed-s50-50.json"
+          node -e "const m=require(process.env.GITHUB_WORKSPACE+'/ltresults/seed-s50-50.json');if(m.userIds.length<50)throw new Error('manifest short');console.log('manifest users',m.userIds.length)"
       - name: Run 50-active slice (barrier-synced)
         run: |
           cd load-tests
           node dist/cli.js concurrent-active \
-            --manifest results/seed-s50-50.json \
-            --users 50 --shard ${{ matrix.shard }}/10 \
+            --manifest "$GITHUB_WORKSPACE/ltresults/seed-s50-50.json" \
+            --users 50 --shard ${{ matrix.shard }}/6 \
             --topology reduced --duration-ms 420000 \
             --signin-spacing-ms 1500 \
             --measure-at ${{ needs.sync.outputs.measure_at }}
       - name: Collect result
         if: always()
-        run: cp load-tests/results/*concurrent-active.json out/result.json || echo '{"error":"no result"}' > out/result.json
+        run: f=$(ls -t "$GITHUB_WORKSPACE"/ltresults/*concurrent-active.json 2>/dev/null | head -1); if [ -n "$f" ]; then cp "$f" out/result.json; else echo '{"error":"no result"}' > out/result.json; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -125,7 +126,7 @@ jobs:
           node dist/cli.js signup-real --mode burst --count 20 --burst-concurrency 6 --probes false
       - name: Collect result
         if: always()
-        run: cp load-tests/results/*signup-real-burst.json out/result.json || echo '{"error":"no result"}' > out/result.json
+        run: f=$(ls -t "$GITHUB_WORKSPACE"/ltresults/*signup-real-burst.json 2>/dev/null | head -1); if [ -n "$f" ]; then cp "$f" out/result.json; else echo '{"error":"no result"}' > out/result.json; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -159,7 +160,7 @@ jobs:
             --return-ms 8000 --login-gap-ms 3000
       - name: Collect result
         if: always()
-        run: cp load-tests/results/*signup-real-classroom.json out/result.json || echo '{"error":"no result"}' > out/result.json
+        run: f=$(ls -t "$GITHUB_WORKSPACE"/ltresults/*signup-real-classroom.json 2>/dev/null | head -1); if [ -n "$f" ]; then cp "$f" out/result.json; else echo '{"error":"no result"}' > out/result.json; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
