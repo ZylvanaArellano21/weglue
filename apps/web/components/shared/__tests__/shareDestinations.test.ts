@@ -6,7 +6,8 @@ const person: Person = { user_id: "u1", username: "marcus", full_name: "Marcus",
 const conversation = (overrides: Partial<ConversationPreview>): ConversationPreview => ({
   id: "c1", type: "group", name: "Study group", avatar_url: null, club_id: null, other_user_id: null,
   last_message: "hi", last_message_at: "2026-08-04T00:00:00Z", last_sender_id: null, last_sender_name: null,
-  unread_count: 0, muted: false, archived: false, message_count: 4, ...overrides,
+  unread_count: 0, muted: false, archived: false, message_count: 4,
+  banner_broadcast_active: false, banner_epoch: null, ...overrides,
 });
 
 describe("share destinations", () => {

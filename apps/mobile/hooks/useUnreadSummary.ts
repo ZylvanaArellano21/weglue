@@ -122,6 +122,10 @@ export function useUnreadSummary(userId: string | undefined) {
     if (!userId) return;
     const invalidate = () => {
       queryClient.invalidateQueries({ queryKey: ['unreadSummary', userId] });
+      // A conversation activating / bumping its banner epoch (migration 105)
+      // fires this `invalidate` on the per-user topic — refetch the chat list
+      // so useConversationBannerChannels picks up the new `banner_epoch`.
+      queryClient.invalidateQueries({ queryKey: ['myChats', userId] });
     };
     return subscribeBroadcastEvents(
       `sync:message-inbox:${userId}`,
@@ -129,6 +133,9 @@ export function useUnreadSummary(userId: string | undefined) {
         invalidate,
         new_message: (payload: NewMessageBroadcastPayload) => {
           invalidate();
+          // The per-user `new_message` path is already server-filtered by
+          // `muted_at` / `channel_mutes`; the conv-scoped path (which is not)
+          // applies the mute filter in useConversationBannerChannels.
           const banner = buildMessageBanner(payload, userId);
           if (banner) publishNotificationInsert(banner);
         },

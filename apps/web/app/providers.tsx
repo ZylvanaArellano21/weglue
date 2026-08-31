@@ -14,6 +14,7 @@ import {
   subscribeBrowserCanonicalRecovery,
 } from "../lib/studentSynchronization";
 import { useUnreadSummary } from "../lib/hooks/useUnreadSummary";
+import { useConversationBannerChannels } from "../lib/hooks/useConversationBannerChannels";
 import { useRealtimeNotifications } from "../lib/hooks/useNotifications";
 import { useMyClubsRealtime } from "../lib/hooks/useClubRealtime";
 import { useBlockSynchronization } from "../lib/hooks/useBlocking";
@@ -52,6 +53,7 @@ function useSessionRealtimeHub(): string | undefined {
   // message types (dm_message/group_message/club_chat_message) — replacing the
   // old broad `messages` INSERT postgres_changes subscription.
   useUnreadSummary(userId);
+  useConversationBannerChannels(userId);
   useRealtimeNotifications(userId);
   useMyClubsRealtime(userId);
   useBlockSynchronization(userId);

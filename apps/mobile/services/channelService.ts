@@ -308,6 +308,15 @@ export async function getChannelMuted(channelId: string, userId: string): Promis
   return !!data;
 }
 
+/** Every channel the viewer has muted (RLS already scopes to auth.uid()). */
+export async function getMutedChannelIds(userId: string): Promise<string[]> {
+  const { data } = await supabase
+    .from('channel_mutes')
+    .select('channel_id')
+    .eq('user_id', userId);
+  return ((data ?? []) as any[]).map((r) => r.channel_id);
+}
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 export async function getChannelMessages(

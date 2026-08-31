@@ -114,4 +114,27 @@ describe("buildMessageBanner", () => {
     expect(buildMessageBanner({ ...base, conversation_id: "" }, ME)).toBeNull();
     expect(buildMessageBanner({ ...base, sender_id: "" }, ME)).toBeNull();
   });
+
+  // ---- migration 105: conversation-scoped delivery reaches muted members,
+  //      so the mute filter is client-side here (useConversationBannerChannels).
+  it("suppresses the banner when the viewer has muted the conversation", () => {
+    const muted = new Set([base.conversation_id]);
+    expect(buildMessageBanner(base, ME, { mutedConversationIds: muted })).toBeNull();
+    // a different conversation is unaffected
+    expect(buildMessageBanner(base, ME, { mutedConversationIds: new Set(["other"]) })).not.toBeNull();
+  });
+
+  it("suppresses the banner when the viewer has muted the channel", () => {
+    const payload = { ...base, conversation_type: "club", channel_id: "44444444-4444-4444-4444-444444444444" };
+    expect(
+      buildMessageBanner(payload, ME, { mutedChannelIds: new Set([payload.channel_id!]) }),
+    ).toBeNull();
+    // no channel_id → channel mute set is irrelevant
+    expect(buildMessageBanner(base, ME, { mutedChannelIds: new Set(["x"]) })).not.toBeNull();
+  });
+
+  it("still banners when the mute sets are empty / absent", () => {
+    expect(buildMessageBanner(base, ME, {})).not.toBeNull();
+    expect(buildMessageBanner(base, ME, { mutedConversationIds: new Set(), mutedChannelIds: new Set() })).not.toBeNull();
+  });
 });

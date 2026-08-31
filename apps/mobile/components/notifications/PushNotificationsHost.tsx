@@ -17,6 +17,7 @@ import { AppState, Platform } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useUnreadSummary } from '../../hooks/useUnreadSummary';
+import { useConversationBannerChannels } from '../../hooks/useConversationBannerChannels';
 import { useBlockSynchronization } from '../../hooks/useBlocking';
 import { getPermissionState } from '../../lib/notifications/permissions';
 import { ForegroundNotificationBanner } from './ForegroundNotificationBanner';
@@ -29,6 +30,9 @@ export function PushNotificationsHost() {
   // message types (dm_message/group_message/club_chat_message) — replacing the
   // old broad `messages` INSERT postgres_changes subscription.
   useUnreadSummary(session?.user.id);
+  // Conversation-scoped foreground-banner subscriptions for large conversations
+  // (migration 105). No-op until a conversation has `banner_broadcast_active`.
+  useConversationBannerChannels(session?.user.id);
   // Must live inside the query provider — this is exactly why it moved here
   // rather than being called from RootLayout's own body, which executes
   // outside the PersistQueryClientProvider it needs.

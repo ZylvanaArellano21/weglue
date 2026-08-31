@@ -68,17 +68,34 @@ export function messageBannerPreview(
   );
 }
 
+export type MessageBannerMuteContext = {
+  /** Conversation ids the viewer has muted (`conversation_participants.muted_at`). */
+  mutedConversationIds?: ReadonlySet<string> | null;
+  /** Channel ids the viewer has muted (`channel_mutes`). */
+  mutedChannelIds?: ReadonlySet<string> | null;
+};
+
 /**
  * Build the foreground banner row for an incoming message, or `null` when it
- * must not be shown (missing identifiers, or the viewer is the sender — the
- * trigger already excludes the sender, this is defence in depth).
+ * must not be shown:
+ *   • missing identifiers,
+ *   • the viewer is the sender (the per-user trigger already excludes the
+ *     sender; a conversation-scoped broadcast reaches the sender's own client,
+ *     so this is load-bearing there),
+ *   • the viewer has muted the conversation or the channel — for a
+ *     conversation-scoped broadcast the server sends one payload to every
+ *     connected member, so mute enforcement is client-side here (the per-user
+ *     path is still server-filtered by `muted_at` / `channel_mutes`).
  */
 export function buildMessageBanner(
   payload: NewMessageBroadcastPayload | null | undefined,
   userId: string,
+  mute?: MessageBannerMuteContext,
 ): MessageBanner | null {
   if (!payload || !payload.message_id || !payload.conversation_id || !payload.sender_id) return null;
   if (payload.sender_id === userId) return null;
+  if (mute?.mutedConversationIds?.has(payload.conversation_id)) return null;
+  if (payload.channel_id && mute?.mutedChannelIds?.has(payload.channel_id)) return null;
 
   const senderName = payload.sender_name?.trim() || "Someone";
   const preview = messageBannerPreview(payload.message_type, payload.preview);
