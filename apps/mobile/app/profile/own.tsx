@@ -30,6 +30,7 @@ import { ProfileConfirmationModal } from '../../components/profile/ProfileConfir
 import { profileColors, profileFonts, profileCardShadow } from '../../components/profile/profileTheme';
 import type { CalendarEvent, CalendarSection } from '../../services/calendarService';
 import type { UserPost } from '../../services/followService';
+import { openProfile } from '../../lib/profileNavigation';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_ITEM_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
@@ -331,7 +332,7 @@ export default function OwnProfileScreen() {
             key={mate.user_id}
             onPress={() => {
               setGluematesSheetOpen(false);
-              router.push({ pathname: '/profile/[userId]', params: { userId: mate.user_id } } as any);
+              openProfile(router, mate.user_id, userId);
             }}
             style={styles.sheetMateRow}
           >

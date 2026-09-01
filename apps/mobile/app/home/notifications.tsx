@@ -20,6 +20,7 @@ import { Avatar } from '../../components/shared/Avatar';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { timeAgo } from '../../components/home/PostCard';
+import { openProfile } from '../../lib/profileNavigation';
 import { markNotificationRead, type AppNotification } from '../../services/notificationService';
 import { validateNotificationRoute } from '../../lib/notifications/routes';
 import { EnableNotificationsCard } from '../../components/notifications/EnableNotificationsCard';
@@ -106,7 +107,7 @@ export default function NotificationsScreen() {
     }
     if (item.sender?.id) {
       markOpened();
-      router.push({ pathname: '/profile/[userId]', params: { userId: item.sender.id } });
+      openProfile(router, item.sender.id);
     }
   };
 
@@ -134,7 +135,7 @@ export default function NotificationsScreen() {
       >
         {item.visual.kind === 'actor' && item.sender?.id ? (
           <TouchableOpacity
-            onPress={() => router.push({ pathname: '/profile/[userId]', params: { userId: item.sender!.id } })}
+            onPress={() => openProfile(router, item.sender!.id)}
             activeOpacity={0.7}
           >
             <NotificationAvatar visual={item.visual} />

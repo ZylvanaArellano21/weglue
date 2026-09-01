@@ -6,6 +6,7 @@ import { Pill } from '../shared/Pill';
 import { timeAgo } from '../home/PostCard';
 import { getResizedImageUrl } from '../../lib/imageResize';
 import { openReportFlow } from '../shared/ReportButton';
+import { openProfile } from '../../lib/profileNavigation';
 import { profileColors, profileFonts } from '../profile/profileTheme';
 import type { FeedPost } from '../../services/postService';
 
@@ -43,9 +44,7 @@ export function PostViewerBlock({
           posts design, so no post ever appears "cut off" above its image. */}
       <View style={styles.identityRow}>
         <TouchableOpacity
-          onPress={() =>
-            router.push({ pathname: '/profile/[userId]', params: { userId: post.author.id } })
-          }
+          onPress={() => openProfile(router, post.author.id, viewerUserId)}
           activeOpacity={0.7}
           style={styles.identityLeft}
         >

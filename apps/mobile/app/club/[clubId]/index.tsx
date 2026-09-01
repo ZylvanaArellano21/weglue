@@ -20,6 +20,7 @@ import { Avatar } from '../../../components/shared/Avatar';
 import { AvatarStack } from '../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import { cardDepth } from '../../../components/shared/cardStyles';
+import { openProfile } from '../../../lib/profileNavigation';
 import { useToast } from '../../../components/Toast';
 import { requestLeaveClub } from '../../../store/leaveClubStore';
 import { ReportButton } from '../../../components/shared/ReportButton';
@@ -454,22 +455,14 @@ function OfficerRow({ officer, currentUserId }: { officer: ClubOfficer; currentU
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
       <TouchableOpacity
-        onPress={() => {
-          if (officer.user_id) {
-            router.push({ pathname: '/profile/[userId]', params: { userId: officer.user_id } });
-          }
-        }}
+        onPress={() => openProfile(router, officer.user_id, currentUserId)}
         activeOpacity={0.7}
       >
         <Avatar uri={officer.avatar_url} size={46} username={officer.display_name} />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
         <TouchableOpacity
-          onPress={() => {
-            if (officer.user_id) {
-              router.push({ pathname: '/profile/[userId]', params: { userId: officer.user_id } });
-            }
-          }}
+          onPress={() => openProfile(router, officer.user_id, currentUserId)}
           activeOpacity={0.7}
         >
           <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>

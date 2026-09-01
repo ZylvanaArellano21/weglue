@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Avatar } from '../shared/Avatar';
+import { openProfile } from '../../lib/profileNavigation';
 import type { DiscoveryPerson } from '../../services/searchService';
 import { searchCardShadow, searchColors, searchSizes, searchTypography } from './searchTheme';
 
@@ -15,9 +16,7 @@ export function PersonDiscoveryCard({ person }: Props) {
   return (
     <TouchableOpacity
       style={styles.card}
-      onPress={() =>
-        router.push({ pathname: '/profile/[userId]', params: { userId: person.user_id } })
-      }
+      onPress={() => openProfile(router, person.user_id)}
       activeOpacity={0.85}
     >
       <Avatar
