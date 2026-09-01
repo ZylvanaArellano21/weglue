@@ -91,7 +91,25 @@ export function ChatInput({
     setAttachOpen(false);
     const picked = await pickPhotos(5);
     if (picked.length === 0) return;
-    setTrayPhotos(picked);
+    // A carousel is images-only. A lone video goes straight to the existing
+    // single-attachment send; a mixed selection keeps just the images.
+    const images = picked.filter((p) => p.kind === 'image');
+    if (images.length === 0 && picked[0]?.kind === 'video') {
+      const v = picked[0];
+      const res = onSendAttachment({
+        localUri: v.uri,
+        kind: 'video',
+        name: v.fileName,
+        size: v.fileSize,
+        mime: v.mimeType,
+      });
+      if (!res.ok && res.error) onAttachmentError?.(res.error);
+      return;
+    }
+    if (images.length < picked.length) {
+      onAttachmentError?.('A photo carousel can only contain images. The video was left out.');
+    }
+    setTrayPhotos(images);
     setTrayOpen(true);
   }
 

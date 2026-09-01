@@ -6,40 +6,48 @@ import type { PickedMedia } from './types';
 export const MAX_PHOTOS = 5;
 
 /**
- * Multi-select up to `limit` photos from the OS photo library.
+ * Multi-select up to `limit` items from the OS photo library.
  *
- * The OS picker itself provides the familiar numbered selection-order
- * experience on both platforms (`orderedSelection`); this only normalizes the
- * result into `PickedMedia[]` in that order. Images only — video stays on the
- * single-item path.
+ * The OS picker provides the familiar numbered selection-order experience on
+ * both platforms (`orderedSelection`); this only normalizes the result into
+ * `PickedMedia[]` in that order.
+ *
+ * Video is still allowed (`allowVideo`, default true) so chat keeps its
+ * single-video send — but a carousel is images-only, so the caller sends one
+ * lone video on the single-attachment path and treats any multi-select or
+ * mixed selection as images (see ChatInput / new-post).
  *
  * Returns [] on cancel. On iOS a photo-library permission is requested first
  * (Android's system photo picker returns a scoped grant and needs none).
  */
-export async function pickPhotos(limit = MAX_PHOTOS): Promise<PickedMedia[]> {
+export async function pickPhotos(limit = MAX_PHOTOS, allowVideo = true): Promise<PickedMedia[]> {
   if (Platform.OS === 'ios') {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return [];
   }
 
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
+    mediaTypes: allowVideo ? ['images', 'videos'] : ['images'],
     allowsMultipleSelection: true,
     selectionLimit: limit,
     orderedSelection: true,
     quality: 0.9,
+    ...(allowVideo ? { videoMaxDuration: 120 } : {}),
   });
 
   if (result.canceled) return [];
 
-  return result.assets.slice(0, limit).map((a) => ({
-    uri: a.uri,
-    fileName: a.fileName ?? 'photo.jpg',
-    mimeType: a.mimeType ?? 'image/jpeg',
-    width: a.width,
-    height: a.height,
-    fileSize: a.fileSize ?? null,
-    source: 'library' as const,
-    kind: 'image' as const,
-  }));
+  return result.assets.slice(0, limit).map((a) => {
+    const isVideo = a.type === 'video';
+    return {
+      uri: a.uri,
+      fileName: a.fileName ?? (isVideo ? 'video.mp4' : 'photo.jpg'),
+      mimeType: a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
+      width: a.width,
+      height: a.height,
+      fileSize: a.fileSize ?? null,
+      source: 'library' as const,
+      kind: isVideo ? ('video' as const) : ('image' as const),
+    };
+  });
 }

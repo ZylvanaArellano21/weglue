@@ -22,9 +22,11 @@ const MUTED = '#6B7280';
 interface Props {
   photos: PickedMedia[];
   onChange: (photos: PickedMedia[]) => void;
-  onConfirm: () => void;
+  onConfirm?: () => void;
   /** e.g. "Post", "Send", "Next". */
-  confirmLabel: string;
+  confirmLabel?: string;
+  /** Hide the built-in confirm button (host screen provides its own). */
+  showConfirm?: boolean;
   /** Re-open the picker to append more (disabled at the limit). */
   onAddMore?: () => void;
   busy?: boolean;
@@ -52,7 +54,8 @@ export function PhotoTray({
   photos,
   onChange,
   onConfirm,
-  confirmLabel,
+  confirmLabel = 'Next',
+  showConfirm = true,
   onAddMore,
   busy = false,
   limit = MAX_PHOTOS,
@@ -128,17 +131,19 @@ export function PhotoTray({
         ) : null}
       </ScrollView>
 
-      <TouchableOpacity
-        style={[styles.confirm, (photos.length === 0 || busy) && styles.confirmOff]}
-        onPress={onConfirm}
-        disabled={photos.length === 0 || busy}
-      >
-        {busy ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
-        ) : (
-          <Text style={styles.confirmText}>{confirmLabel}</Text>
-        )}
-      </TouchableOpacity>
+      {showConfirm ? (
+        <TouchableOpacity
+          style={[styles.confirm, (photos.length === 0 || busy) && styles.confirmOff]}
+          onPress={onConfirm}
+          disabled={photos.length === 0 || busy}
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.confirmText}>{confirmLabel}</Text>
+          )}
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
