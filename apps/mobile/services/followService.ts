@@ -232,6 +232,9 @@ export async function getUserPosts(
     .from('posts')
     .select('id, image_url, created_at, post_images(count)')
     .eq('author_id', userId)
+    // Club-authored posts belong to the club, not this person's profile grid
+    // (matches getUserPostsFeed, which backs the vertical post viewer).
+    .eq('author_kind', 'user')
     .not('image_url', 'is', null)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
