@@ -326,7 +326,7 @@ export function MediaViewer({ visible, items, initialIndex, onClose, currentUser
           pagingEnabled
           initialScrollIndex={Math.max(0, Math.min(initialIndex, items.length - 1))}
           getItemLayout={(_d, i) => ({ length: width, offset: width * i, index: i })}
-          keyExtractor={(item) => item.messageId}
+          keyExtractor={(item, index) => `${item.messageId}:${index}`}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(e) => {
             setIndex(Math.round(e.nativeEvent.contentOffset.x / width));
