@@ -19,11 +19,21 @@ export interface FeedPost {
   image_url: string | null;
   caption: string | null;
   created_at: string;
+  author_kind: 'user' | 'club';
   author: PostAuthor;
+  club: { id: string; name: string; avatar_url: string | null } | null;
+  images: PostImage[];
   tagged_clubs: { id: string; name: string }[];
   likes_count: number;
   comments_count: number;
   user_has_liked: boolean;
+}
+
+export interface PostImage {
+  path: string;
+  position: number;
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface PostComment {
@@ -66,6 +76,76 @@ function mergeTaggedClubs(
   return merged;
 }
 
+async function getPostImages(postIds: string[]): Promise<Map<string, PostImage[]>> {
+  const result = new Map<string, PostImage[]>();
+  if (postIds.length === 0) return result;
+
+  const { data } = await supabase
+    .from('post_images')
+    .select('post_id, storage_path, position, width, height')
+    .in('post_id', postIds)
+    .order('position', { ascending: true });
+
+  for (const row of (data ?? []) as any[]) {
+    const images = result.get(row.post_id) ?? [];
+    images.push({
+      path: row.storage_path,
+      position: Number(row.position),
+      width: row.width ?? null,
+      height: row.height ?? null,
+    });
+    result.set(row.post_id, images);
+  }
+  return result;
+}
+
+function postImages(post: any, imageMap: Map<string, PostImage[]>): PostImage[] {
+  const images = imageMap.get(post.id);
+  if (images && images.length > 0) return images;
+  return post.image_url ? [{ path: post.image_url, position: 0 }] : [];
+}
+
+function postClub(post: any): { id: string; name: string; avatar_url: string | null } | null {
+  if (post.author_kind !== 'club' || !post.clubs) return null;
+  return {
+    id: post.clubs.id,
+    name: post.clubs.name,
+    avatar_url: post.clubs.avatar_url ?? null,
+  };
+}
+
+function postAuthor(post: any, viewerState: {
+  isFollowing: boolean;
+  isRequested: boolean;
+  followsMe: boolean;
+  profileIsPrivate: boolean;
+}): PostAuthor {
+  const club = postClub(post);
+  // Club-authored posts use the club identity in the public response. The
+  // acting officer remains posts.author_id for audit/admin use, but is never
+  // returned as the non-admin FeedPost author.
+  if (club) {
+    return {
+      id: club.id,
+      username: club.name,
+      avatar_url: club.avatar_url,
+      is_following: false,
+      is_requested: false,
+      follows_me: false,
+      profile_is_private: false,
+    };
+  }
+  return {
+    id: post.profiles.id,
+    username: post.profiles.username,
+    avatar_url: post.profiles.avatar_url,
+    is_following: viewerState.isFollowing,
+    is_requested: viewerState.isRequested,
+    follows_me: viewerState.followsMe,
+    profile_is_private: viewerState.profileIsPrivate,
+  };
+}
+
 export async function getHomePostsFeed(
   userId: string,
   page: number = 0,
@@ -104,9 +184,9 @@ export async function getHomePostsFeed(
   let postsQuery = supabase
     .from('posts')
     .select(`
-      id, image_url, caption, created_at, author_id, club_id,
+      id, image_url, caption, created_at, author_id, club_id, author_kind,
       profiles!inner(id, username, avatar_url, university),
-      clubs(id, name)
+      clubs(id, name, avatar_url)
     `)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
@@ -122,7 +202,7 @@ export async function getHomePostsFeed(
   const postIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: privacyRows }, { data: extraTagRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: privacyRows }, { data: extraTagRows }, imageMap] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase
@@ -137,6 +217,7 @@ export async function getHomePostsFeed(
         .from('post_club_tags')
         .select('post_id, club_id, clubs(id, name)')
         .in('post_id', postIds),
+      getPostImages(postIds),
     ]);
 
   const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
@@ -170,15 +251,15 @@ export async function getHomePostsFeed(
     image_url: p.image_url,
     caption: p.caption,
     created_at: p.created_at,
-    author: {
-      id: p.profiles.id,
-      username: p.profiles.username,
-      avatar_url: p.profiles.avatar_url,
-      is_following: followedSet.has(p.author_id),
-      is_requested: requestedSet.has(p.author_id),
-      follows_me: followerSet.has(p.author_id),
-      profile_is_private: privacyMap.get(p.author_id) ?? false,
-    },
+    author_kind: p.author_kind ?? 'user',
+    author: postAuthor(p, {
+      isFollowing: followedSet.has(p.author_id),
+      isRequested: requestedSet.has(p.author_id),
+      followsMe: followerSet.has(p.author_id),
+      profileIsPrivate: privacyMap.get(p.author_id) ?? false,
+    }),
+    club: postClub(p),
+    images: postImages(p, imageMap),
     tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
     likes_count: likesCountMap.get(p.id) ?? 0,
     comments_count: commentsCountMap.get(p.id) ?? 0,
@@ -196,16 +277,16 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
   const { data: p, error } = await supabase
     .from('posts')
     .select(`
-      id, image_url, caption, created_at, author_id, club_id,
+      id, image_url, caption, created_at, author_id, club_id, author_kind,
       profiles!inner(id, username, avatar_url),
-      clubs(id, name)
+      clubs(id, name, avatar_url)
     `)
     .eq('id', postId)
     .single();
 
   if (error || !p) return null;
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }, imageMap] =
     await Promise.all([
       supabase.from('post_likes').select('user_id').eq('post_id', postId),
       supabase.from('post_comments').select('id').eq('post_id', postId),
@@ -231,6 +312,7 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
         .from('post_club_tags')
         .select('post_id, club_id, clubs(id, name)')
         .eq('post_id', postId),
+      getPostImages([postId]),
     ]);
 
   const likes = (likesRows ?? []) as any[];
@@ -240,15 +322,15 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
     image_url: p.image_url,
     caption: p.caption,
     created_at: p.created_at,
-    author: {
-      id: (p as any).profiles.id,
-      username: (p as any).profiles.username,
-      avatar_url: (p as any).profiles.avatar_url,
-      is_following: (followRow as any)?.status === 'accepted',
-      is_requested: (followRow as any)?.status === 'pending',
-      follows_me: !!followsMeRow,
-      profile_is_private: (privacyRow as any)?.is_private ?? false,
-    },
+    author_kind: (p as any).author_kind ?? 'user',
+    author: postAuthor(p, {
+      isFollowing: (followRow as any)?.status === 'accepted',
+      isRequested: (followRow as any)?.status === 'pending',
+      followsMe: !!followsMeRow,
+      profileIsPrivate: (privacyRow as any)?.is_private ?? false,
+    }),
+    club: postClub(p),
+    images: postImages(p, imageMap),
     tagged_clubs: mergeTaggedClubs(
       (p as any).club_id,
       (p as any).clubs,
@@ -276,11 +358,12 @@ export async function getUserPostsFeed(
   const { data: rawPosts, error } = await supabase
     .from('posts')
     .select(`
-      id, image_url, caption, created_at, author_id, club_id,
+      id, image_url, caption, created_at, author_id, club_id, author_kind,
       profiles!inner(id, username, avatar_url),
-      clubs(id, name)
+      clubs(id, name, avatar_url)
     `)
     .eq('author_id', profileUserId)
+    .eq('author_kind', 'user')
     .not('image_url', 'is', null)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
@@ -289,7 +372,7 @@ export async function getUserPostsFeed(
 
   const postIds = (rawPosts as any[]).map((p) => p.id);
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }, imageMap] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase.from('post_comments').select('post_id').in('post_id', postIds),
@@ -315,6 +398,7 @@ export async function getUserPostsFeed(
         .from('post_club_tags')
         .select('post_id, club_id, clubs(id, name)')
         .in('post_id', postIds),
+      getPostImages(postIds),
     ]);
 
   const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
@@ -341,15 +425,15 @@ export async function getUserPostsFeed(
     image_url: p.image_url,
     caption: p.caption,
     created_at: p.created_at,
-    author: {
-      id: p.profiles.id,
-      username: p.profiles.username,
-      avatar_url: p.profiles.avatar_url,
-      is_following: isFollowing,
-      is_requested: isRequested,
-      follows_me: followsMe,
-      profile_is_private: isPrivate,
-    },
+    author_kind: p.author_kind ?? 'user',
+    author: postAuthor(p, {
+      isFollowing,
+      isRequested,
+      followsMe,
+      profileIsPrivate: isPrivate,
+    }),
+    club: postClub(p),
+    images: postImages(p, imageMap),
     tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
     likes_count: likesCountMap.get(p.id) ?? 0,
     comments_count: commentsCountMap.get(p.id) ?? 0,
@@ -373,9 +457,9 @@ export async function getPostsByIds(
   const { data: rawPosts, error } = await supabase
     .from('posts')
     .select(`
-      id, image_url, caption, created_at, author_id, club_id,
+      id, image_url, caption, created_at, author_id, club_id, author_kind,
       profiles!inner(id, username, avatar_url),
-      clubs(id, name)
+      clubs(id, name, avatar_url)
     `)
     .in('id', postIds);
 
@@ -391,6 +475,7 @@ export async function getPostsByIds(
     { data: followerRows },
     { data: privacyRows },
     { data: extraTagRows },
+    imageMap,
   ] = await Promise.all([
     supabase.from('post_likes').select('post_id, user_id').in('post_id', foundIds),
     supabase.from('post_comments').select('post_id').in('post_id', foundIds),
@@ -410,6 +495,7 @@ export async function getPostsByIds(
       .from('post_club_tags')
       .select('post_id, club_id, clubs(id, name)')
       .in('post_id', foundIds),
+    getPostImages(foundIds),
   ]);
 
   const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
@@ -440,15 +526,15 @@ export async function getPostsByIds(
       image_url: p.image_url,
       caption: p.caption,
       created_at: p.created_at,
-      author: {
-        id: p.profiles.id,
-        username: p.profiles.username,
-        avatar_url: p.profiles.avatar_url,
-        is_following: followingMap.get(p.author_id) === 'accepted',
-        is_requested: followingMap.get(p.author_id) === 'pending',
-        follows_me: followerSet.has(p.author_id),
-        profile_is_private: privacyMap.get(p.author_id) ?? false,
-      },
+      author_kind: p.author_kind ?? 'user',
+      author: postAuthor(p, {
+        isFollowing: followingMap.get(p.author_id) === 'accepted',
+        isRequested: followingMap.get(p.author_id) === 'pending',
+        followsMe: followerSet.has(p.author_id),
+        profileIsPrivate: privacyMap.get(p.author_id) ?? false,
+      }),
+      club: postClub(p),
+      images: postImages(p, imageMap),
       tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
       likes_count: likesCountMap.get(p.id) ?? 0,
       comments_count: commentsCountMap.get(p.id) ?? 0,
@@ -533,32 +619,60 @@ async function compressImage(uri: string): Promise<string> {
 
 export async function createPost(
   userId: string,
-  imageUri: string,
+  imageUri: string | string[],
   caption: string | undefined,
   clubIds: string[] | undefined,
   // Stable per-compose tag: a double-tap or a lost-response retry of the SAME
   // New Post reuses it and collapses to one row (migration 100).
   clientTag: string,
+  /** Set only for the locked Club Profile flow; Home tags remain user posts. */
+  authoredClubId?: string,
 ): Promise<string> {
-  const compressedUri = await compressImage(imageUri);
+  const imageUris = Array.isArray(imageUri) ? imageUri : [imageUri];
+  if (imageUris.length < 1 || imageUris.length > 5) {
+    throw new Error('Posts must contain between 1 and 5 images');
+  }
 
-  const filename = `${userId}/${Date.now()}.jpg`;
-  const response = await fetch(compressedUri);
-  const blob = await response.blob();
-  const arrayBuffer = await new Response(blob).arrayBuffer();
+  const publicUrls = await Promise.all(imageUris.map(async (uri, position) => {
+    const compressedUri = await compressImage(uri);
+    const filename = `${userId}/${Date.now()}-${position}.jpg`;
+    const response = await fetch(compressedUri);
+    const blob = await response.blob();
+    const arrayBuffer = await new Response(blob).arrayBuffer();
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('posts')
+      .upload(filename, new Uint8Array(arrayBuffer), {
+        contentType: 'image/jpeg',
+        upsert: false,
+      });
+    if (uploadError || !uploadData) throw uploadError ?? new Error('Upload failed');
+    return supabase.storage.from('posts').getPublicUrl(uploadData.path).data.publicUrl;
+  }));
 
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('posts')
-    .upload(filename, new Uint8Array(arrayBuffer), {
-      contentType: 'image/jpeg',
-      upsert: false,
+  // A post made from a Club Profile is authored by the club. A Home post can
+  // still tag one or more clubs and remains student-authored.
+  if (authoredClubId || publicUrls.length > 1) {
+    const { data, error } = await supabase.rpc('create_post', {
+      p_caption: caption ?? null,
+      p_image_paths: publicUrls,
+      p_club_id: authoredClubId ?? null,
     });
+    if (error) throw error;
+    const result = data as any;
+    const postId = result?.post_id ?? result?.post?.id ?? result?.id;
+    if (!postId) throw new Error('Failed to create post');
 
-  if (uploadError || !uploadData) throw uploadError ?? new Error('Upload failed');
-
-  const { data: { publicUrl } } = supabase.storage
-    .from('posts')
-    .getPublicUrl(uploadData.path);
+    if (!authoredClubId && clubIds && clubIds.length > 0) {
+      const { error: tagError } = await supabase
+        .from('post_club_tags')
+        .upsert(clubIds.map((clubId) => ({ post_id: postId, club_id: clubId })), {
+          onConflict: 'post_id,club_id',
+          ignoreDuplicates: true,
+        });
+      if (tagError) throw tagError;
+    }
+    return postId;
+  }
 
   const primaryClubId = clubIds && clubIds.length > 0 ? clubIds[0] : null;
 
@@ -568,7 +682,7 @@ export async function createPost(
       author_id: userId,
       club_id: primaryClubId,
       post_type: 'picture',
-      image_url: publicUrl,
+      image_url: publicUrls[0],
       caption: caption ?? null,
       client_tag: clientTag,
     })

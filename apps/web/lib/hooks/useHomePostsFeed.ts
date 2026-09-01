@@ -23,11 +23,45 @@ export interface FeedPost {
   image_url: string | null;
   caption: string | null;
   created_at: string;
+  author_kind: "user" | "club";
   author: PostAuthor;
+  club: { id: string; name: string; avatar_url: string | null } | null;
+  images: { path: string; position: number; width?: number | null; height?: number | null }[];
   tagged_clubs: { id: string; name: string }[];
   likes_count: number;
   comments_count: number;
   user_has_liked: boolean;
+}
+
+async function getPostImages(postIds: string[]) {
+  const result = new Map<string, { path: string; position: number; width?: number | null; height?: number | null }[]>();
+  if (postIds.length === 0) return result;
+  const { data } = await getSupabaseBrowser()
+    .from("post_images")
+    .select("post_id, storage_path, position, width, height")
+    .in("post_id", postIds)
+    .order("position", { ascending: true });
+  for (const row of (data ?? []) as any[]) {
+    const images = result.get(row.post_id) ?? [];
+    images.push({ path: row.storage_path, position: Number(row.position), width: row.width ?? null, height: row.height ?? null });
+    result.set(row.post_id, images);
+  }
+  return result;
+}
+
+function postClub(post: any): { id: string; name: string; avatar_url: string | null } | null {
+  if (post.author_kind !== "club" || !post.clubs) return null;
+  return { id: post.clubs.id, name: post.clubs.name, avatar_url: post.clubs.avatar_url ?? null };
+}
+
+function postImages(post: any, imageMap: Map<string, { path: string; position: number; width?: number | null; height?: number | null }[]>) {
+  return imageMap.get(post.id)?.length ? imageMap.get(post.id)! : (post.image_url ? [{ path: post.image_url, position: 0 }] : []);
+}
+
+function postAuthor(post: any, state: { is_following: boolean; is_requested: boolean; follows_me: boolean; profile_is_private: boolean }): PostAuthor {
+  const club = postClub(post);
+  if (club) return { id: club.id, username: club.name, avatar_url: club.avatar_url, is_following: false, is_requested: false, follows_me: false, profile_is_private: false };
+  return { id: post.profiles.id, username: post.profiles.username, avatar_url: post.profiles.avatar_url, ...state };
 }
 
 function mergeTaggedClubs(
@@ -80,9 +114,9 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
     .from("posts")
     .select(
       `
-      id, image_url, caption, created_at, author_id, club_id,
+      id, image_url, caption, created_at, author_id, club_id, author_kind,
       profiles!inner(id, username, avatar_url, university),
-      clubs(id, name)
+      clubs(id, name, avatar_url)
     `
     )
     .order("created_at", { ascending: false })
@@ -96,7 +130,7 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
   const postIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: privacyRows }, { data: extraTagRows }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: privacyRows }, { data: extraTagRows }, imageMap] =
     await Promise.all([
       supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
       supabase.from("post_comments").select("post_id").in("post_id", postIds),
@@ -105,6 +139,7 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
         .from("post_club_tags")
         .select("post_id, club_id, clubs(id, name)")
         .in("post_id", postIds),
+      getPostImages(postIds),
     ]);
 
   const extraTaggedClubsMap = new Map<string, { id: string; name: string }[]>();
@@ -140,15 +175,15 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
     image_url: p.image_url,
     caption: p.caption,
     created_at: p.created_at,
-    author: {
-      id: p.profiles.id,
-      username: p.profiles.username,
-      avatar_url: p.profiles.avatar_url,
+    author_kind: p.author_kind ?? "user",
+    author: postAuthor(p, {
       is_following: followedSet.has(p.author_id),
       is_requested: requestedSet.has(p.author_id),
       follows_me: followerSet.has(p.author_id),
       profile_is_private: privacyMap.get(p.author_id) ?? false,
-    },
+    }),
+    club: postClub(p),
+    images: postImages(p, imageMap),
     tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
     likes_count: likesCountMap.get(p.id) ?? 0,
     comments_count: commentsCountMap.get(p.id) ?? 0,
@@ -179,7 +214,7 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
     .from("posts")
     .select(
       `id, image_url, caption, created_at, author_id, club_id,
-       profiles!inner(id, username, avatar_url), clubs(id, name)`
+       profiles!inner(id, username, avatar_url), clubs(id, name, avatar_url), author_kind`
     )
     .eq("id", postId)
     .maybeSingle();
@@ -187,7 +222,7 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
   const post = p as any;
 
   const isSelf = post.author_id === userId;
-  const [{ data: likesRows }, { data: commentsRows }, { data: extraTagRows }, { data: myFollow }, { data: theirFollow }] =
+  const [{ data: likesRows }, { data: commentsRows }, { data: extraTagRows }, { data: myFollow }, { data: theirFollow }, imageMap] =
     await Promise.all([
       supabase.from("post_likes").select("user_id").eq("post_id", postId),
       supabase.from("post_comments").select("id").eq("post_id", postId),
@@ -206,6 +241,7 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
             .eq("following_id", userId)
             .eq("status", "accepted")
             .maybeSingle(),
+      getPostImages([postId]),
     ]);
 
   const myFollowStatus = (myFollow as { status?: string } | null)?.status ?? null;
@@ -224,15 +260,15 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
     image_url: post.image_url,
     caption: post.caption,
     created_at: post.created_at,
-    author: {
-      id: post.profiles.id,
-      username: post.profiles.username,
-      avatar_url: post.profiles.avatar_url,
+    author_kind: post.author_kind ?? "user",
+    author: postAuthor(post, {
       is_following: myFollowStatus === "accepted",
       is_requested: myFollowStatus === "pending",
       follows_me: !!theirFollow,
       profile_is_private: false,
-    },
+    }),
+    club: postClub(post),
+    images: postImages(post, imageMap),
     tagged_clubs: mergeTaggedClubs(post.club_id, post.clubs, extra.get(post.id) ?? []),
     likes_count: likes.length,
     comments_count: ((commentsRows ?? []) as any[]).length,

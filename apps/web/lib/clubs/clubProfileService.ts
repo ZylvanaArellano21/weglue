@@ -82,6 +82,35 @@ export interface ClubProfileData {
 
 const CLUB_PHOTOS_SELECT = "id, url, source, post_id, caption, created_at";
 
+async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
+  const supabase = getSupabaseBrowser();
+  const [{ data: legacyRows, error: legacyError }, { data: authoredRows, error: authoredError }] = await Promise.all([
+    supabase
+      .from("club_photos")
+      .select(CLUB_PHOTOS_SELECT)
+      .eq("club_id", clubId)
+      .eq("is_visible", true)
+      .or("source.eq.officer_upload,post_id.not.is.null")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("posts")
+      .select("id, image_url, caption, created_at")
+      .eq("club_id", clubId)
+      .eq("author_kind", "club")
+      .not("image_url", "is", null),
+  ]);
+  if (legacyError) throw legacyError;
+  if (authoredError) throw authoredError;
+  const photos = (legacyRows ?? []) as ClubPhoto[];
+  const existingPostIds = new Set(photos.map((photo) => photo.post_id).filter(Boolean));
+  for (const post of (authoredRows ?? []) as any[]) {
+    if (existingPostIds.has(post.id)) continue;
+    photos.push({ id: post.id, url: post.image_url, source: "tagged_post", post_id: post.id, caption: post.caption, created_at: post.created_at });
+  }
+  photos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return photos;
+}
+
 export async function getClubProfile(
   clubId: string,
   userId: string
@@ -95,7 +124,7 @@ export async function getClubProfile(
     { data: goals },
     { data: officerRows },
     { data: eventRows },
-    { data: photoRows },
+    photoRows,
     gluemates,
   ] = await Promise.all([
     supabase
@@ -126,13 +155,7 @@ export async function getClubProfile(
     // receive attendee data or gain direct-detail access. Selected events are
     // omitted unless the caller is selected, creator, or officer.
     supabase.rpc("get_club_profile_events", { p_club_id: clubId }),
-    supabase
-      .from("club_photos")
-      .select(CLUB_PHOTOS_SELECT)
-      .eq("club_id", clubId)
-      .eq("is_visible", true)
-      .or("source.eq.officer_upload,post_id.not.is.null")
-      .order("created_at", { ascending: false }),
+    getClubPhotos(clubId),
     getClubGluemates(clubId, userId),
   ]);
 
@@ -198,7 +221,7 @@ export async function getClubProfile(
     officers,
     upcoming_events: upcoming,
     past_events: past,
-    photos: (photoRows ?? []) as ClubPhoto[],
+    photos: photoRows,
     gluemates: gluemates.slice(0, 4),
     gluemates_count: gluemates.length,
   };
