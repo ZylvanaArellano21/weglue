@@ -15,6 +15,7 @@ import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import * as Clipboard from 'expo-clipboard';
 import type { ThreadMessage } from '../../services/messagingService';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
+import { QuickReactionBar, EmojiPickerSheet } from './ReactionPicker';
 
 // ─── Long-press message action menu ─────────────────────────────────────────
 // Own content:   Copy (text) · Unsend for everyone · Delete for me
@@ -42,6 +43,10 @@ interface Props {
    * open with the reason + details preserved so the user can retry. */
   onReport: (messageId: string, reason: string, details?: string) => Promise<boolean>;
   onSaveMedia?: (messageId: string) => void;
+  /** The viewer's own reaction on this message, if any. */
+  myReaction?: string | null;
+  /** Set (emoji) / clear (null) the viewer's reaction. Absent → no reaction UI. */
+  onReact?: (messageId: string, emoji: string | null) => void;
 }
 
 export function MessageActionsSheet({
@@ -53,10 +58,13 @@ export function MessageActionsSheet({
   onDeleteForMe,
   onReport,
   onSaveMedia,
+  myReaction,
+  onReact,
 }: Props) {
   // Android: lift the report sheet above the keyboard (iOS keeps KAV padding).
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
   const [reporting, setReporting] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -74,7 +82,13 @@ export function MessageActionsSheet({
     setSubmitting(false);
     setSubmitError(false);
     setSubmitted(false);
+    setEmojiPickerOpen(false);
     onClose();
+  }
+
+  function react(emoji: string | null) {
+    if (message && onReact) onReact(message.id, emoji);
+    close();
   }
 
   async function handleCopy() {
@@ -99,6 +113,7 @@ export function MessageActionsSheet({
   }
 
   return (
+    <>
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.overlay} onPress={close}>
         <KeyboardAvoidingView
@@ -107,6 +122,14 @@ export function MessageActionsSheet({
         >
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.handle} />
+
+            {!reporting && onReact ? (
+              <QuickReactionBar
+                current={myReaction}
+                onReact={(e) => react(myReaction === e ? null : e)}
+                onOpenFullPicker={() => setEmojiPickerOpen(true)}
+              />
+            ) : null}
 
             {!reporting ? (
               <>
@@ -208,6 +231,14 @@ export function MessageActionsSheet({
         </KeyboardAvoidingView>
       </Pressable>
     </Modal>
+
+    <EmojiPickerSheet
+      visible={emojiPickerOpen}
+      current={myReaction}
+      onPick={(e) => react(myReaction === e ? null : e)}
+      onClose={() => setEmojiPickerOpen(false)}
+    />
+    </>
   );
 }
 
