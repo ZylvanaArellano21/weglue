@@ -8,10 +8,10 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { QUICK_REACTIONS, EMOJI_GROUPS } from '@weglue/shared';
 import { chatColors, chatFonts, chatShadow } from './chatTheme';
 
-/** The five quick reactions (no 👎 here — it lives in the full picker). */
-export const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '🎉'] as const;
+export { QUICK_REACTIONS };
 
 interface QuickBarProps {
   /** The viewer's current reaction on this message, if any. */
@@ -50,30 +50,6 @@ export function QuickReactionBar({ current, onReact, onOpenFullPicker }: QuickBa
     </View>
   );
 }
-
-// A curated "full" set — every common reaction plus 👎. Grouped for scanability.
-const EMOJI_GROUPS: { label: string; emojis: string[] }[] = [
-  {
-    label: 'Reactions',
-    emojis: ['❤️', '👍', '👎', '😂', '😮', '🎉', '🔥', '👏', '🙏', '💯', '✅', '👀'],
-  },
-  {
-    label: 'Smileys',
-    emojis: ['😀', '😅', '😊', '😍', '🥰', '😎', '🤩', '😭', '😢', '😤', '😴', '🤔', '😬', '🙃', '😇', '🤗'],
-  },
-  {
-    label: 'Gestures',
-    emojis: ['🤝', '✌️', '🤞', '🤙', '👌', '🫶', '🙌', '💪', '🫡', '👋'],
-  },
-  {
-    label: 'Hearts & symbols',
-    emojis: ['🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '💔', '⭐', '🌟', '✨', '⚡'],
-  },
-  {
-    label: 'Life',
-    emojis: ['🎊', '🥳', '🍕', '☕', '📚', '🎓', '🏀', '⚽', '🎵', '🌈', '🌸', '💐'],
-  },
-];
 
 interface FullPickerProps {
   visible: boolean;

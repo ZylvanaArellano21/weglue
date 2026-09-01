@@ -157,6 +157,8 @@ export interface ThreadMessage {
   /** Retained on a pending message so a failed send can be retried with the
    *  original file rather than asking the person to pick it again. */
   pendingFile?: File;
+  /** Same, for a grouped photo send (1..5). */
+  pendingFiles?: File[];
 }
 
 export interface MessageAttachment {

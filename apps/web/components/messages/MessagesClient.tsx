@@ -21,6 +21,7 @@ import { ToastProvider, useToast } from "../shared/Toast";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
 import { useMyClubs } from "../../lib/hooks/useClubTab";
+import { senderNameColor } from "@weglue/shared";
 import { ATTACHMENT_UNAVAILABLE_TEXT, blockConfirmMessage, blockUser } from "../../lib/blocking";
 import {
   addGroupParticipants,
@@ -54,6 +55,7 @@ import {
   postingPermissionOptions,
   releaseAttachmentUrl,
   uploadAttachment,
+  toggleMessageReaction,
   votePoll,
   type Channel,
   type ChannelPreview,
@@ -92,6 +94,17 @@ import {
   useAttachmentUrl,
   useSearchHighlight,
 } from "./RichMessage";
+import {
+  EmojiPickerPopover,
+  GroupedMedia,
+  MediaLightbox,
+  PhotoTray,
+  QuickReactionRow,
+  ReactionChips,
+  useAttachmentUrls,
+  type LightboxItem,
+} from "./messageInteractions";
+import type { MessageAttachment } from "../../lib/messages/service";
 
 type Filter = "single" | "groups";
 type InfoTab = "polls" | "media" | "events" | "files";
@@ -605,7 +618,25 @@ function DraftThread({ userId, draftPerson, groupName, groupIds, onMaterialized,
       onMaterialized(conversationId);
     } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t send the message."); }
   };
-  return <ThreadShell title={label} subtitle={draftPerson ? draftPerson.full_name : null} onBack={onClearSelection}><EmptyThread label="Start the conversation" /><Composer onSend={send} /></ThreadShell>;
+  const sendPhotos = async (files: File[], caption?: string) => {
+    try {
+      let conversationId: string;
+      if (draftPerson) conversationId = await getOrCreateDirectConversation(draftPerson.user_id);
+      else if (groupIds.length) conversationId = await createGroupConversation(groupIds, groupName, "", clientTag());
+      else throw new Error("Choose a recipient first.");
+      const uploaded = await Promise.all(files.map((file) => uploadAttachment(conversationId, file)));
+      await sendMessage({
+        conversationId,
+        channelId: null,
+        content: caption?.trim() || null,
+        messageType: "image",
+        attachments: uploaded.map((u) => ({ path: u.path, kind: "image" as const, mime: u.mime, bytes: u.size, fileName: u.name })),
+        tag: clientTag(),
+      });
+      onMaterialized(conversationId);
+    } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t send the photos."); }
+  };
+  return <ThreadShell title={label} subtitle={draftPerson ? draftPerson.full_name : null} onBack={onClearSelection}><EmptyThread label="Start the conversation" /><Composer isGroup={groupIds.length > 0} onSend={send} onSendPhotos={sendPhotos} /></ThreadShell>;
 }
 
 function ChannelHub({ conversationId, conversationName, conversationAvatarUrl, userId, participants, isOfficer, isOfficersChat, onOpenChannel, onOpenInfo, onBack, onCreateChannel, onRenameChannel, onDeleteChannel, onSetPermission }: { conversationId: string; conversationName: string; conversationAvatarUrl: string | null; userId: string; participants: Array<Person & { joined_at: string; role: string }>; isOfficer: boolean; isOfficersChat: boolean; onOpenChannel: (channel: ChannelPreview) => void; onOpenInfo: () => void; onBack: () => void; onCreateChannel: (name: string) => Promise<void>; onRenameChannel: (channelId: string, name: string) => Promise<void>; onDeleteChannel: (channelId: string) => Promise<void>; onSetPermission: (channelId: string, permission: PostingPermission, userIds: string[]) => Promise<void> }): JSX.Element {
@@ -674,7 +705,7 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   const { data: permitted } = useMessagePermission(channelId);
   const queryClient = useQueryClient();
   const unsend = useUnsendMessage(conversationId, channelId, userId, onError);
-  const { outgoing, enqueue, retry } = useOutgoingMessages(conversationId, channelId, userId, onInvalidate, onError);
+  const { outgoing, enqueue, enqueuePhotos } = useOutgoingMessages(conversationId, channelId, userId, onInvalidate, onError);
   const stored = useMemo(() => [...(page?.messages ?? [])].reverse(), [page?.messages]);
   // A pending message is dropped the moment its stored row arrives, matched on
   // `client_tag` — the same idempotency key the insert carries — so a send can
@@ -708,7 +739,88 @@ function ConversationThread({ userId, conversationId, channelId, details, channe
   });
   const restrictedSenders = useMemo(() => new Set(restrictedSenderIds ?? []), [restrictedSenderIds]);
   const emptyLabel = channelName && channelName.startsWith("#") ? `No messages in ${channelName} yet` : "No messages yet";
-  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}><div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">{isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => <MessageBubble key={message.id} message={message} isOwn={message.sender_id === userId} showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id} userId={userId} onOpenProfile={onOpenProfile} onOpenEvent={onOpenEvent} onOpenPost={onOpenPost} onUnsend={unsend} onChanged={onInvalidate} onError={onError} attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)} isSearchTarget={!!targetMessageId && message.id === targetMessageId} searchNonce={searchNonce} />) : <EmptyThread label={emptyLabel} />}</div><Composer disabled={!actualCanPost} disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined} allowPolls={details.type !== "direct"} onSend={enqueue} onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }} /></ThreadShell>;
+  const isGroup = details.type !== "direct";
+
+  // One flat list of every photo/video in the thread, so the lightbox can swipe
+  // across the whole conversation the way mobile's MediaViewer does.
+  const mediaEntries = useMemo(
+    () =>
+      messages.flatMap((message) => {
+        const media = (message.attachments ?? []).filter((a) => a.kind === "image" || a.kind === "video");
+        const senderName = message.sender.full_name ?? message.sender.username;
+        if (media.length > 0) {
+          return media.map((a, i) => ({ messageId: message.id, index: a.position ?? i, path: a.storage_path, kind: a.kind === "video" ? ("video" as const) : ("image" as const), senderName }));
+        }
+        if ((message.message_type === "image" || message.message_type === "video") && message.attachment_url) {
+          return [{ messageId: message.id, index: 0, path: message.attachment_url, kind: message.message_type as "image" | "video", senderName }];
+        }
+        return [];
+      }),
+    [messages]
+  );
+  const mediaPaths = useMemo(() => mediaEntries.map((e) => e.path), [mediaEntries]);
+  const mediaUrls = useAttachmentUrls(mediaPaths);
+  const lightboxItems: LightboxItem[] = useMemo(
+    () => mediaEntries.map((e) => ({ url: mediaUrls.get(e.path) ?? null, kind: e.kind, senderName: e.senderName })),
+    [mediaEntries, mediaUrls]
+  );
+  const [lightboxAt, setLightboxAt] = useState<number | null>(null);
+  const openMedia = useCallback(
+    (messageId: string, index = 0) => {
+      let i = mediaEntries.findIndex((e) => e.messageId === messageId && e.index === index);
+      if (i === -1) i = mediaEntries.findIndex((e) => e.messageId === messageId);
+      if (i !== -1) setLightboxAt(i);
+    },
+    [mediaEntries]
+  );
+  // Reactions are not optimistic — the canonical rows come back on the realtime
+  // `reaction` broadcast + this invalidate. A failed react is low-stakes.
+  const handleReact = useCallback(
+    (messageId: string, emoji: string) => {
+      void toggleMessageReaction(messageId, emoji).then(onInvalidate).catch(() => onInvalidate());
+    },
+    [onInvalidate]
+  );
+
+  return <ThreadShell title={channelName ?? details.name} subtitle={channelName ? details.name : null} onOpenHub={onOpenHub} onBack={onBack} onOpenInfo={onOpenInfo}>
+    <div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-5">
+      {isLoading ? <p className="m-auto text-sm text-gray-500">Loading messages…</p> : messages.length ? messages.map((message, index) => (
+        <MessageBubble
+          key={message.id}
+          message={message}
+          isOwn={message.sender_id === userId}
+          showSender={index === 0 || messages[index - 1]?.sender_id !== message.sender_id}
+          isLastInGroup={index === messages.length - 1 || messages[index + 1]?.sender_id !== message.sender_id}
+          isGroup={isGroup}
+          userId={userId}
+          attachmentUrls={mediaUrls}
+          onOpenProfile={onOpenProfile}
+          onOpenEvent={onOpenEvent}
+          onOpenPost={onOpenPost}
+          onOpenMedia={openMedia}
+          onReact={handleReact}
+          onUnsend={unsend}
+          onChanged={onInvalidate}
+          onError={onError}
+          attachmentUnavailable={!!message.sender_id && restrictedSenders.has(message.sender_id)}
+          isSearchTarget={!!targetMessageId && message.id === targetMessageId}
+          searchNonce={searchNonce}
+        />
+      )) : <EmptyThread label={emptyLabel} />}
+    </div>
+    <Composer
+      disabled={!actualCanPost}
+      disabledReason={channelId && permitted === false ? "Only club officers can post in this chat." : undefined}
+      allowPolls={isGroup}
+      isGroup={isGroup}
+      onSend={enqueue}
+      onSendPhotos={enqueuePhotos}
+      onPoll={async (poll) => { try { await createPoll({ conversationId, channelId, question: poll.question, options: poll.options, allowMultiple: poll.allowMultiple, startAt: poll.startAt, endAt: poll.endAt }); onInvalidate(); } catch (error) { onError(error instanceof Error ? error.message : "Couldn’t create the poll."); } }}
+    />
+    {lightboxAt !== null && lightboxItems[lightboxAt] && (
+      <MediaLightbox items={lightboxItems} index={lightboxAt} onIndex={setLightboxAt} onClose={() => setLightboxAt(null)} />
+    )}
+  </ThreadShell>;
 }
 
 /**
@@ -735,18 +847,23 @@ function useOutgoingMessages(
   userId: string,
   onSettled: () => void,
   onError: (message: string) => void
-): { outgoing: ThreadMessage[]; enqueue: (text: string, file?: File) => Promise<void>; retry: (tag: string) => void } {
+): { outgoing: ThreadMessage[]; enqueue: (text: string, file?: File) => Promise<void>; enqueuePhotos: (files: File[], caption?: string) => Promise<void>; retry: (tag: string) => void } {
   const [outgoing, setOutgoing] = useState<ThreadMessage[]>([]);
   const previews = useRef(new Map<string, string>());
+  // Grouped-photo sends keep an array of local blob previews per client_tag.
+  const groupPreviews = useRef(new Map<string, string[]>());
 
   useEffect(() => {
     // Clear pending state when the viewer moves to another thread, and release
     // every local preview so the blobs are not retained.
     setOutgoing([]);
     const urls = previews.current;
+    const groups = groupPreviews.current;
     return () => {
       urls.forEach((url) => releaseAttachmentUrl(url));
       urls.clear();
+      groups.forEach((list) => list.forEach((url) => URL.revokeObjectURL(url)));
+      groups.clear();
     };
   }, [channelId, conversationId]);
 
@@ -755,6 +872,11 @@ function useOutgoingMessages(
     if (preview) {
       releaseAttachmentUrl(preview);
       previews.current.delete(tag);
+    }
+    const group = groupPreviews.current.get(tag);
+    if (group) {
+      group.forEach((url) => URL.revokeObjectURL(url));
+      groupPreviews.current.delete(tag);
     }
     setOutgoing((current) => current.filter((message) => message.client_tag !== tag));
   }, []);
@@ -781,12 +903,37 @@ function useOutgoingMessages(
     }
   }, [channelId, conversationId, onError, onSettled, settle]);
 
+  const performPhotos = useCallback(async (tag: string, caption: string, files: File[]) => {
+    try {
+      const uploaded = await Promise.all(files.map((file) => uploadAttachment(conversationId, file)));
+      await sendMessage({
+        conversationId,
+        channelId,
+        content: caption,
+        messageType: "image",
+        attachments: uploaded.map((u) => ({ path: u.path, kind: "image" as const, mime: u.mime, bytes: u.size, fileName: u.name })),
+        tag,
+      });
+      onSettled();
+      settle(tag);
+    } catch (error) {
+      setOutgoing((current) =>
+        current.map((message) => (message.client_tag === tag ? { ...message, pending_state: "failed" as const } : message))
+      );
+      onError(error instanceof Error ? error.message : "Couldn’t send the photos.");
+    }
+  }, [channelId, conversationId, onError, onSettled, settle]);
+
   const retry = useCallback((tag: string) => {
     const message = outgoing.find((item) => item.client_tag === tag);
     if (!message) return;
     setOutgoing((current) => current.map((item) => (item.client_tag === tag ? { ...item, pending_state: "sending" as const } : item)));
-    void perform(tag, message.content ?? "", message.pendingFile);
-  }, [outgoing, perform]);
+    if (message.pendingFiles && message.pendingFiles.length > 0) {
+      void performPhotos(tag, message.content ?? "", message.pendingFiles);
+    } else {
+      void perform(tag, message.content ?? "", message.pendingFile);
+    }
+  }, [outgoing, perform, performPhotos]);
 
   const enqueue = useCallback(async (text: string, file?: File) => {
     const tag = clientTag();
@@ -816,12 +963,52 @@ function useOutgoingMessages(
     await perform(tag, text, file);
   }, [channelId, conversationId, perform, userId]);
 
+  const enqueuePhotos = useCallback(async (files: File[], caption?: string) => {
+    if (files.length === 0) return;
+    const tag = clientTag();
+    const localUrls = files.map((file) => URL.createObjectURL(file));
+    groupPreviews.current.set(tag, localUrls);
+    const attachments: MessageAttachment[] = files.map((file, i) => ({
+      id: `pending:${tag}:${i}`,
+      storage_path: localUrls[i]!,
+      kind: "image",
+      position: i,
+      mime: file.type || null,
+      width: null,
+      height: null,
+      byte_size: file.size,
+      file_name: file.name,
+    }));
+    setOutgoing((current) => [...current, {
+      id: `pending:${tag}`,
+      conversation_id: conversationId,
+      channel_id: channelId,
+      sender_id: userId,
+      content: caption?.trim() || null,
+      attachment_url: null,
+      attachment_name: null,
+      attachment_size: null,
+      attachment_mime: null,
+      message_type: "image",
+      shared_event_id: null,
+      shared_post_id: null,
+      poll_id: null,
+      client_tag: tag,
+      created_at: new Date().toISOString(),
+      attachments,
+      sender: { id: userId, username: "", full_name: null, avatar_url: null },
+      pending_state: "sending",
+      pendingFiles: files,
+    }]);
+    await performPhotos(tag, caption?.trim() ?? "", files);
+  }, [channelId, conversationId, performPhotos, userId]);
+
   const withRetry = useMemo(
     () => outgoing.map((message) => ({ ...message, onRetry: () => retry(message.client_tag!) })),
     [outgoing, retry]
   );
 
-  return { outgoing: withRetry, enqueue, retry };
+  return { outgoing: withRetry, enqueue, enqueuePhotos, retry };
 }
 
 type MessageTypeLocal = ThreadMessage["message_type"];
@@ -834,25 +1021,97 @@ function ThreadShell({ title, subtitle, onOpenHub, onBack, onOpenInfo, children 
 
 function EmptyThread({ label }: { label: string }): JSX.Element { return <p className="m-auto text-sm text-gray-400">{label}</p>; }
 
-function Composer({ disabled = false, disabledReason, allowPolls = false, onSend, onPoll }: { disabled?: boolean; disabledReason?: string; allowPolls?: boolean; onSend: (text: string, file?: File) => Promise<void>; onPoll?: (poll: PollDraft) => Promise<void> }): JSX.Element {
+/**
+ * The composer — WhatsApp interaction structure, We Glue identity.
+ *
+ *  • a "+" attachment button on the LEFT opens a small menu: Camera · Photos ·
+ *    Documents, plus Poll in a group chat. No microphone, no second camera.
+ *  • a rounded typing capsule in the middle.
+ *  • a teal circular send action on the RIGHT once there is text.
+ *
+ * "Photos" is a multi-select (1..5) that opens the preview tray; everything
+ * else sends immediately. A caption typed in the capsule rides along with a
+ * photo send.
+ */
+function Composer({ disabled = false, disabledReason, allowPolls = false, isGroup = false, onSend, onSendPhotos, onPoll }: { disabled?: boolean; disabledReason?: string; allowPolls?: boolean; isGroup?: boolean; onSend: (text: string, file?: File) => Promise<void>; onSendPhotos: (files: File[], caption?: string) => Promise<void>; onPoll?: (poll: PollDraft) => Promise<void> }): JSX.Element {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const submit = async (file?: File) => { if (sending || (!text.trim() && !file)) return; setSending(true); try { await onSend(text, file); setText(""); if (fileRef.current) fileRef.current.value = ""; } finally { setSending(false); } };
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [trayFiles, setTrayFiles] = useState<File[]>([]);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const photosRef = useRef<HTMLInputElement>(null);
+  const docsRef = useRef<HTMLInputElement>(null);
+  useEscapeAndOutside(menuRef, useCallback(() => setMenuOpen(false), []));
+
+  const submitText = async () => { if (sending || !text.trim()) return; setSending(true); try { await onSend(text, undefined); setText(""); } finally { setSending(false); } };
+  const submitFile = async (file: File) => { if (sending) return; setSending(true); try { await onSend(text, file); setText(""); } finally { setSending(false); } };
+  const addPhotos = (list: FileList | null) => {
+    if (!list) return;
+    const picked = Array.from(list).filter((f) => f.type.startsWith("image/"));
+    setTrayFiles((prev) => [...prev, ...picked].slice(0, 5));
+  };
+  const sendTray = async () => {
+    if (sending || trayFiles.length === 0) return;
+    setSending(true);
+    try {
+      await onSendPhotos(trayFiles, text);
+      setTrayFiles([]);
+      setText("");
+    } finally {
+      setSending(false);
+    }
+  };
+
   // Mobile shows the same megaphone + sentence in place of the input when the
   // viewer may not post, instead of letting them type into a send that fails.
   if (disabled) return <div className="flex items-center justify-center gap-2 border-t px-5 py-4 text-center text-sm text-gray-500" style={{ borderColor: "rgba(0,0,0,0.16)" }}><MegaphoneIcon size={16} /><span>{disabledReason ?? "You can’t post in this chat."}</span></div>;
-  return <><form onSubmit={(event) => { event.preventDefault(); void submit(); }} className="flex items-end gap-2 border-t bg-[#fffdf4] px-5 py-3 shadow-[0_-2px_6px_rgba(0,0,0,0.12)]" style={{ borderColor: "rgba(0,0,0,0.16)" }}>
-    {/* The composer uses the normal app face. It was previously `italic`, which
-        rendered every draft — and the placeholder — in a slanted face that read
-        as cursive and matched nothing else in the product. */}
-    <textarea value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} maxLength={2000} rows={1} placeholder="Message…" aria-label="Message" className="min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm not-italic outline-none placeholder:text-gray-500 focus:ring-2 focus:ring-teal" />
-    <input ref={fileRef} type="file" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void submit(file); }} />
-    <button type="button" onClick={() => fileRef.current?.click()} aria-label="Attach a file" className="rounded-full p-2 text-gray-950 hover:bg-black/5"><PaperclipIcon size={20} /></button>
-    {allowPolls && <button type="button" onClick={() => setPollOpen(true)} aria-label="Create a poll" className="rounded-full p-2 text-gray-950 hover:bg-black/5"><ListIcon size={20} /></button>}
-    <button disabled={sending || !text.trim()} aria-label="Send message" className="rounded-full bg-teal px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{sending ? "…" : "Send"}</button>
-  </form>{pollOpen && onPoll && <PollComposer onClose={() => setPollOpen(false)} onSubmit={async (poll) => { await onPoll(poll); setPollOpen(false); }} />}</>;
+
+  return <>
+    {trayFiles.length > 0 && (
+      <PhotoTray
+        files={trayFiles}
+        onChange={setTrayFiles}
+        onAddMore={() => photosRef.current?.click()}
+        onSend={() => void sendTray()}
+        onCancel={() => setTrayFiles([])}
+        sending={sending}
+      />
+    )}
+    <form onSubmit={(event) => { event.preventDefault(); void submitText(); }} className="flex items-end gap-2 border-t bg-[#fffdf4] px-4 py-3 shadow-[0_-2px_6px_rgba(0,0,0,0.12)]" style={{ borderColor: "rgba(0,0,0,0.16)" }}>
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void submitFile(f); }} />
+      <input ref={photosRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
+      <input ref={docsRef} type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void submitFile(f); }} />
+
+      <div className="relative" ref={menuRef}>
+        <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-label="Add attachment" aria-expanded={menuOpen} className="flex h-9 w-9 items-center justify-center rounded-full text-teal hover:bg-teal/10">
+          <PlusIcon size={22} />
+        </button>
+        {menuOpen && (
+          <div role="menu" className="absolute bottom-11 left-0 z-30 w-44 overflow-hidden rounded-xl border bg-white p-1 text-sm shadow-[0_8px_28px_rgba(0,0,0,0.22)]" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
+            <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); cameraRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-black/5"><CameraIcon size={18} />Camera</button>
+            <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); photosRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-black/5"><ImageIcon size={18} />Photos</button>
+            <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); docsRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-black/5"><PaperclipIcon size={18} />Documents</button>
+            {allowPolls && isGroup && onPoll && (
+              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setPollOpen(true); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-black/5"><ListIcon size={18} />Poll</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-1 items-end rounded-3xl bg-white px-3 py-1 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
+        <textarea value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitText(); } }} maxLength={2000} rows={1} placeholder="Message" aria-label="Message" className="max-h-28 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-sm not-italic outline-none placeholder:text-gray-400" />
+      </div>
+
+      {text.trim() && (
+        <button aria-label="Send message" disabled={sending} className="flex h-9 w-9 items-center justify-center rounded-full bg-teal text-white disabled:opacity-40">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+        </button>
+      )}
+    </form>
+    {pollOpen && onPoll && <PollComposer onClose={() => setPollOpen(false)} onSubmit={async (poll) => { await onPoll(poll); setPollOpen(false); }} />}
+  </>;
 }
 
 /**
@@ -864,8 +1123,9 @@ function Composer({ disabled = false, disabledReason, allowPolls = false, onSend
  * is the defect Update 3 removes. The timestamp and the actions menu sit under
  * whatever was rendered, so their placement does not depend on the payload.
  */
-function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOpenEvent, onOpenPost, onUnsend, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; userId: string; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onUnsend: (messageId: string) => Promise<void>; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
+function MessageBubble({ message, isOwn, showSender, isLastInGroup = true, isGroup = false, userId, attachmentUrls, onOpenProfile, onOpenEvent, onOpenPost, onOpenMedia, onReact, onUnsend, onChanged, onError, attachmentUnavailable, isSearchTarget, searchNonce }: { message: ThreadMessage; isOwn: boolean; showSender: boolean; isLastInGroup?: boolean; isGroup?: boolean; userId: string; attachmentUrls?: Map<string, string>; onOpenProfile: (id: string) => void; onOpenEvent: (id: string) => void; onOpenPost: (id: string) => void; onOpenMedia?: (messageId: string, index?: number) => void; onReact?: (messageId: string, emoji: string) => void; onUnsend: (messageId: string) => Promise<void>; onChanged: () => void; onError: (message: string) => void; attachmentUnavailable?: boolean; isSearchTarget?: boolean; searchNonce?: number }): JSX.Element {
   const [menu, setMenu] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(false), []);
@@ -877,6 +1137,12 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
 
   const pending = message.pending_state === "sending";
   const failed = message.pending_state === "failed";
+  const align: "start" | "end" = isOwn ? "end" : "start";
+  const groupImages = (message.attachments ?? []).filter((a) => a.kind === "image");
+  const isGroupedMedia = groupImages.length > 1;
+  const reactions = message.reactions ?? [];
+  const myReaction = reactions.find((r) => r.reactedByMe)?.emoji ?? null;
+  const canReact = !!onReact && !pending && !failed && message.message_type !== "poll";
 
   const mutate = async (action: () => Promise<void>, failureMessage: string) => {
     setMenu(false);
@@ -890,7 +1156,12 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
     }
   };
 
-  const isText = message.message_type === "text" || (!message.attachment_url && !message.poll_id && !message.shared_event_id && !message.shared_post_id && message.message_type !== "poll" && message.message_type !== "shared_event" && message.message_type !== "shared_post");
+  const react = (emoji: string) => {
+    setPickerOpen(false);
+    onReact?.(message.id, emoji);
+  };
+
+  const isText = !isGroupedMedia && (message.message_type === "text" || (!message.attachment_url && !message.poll_id && !message.shared_event_id && !message.shared_post_id && message.message_type !== "poll" && message.message_type !== "shared_event" && message.message_type !== "shared_post"));
   const blockedAttachment = attachmentUnavailable && !!message.attachment_url;
 
   let body: JSX.Element | null = null;
@@ -902,33 +1173,61 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
     body = <PostShareCard postId={message.shared_post_id} onOpenPost={onOpenPost} onOpenProfile={onOpenProfile} />;
   } else if (blockedAttachment) {
     body = <p className="max-w-[300px] rounded-2xl border bg-white px-3 py-2 text-sm text-gray-500" style={{ borderColor: "rgba(0,0,0,0.10)" }}>{ATTACHMENT_UNAVAILABLE_TEXT}</p>;
+  } else if (isGroupedMedia && !attachmentUnavailable) {
+    body = <GroupedMedia attachments={groupImages} urls={attachmentUrls ?? new Map()} onOpen={(i) => onOpenMedia?.(message.id, i)} />;
   } else if (message.message_type === "image") {
-    body = <ChatImage message={message} objectUrl={attachment} onOpen={attachment ? () => window.open(attachment, "_blank", "noreferrer") : undefined} />;
+    body = <ChatImage message={message} objectUrl={attachment} onOpen={onOpenMedia ? () => onOpenMedia(message.id, 0) : undefined} />;
   } else if (message.message_type === "video") {
     body = <ChatVideo objectUrl={attachment} />;
   } else if (message.message_type === "file") {
     body = <ChatFileCard message={message} objectUrl={attachment} pending={pending} />;
   }
 
+  // Consecutive bubbles from the same sender tuck their inner (avatar-side)
+  // corners in, matching mobile's grouped corners.
+  const tuckTop = !showSender;
+  const tuckBottom = !isLastInGroup;
+  const cornerClass = isOwn
+    ? `${tuckTop ? "rounded-tr-md" : ""} ${tuckBottom ? "rounded-br-md" : ""}`
+    : `${tuckTop ? "rounded-tl-md" : ""} ${tuckBottom ? "rounded-bl-md" : ""}`;
+
   return (
-    <div ref={highlightRef} className={`mb-3 flex gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+    <div ref={highlightRef} className={`${isLastInGroup ? "mb-3" : "mb-0.5"} flex gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
       {/* Update 1 — the sender's avatar and, below, their name are both the
-          canonical profile link, resolving to the same person. */}
-      {!isOwn && message.sender_id && (
-        <ClickableUserIdentity userId={message.sender_id} ariaLabel={`Open ${message.sender.full_name || message.sender.username || "this person"}'s profile`} className="self-end">
-          <Avatar uri={message.sender.avatar_url} size={28} name={message.sender.full_name ?? message.sender.username} />
-        </ClickableUserIdentity>
+          canonical profile link, resolving to the same person. Only the last
+          bubble of a consecutive run carries the avatar; the rest reserve its
+          width so the column stays aligned. */}
+      {!isOwn && (
+        isLastInGroup && message.sender_id ? (
+          <ClickableUserIdentity userId={message.sender_id} ariaLabel={`Open ${message.sender.full_name || message.sender.username || "this person"}'s profile`} className="self-end">
+            <Avatar uri={message.sender.avatar_url} size={28} name={message.sender.full_name ?? message.sender.username} />
+          </ClickableUserIdentity>
+        ) : (
+          <span className="w-7 shrink-0" aria-hidden />
+        )
       )}
       <div className={`group relative flex max-w-[78%] flex-col ${isOwn ? "items-end" : "items-start"} rounded-2xl transition-colors ${highlighted ? "bg-teal/15 ring-2 ring-teal" : ""} ${pending ? "opacity-60" : ""}`} style={highlighted ? { padding: 6, margin: -6 } : undefined}>
-        {showSender && !isOwn && message.sender_id && (
-          <ClickableUserIdentity userId={message.sender_id} className="mb-0.5 block max-w-full truncate text-xs font-bold text-teal">
-            {message.sender.full_name || `@${message.sender.username}`}
+        {showSender && !isOwn && isGroup && message.sender_id && (
+          <ClickableUserIdentity userId={message.sender_id} className="mb-0.5 block max-w-full truncate text-xs font-bold">
+            <span style={{ color: senderNameColor(message.sender_id) }}>{message.sender.full_name || `@${message.sender.username}`}</span>
           </ClickableUserIdentity>
         )}
 
+        {/* Hover reaction affordance — mobile's long-press quick bar. */}
+        {canReact && (
+          <div className={`absolute -top-9 z-10 hidden group-hover:block ${isOwn ? "right-0" : "left-0"}`}>
+            <QuickReactionRow current={myReaction} onReact={react} onMore={() => setPickerOpen(true)} />
+          </div>
+        )}
+        {pickerOpen && (
+          <EmojiPickerPopover current={myReaction} align={align} onPick={react} onClose={() => setPickerOpen(false)} />
+        )}
+
         {isText ? (
-          <div className={`rounded-2xl px-3 py-2 shadow-[0_2px_4px_rgba(0,0,0,0.15)] ${isOwn ? "bg-teal text-white" : "bg-white text-teal"} ${failed ? "ring-1 ring-red-400" : ""}`}>
-            {message.content && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}
+          <div className={`rounded-2xl ${cornerClass} px-3 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.12)] ${isOwn ? "bg-[#D7EFEE]" : "bg-white"} ${failed ? "ring-1 ring-red-400" : ""}`}>
+            {message.content && <p className="whitespace-pre-wrap break-words text-sm text-gray-900">{message.content}</p>}
+            {/* Timestamp sits quiet at the lower edge of the bubble. */}
+            <span className="mt-0.5 block text-right text-[10px] leading-none text-gray-400">{pending ? "Sending…" : failed ? "Not sent" : shortTime(message.created_at)}</span>
           </div>
         ) : (
           <>
@@ -938,16 +1237,18 @@ function MessageBubble({ message, isOwn, showSender, userId, onOpenProfile, onOp
             {message.content && message.message_type !== "file" && (
               <p className="mt-1 max-w-[300px] whitespace-pre-wrap break-words text-sm text-gray-700">{message.content}</p>
             )}
+            <span className={`mt-0.5 block text-[10px] leading-none text-gray-400 ${isOwn ? "text-right" : "text-left"}`}>{pending ? "Sending…" : failed ? "Not sent" : shortTime(message.created_at)}</span>
           </>
         )}
 
-        <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-400">
-          <time dateTime={message.created_at}>{pending ? "Sending…" : failed ? "Not sent" : shortTime(message.created_at)}</time>
+        <ReactionChips messageId={message.id} reactions={reactions} align={align} onToggle={react} />
+
+        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400 opacity-0 transition-opacity group-hover:opacity-100">
           {failed && message.onRetry && (
-            <button type="button" onClick={message.onRetry} className="rounded px-1 font-semibold text-red-600 hover:bg-red-50">Retry</button>
+            <button type="button" onClick={message.onRetry} className="rounded px-1 font-semibold text-red-600 opacity-100 hover:bg-red-50">Retry</button>
           )}
           {!pending && !failed && (
-            <button type="button" aria-label="Message actions" aria-expanded={menu} onClick={() => setMenu((open) => !open)} className="rounded px-1 opacity-70 hover:bg-black/10">•••</button>
+            <button type="button" aria-label="Message actions" aria-expanded={menu} onClick={() => setMenu((open) => !open)} className="rounded px-1 hover:bg-black/10">•••</button>
           )}
         </div>
 
