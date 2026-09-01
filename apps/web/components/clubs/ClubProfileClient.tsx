@@ -18,6 +18,7 @@ import { ClubHomeTab } from "./ClubHomeTab";
 import { ClubCalendarTab } from "./ClubCalendarTab";
 import { ClubOfficersTab } from "./ClubOfficersTab";
 import { ClubMediaTab } from "./ClubMediaTab";
+import { CarouselBadge } from "../shared/PhotoCarousel";
 import { AttendanceListModal } from "../home/AttendanceListModal";
 import { LeaveClubDialog } from "./LeaveClubDialog";
 import { ClubMembersModal } from "./ClubMembersModal";
@@ -314,6 +315,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={photo.url} alt={photo.caption ?? ""} className="h-full w-full object-cover" />
+                    {photo.image_count > 1 ? <CarouselBadge /> : null}
                   </button>
                 ))}
               </div>

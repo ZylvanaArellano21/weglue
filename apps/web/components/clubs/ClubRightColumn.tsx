@@ -10,6 +10,7 @@ import {
 import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
 import type { HomeFeedEvent } from "../../lib/hooks/useHomeEventsFeed";
 import { EventAudienceBadge } from "../home/EventAudienceBadge";
+import { CarouselBadge } from "../shared/PhotoCarousel";
 
 // Persistent right column of the Club Profile (visible on every tab): learning
 // outcomes, meeting schedule, an Upcoming Events! rail, and the Photos that Glue
@@ -137,6 +138,7 @@ export function ClubRightColumn({
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={photo.url} alt={photo.caption ?? ""} className="h-full w-full object-cover" />
+          {photo.image_count > 1 ? <CarouselBadge /> : null}
               </button>
             ))}
           </div>

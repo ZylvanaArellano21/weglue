@@ -12,6 +12,7 @@ import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
 import { usePostComments, useAddComment, useUpdatePostCaption, reportComment } from "../../lib/hooks/usePostActions";
 import { usePostInteractionsRealtime } from "../../lib/hooks/useClubRealtime";
 import { ReportModal } from "../shared/ReportModal";
+import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { ClubPhotoRemovalDialog } from "./ClubPhotoRemoval";
 import type { ClubPhoto } from "../../lib/clubs/clubProfileService";
 
@@ -51,6 +52,9 @@ export function ClubMediaOverlay({
   const [index, setIndex] = useState(initialIndex);
   const photo = photos[Math.min(index, photos.length - 1)];
   const many = photos.length > 1;
+  // A post-backed photo may itself be a carousel — pull its ordered images.
+  const { data: postDetail } = usePostDetail(photo?.post_id ?? undefined, userId);
+  const carousel = postDetail?.images && postDetail.images.length > 1 ? postDetail.images : null;
   const prev = () => setIndex((i) => (i - 1 + photos.length) % photos.length);
   const next = () => setIndex((i) => (i + 1) % photos.length);
 
@@ -76,13 +80,19 @@ export function ClubMediaOverlay({
       <div className="flex max-h-[86vh] flex-col md:flex-row">
         {/* Media panel */}
         <div className="flex items-center justify-center bg-black md:w-[58%]" style={{ minHeight: 260 }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            key={photo.id}
-            src={photo.url}
-            alt={photo.caption ?? ""}
-            className="max-h-[86vh] w-full object-contain"
-          />
+          {carousel ? (
+            <div className="w-full self-center">
+              <PhotoCarousel key={photo.id} images={carousel.map((im) => ({ uri: im.path }))} aspectRatio={1} rounded={false} />
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={photo.id}
+              src={photo.url}
+              alt={photo.caption ?? ""}
+              className="max-h-[86vh] w-full object-contain"
+            />
+          )}
         </div>
 
         {/* Info panel */}

@@ -7,6 +7,7 @@ import { useHomePostsFeed, useLikePost, type FeedPost } from "../../lib/hooks/us
 import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
 import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
+import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { EmptyState } from "./EmptyState";
 import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
@@ -142,12 +143,17 @@ function PostCard({
       style={{ background: "#FEFFF8" }}
     >
       <div className="flex items-center gap-2.5 px-3.5 py-3">
-        <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex min-w-0 flex-1 items-center gap-2.5">
-          <Avatar uri={post.author.avatar_url} size={34} name={post.author.username} />
-          <span className="truncate text-[15px] font-semibold text-gray-800">
-            {post.author.username}
-          </span>
-        </ClickableUserIdentity>
+        {post.author_kind === "club" ? (
+          <ClickableClubIdentity clubId={post.author.id} ariaLabel={`Open ${post.author.username}`} className="flex min-w-0 flex-1 items-center gap-2.5">
+            <Avatar uri={post.author.avatar_url} size={34} name={post.author.username} />
+            <span className="truncate text-[15px] font-semibold text-gray-800">{post.author.username}</span>
+          </ClickableClubIdentity>
+        ) : (
+          <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex min-w-0 flex-1 items-center gap-2.5">
+            <Avatar uri={post.author.avatar_url} size={34} name={post.author.username} />
+            <span className="truncate text-[15px] font-semibold text-gray-800">{post.author.username}</span>
+          </ClickableUserIdentity>
+        )}
         {post.tagged_clubs.length > 0 && (
           <span className="flex min-w-0 flex-wrap gap-1 text-xs" style={{ color: "#0FA6A6" }}>
             <span className="text-gray-400">·</span>
@@ -176,7 +182,9 @@ function PostCard({
         )}
       </div>
 
-      {post.image_url ? (
+      {post.images && post.images.length > 1 ? (
+        <PhotoCarousel images={post.images.map((im) => ({ uri: im.path }))} aspectRatio={4 / 5} />
+      ) : post.image_url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={post.image_url} alt={post.caption ?? "post"} className="w-full object-cover" />
       ) : (
