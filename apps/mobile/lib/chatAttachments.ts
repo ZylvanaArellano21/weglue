@@ -76,6 +76,22 @@ export interface UploadResult {
   path: string;
   mime: string;
   size: number;
+  fileName?: string | null;
+}
+
+export interface ChatAttachmentUploadInput {
+  conversationId: string;
+  localUri: string;
+  mime: string;
+  fileName?: string | null;
+  kind: 'image' | 'video' | 'file';
+  onProgress?: (fraction: number) => void;
+}
+
+export interface ChatAttachmentBatchUploadInput {
+  conversationId: string;
+  attachments: ChatAttachmentUploadInput[];
+  onProgress?: (fraction: number) => void;
 }
 
 /**
@@ -83,14 +99,31 @@ export interface UploadResult {
  * Uses a signed upload URL + XMLHttpRequest so React Native reports
  * `upload.onprogress` (supabase-js uploads cannot).
  */
-export async function uploadChatAttachment(opts: {
-  conversationId: string;
-  localUri: string;
-  mime: string;
-  fileName?: string | null;
-  kind: 'image' | 'video' | 'file';
-  onProgress?: (fraction: number) => void;
-}): Promise<UploadResult> {
+export async function uploadChatAttachment(opts: ChatAttachmentUploadInput): Promise<UploadResult>;
+export async function uploadChatAttachment(opts: ChatAttachmentBatchUploadInput): Promise<UploadResult[]>;
+export async function uploadChatAttachment(
+  opts: ChatAttachmentUploadInput | ChatAttachmentBatchUploadInput,
+): Promise<UploadResult | UploadResult[]> {
+  if ('attachments' in opts) {
+    const { attachments, onProgress, conversationId } = opts;
+    if (attachments.length < 1 || attachments.length > 5) throw new Error('You can send between 1 and 5 attachments.');
+    if (attachments.length > 1 && attachments.some((attachment) => attachment.kind !== 'image')) {
+      throw new Error('Only images can be grouped.');
+    }
+    let completed = 0;
+    const results: UploadResult[] = [];
+    for (const attachment of attachments) {
+      const result = await uploadChatAttachment({
+        ...attachment,
+        conversationId,
+        onProgress: (fraction) => onProgress?.((completed + fraction) / attachments.length),
+      });
+      results.push(result);
+      completed += 1;
+      onProgress?.(completed / attachments.length);
+    }
+    return results;
+  }
   const { conversationId, kind, onProgress } = opts;
   let { localUri, mime } = opts;
 
@@ -160,7 +193,7 @@ export async function uploadChatAttachment(opts: {
     xhr.send({ uri: localUri, type: mime, name: opts.fileName ?? `upload.${ext}` } as any);
   });
 
-  return { path, mime, size };
+  return { path, mime, size, fileName: opts.fileName ?? null };
 }
 
 // ─── Attachment delivery: authorization is checked WHEN THE FILE IS FETCHED ──

@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  Image,
   ScrollView,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,6 +14,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
+import { pickPhotos } from '../../lib/media/pickPhotos';
+import type { PickedMedia } from '../../lib/media/types';
+import { PhotoTray } from '../../components/media/PhotoTray';
 import { useAuthStore } from '@weglue/shared';
 import { createPost } from '../../services/postService';
 import { clientUuid } from '../../lib/chatAttachments';
@@ -47,7 +49,7 @@ export default function NewPostScreen() {
   const queryClient = useQueryClient();
   const { show, ToastComponent } = useToast();
 
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<PickedMedia[]>([]);
   const [caption, setCaption] = useState('');
   const [selectedClubs, setSelectedClubs] = useState<UserClub[]>([]);
   const [clubSelectorVisible, setClubSelectorVisible] = useState(false);
@@ -69,41 +71,35 @@ export default function NewPostScreen() {
     c.name.toLowerCase().includes(clubSearch.toLowerCase()),
   );
 
-  // Choosing a new photo starts a genuinely new draft, so it also starts a new
-  // idempotency tag — a later retry can't be deduped against a post made from a
-  // different image.
-  const applyPickedImage = (uri: string) => {
-    setImageUri(uri);
+  // Any change to the selected photos starts a genuinely new draft, so it also
+  // starts a new idempotency tag — a later retry can't be deduped against a
+  // post made from a different set of images.
+  const applyPhotos = (next: PickedMedia[]) => {
+    setPhotos(next.slice(0, 5));
     composeTagRef.current = clientUuid();
   };
 
-  // Android routes through the shared We Glue flow; iOS keeps its existing
-  // expo-image-picker path. Posts keep their free-form (uncropped) image.
+  // Multi-select up to 5, familiar numbered OS picker. Posts are images only
+  // and keep their free-form (uncropped) framing.
   const handlePickFromLibrary = async () => {
-    if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'library', quality: 0.8 });
-      if (picked) applyPickedImage(picked.uri);
-      return;
-    }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      show('We Glue needs access to your photo library to share photos in posts.', 'error');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets[0]) {
-      applyPickedImage(result.assets[0].uri);
-    }
+    const picked = await pickPhotos(5, false);
+    if (picked.length === 0) return;
+    applyPhotos(picked);
+  };
+
+  const addMorePhotos = async () => {
+    const more = await pickPhotos(5 - photos.length, false);
+    if (more.length) applyPhotos([...photos, ...more]);
   };
 
   const handlePickFromCamera = async () => {
+    if (photos.length >= 5) {
+      show('You can add up to 5 photos.', 'error');
+      return;
+    }
     if (useWeGlueMediaFlow) {
       const picked = await pickMedia({ source: 'camera', quality: 0.8 });
-      if (picked) applyPickedImage(picked.uri);
+      if (picked) applyPhotos([...photos, { ...picked }]);
       return;
     }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -111,12 +107,22 @@ export default function NewPostScreen() {
       show('We Glue needs access to your camera to take photos for posts.', 'error');
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      quality: 0.8,
-    });
+    const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.8 });
     if (!result.canceled && result.assets[0]) {
-      applyPickedImage(result.assets[0].uri);
+      const a = result.assets[0];
+      applyPhotos([
+        ...photos,
+        {
+          uri: a.uri,
+          fileName: a.fileName ?? 'photo.jpg',
+          mimeType: a.mimeType ?? 'image/jpeg',
+          width: a.width ?? 0,
+          height: a.height ?? 0,
+          fileSize: a.fileSize ?? null,
+          source: 'camera',
+          kind: 'image',
+        },
+      ]);
     }
   };
 
@@ -133,21 +139,24 @@ export default function NewPostScreen() {
 
   const handleSubmit = async () => {
     if (!userId) return;
-    if (!imageUri) {
-      show('Please select a photo.', 'error');
+    if (photos.length === 0) {
+      show('Please select at least one photo.', 'error');
       return;
     }
     setSubmitting(true);
     try {
-      // In locked mode the club comes from the route, never from component
-      // state, so no interaction can drop or swap it.
-      const clubIds = locked ? [lockedClubId!] : selectedClubs.map((c) => c.id);
+      // Locked = posting from a Club Profile: the post is authored BY the club
+      // (author_kind = 'club'), not tagged. Home posts stay student-authored and
+      // may tag clubs.
+      const authoredClubId = locked ? lockedClubId! : undefined;
+      const clubIds = locked ? undefined : selectedClubs.map((c) => c.id);
       const newPostId = await createPost(
         userId,
-        imageUri,
+        photos.map((p) => p.uri),
         caption.trim() || undefined,
-        clubIds.length > 0 ? clubIds : undefined,
+        clubIds && clubIds.length > 0 ? clubIds : undefined,
         composeTagRef.current,
+        authoredClubId,
       );
       // Post landed — the next compose (if the user comes back) is a new draft.
       composeTagRef.current = clientUuid();
@@ -222,28 +231,16 @@ export default function NewPostScreen() {
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Image Picker */}
-          {imageUri ? (
-            <View style={{ position: 'relative', marginBottom: 20 }}>
-              <Image
-                source={{ uri: imageUri }}
-                style={{ width: '100%', aspectRatio: 1, borderRadius: 16 }}
-                resizeMode="cover"
+          {/* Photos — up to 5, with carousel preview + reorder */}
+          {photos.length > 0 ? (
+            <View style={{ marginBottom: 20, marginHorizontal: -16 }}>
+              <PhotoTray
+                photos={photos}
+                onChange={applyPhotos}
+                onAddMore={photos.length < 5 ? addMorePhotos : undefined}
+                showConfirm={false}
+                aspectRatio={4 / 5}
               />
-              <TouchableOpacity
-                onPress={() => setImageUri(null)}
-                activeOpacity={0.8}
-                style={{
-                  position: 'absolute',
-                  top: 10,
-                  right: 10,
-                  backgroundColor: 'rgba(0,0,0,0.5)',
-                  borderRadius: 16,
-                  padding: 6,
-                }}
-              >
-                <Ionicons name="close" size={18} color="#fff" />
-              </TouchableOpacity>
             </View>
           ) : (
             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}>
@@ -265,7 +262,7 @@ export default function NewPostScreen() {
               >
                 <Ionicons name="images-outline" size={36} color="#9CA3AF" />
                 <Text style={{ fontSize: 13, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
-                  Camera Roll
+                  Photos
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -334,7 +331,7 @@ export default function NewPostScreen() {
             >
               <Ionicons name="people-outline" size={18} color="#0FA6A6" />
               <Text style={{ fontSize: 13, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
-                Posting to
+                Posting as
               </Text>
               <Text style={{ flex: 1, fontSize: 15, color: '#111827', fontFamily: 'Inter_600SemiBold' }}>
                 {lockedClubName || 'this club'}
@@ -429,10 +426,10 @@ export default function NewPostScreen() {
         >
           <TouchableOpacity
             onPress={handleSubmit}
-            disabled={submitting || !imageUri}
+            disabled={submitting || photos.length === 0}
             activeOpacity={0.85}
             style={{
-              backgroundColor: submitting || !imageUri ? '#9CA3AF' : '#0FA6A6',
+              backgroundColor: submitting || photos.length === 0 ? '#9CA3AF' : '#0FA6A6',
               borderRadius: 28,
               paddingVertical: 16,
               alignItems: 'center',

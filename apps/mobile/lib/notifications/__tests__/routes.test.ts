@@ -29,6 +29,20 @@ describe('validateNotificationRoute', () => {
     expect(validateNotificationRoute({ screen: 'notifications' })?.pathname).toBe(
       '/home/notifications',
     );
+    expect(
+      validateNotificationRoute({ screen: 'notificationActors', notificationId: UUID }),
+    ).toEqual({
+      screen: 'notificationActors',
+      pathname: '/home/notification-actors',
+      params: { notificationId: UUID },
+    });
+  });
+
+  it('rejects a grouped-actor route without a valid notificationId', () => {
+    expect(validateNotificationRoute({ screen: 'notificationActors' })).toBeNull();
+    expect(
+      validateNotificationRoute({ screen: 'notificationActors', notificationId: 'not-a-uuid' }),
+    ).toBeNull();
   });
 
   it('opens the exact channel screen when a channelId is present', () => {

@@ -21,6 +21,19 @@ export interface NotificationSender {
   avatar_url: string | null;
 }
 
+export interface NotificationActor {
+  id: string;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
+}
+
+interface PersistedNotificationActorRow {
+  notification_id: string;
+  actor_id: string;
+  created_at: string;
+}
+
 export interface AppNotification {
   id: string;
   type: string;
@@ -34,6 +47,7 @@ export interface AppNotification {
   is_read: boolean;
   created_at: string;
   actors: NotificationVisualActor[];
+  actorCount: number;
   entity: NotificationVisualEntity | null;
   visual: NotificationVisual;
 }
@@ -49,6 +63,7 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
     .from("notifications")
     .select(
       `id, type, entity_id, entity_type, read, created_at, message, route, group_count, group_actors,
+       actor_id,
        profiles!notifications_actor_id_fkey(id, username, avatar_url)`
     )
     .eq("user_id", userId)
@@ -58,8 +73,32 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   if (error || !data) return [];
 
   const rows = data as any[];
-  const groupActorIds = rows.flatMap((n) => Array.isArray(n.group_actors) ? n.group_actors : []);
-  const allActorIds = [...new Set([...rows.map((n) => n.profiles?.id), ...groupActorIds].filter(Boolean) as string[])];
+  const notificationIds = rows.map((n) => n.id).filter(Boolean) as string[];
+  const { data: persistedActorRows, error: persistedActorError } = notificationIds.length
+    ? await supabase
+      .from("notification_actors")
+      .select("notification_id, actor_id, created_at")
+      .in("notification_id", notificationIds)
+      .order("created_at", { ascending: false })
+    : { data: [] as any[], error: null };
+  const persistedActorsByNotification = new Map<string, PersistedNotificationActorRow[]>();
+  for (const actor of (persistedActorRows ?? []) as PersistedNotificationActorRow[]) {
+    const actors = persistedActorsByNotification.get(actor.notification_id) ?? [];
+    actors.push(actor);
+    persistedActorsByNotification.set(actor.notification_id, actors);
+  }
+  const actorIdsForRow = (n: any): string[] => {
+    const persisted = persistedActorsByNotification.get(n.id) ?? [];
+    const legacy = Array.isArray(n.group_actors) ? n.group_actors : [];
+    // The representative is the current actor_id; remaining actors are most
+    // recent first. The legacy array is oldest-first because 046 appends.
+    const useLegacy = Boolean(persistedActorError) || (persisted.length === 0 && legacy.length > 0);
+    const candidates = useLegacy
+      ? [n.profiles?.id ?? n.actor_id, ...legacy.slice().reverse()]
+      : [n.profiles?.id ?? n.actor_id, ...persisted.map((a) => a.actor_id)];
+    return [...new Set(candidates.filter(Boolean) as string[])];
+  };
+  const allActorIds = [...new Set(rows.flatMap(actorIdsForRow))];
   const eventTypes = ["new_event", "event_updated", "event_reminder_tomorrow", "event_reminder_hour", "event_reminder_now", "event_last_chance", "event_canceled", "event_rsvp"];
   const eventIds = [...new Set(rows.filter((n) => n.entity_type === "event" || eventTypes.includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
   const postIds = [...new Set(rows.filter((n) => n.entity_type === "post" || n.type === "club_post").map((n) => n.entity_id).filter(Boolean) as string[])];
@@ -78,9 +117,7 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   const postClubMap = new Map<string, NotificationVisualEntity>((postRows ?? []).filter((p: any) => p.clubs).map((p: any) => [p.id, { id: p.clubs.id, name: p.clubs.name, avatar_url: p.clubs.avatar_url ?? null }]));
   const conversationClubMap = new Map<string, NotificationVisualEntity>((conversationRows ?? []).filter((c: any) => c.clubs).map((c: any) => [c.id, { id: c.clubs.id, name: c.clubs.name, avatar_url: c.clubs.avatar_url ?? null }]));
 
-  const actorIds = [
-    ...new Set((data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[]),
-  ];
+  const actorIds = [...new Set((data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[])];
   const followStateMap = new Map<string, ActorFollowState>();
   if (actorIds.length > 0) {
     const { data: myFollows } = await supabase
@@ -104,7 +141,9 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   for (const n of rows) {
     const notifDay = dateInAppTz(new Date(n.created_at));
     const daysAgo = dayDiff(notifDay, today);
-    const actors = (Array.isArray(n.group_actors) ? n.group_actors : n.profiles?.id ? [n.profiles.id] : [])
+    const actorIds = actorIdsForRow(n);
+    const actorCount = actorIds.length;
+    const actors = actorIds
       .map((id: string) => actorMap.get(id)).filter(Boolean) as NotificationVisualActor[];
     const entity = n.entity_type === "event"
       ? eventMap.get(n.entity_id) ?? null
@@ -123,13 +162,16 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
       reference_id: n.entity_id ?? null,
       entity_type: n.entity_type ?? null,
       message: n.message ?? null,
-      route: n.route ?? null,
       group_count: n.group_count ?? 1,
       actor_follow_state: n.profiles ? followStateMap.get(n.profiles.id) ?? "not_following" : "not_following",
       is_read: n.read,
       created_at: n.created_at,
       actors,
+      actorCount,
       entity,
+      route: actorCount > 1
+        ? { screen: "notificationActors", notificationId: n.id }
+        : n.route ?? null,
       visual: resolveNotificationVisual({ type: n.type, group_count: n.group_count, actor: sender, actors, entity }),
     };
     if (daysAgo <= 0) groups["New"].push(notification);
@@ -141,6 +183,60 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   return (Object.entries(groups) as [NotificationGroup, AppNotification[]][])
     .filter(([, items]) => items.length > 0)
     .map(([group, data]) => ({ group, data }));
+}
+
+/**
+ * Return the full persisted actor set for a grouped notification. The
+ * representative is first, followed by the remaining actors in recency
+ * order. Pagination is applied after that ordering so page boundaries are
+ * stable even when the representative is the newest actor.
+ */
+export async function getNotificationActors(
+  notificationId: string,
+  limit = 50,
+  offset = 0,
+): Promise<NotificationActor[]> {
+  const safeLimit = Math.max(0, Math.floor(limit));
+  const safeOffset = Math.max(0, Math.floor(offset));
+  if (!safeLimit) return [];
+
+  const supabase = getSupabaseBrowser();
+  const { data: notification } = await supabase
+    .from("notifications")
+    .select("actor_id, group_actors")
+    .eq("id", notificationId)
+    .maybeSingle();
+  if (!notification) return [];
+
+  const { data: persisted, error: persistedError } = await supabase
+    .from("notification_actors")
+    .select("actor_id, created_at")
+    .eq("notification_id", notificationId)
+    .order("created_at", { ascending: false });
+  const legacy = Array.isArray((notification as any).group_actors)
+    ? (notification as any).group_actors as string[]
+    : [];
+  const useLegacy = Boolean(persistedError) || ((persisted ?? []).length === 0 && legacy.length > 0);
+  const candidates = useLegacy
+    ? [(notification as any).actor_id, ...legacy.slice().reverse()]
+    : [(notification as any).actor_id, ...(persisted ?? []).map((a: any) => a.actor_id)];
+  const actorIds = [...new Set(candidates.filter(Boolean) as string[])].slice(safeOffset, safeOffset + safeLimit);
+  if (!actorIds.length) return [];
+
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, full_name, username, avatar_url")
+    .in("id", actorIds);
+  const profileMap = new Map((profiles ?? []).map((profile: any) => [profile.id, profile]));
+  return actorIds
+    .map((id) => profileMap.get(id))
+    .filter(Boolean)
+    .map((profile: any) => ({
+      id: profile.id,
+      displayName: profile.full_name?.trim() || profile.username,
+      username: profile.username,
+      avatarUrl: profile.avatar_url ?? null,
+    }));
 }
 
 export function useNotifications(userId: string | undefined) {
@@ -181,6 +277,7 @@ export type NotificationTarget =
   | { kind: "post"; id: string }
   | { kind: "club"; id: string }
   | { kind: "chat"; id: string; channelId?: string }
+  | { kind: "notification-actors"; id: string }
   | { kind: "notifications" };
 
 /** Resolves where a notification opens — server route first, then legacy fallback. */
@@ -199,6 +296,9 @@ export function resolveNotificationTarget(item: AppNotification): NotificationTa
     if (screen === "chat" && idFor("chatId")) {
       const channelId = idFor("channelId");
       return channelId ? { kind: "chat", id: idFor("chatId")!, channelId } : { kind: "chat", id: idFor("chatId")! };
+    }
+    if (screen === "notificationActors" && idFor("notificationId")) {
+      return { kind: "notification-actors", id: idFor("notificationId")! };
     }
     if (screen === "notifications") return { kind: "notifications" };
   }

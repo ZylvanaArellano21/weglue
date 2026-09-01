@@ -7,6 +7,7 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 import { corsHeaders, handlePreflight } from "../_shared/cors.ts";
+import { messageAttachmentPaths } from "../_shared/messageAttachmentPaths.ts";
 import { attachmentCleanupOutcomeWithoutLease } from "./cleanupOutcome.ts";
 import { parseDeleteMessageRequest } from "./requestValidation.ts";
 
@@ -59,6 +60,7 @@ async function ensureObjectAbsent(admin: SupabaseClient, bucket: string, path: s
 async function processCleanup(admin: SupabaseClient, job: CleanupJob): Promise<boolean> {
   let retainedPath: string | null = null;
   try {
+    const cleanupPaths = await messageAttachmentPaths(admin, job.original_object_path);
     if (job.requires_evidence_copy) {
       if (!job.report_evidence_id) throw new Error("evidence_mapping_missing");
       retainedPath = `report-evidence/${job.report_evidence_id}/attachment`;
@@ -70,9 +72,11 @@ async function processCleanup(admin: SupabaseClient, job: CleanupJob): Promise<b
       });
       if (copyError) throw copyError;
     }
-    const { error: removeError } = await admin.storage.from(job.original_bucket).remove([job.original_object_path]);
+    const { error: removeError } = await admin.storage.from(job.original_bucket).remove(cleanupPaths);
     if (removeError) throw removeError;
-    await ensureObjectAbsent(admin, job.original_bucket, job.original_object_path);
+    for (const path of cleanupPaths) {
+      await ensureObjectAbsent(admin, job.original_bucket, path);
+    }
     const { error: completeError } = await admin.rpc("complete_message_attachment_cleanup", {
       p_job_id: job.job_id,
       p_claim_token: job.claim_token,

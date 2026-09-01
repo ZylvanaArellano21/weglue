@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,8 @@ import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { useToast } from '../../components/Toast';
 import type { UserWeeklyEvent } from '../../services/followService';
 import { openDirectChatWith } from '../../lib/chatNavigation';
+import { openProfile } from '../../lib/profileNavigation';
+import { CarouselBadge } from '../../components/shared/PhotoCarousel';
 import { useDidIBlock, useBlockUser, useUnblockUser } from '../../hooks/useBlocking';
 import {
   confirmBlock,
@@ -74,6 +76,14 @@ export default function UserProfileScreen() {
   const { mutate: followMutate, isPending: followPending } = useFollowMutation(viewerUserId, targetUserId);
 
   const isOwnProfile = targetUserId === viewerUserId;
+
+  // Any path that lands here for the signed-in user (a deep link, a push
+  // notification, a missed call site) belongs on canonical Your Profile with
+  // full owner controls — not this public-shaped view. `replace` so Back skips
+  // straight past it.
+  useEffect(() => {
+    if (isOwnProfile) router.replace('/profile/own');
+  }, [isOwnProfile, router]);
   const isPublic = !profile?.is_private || profile?.follow_status === 'following';
   // Hide Events privacy: the owner always sees their own weekly events.
   // Also enforced server-side (event_rsvps RLS), this only drives the UI state.
@@ -607,6 +617,7 @@ export default function UserProfileScreen() {
                               }}
                               resizeMode="cover"
                             />
+                            {post.image_count > 1 ? <CarouselBadge /> : null}
                           </TouchableOpacity>
                         ) : null,
                       )}
@@ -680,10 +691,7 @@ export default function UserProfileScreen() {
               key={mate.user_id}
               onPress={() => {
                 setGluematesSheetOpen(false);
-                router.push({
-                  pathname: '/profile/[userId]',
-                  params: { userId: mate.user_id },
-                } as any);
+                openProfile(router, mate.user_id, viewerUserId);
               }}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 }}
               activeOpacity={0.7}

@@ -17,6 +17,7 @@ import { Pill } from '../../components/shared/Pill';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { useToast } from '../../components/Toast';
 import { followUser } from '../../services/followService';
+import { openProfile } from '../../lib/profileNavigation';
 import { useQueryClient } from '@tanstack/react-query';
 import type { EventAttendee } from '../../services/eventService';
 
@@ -63,7 +64,7 @@ export default function AttendeesScreen() {
 
     return (
       <TouchableOpacity
-        onPress={() => router.push({ pathname: '/profile/[userId]', params: { userId: item.id } })}
+        onPress={() => openProfile(router, item.id, userId)}
         activeOpacity={0.7}
         style={{
           flexDirection: 'row',

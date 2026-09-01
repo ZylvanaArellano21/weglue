@@ -114,6 +114,8 @@ export function useUserPosts(targetUserId: string | undefined) {
         .from("posts")
         .select("id, image_url, created_at")
         .eq("author_id", targetUserId!)
+        // Club-authored posts belong to the club, not this person's grid.
+        .eq("author_kind", "user")
         .not("image_url", "is", null)
         .order("created_at", { ascending: false })
         .limit(36);

@@ -1,6 +1,8 @@
 import { supabase } from '../lib/supabase';
 import { resolveDisplayName, MEMBER_FALLBACK } from '../lib/displayName';
 import { CHAT_ATTACHMENTS_BUCKET, clientUuid } from '../lib/chatAttachments';
+import { applyThreadVisibility, loadThreadVisibility } from '@weglue/shared';
+import type { MessageAttachment, MessageReactionSummary } from './messagingService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -187,12 +189,38 @@ export interface DirectMessageThread {
   shared_event_id: string | null;
   shared_post_id: string | null;
   created_at: string;
+  attachments: MessageAttachment[];
+  reactions: MessageReactionSummary[];
   sender: {
     id: string;
     username: string;
     avatar_url: string | null;
   };
   poll_id?: string | null;
+}
+
+function directAttachments(m: any): MessageAttachment[] {
+  const rows = Array.isArray(m.message_attachments) && m.message_attachments.length
+    ? m.message_attachments
+    : m.attachment_url
+      ? [{ id: `legacy:${m.id}`, storage_path: m.attachment_url, kind: m.message_type === 'video' ? 'video' : m.message_type === 'file' ? 'file' : 'image', position: 0, mime: m.attachment_mime ?? null, width: null, height: null, byte_size: m.attachment_size ?? null, file_name: m.attachment_name ?? null }]
+      : [];
+  return rows
+    .map((a: any) => ({ id: a.id, storage_path: a.storage_path, kind: a.kind, position: Number(a.position), mime: a.mime ?? null, width: a.width ?? null, height: a.height ?? null, byte_size: a.byte_size ?? null, file_name: a.file_name ?? null }))
+    .sort((a: MessageAttachment, b: MessageAttachment) => a.position - b.position);
+}
+
+function directReactions(m: any, viewerId: string): MessageReactionSummary[] {
+  const groups = new Map<string, MessageReactionSummary & { firstCreatedAt: string }>();
+  for (const row of (Array.isArray(m.message_reactions) ? m.message_reactions : [])) {
+    const current = groups.get(row.emoji) ?? { emoji: row.emoji, count: 0, reactedByMe: false, userIds: [], firstCreatedAt: row.created_at ?? '' };
+    current.count += 1;
+    current.reactedByMe ||= row.user_id === viewerId;
+    if (current.userIds.length < 50) (current.userIds as string[]).push(row.user_id);
+    if (row.created_at && (!current.firstCreatedAt || row.created_at < current.firstCreatedAt)) current.firstCreatedAt = row.created_at;
+    groups.set(row.emoji, current);
+  }
+  return Array.from(groups.values()).sort((a, b) => b.count - a.count || a.firstCreatedAt.localeCompare(b.firstCreatedAt)).map(({ firstCreatedAt: _firstCreatedAt, ...reaction }) => reaction);
 }
 
 export interface DirectMessagesPage {
@@ -428,7 +456,7 @@ export async function getDirectMessages(
   let query = supabase
     .from('messages')
     .select(
-      'id, conversation_id, sender_id, content, attachment_url, message_type, shared_event_id, shared_post_id, created_at, profiles!sender_id(id, username, avatar_url)',
+      'id, conversation_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, created_at, profiles!sender_id(id, username, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))',
     )
     .eq('conversation_id', conversationId)
     .is('channel_id', null)
@@ -439,16 +467,20 @@ export async function getDirectMessages(
     query = query.lt('created_at', cursor);
   }
 
-  const { data, error } = await query;
+  const [{ data, error }, auth] = await Promise.all([query, supabase.auth.getUser()]);
   if (error) throw error;
 
   const rows = (data ?? []) as any[];
-  const messages: DirectMessageThread[] = rows.map((m) => ({
+  const viewerId = auth.data.user?.id ?? '';
+  const visibility = await loadThreadVisibility(supabase, conversationId, viewerId);
+  const messages: DirectMessageThread[] = applyThreadVisibility(rows, visibility).map((m) => ({
     id: m.id,
     conversation_id: m.conversation_id,
     sender_id: m.sender_id,
     content: m.content,
     attachment_url: m.attachment_url,
+    attachments: directAttachments(m),
+    reactions: directReactions(m, viewerId),
     message_type: m.message_type,
     shared_event_id: m.shared_event_id ?? null,
     shared_post_id: m.shared_post_id ?? null,
@@ -483,6 +515,11 @@ export async function sendDirectMessage(
   });
   if (error) throw error;
 }
+
+// Re-export the canonical reaction API for legacy DM callers; channel callers
+// can use the same functions because authorization is derived from message
+// participation, never from posting permission.
+export { setMessageReaction, removeMessageReaction, toggleMessageReaction, getMessageReactors } from './messagingService';
 
 // ─── Share Messages ───────────────────────────────────────────────────────────
 // Sends a rich event/post preview card into a DM. Renders via
@@ -533,7 +570,7 @@ export async function getNonMemberPreview(conversationId: string): Promise<Direc
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, conversation_id, sender_id, content, attachment_url, message_type, shared_event_id, shared_post_id, created_at, profiles!sender_id(id, username, avatar_url)',
+      'id, conversation_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, created_at, profiles!sender_id(id, username, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))',
     )
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
@@ -547,6 +584,8 @@ export async function getNonMemberPreview(conversationId: string): Promise<Direc
     sender_id: m.sender_id,
     content: m.content,
     attachment_url: m.attachment_url,
+    attachments: directAttachments(m),
+    reactions: [],
     message_type: m.message_type,
     shared_event_id: m.shared_event_id ?? null,
     shared_post_id: m.shared_post_id ?? null,

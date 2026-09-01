@@ -49,6 +49,10 @@ const ROUTE_SPECS: Record<string, RouteSpec> = {
   notifications: {
     build: () => ({ pathname: '/home/notifications' }),
   },
+  notificationActors: {
+    param: 'notificationId',
+    build: (p) => ({ pathname: '/home/notification-actors', params: { notificationId: p.notificationId } }),
+  },
   // A new public app version is available. Unlike every other type, this is
   // not a notification-content item, so it deliberately does NOT get the
   // Notifications-inbox underlay in navigateToNotificationTarget below — it

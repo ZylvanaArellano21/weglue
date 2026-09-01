@@ -5,6 +5,7 @@ import { Modal } from "../shared/Modal";
 import { ImageIcon, CloseIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { useAllClubs, useCreatePost } from "../../lib/hooks/useCreatePost";
+import { PhotoCarousel } from "../shared/PhotoCarousel";
 
 // Desktop create-post (Share a Glue → Picture). Same model as mobile: a
 // required image, an optional caption, and optional multi-select club tags.
@@ -35,21 +36,35 @@ export function ComposePostModal({
   const { data: clubs } = useAllClubs(!lockedClub);
   const create = useCreatePost(userId);
 
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [caption, setCaption] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [clubQuery, setClubQuery] = useState("");
 
-  const onFile = (f: File | undefined) => {
-    if (!f) return;
-    if (!f.type.startsWith("image/")) {
-      show("Please choose an image file.", "error");
+  const previews = files.map((f) => ({ f, url: URL.createObjectURL(f) }));
+
+  const onFiles = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    const picked = Array.from(list).filter((f) => f.type.startsWith("image/"));
+    if (picked.length === 0) {
+      show("Please choose image files.", "error");
       return;
     }
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
+    setFiles((prev) => {
+      const next = [...prev, ...picked].slice(0, 5);
+      if (prev.length + picked.length > 5) show("You can add up to 5 photos.", "error");
+      return next;
+    });
   };
+  const removeAt = (i: number) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
+  const move = (i: number, dir: -1 | 1) =>
+    setFiles((prev) => {
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = prev.slice();
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
 
   const toggle = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
@@ -57,15 +72,16 @@ export function ComposePostModal({
   const filtered = (clubs ?? []).filter((c) => c.name.toLowerCase().includes(clubQuery.toLowerCase()));
 
   const submit = () => {
-    if (!file) {
-      show("Please select a photo.", "error");
+    if (files.length === 0) {
+      show("Please select at least one photo.", "error");
       return;
     }
-    // The locked club is the single source of truth for the tag in that mode —
-    // it is never read from component state, so no UI path can drop it.
-    const clubIds = lockedClub ? [lockedClub.id] : selected;
+    // Locked = posting from a Club Profile: the post is authored BY the club
+    // (author_kind='club'), not tagged. Home posts stay student-authored + tag.
+    const authoredClubId = lockedClub?.id;
+    const clubIds = lockedClub ? [] : selected;
     create.mutate(
-      { file, caption: caption.trim() || undefined, clubIds },
+      { file: files.length === 1 ? files[0]! : files, caption: caption.trim() || undefined, clubIds, authoredClubId },
       {
         onSuccess: () => {
           show("Post shared! 📸");
@@ -83,21 +99,35 @@ export function ComposePostModal({
           New Post
         </h2>
 
-        {preview ? (
-          <div className="relative mb-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview} alt="preview" className="w-full rounded-xl object-cover" style={{ maxHeight: 360 }} />
-            <button
-              type="button"
-              onClick={() => {
-                setFile(null);
-                setPreview(null);
-              }}
-              aria-label="Remove photo"
-              className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white"
-            >
-              <CloseIcon size={16} />
-            </button>
+        {previews.length > 0 ? (
+          <div className="mb-4">
+            {previews.length > 1 ? (
+              <PhotoCarousel images={previews.map((p) => ({ uri: p.url }))} aspectRatio={4 / 5} />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={previews[0]!.url} alt="preview" className="w-full rounded-xl object-cover" style={{ maxHeight: 360 }} />
+            )}
+            <div className="mt-2 flex flex-wrap gap-2">
+              {previews.map((p, i) => (
+                <div key={p.url} className="relative h-16 w-16">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt="" className="h-full w-full rounded-lg object-cover" />
+                  <span className="absolute left-1 top-1 rounded-full bg-black/60 px-1.5 text-[10px] font-bold text-white">{i + 1}</span>
+                  <button type="button" onClick={() => removeAt(i)} aria-label={`Remove photo ${i + 1}`} className="absolute -right-1.5 -top-1.5 rounded-full bg-black/70 p-0.5 text-white">
+                    <CloseIcon size={12} />
+                  </button>
+                  <span className="absolute inset-x-1 bottom-1 flex justify-between">
+                    <button type="button" disabled={i === 0} onClick={() => move(i, -1)} className="rounded bg-black/55 px-1 text-[11px] text-white disabled:opacity-30">‹</button>
+                    <button type="button" disabled={i === previews.length - 1} onClick={() => move(i, 1)} className="rounded bg-black/55 px-1 text-[11px] text-white disabled:opacity-30">›</button>
+                  </span>
+                </div>
+              ))}
+              {files.length < 5 && (
+                <button type="button" onClick={() => fileRef.current?.click()} className="flex h-16 w-16 items-center justify-center rounded-lg border-2 border-dashed" style={{ borderColor: "#0FA6A6", color: "#0FA6A6" }}>
+                  <ImageIcon size={18} />
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <button
@@ -107,10 +137,10 @@ export function ComposePostModal({
             style={{ borderColor: "#E5E7EB", color: "#9CA3AF" }}
           >
             <ImageIcon size={36} />
-            <span className="text-sm">Choose a photo</span>
+            <span className="text-sm">Choose photos (up to 5)</span>
           </button>
         )}
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => onFiles(e.target.files)} />
 
         <textarea
           value={caption}
@@ -129,7 +159,7 @@ export function ComposePostModal({
             className="mb-5 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
             style={{ borderColor: "#0FA6A6", background: "rgba(15,166,166,0.08)" }}
           >
-            <span className="text-gray-500">Posting to</span>
+            <span className="text-gray-500">Posting as</span>
             <span className="font-semibold text-gray-900">{lockedClub.name}</span>
           </div>
         ) : (
@@ -168,7 +198,7 @@ export function ComposePostModal({
         <button
           type="button"
           onClick={submit}
-          disabled={!file || create.isPending}
+          disabled={files.length === 0 || create.isPending}
           className="w-full rounded-full py-3 text-[15px] font-semibold text-white disabled:opacity-50"
           style={{ background: "#0FA6A6" }}
         >

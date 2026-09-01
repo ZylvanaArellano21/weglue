@@ -19,6 +19,9 @@ import { useOfficerStore } from '../../../store/officerStore';
 import { Avatar } from '../../../components/shared/Avatar';
 import { AvatarStack } from '../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
+import { cardDepth } from '../../../components/shared/cardStyles';
+import { CarouselBadge } from '../../../components/shared/PhotoCarousel';
+import { openProfile } from '../../../lib/profileNavigation';
 import { useToast } from '../../../components/Toast';
 import { requestLeaveClub } from '../../../store/leaveClubStore';
 import { ReportButton } from '../../../components/shared/ReportButton';
@@ -36,13 +39,10 @@ const ALERT_RED = '#F02719';
 const MUTED = '#5F5D5D';
 const INK = '#000000';
 
-const CARD_SHADOW = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.25,
-  shadowRadius: 5,
-  elevation: 3,
-} as const;
+// The shared, restrained card depth (see components/shared/cardStyles.ts) so
+// club-profile cards match posts, events and Discovery cards. Views that spread
+// this must NOT also set `overflow: 'hidden'` — clip on an inner column instead.
+const CARD_SHADOW = cardDepth;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatDate(dateStr: string): string {
@@ -456,22 +456,14 @@ function OfficerRow({ officer, currentUserId }: { officer: ClubOfficer; currentU
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
       <TouchableOpacity
-        onPress={() => {
-          if (officer.user_id) {
-            router.push({ pathname: '/profile/[userId]', params: { userId: officer.user_id } });
-          }
-        }}
+        onPress={() => openProfile(router, officer.user_id, currentUserId)}
         activeOpacity={0.7}
       >
         <Avatar uri={officer.avatar_url} size={46} username={officer.display_name} />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
         <TouchableOpacity
-          onPress={() => {
-            if (officer.user_id) {
-              router.push({ pathname: '/profile/[userId]', params: { userId: officer.user_id } });
-            }
-          }}
+          onPress={() => openProfile(router, officer.user_id, currentUserId)}
           activeOpacity={0.7}
         >
           <Text style={{ fontSize: 14, fontWeight: '700', color: INK, fontFamily: 'Inter_700Bold' }}>
@@ -1063,6 +1055,7 @@ export default function ClubProfileScreen() {
                   style={{ width: PHOTO_SIZE, height: PHOTO_SIZE, borderRadius: 8, backgroundColor: '#E5E7EB' }}
                   resizeMode="cover"
                 />
+                {photo.image_count > 1 ? <CarouselBadge /> : null}
               </TouchableOpacity>
             ))}
           </View>

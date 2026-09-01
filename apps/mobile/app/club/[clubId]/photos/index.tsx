@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
 import { useClubPhotoFeed } from '../../../../hooks/useClubPhotos';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
+import { CarouselBadge } from '../../../../components/shared/PhotoCarousel';
 
 export type PhotoGridParams = {
   clubId: string;
@@ -83,6 +84,7 @@ export default function ClubPhotosScreen() {
                 style={{ width: PHOTO_SIZE, height: PHOTO_SIZE, backgroundColor: '#E5E7EB' }}
                 resizeMode="cover"
               />
+              {(item.post?.images?.length ?? item.photo.image_count) > 1 ? <CarouselBadge /> : null}
             </TouchableOpacity>
           )}
           ListEmptyComponent={

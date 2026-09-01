@@ -14,6 +14,7 @@ import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { MediaViewer, type ViewerMediaItem } from './MediaViewer';
 import { MessageActionsSheet } from './MessageActionsSheet';
+import { MessageReactorsSheet } from './MessageReactorsSheet';
 import { PollComposer, type PollComposerPayload } from './PollComposer';
 import { PollMessage } from './PollMessage';
 import { EventShareCard } from './EventShareCard';
@@ -31,11 +32,14 @@ import {
   reportMessage,
   createPollAtomic,
   newClientTag,
+  setMessageReaction,
+  removeMessageReaction,
   type ThreadMessage,
 } from '../../services/messagingService';
 import { resolveAttachmentUrl, openAttachmentExternally } from '../../lib/chatAttachments';
 import { getConversationRestrictedSenders } from '../../services/messagingService';
 import { displayNameOrFallback } from '../../lib/displayName';
+import { openProfile } from '../../lib/profileNavigation';
 import { markConversationRead } from '../../services/chatService';
 import { setActiveThread, clearActiveThread } from '../../lib/notifications/activeThread';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
@@ -196,32 +200,57 @@ export function ConversationThread({
   }, [jumpToMessageId, serverMessages.length]);
 
   // ── Media viewer ──
-  const mediaItems: ViewerMediaItem[] = useMemo(
+  // Grouped-media messages contribute one viewer entry per photo so a tap opens
+  // on the chosen image and swipes through that message's set.
+  const mediaEntries = useMemo(
     () =>
       serverMessages
         .filter(
           (m) =>
             (m.message_type === 'image' || m.message_type === 'video') &&
-            m.attachment_url &&
             !(m.sender_id && restrictedSenders.has(m.sender_id)),
         )
-        .map((m) => ({
-          messageId: m.id,
-          source: m.attachment_url!,
-          kind: m.message_type === 'video' ? ('video' as const) : ('image' as const),
-          senderName: displayNameOrFallback(m.sender),
-          sentAt: m.created_at,
-        })),
+        .flatMap((m) => {
+          const grouped = (m.attachments ?? []).filter((a) => a.kind !== 'file');
+          const sources =
+            grouped.length > 0
+              ? grouped.map((a) => ({ source: a.storage_path, kind: a.kind, position: a.position }))
+              : m.attachment_url
+                ? [{
+                    source: m.attachment_url,
+                    kind: m.message_type === 'video' ? ('video' as const) : ('image' as const),
+                    position: 0,
+                  }]
+                : [];
+          return sources.map((s) => ({
+            messageId: m.id,
+            attachmentIndex: s.position,
+            item: {
+              messageId: m.id,
+              source: s.source,
+              kind: s.kind as 'image' | 'video',
+              senderName: displayNameOrFallback(m.sender),
+              sentAt: m.created_at,
+            } satisfies ViewerMediaItem,
+          }));
+        }),
     [serverMessages, restrictedSenders],
+  );
+  const mediaItems: ViewerMediaItem[] = useMemo(
+    () => mediaEntries.map((e) => e.item),
+    [mediaEntries],
   );
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const openMedia = useCallback(
-    (messageId: string) => {
-      const idx = mediaItems.findIndex((i) => i.messageId === messageId);
+    (messageId: string, index = 0) => {
+      let idx = mediaEntries.findIndex(
+        (e) => e.messageId === messageId && e.attachmentIndex === index,
+      );
+      if (idx === -1) idx = mediaEntries.findIndex((e) => e.messageId === messageId);
       if (idx !== -1) setViewerIndex(idx);
     },
-    [mediaItems],
+    [mediaEntries],
   );
 
   const openFile = useCallback(
@@ -240,6 +269,7 @@ export function ConversationThread({
 
   // ── Long-press actions ──
   const [actionTarget, setActionTarget] = useState<ThreadMessage | null>(null);
+  const [reactorsTarget, setReactorsTarget] = useState<string | null>(null);
 
   const invalidateFor = useCallback(
     (id: string | undefined) => {
@@ -273,6 +303,17 @@ export function ConversationThread({
         .catch(() => Alert.alert('Could not delete the message. Please try again.'));
     },
     [invalidate, currentUserId],
+  );
+
+  // Reactions: optimistic isn't attempted — the canonical rows come back on the
+  // `reaction` broadcast + this invalidate. Errors are quiet (a failed react is
+  // low-stakes and self-corrects on the next thread read).
+  const handleReact = useCallback(
+    (messageId: string, emoji: string | null) => {
+      const p = emoji ? setMessageReaction(messageId, emoji) : removeMessageReaction(messageId);
+      p.then(invalidate).catch(() => invalidate());
+    },
+    [invalidate],
   );
 
   // Returns true only when the report is durably saved. The action sheet keeps
@@ -334,6 +375,21 @@ export function ConversationThread({
           attachmentUrl={p.localUri ?? null}
           attachmentName={p.attachmentName}
           attachmentSize={p.attachmentSize}
+          attachments={
+            p.localUris && p.localUris.length > 1
+              ? p.localUris.map((uri, i) => ({
+                  id: `pending-${i}`,
+                  storage_path: uri,
+                  kind: 'image' as const,
+                  position: i,
+                  mime: null,
+                  width: null,
+                  height: null,
+                  byte_size: null,
+                  file_name: null,
+                }))
+              : undefined
+          }
           messageType={p.messageType}
           createdAt={p.createdAt}
           isOwn
@@ -348,8 +404,15 @@ export function ConversationThread({
 
     const m = item.msg;
     const prev = prevRow?.kind === 'server' ? prevRow.msg : undefined;
-    const showSenderInfo = !prev || prev.sender_id !== m.sender_id;
+    const nextRow = rows[index + 1];
+    const next = nextRow?.kind === 'server' ? nextRow.msg : undefined;
     const showDateDivider = !prev || !isSameChatDay(prev.created_at, m.created_at);
+    const showSenderInfo =
+      showDateDivider || !prev || prev.sender_id !== m.sender_id;
+    const isLastInGroup =
+      !next ||
+      next.sender_id !== m.sender_id ||
+      !isSameChatDay(m.created_at, next.created_at);
     const isOwn = m.sender_id === currentUserId;
 
     return (
@@ -366,15 +429,29 @@ export function ConversationThread({
             attachmentName={m.attachment_name}
             attachmentSize={m.attachment_size}
             attachmentUnavailable={!!m.sender_id && restrictedSenders.has(m.sender_id)}
+            attachments={m.attachments}
+            reactions={m.reactions}
+            onToggleReaction={(emoji) => {
+              const mine = m.reactions?.find((r) => r.reactedByMe)?.emoji;
+              handleReact(m.id, mine === emoji ? null : emoji);
+            }}
+            onPressReactions={() => setReactorsTarget(m.id)}
             messageType={m.message_type}
             createdAt={m.created_at}
             isOwn={isOwn}
+            isGroup={allowPolls}
             showSenderInfo={showSenderInfo}
+            isLastInGroup={isLastInGroup}
             onLongPress={() => setActionTarget(m)}
             onPressMedia={openMedia}
             onPressFile={openFile}
             onPressAvatar={
-              onOpenProfile && m.sender_id ? () => onOpenProfile(m.sender_id!) : undefined
+              m.sender_id
+                ? () => {
+                    if (onOpenProfile) onOpenProfile(m.sender_id!);
+                    else openProfile(router, m.sender_id, currentUserId);
+                  }
+                : undefined
             }
             pollSlot={
               m.message_type === 'poll' && m.poll_id ? (
@@ -427,6 +504,7 @@ export function ConversationThread({
         blockedReason={blockedReason}
         onSendText={pipeline.sendText}
         onSendAttachment={(draft) => pipeline.sendAttachment(draft)}
+        onSendPhotos={(photos, caption) => pipeline.sendPhotos(photos, caption)}
         onAttachmentError={(message) => Alert.alert('Attachment', message)}
         onOpenPoll={allowPolls ? () => setPollOpen(true) : undefined}
       />
@@ -448,6 +526,15 @@ export function ConversationThread({
         onDeleteForMe={handleDeleteForMe}
         onReport={handleReport}
         onSaveMedia={(messageId) => openMedia(messageId)}
+        myReaction={actionTarget?.reactions?.find((r) => r.reactedByMe)?.emoji ?? null}
+        onReact={handleReact}
+      />
+
+      <MessageReactorsSheet
+        messageId={reactorsTarget}
+        currentUserId={currentUserId}
+        onClose={() => setReactorsTarget(null)}
+        onRemoveOwn={(id) => handleReact(id, null)}
       />
 
       {allowPolls && (

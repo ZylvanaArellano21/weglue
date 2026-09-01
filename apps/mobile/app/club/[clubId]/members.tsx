@@ -22,6 +22,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { followUser, unfollowUser } from '../../../services/followService';
 import type { MemberWithFollowStatus } from '../../../services/clubTabService';
 import { openDirectChatWith } from '../../../lib/chatNavigation';
+import { openProfile } from '../../../lib/profileNavigation';
 import { useOfficerStore } from '../../../store/officerStore';
 import { ConfirmationModal } from '../../../components/chat/ConfirmationModal';
 import { openReportFlow } from '../../../components/shared/ReportButton';
@@ -158,7 +159,7 @@ function MemberRow({
     >
       {/* Avatar */}
       <TouchableOpacity
-        onPress={() => router.push({ pathname: '/profile/[userId]', params: { userId: member.id } })}
+        onPress={() => openProfile(router, member.id, viewerId)}
         activeOpacity={0.7}
       >
         <Avatar uri={member.avatar_url} size={46} username={member.username} />
@@ -167,7 +168,7 @@ function MemberRow({
       {/* Name */}
       <TouchableOpacity
         style={{ flex: 1 }}
-        onPress={() => router.push({ pathname: '/profile/[userId]', params: { userId: member.id } })}
+        onPress={() => openProfile(router, member.id, viewerId)}
         activeOpacity={0.7}
       >
         <Text

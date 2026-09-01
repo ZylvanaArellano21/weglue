@@ -57,12 +57,8 @@ export function EventCard({
 
   return (
     <article
-      className="overflow-hidden rounded-xl"
-      style={{
-        background: "#FEFFF8",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.07)",
-        border: "1px solid rgba(0,0,0,0.04)",
-      }}
+      className="overflow-hidden rounded-2xl shadow-card"
+      style={{ background: "#FEFFF8" }}
     >
       {/* Club row */}
       <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-2">

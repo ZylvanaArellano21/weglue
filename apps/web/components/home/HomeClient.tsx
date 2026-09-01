@@ -10,6 +10,7 @@ import { RightColumn } from "./RightColumn";
 import { EventDetailModal } from "./EventDetailModal";
 import { SavedEventsModal } from "./SavedEventsModal";
 import { NotificationsModal } from "./NotificationsModal";
+import { NotificationActorsModal } from "./NotificationActorsModal";
 import { GluematesModal } from "./GluematesModal";
 import { CalendarModal } from "./CalendarModal";
 import { PostModal } from "./PostModal";
@@ -52,6 +53,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const attendanceEventId = params.get("attendees");
   const savedOpen = params.get("saved") === "1";
   const notifOpen = params.get("notifications") === "1";
+  const notifActorsId = params.get("notifActors");
   const gluematesOpen = params.get("gluemates") === "1";
   // The phone bottom tab bar's Calendar tab now links to the standalone
   // /calendar route (CalendarTabClient) instead of this param. This stays
@@ -107,10 +109,11 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
         case "user": return router.push(`/u/${target.id}`);
         case "club": return router.push(`/club/${target.id}`);
         case "chat": return router.push(messagesHref({ conversationId: target.id, channelId: target.channelId }));
+        case "notification-actors": return set("notifActors", target.id);
         case "notifications": return; // already here
       }
     },
-    [openEvent, openPost, router]
+    [openEvent, openPost, router, set]
   );
 
   return (
@@ -140,12 +143,18 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
       {savedOpen && !eventId && !postId && (
         <SavedEventsModal userId={userId} onClose={() => clear("saved")} onOpenEvent={openEvent} />
       )}
-      {notifOpen && !eventId && !postId && (
+      {notifOpen && !eventId && !postId && !notifActorsId && (
         <NotificationsModal
           userId={userId}
           username={profile?.username}
           onClose={() => clear("notifications")}
           onOpenTarget={openTarget}
+        />
+      )}
+      {notifActorsId && !eventId && !postId && (
+        <NotificationActorsModal
+          notificationId={notifActorsId}
+          onClose={() => clear("notifActors")}
         />
       )}
       {gluematesOpen && !eventId && !postId && (

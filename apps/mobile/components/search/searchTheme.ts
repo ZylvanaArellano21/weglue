@@ -1,4 +1,5 @@
 import { Platform, type TextStyle, type ViewStyle } from 'react-native';
+import { cardDepth } from '../shared/cardStyles';
 
 /** Figma Search tab tokens (file ZaAzanItzMQgvheIs2iBkR, frame 1325:1701) */
 export const searchColors = {
@@ -38,19 +39,10 @@ export const searchShadow = Platform.select({
   default: {},
 }) as ViewStyle;
 
-/** Full-card raised 3D shadow. Softer + larger spread than a tight drop so the
- *  whole card reads as lifted off the page, and elevation keeps it visible on
- *  Android (where iOS shadow* props are ignored). */
-export const searchCardShadow = Platform.select({
-  ios: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-  },
-  android: { elevation: 6 },
-  default: {},
-}) as ViewStyle;
+/** Full-card depth — the shared, restrained card elevation (see cardStyles.ts).
+ *  Kept as a named re-export so Search/Discovery cards stay in the one
+ *  card-depth system with posts, events and club cards. */
+export const searchCardShadow = cardDepth;
 
 export const searchSizes = {
   searchBarHeight: 42,

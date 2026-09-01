@@ -5,9 +5,12 @@
 // through the service-role client; canonical tables only; counts computed live.
 //
 // CANONICAL SOURCES (from supabase/migrations/*.sql):
-//   • posts          — id, author_id, club_id (nullable = "not tagged to a
-//                       club"), post_type ('picture'|'event'), image_url
-//                       (single-image model), caption, linked_event_id, created_at
+//   • posts          — id, author_id (acting user/audit identity), author_kind
+//                       ('user'|'club'), club_id, post_type ('picture'|'event'),
+//                       image_url (position-0 legacy projection), caption,
+//                       linked_event_id, created_at
+//   • post_images    — ordered post media (positions 0..4); image_url remains
+//                       the position-0 compatibility projection.
 //                       NOTE: there is NO posts.status / deleted_at / hidden
 //                       column — posts have no soft-delete lifecycle. Removal
 //                       from a club is the canonical "unglue" behavior
@@ -94,6 +97,8 @@ export interface AdminPostRow {
   caption: string | null;
   post_type: string;
   image_url: string | null;
+  images: AdminPostImage[];
+  author_kind: "user" | "club";
   author_id: string;
   author_name: string;
   author_username: string;
@@ -107,6 +112,13 @@ export interface AdminPostRow {
   like_count: number;
   report_count: number;
   created_at: string;
+}
+
+export interface AdminPostImage {
+  path: string;
+  position: number;
+  width: number | null;
+  height: number | null;
 }
 
 export interface ListPostsParams {
@@ -135,7 +147,7 @@ export async function listPosts(params: ListPostsParams = {}): Promise<Paginated
 
   let q = admin
     .from("posts")
-    .select("id, author_id, club_id, post_type, image_url, caption, created_at", { count: "exact" });
+    .select("id, author_id, author_kind, club_id, post_type, image_url, caption, created_at", { count: "exact" });
 
   if (params.clubId) q = q.eq("club_id", params.clubId);
   if (params.type === "picture" || params.type === "event") q = q.eq("post_type", params.type);
@@ -189,13 +201,14 @@ export async function listPosts(params: ListPostsParams = {}): Promise<Paginated
   const authorIds = posts.map((p) => p.author_id);
   const clubIds = posts.map((p) => p.club_id).filter(Boolean) as string[];
 
-  const [emails, authorMap, clubMap, comments, likes, reports] = await Promise.all([
+  const [emails, authorMap, clubMap, comments, likes, reports, imageMap] = await Promise.all([
     emailMap(authorIds),
     profileMap(admin, authorIds),
     clubMap_(admin, clubIds),
     childCounts(admin, "post_comments", "post_id", ids),
     childCounts(admin, "post_likes", "post_id", ids),
     postReportCounts(admin, ids),
+    postImagesMap(admin, ids),
   ]);
 
   const uniIds = [
@@ -207,12 +220,15 @@ export async function listPosts(params: ListPostsParams = {}): Promise<Paginated
   const rows: AdminPostRow[] = posts.map((p) => {
     const club = p.club_id ? clubMap.get(p.club_id) : null;
     const author = authorMap.get(p.author_id);
+    const images = imageMap.get(p.id) ?? legacyPostImages(p.image_url);
     const uniId = club?.university_id ?? author?.university_id ?? null;
     return {
       id: p.id,
       caption: captionPreview(p.caption),
       post_type: p.post_type,
       image_url: p.image_url ?? null,
+      images,
+      author_kind: p.author_kind === "club" ? "club" : "user",
       author_id: p.author_id,
       author_name: author?.full_name ?? "",
       author_username: author?.username ?? "",
@@ -221,7 +237,7 @@ export async function listPosts(params: ListPostsParams = {}): Promise<Paginated
       club_name: club?.name ?? null,
       club_handle: club?.handle ?? null,
       university: uniId ? uniMap.get(uniId) ?? null : null,
-      media_count: p.image_url ? 1 : 0,
+      media_count: images.length,
       comment_count: comments.get(p.id) ?? 0,
       like_count: likes.get(p.id) ?? 0,
       report_count: reports.get(p.id) ?? 0,
@@ -303,6 +319,37 @@ async function childCounts(
   return map;
 }
 
+/** Ordered media for posts. Legacy image_url is added by the caller when an
+ * old/partially migrated row has no normalized child row. */
+async function postImagesMap(
+  admin: ReturnType<typeof createAdminClient>,
+  postIds: string[]
+): Promise<Map<string, AdminPostImage[]>> {
+  const map = new Map<string, AdminPostImage[]>();
+  if (postIds.length === 0) return map;
+  const { data, error } = await admin
+    .from("post_images")
+    .select("post_id, storage_path, position, width, height")
+    .in("post_id", postIds)
+    .order("position", { ascending: true });
+  if (error) throw error;
+  for (const image of (data ?? []) as any[]) {
+    const list = map.get(image.post_id) ?? [];
+    list.push({
+      path: image.storage_path,
+      position: image.position,
+      width: image.width ?? null,
+      height: image.height ?? null,
+    });
+    map.set(image.post_id, list);
+  }
+  return map;
+}
+
+function legacyPostImages(imageUrl: string | null): AdminPostImage[] {
+  return imageUrl ? [{ path: imageUrl, position: 0, width: null, height: null }] : [];
+}
+
 // ── Post detail ────────────────────────────────────────────────────────────────
 
 export interface PostComment {
@@ -336,12 +383,18 @@ export interface PostDetail {
   caption: string | null;
   post_type: string;
   image_url: string | null;
+  images: AdminPostImage[];
+  author_kind: "user" | "club";
   linked_event_id: string | null;
   author_id: string;
   author_name: string;
   author_username: string;
   author_email: string | null;
   author_avatar: string | null;
+  club_id: string | null;
+  club_name: string | null;
+  club_handle: string | null;
+  club_avatar: string | null;
   university: string | null;
   created_at: string;
   tags: PostTag[];
@@ -358,13 +411,13 @@ export async function getPostDetail(id: string): Promise<PostDetail | null> {
 
   const { data: post } = await admin
     .from("posts")
-    .select("id, author_id, club_id, post_type, image_url, caption, linked_event_id, created_at")
+    .select("id, author_id, author_kind, club_id, post_type, image_url, caption, linked_event_id, created_at")
     .eq("id", id)
     .maybeSingle();
   if (!post) return null;
   const p = post as any;
 
-  const [authorMap, extraTagsRes, commentsRes, reportsRes, likeCount, commentCount, reportCount] =
+  const [authorMap, extraTagsRes, commentsRes, reportsRes, likeCount, commentCount, reportCount, imageMap] =
     await Promise.all([
       profileMap(admin, [p.author_id]),
       admin.from("post_club_tags").select("club_id").eq("post_id", id),
@@ -383,6 +436,7 @@ export async function getPostDetail(id: string): Promise<PostDetail | null> {
       admin.from("post_likes").select("id", { count: "exact", head: true }).eq("post_id", id),
       admin.from("post_comments").select("id", { count: "exact", head: true }).eq("post_id", id),
       admin.from("reports").select("id", { count: "exact", head: true }).eq("entity_type", "post").eq("entity_id", id),
+      postImagesMap(admin, [id]),
     ]);
 
   const author = authorMap.get(p.author_id);
@@ -405,18 +459,26 @@ export async function getPostDetail(id: string): Promise<PostDetail | null> {
 
   const uniId = (p.club_id ? clubMap.get(p.club_id)?.university_id : null) ?? author?.university_id ?? null;
   const uniName = uniId ? (await universityNameMap(admin, [uniId])).get(uniId) ?? null : null;
+  const club = p.club_id ? clubMap.get(p.club_id) : null;
+  const images = imageMap.get(id) ?? legacyPostImages(p.image_url);
 
   return {
     id: p.id,
     caption: p.caption ?? null,
     post_type: p.post_type,
     image_url: p.image_url ?? null,
+    images,
+    author_kind: p.author_kind === "club" ? "club" : "user",
     linked_event_id: p.linked_event_id ?? null,
     author_id: p.author_id,
     author_name: author?.full_name ?? "",
     author_username: author?.username ?? "",
     author_email: emails.get(p.author_id) ?? null,
     author_avatar: author?.avatar_url ?? null,
+    club_id: p.club_id ?? null,
+    club_name: club?.name ?? null,
+    club_handle: club?.handle ?? null,
+    club_avatar: club?.avatar_url ?? null,
     university: uniName,
     created_at: p.created_at,
     tags,

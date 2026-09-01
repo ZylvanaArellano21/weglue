@@ -26,6 +26,8 @@ export interface ThreadMessage {
   poll_id: string | null;
   client_tag: string | null;
   created_at: string;
+  attachments?: MessageAttachment[];
+  reactions?: MessageReactionSummary[];
   sender: {
     id: string;
     username: string;
@@ -34,13 +36,39 @@ export interface ThreadMessage {
   };
 }
 
+export interface MessageAttachment {
+  id: string;
+  storage_path: string;
+  kind: 'image' | 'video' | 'file';
+  position: number;
+  mime: string | null;
+  width: number | null;
+  height: number | null;
+  byte_size: number | null;
+  file_name: string | null;
+}
+
+export interface MessageReactionSummary {
+  emoji: string;
+  count: number;
+  reactedByMe: boolean;
+  userIds: string[];
+}
+
+export interface MessageReactor {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  emoji: string;
+}
+
 export interface ThreadPage {
   messages: ThreadMessage[];
   next_cursor: string | null;
 }
 
 const MESSAGE_SELECT =
-  'id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url)';
+  'id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))';
 
 export interface SharedIdentity {
   id: string;
@@ -94,7 +122,59 @@ export async function getConversationRestrictedSenders(conversationId: string): 
   return ((data ?? []) as string[]) ?? [];
 }
 
-function mapMessage(m: any, identities?: Map<string, SharedIdentity>): ThreadMessage {
+function mapAttachments(m: any): MessageAttachment[] {
+  const rows = Array.isArray(m.message_attachments) ? m.message_attachments : [];
+  if (rows.length > 0) {
+    return rows
+      .map((a: any) => ({
+        id: a.id,
+        storage_path: a.storage_path,
+        kind: a.kind,
+        position: Number(a.position),
+        mime: a.mime ?? null,
+        width: a.width ?? null,
+        height: a.height ?? null,
+        byte_size: a.byte_size ?? null,
+        file_name: a.file_name ?? null,
+      }))
+      .sort((a: MessageAttachment, b: MessageAttachment) => a.position - b.position);
+  }
+  if (!m.attachment_url) return [];
+  return [{
+    id: `legacy:${m.id}`,
+    storage_path: m.attachment_url,
+    kind: m.message_type === 'video' ? 'video' : m.message_type === 'file' ? 'file' : 'image',
+    position: 0,
+    mime: m.attachment_mime ?? null,
+    width: null,
+    height: null,
+    byte_size: m.attachment_size ?? null,
+    file_name: m.attachment_name ?? null,
+  }];
+}
+
+function mapReactions(m: any, viewerId?: string): MessageReactionSummary[] {
+  const groups = new Map<string, MessageReactionSummary & { firstCreatedAt: string }>();
+  for (const row of (Array.isArray(m.message_reactions) ? m.message_reactions : [])) {
+    const current = groups.get(row.emoji) ?? {
+      emoji: row.emoji,
+      count: 0,
+      reactedByMe: false,
+      userIds: [],
+      firstCreatedAt: row.created_at ?? '',
+    };
+    current.count += 1;
+    current.reactedByMe ||= row.user_id === viewerId;
+    if (current.userIds.length < 50) (current.userIds as string[]).push(row.user_id);
+    if (row.created_at && (!current.firstCreatedAt || row.created_at < current.firstCreatedAt)) current.firstCreatedAt = row.created_at;
+    groups.set(row.emoji, current);
+  }
+  return Array.from(groups.values())
+    .sort((a, b) => b.count - a.count || a.firstCreatedAt.localeCompare(b.firstCreatedAt))
+    .map(({ firstCreatedAt: _firstCreatedAt, ...reaction }) => reaction);
+}
+
+function mapMessage(m: any, identities?: Map<string, SharedIdentity>, viewerId?: string): ThreadMessage {
   const shared = m.sender_id ? identities?.get(m.sender_id) : undefined;
   return {
     id: m.id,
@@ -112,6 +192,8 @@ function mapMessage(m: any, identities?: Map<string, SharedIdentity>): ThreadMes
     poll_id: Array.isArray(m.polls) ? (m.polls[0]?.id ?? null) : (m.polls?.id ?? null),
     client_tag: m.client_tag ?? null,
     created_at: m.created_at,
+    attachments: mapAttachments(m),
+    reactions: mapReactions(m, viewerId),
     sender: {
       id: m.profiles?.id ?? m.sender_id ?? '',
       username: m.profiles?.username ?? shared?.username ?? '',
@@ -161,7 +243,7 @@ export async function getThreadMessages(
   const rows = applyThreadVisibility(raw, visibility);
 
   return {
-    messages: rows.map((m) => mapMessage(m, identities)),
+    messages: rows.map((m) => mapMessage(m, identities, userId)),
     // Cursor comes from the RAW page, never the filtered one: a page whose rows
     // were all hidden must still advance, or history would truncate there.
     next_cursor: raw.length === PAGE_SIZE ? raw[raw.length - 1].created_at : null,
@@ -179,6 +261,15 @@ export interface SendMessageInput {
   attachmentName?: string | null;
   attachmentSize?: number | null;
   attachmentMime?: string | null;
+  attachments?: Array<{
+    path: string;
+    kind: 'image' | 'video' | 'file';
+    mime: string | null;
+    width?: number;
+    height?: number;
+    bytes?: number;
+    fileName?: string | null;
+  }>;
   /** Stable per-logical-message tag; retries with the same tag never duplicate. */
   clientTag: string;
 }
@@ -187,6 +278,37 @@ export async function sendMessage(input: SendMessageInput): Promise<ThreadMessag
   const { data: auth } = await supabase.auth.getUser();
   const senderId = auth.user?.id;
   if (!senderId) throw new Error('Not signed in');
+
+  if (input.attachments) {
+    if (input.attachments.length < 1 || input.attachments.length > 5) throw new Error('You can send between 1 and 5 attachments.');
+    const kind = input.attachments[0].kind;
+    if (input.attachments.some((attachment) => attachment.kind !== kind)) throw new Error('Grouped attachments must have one kind.');
+    if (input.attachments.length > 1 && kind !== 'image') throw new Error('Only images can be grouped.');
+    const { data: messageId, error: rpcError } = await supabase.rpc('send_message_with_attachments', {
+      p_conversation_id: input.conversationId,
+      p_channel_id: input.channelId ?? null,
+      p_content: input.content ?? null,
+      p_message_type: input.messageType ?? kind,
+      p_client_tag: input.clientTag,
+      p_attachments: input.attachments.map((attachment) => ({
+        path: attachment.path,
+        kind: attachment.kind,
+        mime: attachment.mime,
+        width: attachment.width ?? null,
+        height: attachment.height ?? null,
+        bytes: attachment.bytes ?? null,
+        fileName: attachment.fileName ?? null,
+      })),
+    });
+    if (rpcError && (rpcError as any).code === '23505') {
+      const { data: existing } = await supabase.from('messages').select(MESSAGE_SELECT).eq('sender_id', senderId).eq('client_tag', input.clientTag).single();
+      if (existing) return mapMessage(existing, undefined, senderId);
+    }
+    if (rpcError) throw rpcError;
+    const { data: stored, error: selectError } = await supabase.from('messages').select(MESSAGE_SELECT).eq('id', messageId).single();
+    if (selectError) throw selectError;
+    return mapMessage(stored, undefined, senderId);
+  }
 
   const { data, error } = await supabase
     .from('messages')
@@ -214,15 +336,68 @@ export async function sendMessage(input: SendMessageInput): Promise<ThreadMessag
         .eq('sender_id', senderId)
         .eq('client_tag', input.clientTag)
         .single();
-      if (existing) return mapMessage(existing);
+      if (existing) return mapMessage(existing, undefined, senderId);
     }
     throw error;
   }
-  return mapMessage(data);
+  return mapMessage(data, undefined, senderId);
 }
 
 export function newClientTag(): string {
   return clientUuid();
+}
+
+export async function setMessageReaction(messageId: string, emoji: string): Promise<void> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('Not signed in');
+  const { error } = await supabase
+    .from('message_reactions')
+    .upsert({ message_id: messageId, user_id: userId, emoji }, { onConflict: 'message_id,user_id' });
+  if (error) throw error;
+}
+
+export async function removeMessageReaction(messageId: string): Promise<void> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('Not signed in');
+  const { error } = await supabase
+    .from('message_reactions')
+    .delete()
+    .eq('message_id', messageId)
+    .eq('user_id', userId);
+  if (error) throw error;
+}
+
+/** Tap-again behavior for a quick reaction; changing emoji remains an upsert. */
+export async function toggleMessageReaction(messageId: string, emoji: string): Promise<void> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('Not signed in');
+  const { data: current, error: readError } = await supabase
+    .from('message_reactions')
+    .select('emoji')
+    .eq('message_id', messageId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (current?.emoji === emoji) return removeMessageReaction(messageId);
+  return setMessageReaction(messageId, emoji);
+}
+
+export async function getMessageReactors(messageId: string): Promise<MessageReactor[]> {
+  const { data, error } = await supabase
+    .from('message_reactions')
+    .select('user_id, emoji, created_at, profiles!user_id(username, full_name, avatar_url)')
+    .eq('message_id', messageId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    userId: row.user_id,
+    displayName: row.profiles?.full_name?.trim() || row.profiles?.username || 'We Glue member',
+    avatarUrl: row.profiles?.avatar_url ?? null,
+    emoji: row.emoji,
+  }));
 }
 
 // ─── Message actions ─────────────────────────────────────────────────────────
@@ -499,7 +674,7 @@ export async function getConversationMedia(
     getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
-  return applyThreadVisibility((data ?? []) as any[], visibility).map((m) => mapMessage(m, identities));
+  return applyThreadVisibility((data ?? []) as any[], visibility).map((m) => mapMessage(m, identities, userId));
 }
 
 export async function getConversationFiles(
@@ -520,7 +695,7 @@ export async function getConversationFiles(
     getConversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
-  return applyThreadVisibility((data ?? []) as any[], visibility).map((m) => mapMessage(m, identities));
+  return applyThreadVisibility((data ?? []) as any[], visibility).map((m) => mapMessage(m, identities, userId));
 }
 
 export interface SharedCalendarEvent {
@@ -699,24 +874,24 @@ export async function searchConversation(
   const visible = (rows: any[]) => applyThreadVisibility(rows, visibility);
 
   for (const m of visible((content.data ?? []) as any[])) {
-    hits.set(m.id, { message: mapMessage(m), matchField: 'content', matchText: m.content ?? '' });
+    hits.set(m.id, { message: mapMessage(m, undefined, userId), matchField: 'content', matchText: m.content ?? '' });
   }
   for (const m of visible((files.data ?? []) as any[])) {
     if (!hits.has(m.id))
-      hits.set(m.id, { message: mapMessage(m), matchField: 'file_name', matchText: m.attachment_name ?? '' });
+      hits.set(m.id, { message: mapMessage(m, undefined, userId), matchField: 'file_name', matchText: m.attachment_name ?? '' });
   }
   for (const r of (polls.data ?? []) as any[]) {
     const m = r.messages;
     if (m && isMessageVisible(m, visibility) && !hits.has(m.id))
-      hits.set(m.id, { message: mapMessage(m), matchField: 'poll_question', matchText: r.question ?? '' });
+      hits.set(m.id, { message: mapMessage(m, undefined, userId), matchField: 'poll_question', matchText: r.question ?? '' });
   }
   for (const m of visible((events.data ?? []) as any[])) {
     if (!hits.has(m.id))
-      hits.set(m.id, { message: mapMessage(m), matchField: 'shared_event', matchText: m.events?.title ?? '' });
+      hits.set(m.id, { message: mapMessage(m, undefined, userId), matchField: 'shared_event', matchText: m.events?.title ?? '' });
   }
   for (const m of visible((posts.data ?? []) as any[])) {
     if (!hits.has(m.id))
-      hits.set(m.id, { message: mapMessage(m), matchField: 'shared_post', matchText: m.posts?.caption ?? '' });
+      hits.set(m.id, { message: mapMessage(m, undefined, userId), matchField: 'shared_post', matchText: m.posts?.caption ?? '' });
   }
 
   return Array.from(hits.values()).sort(

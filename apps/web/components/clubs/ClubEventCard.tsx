@@ -29,7 +29,7 @@ export function ClubEventCard({
     <button
       type="button"
       onClick={() => (event.can_open ? onOpen(event.id) : onRestricted())}
-      className="mb-3.5 flex w-full items-center overflow-hidden rounded-xl bg-[#FEFCF0] text-left shadow-[0_4px_5px_rgba(0,0,0,0.25)]"
+      className="mb-3.5 flex w-full items-center overflow-hidden rounded-2xl bg-[#FEFCF0] text-left shadow-card"
       style={{ minHeight: 96 }}
     >
       <div className="relative w-32 shrink-0 self-stretch bg-gray-200">

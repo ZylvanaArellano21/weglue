@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Avatar } from '../shared/Avatar';
+import { openProfile } from '../../lib/profileNavigation';
 import { chatColors, chatFonts, chatSizes } from '../chat/chatTheme';
 import type { SearchResult } from '../../services/searchService';
 
@@ -16,7 +17,7 @@ export function SearchResultRow({ item, onJoin, joiningId }: Props) {
 
   const handlePress = () => {
     if (item.result_type === 'person') {
-      router.push({ pathname: '/profile/[userId]', params: { userId: item.id } });
+      openProfile(router, item.id);
     } else {
       router.push({ pathname: '/club/[clubId]', params: { clubId: item.id } });
     }

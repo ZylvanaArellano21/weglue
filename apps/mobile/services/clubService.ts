@@ -64,10 +64,12 @@ export async function getAllClubs(): Promise<UserClub[]> {
 export interface ClubPhoto {
   id: string;
   url: string;
-  source: 'officer_upload' | 'tagged_post';
+  source: 'officer_upload' | 'tagged_post' | 'club_authored';
   post_id: string | null;
   caption: string | null;
   created_at: string;
+  /** >1 when the backing post is a multi-photo carousel (drives the grid badge). */
+  image_count: number;
 }
 
 // One source of truth for every Photos that Glue surface (club profile
@@ -78,16 +80,67 @@ export interface ClubPhoto {
 const CLUB_PHOTOS_SELECT = 'id, url, source, post_id, caption, created_at';
 
 export async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
-  const { data, error } = await supabase
-    .from('club_photos')
-    .select(CLUB_PHOTOS_SELECT)
-    .eq('club_id', clubId)
-    .eq('is_visible', true)
-    .or('source.eq.officer_upload,post_id.not.is.null')
-    .order('created_at', { ascending: false });
+  const [{ data: legacyRows, error: legacyError }, { data: authoredRows, error: authoredError }] = await Promise.all([
+    supabase
+      .from('club_photos')
+      .select(CLUB_PHOTOS_SELECT)
+      .eq('club_id', clubId)
+      .eq('is_visible', true)
+      .or('source.eq.officer_upload,post_id.not.is.null')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('posts')
+      .select('id, image_url, caption, created_at')
+      .eq('club_id', clubId)
+      .eq('author_kind', 'club')
+      .not('image_url', 'is', null),
+  ]);
+  if (legacyError) throw legacyError;
+  if (authoredError) throw authoredError;
 
-  if (error) throw error;
-  return (data ?? []) as ClubPhoto[];
+  const photos = ((legacyRows ?? []) as any[]).map((row) => ({
+    id: row.id,
+    url: row.url,
+    source: row.source,
+    post_id: row.post_id,
+    caption: row.caption,
+    created_at: row.created_at,
+    image_count: 1,
+  })) as ClubPhoto[];
+  const existingPostIds = new Set(photos.map((photo) => photo.post_id).filter(Boolean));
+  for (const post of (authoredRows ?? []) as any[]) {
+    if (existingPostIds.has(post.id)) continue;
+    photos.push({
+      id: post.id,
+      url: post.image_url,
+      // A club-authored post's club identity IS its authorship — removal is a
+      // full delete, not a detach (see clubPhotoRemoval planner).
+      source: 'club_authored',
+      post_id: post.id,
+      caption: post.caption,
+      created_at: post.created_at,
+      image_count: 1,
+    });
+  }
+
+  // One extra query fills in the carousel count for every photo backed by a post.
+  const postIds = [...new Set(photos.map((p) => p.post_id).filter(Boolean) as string[])];
+  if (postIds.length > 0) {
+    const { data: imgRows } = await supabase
+      .from('post_images')
+      .select('post_id')
+      .in('post_id', postIds);
+    const counts = new Map<string, number>();
+    for (const r of (imgRows ?? []) as { post_id: string }[]) {
+      counts.set(r.post_id, (counts.get(r.post_id) ?? 0) + 1);
+    }
+    for (const photo of photos) {
+      if (photo.post_id && counts.has(photo.post_id)) photo.image_count = counts.get(photo.post_id)!;
+    }
+  }
+
+  photos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return photos;
 }
 
 export interface ClubGluemate {
@@ -133,7 +186,7 @@ export async function getClubProfile(
     { data: goals },
     { data: officerRows },
     { data: eventRows },
-    { data: photoRows },
+    photoRows,
     gluemates,
   ] = await Promise.all([
     supabase
@@ -163,13 +216,7 @@ export async function getClubProfile(
     // The canonical RPC intentionally returns a card-only preview for a
     // members-only event to a non-member, while selected events stay hidden.
     supabase.rpc('get_club_profile_events', { p_club_id: clubId }),
-    supabase
-      .from('club_photos')
-      .select(CLUB_PHOTOS_SELECT)
-      .eq('club_id', clubId)
-      .eq('is_visible', true)
-      .or('source.eq.officer_upload,post_id.not.is.null')
-      .order('created_at', { ascending: false }),
+    getClubPhotos(clubId),
     getClubGluemates(clubId, userId),
   ]);
 
@@ -220,7 +267,7 @@ export async function getClubProfile(
     officers,
     upcoming_events: upcoming,
     past_events: past,
-    photos: (photoRows ?? []) as ClubPhoto[],
+    photos: photoRows,
     gluemates: gluemates.slice(0, 4),
     gluemates_count: gluemates.length,
   };
@@ -550,5 +597,55 @@ export async function deleteClubPhotoEverywhere(photoId: string): Promise<void> 
   const { error } = await supabase.rpc('delete_club_photo_everywhere', {
     p_photo_id: photoId,
   });
+  if (error) throw error;
+}
+
+export interface ClubPostCreateResult {
+  post_id?: string;
+  id: string;
+  image_url: string | null;
+  caption: string | null;
+  created_at: string;
+  author_kind: 'club';
+  club: { id: string; name: string; avatar_url: string | null };
+  images: { path: string; position: number; width?: number | null; height?: number | null }[];
+}
+
+/** Creates a club-authored post. The database verifies club_members.role. */
+export async function createClubPost(
+  clubId: string,
+  imagePaths: string[],
+  caption?: string,
+): Promise<ClubPostCreateResult> {
+  const { data, error } = await supabase.rpc('create_club_post', {
+    p_club_id: clubId,
+    p_image_paths: imagePaths,
+    p_caption: caption?.trim() || null,
+  });
+  if (error) throw error;
+  return data as ClubPostCreateResult;
+}
+
+/** Any current officer may edit the club post caption; RLS is authoritative. */
+export async function updateClubPostCaption(postId: string, caption: string): Promise<void> {
+  const { error } = await supabase
+    .from('posts')
+    .update({ caption: caption.trim() || null })
+    .eq('id', postId)
+    .eq('author_kind', 'club')
+    .select('id')
+    .single();
+  if (error) throw error;
+}
+
+/** Any current officer may delete a club post; its images cascade with it. */
+export async function deleteClubPost(postId: string): Promise<void> {
+  const { error } = await supabase
+    .from('posts')
+    .delete()
+    .eq('id', postId)
+    .eq('author_kind', 'club')
+    .select('id')
+    .single();
   if (error) throw error;
 }

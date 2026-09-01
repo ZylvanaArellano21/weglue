@@ -3,9 +3,11 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
+import { PhotoCarousel } from '../shared/PhotoCarousel';
 import { timeAgo } from '../home/PostCard';
 import { getResizedImageUrl } from '../../lib/imageResize';
 import { openReportFlow } from '../shared/ReportButton';
+import { openProfile } from '../../lib/profileNavigation';
 import { profileColors, profileFonts } from '../profile/profileTheme';
 import type { FeedPost } from '../../services/postService';
 
@@ -36,6 +38,19 @@ export function PostViewerBlock({
   const router = useRouter();
 
   const isOwnPost = post.author.id === viewerUserId;
+  const images = post.images && post.images.length > 0
+    ? post.images
+    : post.image_url
+      ? [{ path: post.image_url, position: 0 }]
+      : [];
+
+  const pressAuthor = () => {
+    if (post.author_kind === 'club') {
+      router.push({ pathname: '/club/[clubId]', params: { clubId: post.author.id } });
+      return;
+    }
+    openProfile(router, post.author.id, viewerUserId);
+  };
 
   return (
     <View style={styles.postBlock}>
@@ -43,9 +58,7 @@ export function PostViewerBlock({
           posts design, so no post ever appears "cut off" above its image. */}
       <View style={styles.identityRow}>
         <TouchableOpacity
-          onPress={() =>
-            router.push({ pathname: '/profile/[userId]', params: { userId: post.author.id } })
-          }
+          onPress={pressAuthor}
           activeOpacity={0.7}
           style={styles.identityLeft}
         >
@@ -134,12 +147,18 @@ export function PostViewerBlock({
         )}
       </View>
 
-      {/* Media */}
-      {post.image_url ? (
+      {/* Media — one image, or a swipeable carousel for up to 5 */}
+      {images.length > 1 ? (
+        <PhotoCarousel
+          images={images.map((img) => ({ uri: img.path }))}
+          width={SCREEN_WIDTH}
+          aspectRatio={4 / 5}
+        />
+      ) : images.length === 1 ? (
         <Image
           source={{
             uri:
-              getResizedImageUrl(post.image_url, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ??
+              getResizedImageUrl(images[0]!.path, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ??
               undefined,
           }}
           style={styles.media}

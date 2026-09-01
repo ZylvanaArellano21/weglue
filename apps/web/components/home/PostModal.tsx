@@ -6,6 +6,7 @@ import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { usePostDetail, useLikePost } from "../../lib/hooks/useHomePostsFeed";
+import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
 import { ReportModal } from "../shared/ReportModal";
 import { useToast } from "../shared/Toast";
@@ -48,12 +49,17 @@ export function PostModal({
       ) : (
         <div>
           <div className="flex items-center gap-2.5 p-4 pr-10">
-            <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex items-center gap-2.5">
-              <Avatar uri={post.author.avatar_url} size={38} name={post.author.username} />
-              <span id="post-title" className="text-[15px] font-semibold text-gray-900">
-                {post.author.username}
-              </span>
-            </ClickableUserIdentity>
+            {post.author_kind === "club" ? (
+              <ClickableClubIdentity clubId={post.author.id} ariaLabel={`Open ${post.author.username}`} className="flex items-center gap-2.5">
+                <Avatar uri={post.author.avatar_url} size={38} name={post.author.username} />
+                <span id="post-title" className="text-[15px] font-semibold text-gray-900">{post.author.username}</span>
+              </ClickableClubIdentity>
+            ) : (
+              <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex items-center gap-2.5">
+                <Avatar uri={post.author.avatar_url} size={38} name={post.author.username} />
+                <span id="post-title" className="text-[15px] font-semibold text-gray-900">{post.author.username}</span>
+              </ClickableUserIdentity>
+            )}
             {post.tagged_clubs.length > 0 && (
               <span className="flex min-w-0 flex-wrap gap-1 text-xs" style={{ color: "#0FA6A6" }}>
                 <span className="text-gray-400">·</span>
@@ -72,7 +78,9 @@ export function PostModal({
             )}
           </div>
 
-          {post.image_url ? (
+          {post.images && post.images.length > 1 ? (
+            <PhotoCarousel images={post.images.map((im) => ({ uri: im.path }))} aspectRatio={4 / 5} />
+          ) : post.image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={post.image_url} alt={post.caption ?? "post"} className="w-full object-cover" />
           ) : (

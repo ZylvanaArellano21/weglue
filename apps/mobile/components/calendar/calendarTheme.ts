@@ -1,4 +1,5 @@
 import { Platform, type TextStyle, type ViewStyle } from 'react-native';
+import { cardDepth } from '../shared/cardStyles';
 
 /** Figma Calendar tab tokens (file ZaAzanItzMQgvheIs2iBkR) */
 export const calendarColors = {
@@ -35,16 +36,9 @@ export const calendarShadow = Platform.select({
   default: {},
 }) as ViewStyle;
 
-export const calendarCardShadow = Platform.select({
-  ios: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-  },
-  android: { elevation: 2 },
-  default: {},
-}) as ViewStyle;
+/** Event/list card depth — the shared, restrained card elevation
+ *  (see cardStyles.ts), so calendar cards match posts, events and club cards. */
+export const calendarCardShadow = cardDepth;
 
 export const calendarSizes = {
   screenPaddingH: 16,

@@ -30,6 +30,10 @@
 export interface VisibilityCandidate {
   id: string;
   created_at: string;
+  deleted_at?: string | null;
+  deletion_kind?: string | null;
+  reactions?: unknown[];
+  attachments?: Array<{ position?: number; [key: string]: unknown }>;
 }
 
 /** Everything needed to decide visibility for one viewer in one conversation. */
@@ -120,12 +124,29 @@ export function applyThreadVisibility<T extends VisibilityCandidate>(
   rows: T[],
   visibility: ThreadVisibility
 ): T[] {
-  return rows.filter((row) => isMessageVisible(row, visibility));
+  return rows
+    .filter((row) => isMessageVisible(row, visibility))
+    .map((row) => {
+      // A privileged/preview query may still carry a redacted row. Never let
+      // its reaction summaries or grouped media escape through a shared
+      // presentation path; retain only the legacy position-0 projection.
+      if (row.deleted_at != null || (row.deletion_kind != null && row.deletion_kind !== "active")) {
+        return {
+          ...row,
+          reactions: [],
+          attachments: Array.isArray(row.attachments)
+            ? row.attachments.filter((attachment) => attachment.position === 0)
+            : row.attachments,
+        } as T;
+      }
+      return row;
+    });
 }
 
 /** The same rule for ONE row, for callers that reach a message through a join
  *  (a poll's parent message, for example) rather than through a list. */
 export function isMessageVisible(row: VisibilityCandidate, visibility: ThreadVisibility): boolean {
+  if (row.deleted_at != null || (row.deletion_kind != null && row.deletion_kind !== "active")) return false;
   if (visibility.hiddenIds.has(row.id)) return false;
   if (visibility.clearedBefore && new Date(row.created_at).getTime() <= new Date(visibility.clearedBefore).getTime()) return false;
   return true;

@@ -239,38 +239,40 @@ describe("removal wording is mobile's, exactly", () => {
   });
 });
 
-describe("an officer's own club-profile post uses the same shared-post model", () => {
-  // Fix 7: posting from a club profile passes the locked club as the FIRST (and
-  // only) club id, and createPost writes it to posts.club_id — the identical
-  // shape a Home post that tags a club produces. So there is one post row, it
-  // shows in Home and in the club, and the very same "Remove from club"
-  // detaches it without deleting it.
+describe("an officer's own club-profile post is authored BY the club", () => {
+  // A post made from a Club Profile is club-authored (author_kind='club'):
+  // the acting officer stays in posts.author_id for audit, the club is the
+  // public author, and it still appears in Home AND the club. Its club identity
+  // IS its authorship, so removal is a full delete (any officer), not a detach.
   const root = join(__dirname, "..", "..");
 
-  it("web posts the locked club through the normal clubIds tagging path", () => {
+  it("web posts the locked club as authoredClubId, not a tag", () => {
     const compose = readFileSync(join(root, "components/home/ComposePostModal.tsx"), "utf8");
-    expect(compose).toContain("const clubIds = lockedClub ? [lockedClub.id] : selected;");
-    // No separate creation call for the club-profile flow.
+    expect(compose).toContain("const authoredClubId = lockedClub?.id;");
+    expect(compose).toContain("const clubIds = lockedClub ? [] : selected;");
     expect(compose.match(/create\.mutate\(/g) ?? []).toHaveLength(1);
 
     const createPost = readFileSync(join(root, "lib/hooks/useCreatePost.ts"), "utf8");
-    expect(createPost).toContain("const primaryClubId = clubIds.length > 0 ? clubIds[0]! : null;");
-    expect(createPost).toContain("club_id: primaryClubId,");
+    expect(createPost).toContain("p_club_id: authoredClubId ?? null,");
   });
 
-  it("mobile posts the locked club through the same single createPost call", () => {
+  it("mobile posts the locked club as authoredClubId through one createPost call", () => {
     const newPost = readFileSync(
       join(__dirname, "..", "..", "..", "mobile", "app", "home", "new-post.tsx"),
       "utf8"
     );
-    expect(newPost).toContain(
-      "const clubIds = locked ? [lockedClubId!] : selectedClubs.map((c) => c.id);"
-    );
+    expect(newPost).toContain("const authoredClubId = locked ? lockedClubId! : undefined;");
     expect(newPost.match(/await createPost\(/g) ?? []).toHaveLength(1);
   });
 
-  it("is removable by the same club-detach operation", () => {
+  it("a legacy tagged post is still only DETACHED from the club", () => {
     const plan = planClubPhotoRemoval({ source: "tagged_post", post_id: POST }, CLUB_NAME);
     expect(plan.kind).toBe("remove_post_from_club");
+  });
+
+  it("a club-authored post is DELETED, not detached", () => {
+    const plan = planClubPhotoRemoval({ source: "club_authored", post_id: POST }, CLUB_NAME);
+    expect(plan.kind).toBe("delete_club_post");
+    expect(plan.title).toBe(`Delete this ${CLUB_NAME} post?`);
   });
 });

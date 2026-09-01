@@ -248,13 +248,23 @@ export async function getOwnPosts(userId: string, page: number = 0): Promise<Use
   const PAGE_SIZE = 12;
   const { data } = await supabase
     .from('posts')
-    .select('id, image_url, created_at')
+    .select('id, image_url, created_at, post_images(count)')
     .eq('author_id', userId)
+    // Club-authored posts (author_kind='club') belong to the club's identity,
+    // not the officer's personal profile — they surface in Home + club Photos
+    // only. Excluding them here keeps the grid in step with getUserPostsFeed
+    // (which the vertical post viewer opens on the tapped grid item).
+    .eq('author_kind', 'user')
     .not('image_url', 'is', null)
     .order('created_at', { ascending: false })
     .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-  return (data ?? []) as UserPost[];
+  return (data ?? []).map((p: any) => ({
+    id: p.id,
+    image_url: p.image_url,
+    created_at: p.created_at,
+    image_count: p.post_images?.[0]?.count ?? (p.image_url ? 1 : 0),
+  })) as UserPost[];
 }
 
 // ─── Delete own post (removes from grid + DB) ────────────────────────────────

@@ -25,11 +25,17 @@
 // from one grid. That is a different data relationship from mobile's and has
 // been removed.
 
-export type ClubPhotoSource = "officer_upload" | "tagged_post";
+//   club_authored  A post published BY this club from its own profile
+//                (author_kind = 'club'). Its club identity IS its authorship —
+//                there is nothing to detach it to. Any officer (or a platform
+//                admin) deletes the whole post via the posts RLS delete policy.
+//                The wording must say "delete", not "remove from club".
+
+export type ClubPhotoSource = "officer_upload" | "tagged_post" | "club_authored";
 
 export interface ClubPhotoRemovalPlan {
   /** Which server operation this photo needs. */
-  kind: "remove_post_from_club" | "delete_club_photo";
+  kind: "remove_post_from_club" | "delete_club_photo" | "delete_club_post";
   title: string;
   message: string;
   confirmLabel: string;
@@ -48,6 +54,17 @@ export function planClubPhotoRemoval(
   clubName: string
 ): ClubPhotoRemovalPlan {
   const club = clubName.trim() || "this club";
+
+  if (photo.source === "club_authored" && photo.post_id) {
+    return {
+      kind: "delete_club_post",
+      title: `Delete this ${club} post?`,
+      message: `This removes the post everywhere — Home and ${club}’s Photos that Glue. It can’t be undone.`,
+      confirmLabel: "Delete post",
+      successMessage: "Post deleted.",
+      errorMessage: "Could not delete the post. Try again.",
+    };
+  }
 
   if (photo.source === "tagged_post" && photo.post_id) {
     return {

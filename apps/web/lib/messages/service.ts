@@ -141,6 +141,8 @@ export interface ThreadMessage {
   poll_id: string | null;
   client_tag: string | null;
   created_at: string;
+  attachments?: MessageAttachment[];
+  reactions?: MessageReactionSummary[];
   sender: { id: string; username: string; full_name: string | null; avatar_url: string | null };
   /**
    * Present only on a LOCAL, not-yet-stored message (Bug 6). A stored row never
@@ -155,6 +157,44 @@ export interface ThreadMessage {
   /** Retained on a pending message so a failed send can be retried with the
    *  original file rather than asking the person to pick it again. */
   pendingFile?: File;
+  /** Same, for a grouped photo send (1..5). */
+  pendingFiles?: File[];
+}
+
+export interface MessageAttachment {
+  id: string;
+  storage_path: string;
+  kind: "image" | "video" | "file";
+  position: number;
+  mime: string | null;
+  width: number | null;
+  height: number | null;
+  byte_size: number | null;
+  file_name: string | null;
+}
+
+export interface MessageReactionSummary {
+  emoji: string;
+  count: number;
+  reactedByMe: boolean;
+  userIds: string[];
+}
+
+export interface MessageReactor {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  emoji: string;
+}
+
+export interface SendMessageAttachment {
+  path: string;
+  kind: "image" | "video" | "file";
+  mime: string | null;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  fileName?: string | null;
 }
 
 export interface ThreadPage {
@@ -247,9 +287,25 @@ export async function conversationRestrictedSenders(conversationId: string): Pro
   return ((data ?? []) as string[]) ?? [];
 }
 
-function messageFromRow(row: any, identities?: Map<string, SharedIdentity>): ThreadMessage {
+function messageFromRow(row: any, identities?: Map<string, SharedIdentity>, viewerId?: string): ThreadMessage {
   const poll = Array.isArray(row.polls) ? row.polls[0] : row.polls;
   const shared = row.sender_id ? identities?.get(row.sender_id) : undefined;
+  const attachments: MessageAttachment[] = ((Array.isArray(row.message_attachments) && row.message_attachments.length > 0
+    ? row.message_attachments
+    : row.attachment_url
+      ? [{ id: `legacy:${row.id}`, storage_path: row.attachment_url, kind: row.message_type === "video" ? "video" : row.message_type === "file" ? "file" : "image", position: 0, mime: row.attachment_mime ?? null, width: null, height: null, byte_size: row.attachment_size ?? null, file_name: row.attachment_name ?? null }]
+      : []) as any[])
+    .map((attachment: any) => ({ id: attachment.id, storage_path: attachment.storage_path, kind: attachment.kind, position: Number(attachment.position), mime: attachment.mime ?? null, width: attachment.width ?? null, height: attachment.height ?? null, byte_size: attachment.byte_size ?? null, file_name: attachment.file_name ?? null }))
+    .sort((a: MessageAttachment, b: MessageAttachment) => a.position - b.position);
+  const reactionGroups = new Map<string, MessageReactionSummary & { firstCreatedAt: string }>();
+  for (const reaction of (Array.isArray(row.message_reactions) ? row.message_reactions : [])) {
+    const current = reactionGroups.get(reaction.emoji) ?? { emoji: reaction.emoji, count: 0, reactedByMe: false, userIds: [], firstCreatedAt: reaction.created_at ?? "" };
+    current.count += 1;
+    current.reactedByMe ||= reaction.user_id === viewerId;
+    if (current.userIds.length < 50) (current.userIds as string[]).push(reaction.user_id);
+    if (reaction.created_at && (!current.firstCreatedAt || reaction.created_at < current.firstCreatedAt)) current.firstCreatedAt = reaction.created_at;
+    reactionGroups.set(reaction.emoji, current);
+  }
   return {
     id: row.id,
     conversation_id: row.conversation_id,
@@ -266,6 +322,10 @@ function messageFromRow(row: any, identities?: Map<string, SharedIdentity>): Thr
     poll_id: poll?.id ?? null,
     client_tag: row.client_tag ?? null,
     created_at: row.created_at,
+    attachments,
+    reactions: Array.from(reactionGroups.values())
+      .sort((a, b) => b.count - a.count || a.firstCreatedAt.localeCompare(b.firstCreatedAt))
+      .map(({ firstCreatedAt: _firstCreatedAt, ...reaction }) => reaction),
     sender: {
       id: row.profiles?.id ?? row.sender_id ?? "",
       username: row.profiles?.username ?? shared?.username ?? "",
@@ -502,7 +562,7 @@ export async function getThread(conversationId: string, channelId: string | null
   let query = threadFilter(
     supabase
       .from("messages")
-      .select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url)")
+      .select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
       .limit(PAGE_SIZE),
@@ -518,7 +578,7 @@ export async function getThread(conversationId: string, channelId: string | null
   const raw = (data ?? []) as any[];
   const rows = applyThreadVisibility(raw, visibility);
   return {
-    messages: rows.map((row) => messageFromRow(row, identities)),
+    messages: rows.map((row) => messageFromRow(row, identities, userId)),
     // Cursor is derived from the RAW page: a page whose rows were all hidden
     // must still advance, or the history would appear to end there.
     next_cursor: raw.length === PAGE_SIZE ? raw[raw.length - 1].created_at : null,
@@ -628,10 +688,41 @@ export async function sendMessage(input: {
   content?: string | null;
   messageType?: "text" | "image" | "video" | "file";
   attachment?: { path: string; name: string | null; size: number; mime: string } | null;
+  attachments?: SendMessageAttachment[];
   tag?: string;
-}): Promise<void> {
+}): Promise<ThreadMessage> {
   const senderId = await requireUserId();
   const tag = input.tag ?? clientTag();
+  if (input.attachments) {
+    if (input.attachments.length < 1 || input.attachments.length > 5) throw new Error("You can send between 1 and 5 attachments.");
+    const kind = input.attachments[0]!.kind;
+    if (input.attachments.some((attachment) => attachment.kind !== kind)) throw new Error("Grouped attachments must have one kind.");
+    if (input.attachments.length > 1 && kind !== "image") throw new Error("Only images can be grouped.");
+    const { data: messageId, error: rpcError } = await getSupabaseBrowser().rpc("send_message_with_attachments", {
+      p_conversation_id: input.conversationId,
+      p_channel_id: input.channelId,
+      p_content: input.content ?? null,
+      p_message_type: input.messageType ?? kind,
+      p_client_tag: tag,
+      p_attachments: input.attachments.map((attachment) => ({
+        path: attachment.path,
+        kind: attachment.kind,
+        mime: attachment.mime,
+        width: attachment.width ?? null,
+        height: attachment.height ?? null,
+        bytes: attachment.bytes ?? null,
+        fileName: attachment.fileName ?? null,
+      })),
+    });
+    if (rpcError && (rpcError as { code?: string }).code === "23505") {
+      const { data: existing } = await getSupabaseBrowser().from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))").eq("sender_id", senderId).eq("client_tag", tag).single();
+      if (existing) return messageFromRow(existing, undefined, senderId);
+    }
+    if (rpcError) throw rpcError;
+    const { data: stored, error: selectError } = await getSupabaseBrowser().from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))").eq("id", messageId).single();
+    if (selectError) throw selectError;
+    return messageFromRow(stored, undefined, senderId);
+  }
   const { error } = await getSupabaseBrowser().from("messages").insert({
     conversation_id: input.conversationId,
     channel_id: input.channelId,
@@ -647,8 +738,60 @@ export async function sendMessage(input: {
   // Same retry contract as mobile: a lost response may have stored the row, and
   // the unique (sender_id, client_tag) index turns the retry into a no-op rather
   // than a duplicate message.
-  if (error && (error as { code?: string }).code === "23505") return;
+  if (error && (error as { code?: string }).code === "23505") {
+    const { data: existing } = await getSupabaseBrowser().from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))").eq("sender_id", senderId).eq("client_tag", tag).single();
+    if (existing) return messageFromRow(existing, undefined, senderId);
+  }
   if (error) throw error;
+  const { data: stored, error: selectError } = await getSupabaseBrowser().from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name)").eq("sender_id", senderId).eq("client_tag", tag).single();
+  if (selectError) throw selectError;
+  return messageFromRow(stored, undefined, senderId);
+}
+
+export async function setMessageReaction(messageId: string, emoji: string): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await getSupabaseBrowser()
+    .from("message_reactions")
+    .upsert({ message_id: messageId, user_id: userId, emoji }, { onConflict: "message_id,user_id" });
+  if (error) throw error;
+}
+
+export async function removeMessageReaction(messageId: string): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await getSupabaseBrowser()
+    .from("message_reactions")
+    .delete()
+    .eq("message_id", messageId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function toggleMessageReaction(messageId: string, emoji: string): Promise<void> {
+  const userId = await requireUserId();
+  const { data, error } = await getSupabaseBrowser()
+    .from("message_reactions")
+    .select("emoji")
+    .eq("message_id", messageId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.emoji === emoji) return removeMessageReaction(messageId);
+  return setMessageReaction(messageId, emoji);
+}
+
+export async function getMessageReactors(messageId: string): Promise<MessageReactor[]> {
+  const { data, error } = await getSupabaseBrowser()
+    .from("message_reactions")
+    .select("user_id, emoji, created_at, profiles!user_id(username, full_name, avatar_url)")
+    .eq("message_id", messageId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    userId: row.user_id,
+    displayName: row.profiles?.full_name?.trim() || row.profiles?.username || "We Glue member",
+    avatarUrl: row.profiles?.avatar_url ?? null,
+    emoji: row.emoji,
+  }));
 }
 
 /** Sends the same canonical shared_event reference used by the mobile share
@@ -1237,7 +1380,7 @@ export async function getSharedEvents(conversationId: string, channelId: string 
 export async function getSharedMessages(conversationId: string, channelId: string | null, type: "image" | "video" | "file" | "poll", userId: string): Promise<ThreadMessage[]> {
   const supabase = getSupabaseBrowser();
   const query = threadFilter(
-    supabase.from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url)").eq("conversation_id", conversationId).eq("message_type", type).order("created_at", { ascending: false }).limit(100),
+    supabase.from("messages").select("id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))").eq("conversation_id", conversationId).eq("message_type", type).order("created_at", { ascending: false }).limit(100),
     channelId
   );
   const [{ data, error }, visibility, identities] = await Promise.all([
@@ -1246,7 +1389,7 @@ export async function getSharedMessages(conversationId: string, channelId: strin
     conversationSharedIdentities(conversationId),
   ]);
   if (error) throw error;
-  return applyThreadVisibility((data ?? []) as any[], visibility).map((row) => messageFromRow(row, identities));
+  return applyThreadVisibility((data ?? []) as any[], visibility).map((row) => messageFromRow(row, identities, userId));
 }
 
 /**

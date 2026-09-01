@@ -11,6 +11,9 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
+import { cardSurface, cardClip, cardDepth } from '../shared/cardStyles';
+import { PhotoCarousel } from '../shared/PhotoCarousel';
+import { openProfile } from '../../lib/profileNavigation';
 import { getResizedImageUrl } from '../../lib/imageResize';
 import type { FeedPost } from '../../services/postService';
 
@@ -48,30 +51,28 @@ export const PostCard = memo(function PostCard({
   const [sharePressed, setSharePressed] = useState(false);
 
   const handlePressAuthor = () => {
-    router.push({ pathname: '/profile/[userId]', params: { userId: post.author.id } });
+    if (post.author_kind === 'club') {
+      router.push({ pathname: '/club/[clubId]', params: { clubId: post.author.id } });
+      return;
+    }
+    openProfile(router, post.author.id, viewerUserId);
   };
 
   const handlePressClub = (clubId: string) => {
     router.push({ pathname: '/club/[clubId]', params: { clubId } });
   };
 
+  const images = post.images && post.images.length > 0
+    ? post.images
+    : post.image_url
+      ? [{ path: post.image_url, position: 0 }]
+      : [];
+
   const isOwnPost = post.author.id === viewerUserId;
 
   return (
-    <View
-      style={{
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        marginHorizontal: 16,
-        marginBottom: 16,
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.07,
-        shadowRadius: 8,
-        elevation: 3,
-      }}
-    >
+    <View style={{ marginHorizontal: 16, marginBottom: 16, ...cardDepth }}>
+    <View style={{ ...cardSurface, ...cardClip }}>
       {/* Author Row */}
       <View
         style={{
@@ -145,10 +146,16 @@ export const PostCard = memo(function PostCard({
         )}
       </View>
 
-      {/* Post Image */}
-      {post.image_url ? (
+      {/* Post image(s) — one image, or a swipeable carousel for up to 5 */}
+      {images.length > 1 ? (
+        <PhotoCarousel
+          images={images.map((img) => ({ uri: img.path }))}
+          width={SCREEN_WIDTH - 32}
+          aspectRatio={4 / 5}
+        />
+      ) : images.length === 1 ? (
         <Image
-          source={{ uri: getResizedImageUrl(post.image_url, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ?? undefined }}
+          source={{ uri: getResizedImageUrl(images[0]!.path, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ?? undefined }}
           style={{ width: '100%', aspectRatio: 4 / 5 }}
           resizeMode="cover"
           fadeDuration={0}
@@ -236,6 +243,7 @@ export const PostCard = memo(function PostCard({
           {timeAgo(post.created_at)}
         </Text>
       </View>
+    </View>
     </View>
   );
 });

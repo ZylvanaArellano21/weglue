@@ -50,7 +50,8 @@ export function resolveNotificationVisual(input: {
   return { kind: "fallback" };
 }
 
-function dedupeActors(actors: NotificationVisualActor[]): NotificationVisualActor[] {
+/** Preserve the caller's ordering while removing repeated actor IDs. */
+export function dedupeActors(actors: NotificationVisualActor[]): NotificationVisualActor[] {
   const seen = new Set<string>();
   return actors.filter((actor) => {
     if (seen.has(actor.id)) return false;

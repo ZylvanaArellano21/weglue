@@ -131,22 +131,35 @@ export default async function AdminMessageDetailPage({ params }: { params: { id:
 
   const attachmentPollTab = (
     <div className="grid gap-6 md:grid-cols-2">
-      <SectionCard title="Attachment">
-        {msg.attachment ? (
-          <dl className="grid gap-4 p-4">
-            <Field label="Type / MIME">{msg.attachment.mime ?? "unknown"}</Field>
-            <Field label="Filename">{msg.attachment.name}</Field>
-            <Field label="Size">{fmtSize(msg.attachment.size)}</Field>
-            <Field label="Storage">{msg.attachment.active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</Field>
-            <div>
-              <DisabledAction
-                label="Preview attachment"
-                reason="Authorized temporary signed preview is not enabled in this build; storage paths are never exposed and no long-lived public URL is created"
-              />
-            </div>
-          </dl>
+      <SectionCard title={`Attachments (${msg.attachments.length})`}>
+        {msg.attachments.length > 0 ? (
+          <ol className="divide-y divide-gray-100">
+            {msg.attachments.map((attachment) => (
+              <li key={attachment.position} className="space-y-2 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Badge tone="neutral">#{attachment.position + 1}</Badge>
+                    <span className="text-sm font-medium capitalize text-gray-900">{attachment.kind}</span>
+                  </div>
+                  {attachment.active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}
+                </div>
+                <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                  <Field label="Type / MIME">{attachment.mime ?? "unknown"}</Field>
+                  <Field label="Filename">{attachment.name ?? "Unnamed attachment"}</Field>
+                  <Field label="Size">{fmtSize(attachment.size)}</Field>
+                  <Field label="Dimensions">
+                    {attachment.width && attachment.height ? `${attachment.width} × ${attachment.height}` : "—"}
+                  </Field>
+                </dl>
+                <DisabledAction
+                  label="Preview attachment"
+                  reason="Authorized temporary signed preview is not enabled in this build; storage paths are never exposed and no long-lived public URL is created"
+                />
+              </li>
+            ))}
+          </ol>
         ) : (
-          <EmptyState icon="📎" title="No attachment" message={msg.deleted ? "Deleted messages never expose retained attachments." : "This message has no attachment."} />
+          <EmptyState icon="📎" title="No attachments" message={msg.deleted ? "Deleted messages never expose retained attachments." : "This message has no attachment."} />
         )}
       </SectionCard>
       <SectionCard title="Poll">
@@ -181,6 +194,38 @@ export default async function AdminMessageDetailPage({ params }: { params: { id:
         )}
       </SectionCard>
     </div>
+  );
+
+  const reactionsTab = (
+    <SectionCard title={`Reactions (${msg.reactions.reduce((total, reaction) => total + reaction.count, 0)})`}>
+      {msg.reactions.length > 0 ? (
+        <ul className="divide-y divide-gray-100">
+          {msg.reactions.map((reaction) => (
+            <li key={reaction.emoji} className="space-y-2 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl" aria-label={`${reaction.emoji} reaction`}>
+                  {reaction.emoji}
+                </span>
+                <Badge tone="neutral">{reaction.count}</Badge>
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-gray-700">
+                {reaction.reactors.map((reactor, index) => (
+                  <span key={`${reactor.username ?? reactor.display_name}-${index}`}>
+                    {reactor.display_name}
+                    {reactor.username ? <span className="ml-1 text-xs text-gray-400">@{reactor.username}</span> : null}
+                  </span>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyState icon="🙂" title="No reactions" message={msg.deleted ? "Deleted messages never expose reaction data." : "This message has no reactions."} />
+      )}
+      <p className="border-t border-gray-100 p-4 text-xs text-gray-400">
+        Read-only conversation metadata. Reactions are not independently moderatable and cascade with the message.
+      </p>
+    </SectionCard>
   );
 
   const reportsTab = (
@@ -270,6 +315,7 @@ export default async function AdminMessageDetailPage({ params }: { params: { id:
           { key: "overview", label: "Message", content: overviewTab },
           { key: "context", label: "Sender & context", content: contextTab },
           { key: "media", label: "Attachment & poll", content: attachmentPollTab },
+          { key: "reactions", label: "Reactions", count: msg.reactions.reduce((total, reaction) => total + reaction.count, 0), content: reactionsTab },
           { key: "reports", label: "Reports", count: msg.reportCount, content: reportsTab },
           { key: "actions", label: "Actions", content: actionsTab },
         ]}

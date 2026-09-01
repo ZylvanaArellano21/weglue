@@ -173,8 +173,7 @@ function SearchClubCard({ club, onJoin, joining }: { club: SearchDiscoveryClub; 
       onClick={open}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } }}
       aria-label={`Open ${club.name}`}
-      className="flex cursor-pointer flex-col overflow-hidden rounded-xl bg-white text-left shadow-[0_6px_16px_rgba(0,0,0,0.10)] transition hover:shadow-[0_8px_22px_rgba(0,0,0,0.14)]"
-      style={{ border: "1px solid rgba(0,0,0,0.05)" }}
+      className="flex cursor-pointer flex-col overflow-hidden rounded-2xl bg-white text-left shadow-card transition hover:-translate-y-0.5"
     >
       <div className="relative aspect-[5/3] w-full bg-gray-200">
         {image ? (
@@ -226,8 +225,7 @@ function PersonCard({ person, onOpen }: { person: SearchDiscoveryPerson; onOpen:
       type="button"
       onClick={onOpen}
       aria-label={`Open ${name}'s profile`}
-      className="flex w-[129px] shrink-0 flex-col items-center rounded-xl bg-white px-2 py-3.5 shadow-[0_6px_16px_rgba(0,0,0,0.10)]"
-      style={{ border: "1px solid rgba(0,0,0,0.05)" }}
+      className="flex w-[129px] shrink-0 flex-col items-center rounded-2xl bg-white px-2 py-3.5 shadow-card"
     >
       <Avatar uri={person.avatar_url} size={52} name={person.full_name ?? person.username} />
       <span className="mt-2 mb-1 w-full truncate text-center text-sm font-semibold text-gray-900">{name}</span>

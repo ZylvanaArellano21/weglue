@@ -33,6 +33,7 @@ import { usePostComments, useAddComment, usePostDetail } from '../../hooks/useHo
 import { timeAgo } from '../../components/home/PostCard';
 import type { PostComment } from '../../services/postService';
 import { openReportFlow } from '../../components/shared/ReportButton';
+import { openProfile } from '../../lib/profileNavigation';
 import { clientUuid } from '../../lib/chatAttachments';
 
 export default function CommentsScreen() {
@@ -56,7 +57,7 @@ export default function CommentsScreen() {
   // Push the commenter's profile ABOVE this route — no dismiss. Back restores
   // this exact Comments instance (draft + scroll intact).
   const handlePressCommenter = (userId: string) => {
-    router.push({ pathname: '/profile/[userId]', params: { userId } });
+    openProfile(router, userId, viewerUserId);
   };
 
   const close = () => {

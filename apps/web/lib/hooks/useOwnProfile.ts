@@ -255,6 +255,11 @@ export function useOwnPosts(userId: string | undefined) {
         .from("posts")
         .select("id, image_url, created_at")
         .eq("author_id", userId!)
+        // Club-authored posts (author_kind='club') live on the club's identity,
+        // not the officer's personal profile — they appear in Home + club Photos
+        // only. The post detail/viewer never loads them for a personal profile,
+        // so they must not sit in this grid either.
+        .eq("author_kind", "user")
         .not("image_url", "is", null)
         .order("created_at", { ascending: false })
         .limit(36);

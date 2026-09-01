@@ -24,6 +24,8 @@ export interface UserPost {
   id: string;
   image_url: string | null;
   created_at: string;
+  /** >1 when the post is a multi-photo carousel (drives the grid badge). */
+  image_count: number;
 }
 
 export interface UserWeeklyEvent {
@@ -228,13 +230,21 @@ export async function getUserPosts(
 
   const { data } = await supabase
     .from('posts')
-    .select('id, image_url, created_at')
+    .select('id, image_url, created_at, post_images(count)')
     .eq('author_id', userId)
+    // Club-authored posts belong to the club, not this person's profile grid
+    // (matches getUserPostsFeed, which backs the vertical post viewer).
+    .eq('author_kind', 'user')
     .not('image_url', 'is', null)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
 
-  return (data ?? []) as UserPost[];
+  return (data ?? []).map((p: any) => ({
+    id: p.id,
+    image_url: p.image_url,
+    created_at: p.created_at,
+    image_count: p.post_images?.[0]?.count ?? (p.image_url ? 1 : 0),
+  })) as UserPost[];
 }
 
 export async function getUserWeeklyEvents(

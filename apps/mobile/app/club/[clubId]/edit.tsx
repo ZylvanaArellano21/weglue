@@ -33,6 +33,7 @@ import {
   removeOfficer,
   removePostFromClub,
   deleteClubPhotoEverywhere,
+  deleteClubPost,
   type UpdateClubInput,
   type UniversityUser,
 } from '../../../services/clubService';
@@ -724,6 +725,33 @@ export default function EditClubScreen() {
 
   function handlePhotoOptions(photo: ClubPhoto) {
     const clubName = club?.name ?? 'this club';
+
+    if (photo.source === 'club_authored' && photo.post_id) {
+      // A post the club published from its own profile. Its club identity IS
+      // its authorship — any officer deletes the whole post.
+      Alert.alert(
+        `Delete this ${clubName} post?`,
+        `This removes the post everywhere — Home and ${clubName}’s Photos that Glue. It can’t be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete post',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteClubPost(photo.post_id!);
+                setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+                invalidatePhotoQueries();
+                show('Post deleted.');
+              } catch {
+                Alert.alert('Error', 'Could not delete the post. Try again.');
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
 
     if (photo.source === 'tagged_post' && photo.post_id) {
       // A student's tagged post: officers remove it from THIS CLUB only.

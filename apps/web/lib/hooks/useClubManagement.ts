@@ -11,6 +11,7 @@ import {
   searchUniversityUsers,
   removePostFromClub,
   deleteClubPhotoEverywhere,
+  deleteClubPost,
   type UpdateClubInput,
 } from "../clubs/clubManagement";
 import { clubProfileKey } from "./useClubProfile";
@@ -115,6 +116,10 @@ export function useManageClubPhoto(clubId: string, userId: string) {
     }),
     deleteUpload: useMutation({
       mutationFn: (photoId: string) => deleteClubPhotoEverywhere(photoId),
+      onSuccess: afterChange,
+    }),
+    deleteClubPost: useMutation({
+      mutationFn: (postId: string) => deleteClubPost(postId),
       onSuccess: afterChange,
     }),
   };

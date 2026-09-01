@@ -3,8 +3,16 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } fr
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../lib/chatAttachments';
-import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from './chatTheme';
+import {
+  chatColors,
+  chatFonts,
+  chatShadow,
+  chatSizes,
+  chatTypography,
+  senderNameColor,
+} from './chatTheme';
 import { ATTACHMENT_UNAVAILABLE_TEXT } from '../../lib/blockPrompts';
+import type { MessageAttachment, MessageReactionSummary } from '../../services/messagingService';
 
 interface Props {
   id: string;
@@ -15,6 +23,15 @@ interface Props {
   attachmentUrl: string | null;
   attachmentName?: string | null;
   attachmentSize?: number | null;
+  /** Grouped media (1..5). When length > 1 renders a grid; falls back to
+   * attachmentUrl for legacy single messages. */
+  attachments?: MessageAttachment[];
+  /** Reaction summary, grouped by emoji, count desc. */
+  reactions?: MessageReactionSummary[];
+  /** Toggle the viewer's reaction (null clears). */
+  onToggleReaction?: (emoji: string) => void;
+  /** Tapping the reaction chips opens the "who reacted with what" sheet. */
+  onPressReactions?: () => void;
   /**
    * True when this sender's attachment payload is unavailable to the viewer
    * (a block in either direction). The message row is still rendered, as
@@ -25,14 +42,19 @@ interface Props {
   messageType: string;
   createdAt: string;
   isOwn: boolean;
+  /** This is a group conversation — show the sender's name in incoming bubbles. */
+  isGroup?: boolean;
+  /** First message of a consecutive run from this sender (show avatar + name). */
   showSenderInfo: boolean;
+  /** Last message of a consecutive run from this sender (drives corner + spacing). */
+  isLastInGroup?: boolean;
   /** Pending pipeline state (optimistic messages only). */
   pendingState?: 'uploading' | 'sending' | 'failed';
   uploadProgress?: number;
   onRetry?: () => void;
   onDiscardFailed?: () => void;
   onLongPress?: (messageId: string) => void;
-  onPressMedia?: (messageId: string) => void;
+  onPressMedia?: (messageId: string, index?: number) => void;
   onPressFile?: (messageId: string) => void;
   onPressAvatar?: () => void;
   pollSlot?: React.ReactNode;
@@ -119,19 +141,135 @@ function MediaPreview({
   );
 }
 
+/** Signed-URL image tile for the grouped-media grid. */
+function GridImage({ path, style }: { path: string; style: object }) {
+  const uri = useAttachmentUri(path);
+  return uri ? (
+    <Image source={{ uri }} style={style} resizeMode="cover" />
+  ) : (
+    <View style={[style, styles.mediaLoading]}>
+      <ActivityIndicator size="small" color={chatColors.teal} />
+    </View>
+  );
+}
+
+/** 1..5 images as one rounded media group. Layout adapts to the count. */
+function GroupedMedia({
+  images,
+  onPress,
+  onLongPress,
+}: {
+  images: MessageAttachment[];
+  onPress: (index: number) => void;
+  onLongPress: () => void;
+}) {
+  const n = images.length;
+  const gap = 2;
+  const W = MEDIA_MAX_WIDTH;
+  const tile = (i: number, w: number, h: number) => (
+    <TouchableOpacity
+      key={images[i]!.id}
+      activeOpacity={0.9}
+      onPress={() => onPress(i)}
+      onLongPress={onLongPress}
+      style={{ width: w, height: h }}
+    >
+      <GridImage path={images[i]!.storage_path} style={{ width: '100%', height: '100%' }} />
+    </TouchableOpacity>
+  );
+
+  let layout: React.ReactNode;
+  if (n === 2) {
+    const s = (W - gap) / 2;
+    layout = <View style={styles.gridRow}>{tile(0, s, s)}<View style={{ width: gap }} />{tile(1, s, s)}</View>;
+  } else if (n === 3) {
+    const big = (W - gap) * 0.62;
+    const small = W - gap - big;
+    const sh = (big - gap) / 2;
+    layout = (
+      <View style={styles.gridRow}>
+        {tile(0, big, big)}
+        <View style={{ width: gap }} />
+        <View style={{ width: small }}>{tile(1, small, sh)}<View style={{ height: gap }} />{tile(2, small, sh)}</View>
+      </View>
+    );
+  } else if (n === 4) {
+    const s = (W - gap) / 2;
+    layout = (
+      <View>
+        <View style={styles.gridRow}>{tile(0, s, s)}<View style={{ width: gap }} />{tile(1, s, s)}</View>
+        <View style={{ height: gap }} />
+        <View style={styles.gridRow}>{tile(2, s, s)}<View style={{ width: gap }} />{tile(3, s, s)}</View>
+      </View>
+    );
+  } else {
+    // 5: one wide on top, 2×2 below
+    const s = (W - gap) / 2;
+    layout = (
+      <View>
+        {tile(0, W, s)}
+        <View style={{ height: gap }} />
+        <View style={styles.gridRow}>{tile(1, s, s)}<View style={{ width: gap }} />{tile(2, s, s)}</View>
+        <View style={{ height: gap }} />
+        <View style={styles.gridRow}>{tile(3, s, s)}<View style={{ width: gap }} />{tile(4, s, s)}</View>
+      </View>
+    );
+  }
+  return <View style={styles.groupedMedia}>{layout}</View>;
+}
+
+function ReactionChips({
+  reactions,
+  isOwn,
+  onToggle,
+  onPressReactions,
+}: {
+  reactions: MessageReactionSummary[];
+  isOwn: boolean;
+  onToggle?: (emoji: string) => void;
+  onPressReactions?: () => void;
+}) {
+  if (!reactions.length) return null;
+  return (
+    <View style={[styles.reactionRow, isOwn ? styles.timeOwn : styles.timeOther]}>
+      {reactions.map((r) => (
+        <TouchableOpacity
+          key={r.emoji}
+          style={[styles.reactionChip, r.reactedByMe && styles.reactionChipMine]}
+          // Tap → "who reacted with what". Long-press → quick toggle of that
+          // emoji (fast path; also reachable from the long-press quick bar).
+          onPress={() => (onPressReactions ? onPressReactions() : onToggle?.(r.emoji))}
+          onLongPress={() => onToggle?.(r.emoji)}
+          disabled={!onPressReactions && !onToggle}
+        >
+          <Text style={styles.reactionEmoji}>{r.emoji}</Text>
+          {r.count > 1 ? <Text style={styles.reactionCount}>{r.count}</Text> : null}
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 export function MessageBubble({
   id,
+  senderId,
   senderUsername,
   senderAvatarUrl,
   content,
   attachmentUrl,
   attachmentName,
   attachmentSize,
+  attachments,
+  reactions,
+  onToggleReaction,
+  onPressReactions,
   attachmentUnavailable,
   messageType,
   createdAt,
   isOwn,
+  isGroup,
   showSenderInfo,
+  isLastInGroup = true,
   pendingState,
   uploadProgress,
   onRetry,
@@ -143,19 +281,36 @@ export function MessageBubble({
   pollSlot,
   cardSlot,
 }: Props) {
+  const groupImages = (attachments ?? []).filter((a) => a.kind === 'image');
+  const isGroupedMedia = groupImages.length > 1;
   const isPoll = messageType === 'poll' && pollSlot;
   const isCard = (messageType === 'shared_event' || messageType === 'shared_post') && cardSlot;
   const isMedia = messageType === 'image' || messageType === 'video';
   const isFile = messageType === 'file';
   const failed = pendingState === 'failed';
+  const isTextBubble = !isPoll && !isCard && !isMedia && !isFile && !(attachmentUnavailable && isFile);
 
   const longPress = () => onLongPress?.(id);
+  const showName = !!isGroup && !isOwn && showSenderInfo;
+
+  // Consecutive bubbles from the same sender tuck their inner corner in.
+  const R = chatSizes.bubbleRadius;
+  const r = chatSizes.bubbleRadiusGrouped;
+  const groupedCorners = isOwn
+    ? { borderTopRightRadius: showSenderInfo ? R : r, borderBottomRightRadius: isLastInGroup ? R : r }
+    : { borderTopLeftRadius: showSenderInfo ? R : r, borderBottomLeftRadius: isLastInGroup ? R : r };
 
   return (
-    <View style={[styles.row, isOwn && styles.rowOwn]}>
+    <View
+      style={[
+        styles.row,
+        isOwn && styles.rowOwn,
+        { marginTop: showSenderInfo ? 6 : 2, marginBottom: isLastInGroup ? 6 : 2 },
+      ]}
+    >
       {!isOwn && (
         <View style={styles.avatarCol}>
-          {showSenderInfo ? (
+          {isLastInGroup ? (
             <TouchableOpacity onPress={onPressAvatar} disabled={!onPressAvatar}>
               <Avatar uri={senderAvatarUrl} size={chatSizes.avatarMessage} username={senderUsername} />
             </TouchableOpacity>
@@ -185,12 +340,23 @@ export function MessageBubble({
               </Text>
             </View>
           </TouchableOpacity>
+        ) : isMedia && isGroupedMedia ? (
+          <View>
+            <GroupedMedia
+              images={groupImages}
+              onPress={(i) => onPressMedia?.(id, i)}
+              onLongPress={longPress}
+            />
+            {content ? (
+              <Text style={[styles.mediaCaption, isOwn ? styles.timeOwn : styles.timeOther]}>{content}</Text>
+            ) : null}
+          </View>
         ) : isMedia ? (
           <View>
             <MediaPreview
               raw={attachmentUrl}
               isVideo={messageType === 'video'}
-              onPress={() => onPressMedia?.(id)}
+              onPress={() => onPressMedia?.(id, 0)}
               onLongPress={longPress}
             />
             {content ? (
@@ -233,14 +399,29 @@ export function MessageBubble({
         ) : (
           <TouchableOpacity
             onLongPress={longPress}
-            activeOpacity={0.88}
-            style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, failed && styles.bubbleFailed]}
+            activeOpacity={0.9}
+            style={[
+              styles.bubble,
+              isOwn ? styles.bubbleOwn : styles.bubbleOther,
+              groupedCorners,
+              failed && styles.bubbleFailed,
+            ]}
           >
+            {showName ? (
+              <Text style={[chatTypography.senderName, { color: senderNameColor(senderId || senderUsername) }]}>
+                {senderUsername}
+              </Text>
+            ) : null}
             {content ? (
               <Text style={isOwn ? chatTypography.bubbleSent : chatTypography.bubbleReceived}>{content}</Text>
             ) : null}
+            <Text style={styles.bubbleTime}>
+              {pendingState ? 'Sending…' : formatTime(createdAt)}
+            </Text>
           </TouchableOpacity>
         )}
+
+        <ReactionChips reactions={reactions ?? []} isOwn={isOwn} onToggle={onToggleReaction} onPressReactions={onPressReactions} />
 
         {failed ? (
           <View style={styles.failedRow}>
@@ -253,11 +434,11 @@ export function MessageBubble({
               <Text style={styles.discardText}>Discard</Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <Text style={[chatTypography.timestamp, isOwn ? styles.timeOwn : styles.timeOther]}>
+        ) : !isTextBubble ? (
+          <Text style={[chatTypography.bubbleTimestamp, isOwn ? styles.timeOwn : styles.timeOther]}>
             {pendingState ? 'Sending…' : formatTime(createdAt)}
           </Text>
-        )}
+        ) : null}
       </View>
     </View>
   );
@@ -267,7 +448,6 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    marginVertical: 4,
     paddingHorizontal: 15,
   },
   rowOwn: {
@@ -275,7 +455,7 @@ const styles = StyleSheet.create({
   },
   avatarCol: {
     marginRight: 8,
-    marginBottom: 14,
+    marginBottom: 2,
   },
   col: {
     maxWidth: '78%',
@@ -286,20 +466,24 @@ const styles = StyleSheet.create({
   },
   bubble: {
     borderRadius: chatSizes.bubbleRadius,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    minHeight: 34,
-    justifyContent: 'center',
-    ...chatShadow,
+    paddingHorizontal: 12,
+    paddingTop: 7,
+    paddingBottom: 5,
+    minHeight: 32,
   },
   bubbleOwn: {
-    backgroundColor: chatColors.teal,
+    backgroundColor: chatColors.bubbleOwn,
   },
   bubbleOther: {
-    backgroundColor: chatColors.bg,
+    backgroundColor: chatColors.bubbleIncoming,
   },
   bubbleFailed: {
     opacity: 0.65,
+  },
+  bubbleTime: {
+    ...chatTypography.bubbleTimestamp,
+    alignSelf: 'flex-end',
+    marginTop: 1,
   },
   timeOwn: {
     marginTop: 3,
@@ -315,6 +499,42 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#00000010',
+  },
+  groupedMedia: {
+    width: MEDIA_MAX_WIDTH,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#00000010',
+  },
+  gridRow: {
+    flexDirection: 'row',
+  },
+  reactionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  reactionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    ...chatShadow,
+  },
+  reactionChipMine: {
+    backgroundColor: 'rgba(15,166,166,0.16)',
+  },
+  reactionEmoji: {
+    fontSize: 13,
+  },
+  reactionCount: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 11,
+    color: chatColors.textMuted,
   },
   mediaImage: {
     width: '100%',
@@ -358,8 +578,6 @@ const styles = StyleSheet.create({
     width: 240,
     backgroundColor: chatColors.white,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: chatColors.border,
     paddingHorizontal: 12,
     paddingVertical: 10,
     ...chatShadow,

@@ -217,3 +217,56 @@ export async function deleteClubPhotoEverywhere(photoId: string): Promise<void> 
   const { error } = await supabase.rpc("delete_club_photo_everywhere", { p_photo_id: photoId });
   if (error) throw error;
 }
+
+export interface ClubPostCreateResult {
+  post_id?: string;
+  id: string;
+  image_url: string | null;
+  caption: string | null;
+  created_at: string;
+  author_kind: "club";
+  club: { id: string; name: string; avatar_url: string | null };
+  images: { path: string; position: number; width?: number | null; height?: number | null }[];
+}
+
+/** Creates a club-authored post. The database verifies club_members.role. */
+export async function createClubPost(
+  clubId: string,
+  imagePaths: string[],
+  caption?: string,
+): Promise<ClubPostCreateResult> {
+  const supabase = getSupabaseBrowser();
+  const { data, error } = await supabase.rpc("create_club_post", {
+    p_club_id: clubId,
+    p_image_paths: imagePaths,
+    p_caption: caption?.trim() || null,
+  });
+  if (error) throw error;
+  return data as ClubPostCreateResult;
+}
+
+/** Any current officer may edit the club post caption; RLS is authoritative. */
+export async function updateClubPostCaption(postId: string, caption: string): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase
+    .from("posts")
+    .update({ caption: caption.trim() || null })
+    .eq("id", postId)
+    .eq("author_kind", "club")
+    .select("id")
+    .single();
+  if (error) throw error;
+}
+
+/** Any current officer may delete a club post; its images cascade with it. */
+export async function deleteClubPost(postId: string): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase
+    .from("posts")
+    .delete()
+    .eq("id", postId)
+    .eq("author_kind", "club")
+    .select("id")
+    .single();
+  if (error) throw error;
+}

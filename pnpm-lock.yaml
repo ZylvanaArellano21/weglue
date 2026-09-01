@@ -158,6 +158,9 @@ importers:
       react-native-worklets:
         specifier: 0.5.1
         version: 0.5.1(@babel/core@7.29.7)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      rn-emoji-keyboard:
+        specifier: ^1.7.0
+        version: 1.7.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
       zustand:
         specifier: ^4.5.7
         version: 4.5.7(@types/react@19.1.17)(react@19.1.0)
@@ -204,6 +207,9 @@ importers:
       '@weglue/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      emoji-picker-react:
+        specifier: ^4.19.1
+        version: 4.19.1(react@18.3.1)
       next:
         specifier: 14.2.35
         version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -2277,6 +2283,12 @@ packages:
   electron-to-chromium@1.5.392:
     resolution: {integrity: sha512-1yQq3VQCZRwsnYc67Oc+1fge6Lwtn0hzi6zmEVkB61Zx21kTbwJAW4dFLadl5Rc1tKhG/kSpYXnfiAhu0f0a1g==}
 
+  emoji-picker-react@4.19.1:
+    resolution: {integrity: sha512-BmDdqInKFVYJpv7qS9WI6L9656cDAC+FkDvUjJds56nKHbaVTBNeDmLwKBytRnzu37zWHs9Isg7gt5PT43y6xA==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      react: '>=16'
+
   emoji-regex@8.0.0:
     resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
 
@@ -2635,6 +2647,9 @@ packages:
   find-up@4.1.0:
     resolution: {integrity: sha512-PpOwAdQ/YlXQ2vj8a3h8IipDuYRi3wceVQQGYWxNINccq40Anw7BlsEXCMbt1Zt+OLA6Fq9suIpIWD0OsnISlw==}
     engines: {node: '>=8'}
+
+  flairup@1.0.0:
+    resolution: {integrity: sha512-IKlE+pNvL2R+kVL1kEhUYqRxVqeFnjiIvHWDMLFXNaqyUdFXQM2wte44EfMYJNHkW16X991t2Zg8apKkhv7OBA==}
 
   flow-enums-runtime@0.0.6:
     resolution: {integrity: sha512-3PYnM29RFXwvAN6Pc/scUfkI7RwhQ/xqyLUyPNlXUp9S40zI8nup9tUSrTLSVnWGBN38FNiGWbwZOB6uR4OGdw==}
@@ -3872,6 +3887,13 @@ packages:
     resolution: {integrity: sha512-JZkJMZkAGFFPP2YqXZXPbMlMBgsxzE8ILs4lMIX/2o0L9UBw9O/Y3o6wFw/i9YLapcUJWwqbi3kdxIPdC62TIA==}
     deprecated: Rimraf versions prior to v4 are no longer supported
     hasBin: true
+
+  rn-emoji-keyboard@1.7.0:
+    resolution: {integrity: sha512-Yo5yJB+joYqSgvZx7WX/DMAC6rHUEJOQFYNjevd+jzhON23SSg/8kq2r9MH/kIdkNGdQWwIVBPowWqZwRQdfOA==}
+    engines: {node: '>= 16.0.0'}
+    peerDependencies:
+      react: '*'
+      react-native: '*'
 
   rolldown@1.1.5:
     resolution: {integrity: sha512-t9z29cJjXf/vxQ8dyhCSpt6H6aSwHTk8cT5I3iy6SMXuFpk5mB6PL6XfC8PCwrPTx93udwKUm9HRteAlTGBLiA==}
@@ -6932,6 +6954,11 @@ snapshots:
 
   electron-to-chromium@1.5.392: {}
 
+  emoji-picker-react@4.19.1(react@18.3.1):
+    dependencies:
+      flairup: 1.0.0
+      react: 18.3.1
+
   emoji-regex@8.0.0: {}
 
   encodeurl@1.0.2: {}
@@ -7326,6 +7353,8 @@ snapshots:
     dependencies:
       locate-path: 5.0.0
       path-exists: 4.0.0
+
+  flairup@1.0.0: {}
 
   flow-enums-runtime@0.0.6: {}
 
@@ -8798,6 +8827,11 @@ snapshots:
   rimraf@3.0.2:
     dependencies:
       glob: 7.2.3
+
+  rn-emoji-keyboard@1.7.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0):
+    dependencies:
+      react: 19.1.0
+      react-native: 0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)
 
   rolldown@1.1.5:
     dependencies:

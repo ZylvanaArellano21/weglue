@@ -30,8 +30,7 @@ export function CatalogCard({
 
   return (
     <div
-      className="group flex flex-col overflow-hidden rounded-xl bg-white shadow-[0_6px_16px_rgba(0,0,0,0.10)] transition hover:shadow-[0_8px_22px_rgba(0,0,0,0.14)]"
-      style={{ border: "1px solid rgba(0,0,0,0.05)" }}
+      className="group flex flex-col overflow-hidden rounded-2xl bg-white shadow-card transition hover:-translate-y-0.5"
     >
       <button
         type="button"

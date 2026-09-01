@@ -1,6 +1,7 @@
 "use client";
 
 import type { ClubPhoto } from "../../lib/clubs/clubProfileService";
+import { CarouselBadge } from "../shared/PhotoCarousel";
 
 // Media tab (spec §19): the real club-associated media grid (officer uploads +
 // tagged posts, newest first, hidden/removed items already filtered server-side).
@@ -28,6 +29,7 @@ export function ClubMediaTab({
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={photo.url} alt={photo.caption ?? ""} className="h-full w-full object-cover transition hover:opacity-95" />
+          {photo.image_count > 1 ? <CarouselBadge /> : null}
         </button>
       ))}
     </div>

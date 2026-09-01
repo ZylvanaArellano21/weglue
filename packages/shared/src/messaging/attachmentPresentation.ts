@@ -58,6 +58,16 @@ export const CHAT_IMAGE_MIN_ASPECT = 0.5;
 export const CHAT_IMAGE_MAX_ASPECT = 2;
 export const CHAT_IMAGE_FALLBACK_ASPECT = 4 / 3;
 
+export const MAX_GROUPED_CHAT_ATTACHMENTS = 5;
+export type ChatAttachmentLayout = "single" | "two" | "three" | "four" | "five";
+
+/** Stable layout token for the renderer; callers should still render in
+ * `position` order and use the same token on web and mobile. */
+export function chatAttachmentLayout(count: number): ChatAttachmentLayout {
+  const bounded = Math.max(1, Math.min(MAX_GROUPED_CHAT_ATTACHMENTS, Math.floor(count)));
+  return (bounded === 1 ? "single" : bounded === 2 ? "two" : bounded === 3 ? "three" : bounded === 4 ? "four" : "five");
+}
+
 export function clampChatImageAspect(aspect: number | null | undefined): number {
   if (!aspect || !Number.isFinite(aspect) || aspect <= 0) return CHAT_IMAGE_FALLBACK_ASPECT;
   return Math.max(CHAT_IMAGE_MIN_ASPECT, Math.min(CHAT_IMAGE_MAX_ASPECT, aspect));

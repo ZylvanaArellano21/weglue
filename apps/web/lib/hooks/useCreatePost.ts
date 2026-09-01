@@ -40,15 +40,53 @@ export function useAllClubs(enabled = true) {
 
 async function createPost(
   userId: string,
-  file: File,
+  file: File | File[],
   caption: string | undefined,
   clubIds: string[],
   // Stable per-compose tag: a double-click or a lost-response retry of the same
   // New Post reuses it and collapses to one row (migration 100).
-  tag: string
+  tag: string,
+  authoredClubId?: string,
 ): Promise<string> {
   const supabase = getSupabaseBrowser();
-  const publicUrl = await uploadToBucket("posts", `${userId}/${Date.now()}.jpg`, file);
+  const files = Array.isArray(file) ? file : [file];
+  if (files.length < 1 || files.length > 5) {
+    throw new Error("Posts must contain between 1 and 5 images");
+  }
+  const uploadStamp = Date.now();
+  const publicUrls = await Promise.all(
+    files.map((image, position) =>
+      uploadToBucket("posts", `${userId}/${uploadStamp}-${position}.jpg`, image)
+    )
+  );
+
+  // An explicitly locked club is a club-authored post. Ordinary Home posts
+  // keep the existing student author and optional club-tag behavior.
+  if (authoredClubId || publicUrls.length > 1) {
+    const { data, error } = await supabase.rpc("create_post", {
+      p_caption: caption ?? null,
+      p_image_paths: publicUrls,
+      p_club_id: authoredClubId ?? null,
+      p_client_tag: tag,
+    });
+    if (error) throw error;
+    const result = data as any;
+    const postId = result?.post_id ?? result?.post?.id ?? result?.id;
+    if (!postId) throw new Error("Failed to create post");
+    if (!authoredClubId && clubIds.length > 0) {
+      const { error: tagError } = await supabase
+        .from("post_club_tags")
+        .upsert(clubIds.map((clubId) => ({ post_id: postId, club_id: clubId })), {
+          onConflict: "post_id,club_id",
+          ignoreDuplicates: true,
+        });
+      if (tagError) throw tagError;
+    }
+    return postId;
+  }
+
+  const publicUrl = publicUrls[0]!;
+
   const primaryClubId = clubIds.length > 0 ? clubIds[0]! : null;
 
   const { data: post, error } = await supabase
@@ -99,8 +137,8 @@ export function useCreatePost(userId: string | undefined) {
   // retries, regenerated after a post lands so the next one is a new create.
   const tagRef = useRef(clientTag());
   return useMutation({
-    mutationFn: ({ file, caption, clubIds }: { file: File; caption?: string; clubIds: string[] }) =>
-      createPost(userId!, file, caption, clubIds, tagRef.current),
+    mutationFn: ({ file, caption, clubIds, authoredClubId }: { file: File | File[]; caption?: string; clubIds: string[]; authoredClubId?: string }) =>
+      createPost(userId!, file, caption, clubIds, tagRef.current, authoredClubId),
     onSuccess: () => {
       tagRef.current = clientTag();
       void queryClient.invalidateQueries({ queryKey: ["homePostsFeed", userId] });

@@ -27,6 +27,12 @@
 //                                attachment_url/name/size/mime (010/040),
 //                                deleted_at/deleted_by (040), client_tag (040),
 //                                created_at, updated_at.
+//   • message_attachments       — ordered position 0..4 attachment metadata;
+//                                attachment_* remains the position-0 legacy
+//                                projection.
+//   • message_reactions         — one participant reaction per message/user;
+//                                read-only in this dashboard and never a
+//                                moderation target of its own.
 //   • polls / poll_options / poll_votes — canonical poll model.
 //   • notifications             — id, user_id, type (FK notification_types),
 //                                actor_id, entity_id, entity_type IN
@@ -1068,11 +1074,27 @@ async function channelNameMap(admin: Admin, ids: string[]): Promise<Map<string, 
 
 export interface MessageAttachmentMeta {
   present: boolean;
+  position: number;
+  kind: "image" | "video" | "file";
   name: string | null;
   size: number | null;
   mime: string | null;
+  width: number | null;
+  height: number | null;
   /** Storage bucket path segment is intentionally NOT exposed. */
   active: boolean;
+}
+
+export interface MessageReactor {
+  display_name: string;
+  username: string | null;
+  avatar_url: string | null;
+}
+
+export interface MessageReactionSummary {
+  emoji: string;
+  count: number;
+  reactors: MessageReactor[];
 }
 
 export interface MessagePollDetail {
@@ -1116,7 +1138,10 @@ export interface MessageDetail {
   /** A short preview of the CURRENTLY-VISIBLE text body only (never for deleted
    * rows). The full private body is only obtainable via the recent-MFA reveal. */
   preview: string | null;
+  /** Position-0 compatibility alias; new callers should use attachments. */
   attachment: MessageAttachmentMeta | null;
+  attachments: MessageAttachmentMeta[];
+  reactions: MessageReactionSummary[];
   poll: MessagePollDetail | null;
   reportCount: number;
   reports: MessageReportDetail[];
@@ -1151,16 +1176,18 @@ export async function getMessageDetail(id: string): Promise<MessageDetail | null
       .limit(200),
   ]);
 
+  const [attachments, reactions] = await Promise.all([
+    loadMessageAttachments(admin, id, m, deleted),
+    loadMessageReactions(admin, id, deleted),
+  ]);
+
   const sender = senderMap.get(m.sender_id);
   const cv = convMap.get(m.conversation_id);
   const club = cv?.club_id ? (await clubMap(admin, [cv.club_id])).get(cv.club_id) : null;
   const edited = !deleted && !!m.updated_at && !!m.created_at && new Date(m.updated_at).getTime() - new Date(m.created_at).getTime() > 1000;
 
   // Attachment metadata — never for deleted rows (retained-evidence protection).
-  const attachment: MessageAttachmentMeta | null =
-    !deleted && m.attachment_url
-      ? { present: true, name: m.attachment_name ?? null, size: m.attachment_size ?? null, mime: m.attachment_mime ?? null, active: true }
-      : null;
+  const attachment = attachments[0] ?? null;
 
   return {
     id: m.id,
@@ -1184,6 +1211,8 @@ export async function getMessageDetail(id: string): Promise<MessageDetail | null
     updated_at: m.updated_at ?? null,
     preview: deleted ? null : m.message_type === "text" ? textPreview(m.content, 160) : null,
     attachment,
+    attachments,
+    reactions,
     poll: pollRes,
     reportCount: (reportsRes.data ?? []).length,
     reports: ((reportsRes.data ?? []) as any[]).map((r) => ({
@@ -1195,6 +1224,96 @@ export async function getMessageDetail(id: string): Promise<MessageDetail | null
       created_at: r.created_at,
     })),
   };
+}
+
+function legacyAttachmentKind(messageType: string): MessageAttachmentMeta["kind"] {
+  if (messageType === "image") return "image";
+  if (messageType === "video") return "video";
+  return "file";
+}
+
+/** Load normalized attachment metadata while keeping storage paths private. */
+async function loadMessageAttachments(
+  admin: Admin,
+  messageId: string,
+  message: any,
+  deleted: boolean
+): Promise<MessageAttachmentMeta[]> {
+  if (deleted) return [];
+  const { data, error } = await admin
+    .from("message_attachments")
+    .select("position, kind, mime, width, height, byte_size, file_name")
+    .eq("message_id", messageId)
+    .order("position", { ascending: true });
+  if (error) throw error;
+
+  const normalized = ((data ?? []) as any[]).map((attachment) => ({
+    present: true,
+    position: attachment.position,
+    kind: attachment.kind as MessageAttachmentMeta["kind"],
+    name: attachment.file_name ?? null,
+    size: attachment.byte_size ?? null,
+    mime: attachment.mime ?? null,
+    width: attachment.width ?? null,
+    height: attachment.height ?? null,
+    active: true,
+  }));
+  if (normalized.length > 0) return normalized;
+
+  // Position-0 compatibility fallback protects admin visibility for a row
+  // created by an older client before its normalized child was backfilled.
+  return message.attachment_url
+    ? [{
+        present: true,
+        position: 0,
+        kind: legacyAttachmentKind(message.message_type),
+        name: message.attachment_name ?? null,
+        size: message.attachment_size ?? null,
+        mime: message.attachment_mime ?? null,
+        width: null,
+        height: null,
+        active: true,
+      }]
+    : [];
+}
+
+/** Group participant-visible reaction metadata for the admin read-only view. */
+async function loadMessageReactions(admin: Admin, messageId: string, deleted: boolean): Promise<MessageReactionSummary[]> {
+  if (deleted) return [];
+  const { data, error } = await admin
+    .from("message_reactions")
+    .select("user_id, emoji, created_at")
+    .eq("message_id", messageId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  const rows = (data ?? []) as any[];
+  if (rows.length === 0) return [];
+
+  const reactors = await profileMap(admin, rows.map((row) => row.user_id));
+  const grouped = new Map<string, MessageReactionSummary & { firstCreatedAt: string }>();
+  for (const row of rows) {
+    if (!row.emoji) continue;
+    const existing = grouped.get(row.emoji);
+    const profile = reactors.get(row.user_id);
+    const reactor: MessageReactor = {
+      display_name: profile?.full_name || profile?.username || "Unavailable account",
+      username: profile?.username ?? null,
+      avatar_url: profile?.avatar_url ?? null,
+    };
+    if (existing) {
+      existing.count += 1;
+      existing.reactors.push(reactor);
+    } else {
+      grouped.set(row.emoji, { emoji: row.emoji, count: 1, reactors: [reactor], firstCreatedAt: row.created_at });
+    }
+  }
+  return Array.from(grouped.values())
+    .sort((a, b) => b.count - a.count || a.firstCreatedAt.localeCompare(b.firstCreatedAt))
+    .map((summary) => ({
+      emoji: summary.emoji,
+      count: summary.count,
+      reactors: summary.reactors,
+    }));
 }
 
 async function loadPoll(admin: Admin, messageId: string): Promise<MessagePollDetail | null> {

@@ -36,6 +36,7 @@ export function CalendarEventCard({ event, isToday, onPress }: CalendarEventCard
     ?? `${event.building ?? ''} ${event.room ?? ''}`.trim();
 
   return (
+    <View style={styles.cardOuter}>
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.8}
@@ -71,19 +72,25 @@ export function CalendarEventCard({ event, isToday, onPress }: CalendarEventCard
         style={styles.chevron}
       />
     </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Depth on the outer view (no clipping); inner card clips the red strip
+  // to the rounded corners.
+  cardOuter: {
+    marginHorizontal: calendarSizes.screenPaddingH,
+    marginBottom: 10,
+    borderRadius: calendarSizes.eventCardRadius,
+    ...calendarCardShadow,
+  },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: calendarColors.white,
-    marginHorizontal: calendarSizes.screenPaddingH,
-    marginBottom: 10,
     borderRadius: calendarSizes.eventCardRadius,
     overflow: 'hidden',
-    ...calendarCardShadow,
   },
   redStrip: {
     width: calendarSizes.eventCardBorderWidth,
