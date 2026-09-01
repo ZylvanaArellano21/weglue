@@ -1241,7 +1241,13 @@ function MessageBubble({ message, isOwn, showSender, isLastInGroup = true, isGro
           </>
         )}
 
-        <ReactionChips messageId={message.id} reactions={reactions} align={align} onToggle={react} />
+        <ReactionChips
+          messageId={message.id}
+          reactions={reactions}
+          align={align}
+          currentUserId={userId}
+          onRemoveOwn={myReaction ? () => react(myReaction) : undefined}
+        />
 
         <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400 opacity-0 transition-opacity group-hover:opacity-100">
           {failed && message.onRetry && (

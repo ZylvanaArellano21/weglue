@@ -1,17 +1,18 @@
 import {
   View,
   Text,
-  Modal,
-  Pressable,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { QUICK_REACTIONS, EMOJI_GROUPS } from '@weglue/shared';
-import { chatColors, chatFonts, chatShadow } from './chatTheme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import EmojiPicker, { type EmojiType, useRecentPicksPersistence } from 'rn-emoji-keyboard';
+import { QUICK_REACTIONS } from '@weglue/shared';
+import { chatColors, chatShadow } from './chatTheme';
 
 export { QUICK_REACTIONS };
+
+const RECENT_EMOJI_KEY = 'weglue-recent-reaction-emojis-v1';
 
 interface QuickBarProps {
   /** The viewer's current reaction on this message, if any. */
@@ -58,40 +59,60 @@ interface FullPickerProps {
   onClose: () => void;
 }
 
-/** The full emoji picker (a curated grid; includes 👎). */
-export function EmojiPickerSheet({ visible, current, onPick, onClose }: FullPickerProps) {
+/**
+ * The full emoji picker — the real thing, WhatsApp-style: a bottom sheet with a
+ * search bar, "Recently used", and every emoji category with a category tab bar
+ * at the bottom. Backed by `rn-emoji-keyboard` so the same picker is used on
+ * iOS and Android. Any emoji is a valid reaction (👎 included).
+ */
+export function EmojiPickerSheet({ visible, current: _current, onPick, onClose }: FullPickerProps) {
+  // Persist "Recently used" across sessions (WhatsApp keeps a frequently-used
+  // row). AsyncStorage-backed, keyed so it never collides with other stores.
+  useRecentPicksPersistence({
+    initialization: async () => {
+      try {
+        return JSON.parse((await AsyncStorage.getItem(RECENT_EMOJI_KEY)) || '[]');
+      } catch {
+        return [];
+      }
+    },
+    onStateChange: async (next) => {
+      try {
+        await AsyncStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(next));
+      } catch {
+        /* non-critical */
+      }
+    },
+  });
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.pickerSheet} onPress={() => {}}>
-          <View style={styles.handle} />
-          <View style={styles.pickerHeader}>
-            <Text style={styles.pickerTitle}>Choose a reaction</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={10}>
-              <Ionicons name="close" size={22} color={chatColors.text} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={styles.pickerScroll}>
-            {EMOJI_GROUPS.map((g) => (
-              <View key={g.label}>
-                <Text style={styles.groupLabel}>{g.label}</Text>
-                <View style={styles.grid}>
-                  {g.emojis.map((e) => (
-                    <TouchableOpacity
-                      key={e}
-                      style={[styles.gridCell, current === e && styles.gridCellActive]}
-                      onPress={() => onPick(e)}
-                    >
-                      <Text style={styles.gridEmoji}>{e}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            ))}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <EmojiPicker
+      open={visible}
+      onClose={onClose}
+      onEmojiSelected={(e: EmojiType) => onPick(e.emoji)}
+      enableSearchBar
+      enableRecentlyUsed
+      categoryPosition="bottom"
+      expandable
+      theme={{
+        backdrop: 'rgba(0,0,0,0.35)',
+        container: chatColors.bg,
+        header: chatColors.text,
+        skinTonesContainer: chatColors.white,
+        category: {
+          icon: chatColors.textMuted,
+          iconActive: chatColors.teal,
+          container: chatColors.white,
+          containerActive: 'rgba(15,166,166,0.16)',
+        },
+        search: {
+          text: chatColors.text,
+          placeholder: chatColors.textMuted,
+          icon: chatColors.textMuted,
+          background: chatColors.white,
+        },
+      }}
+    />
   );
 }
 
@@ -130,67 +151,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: chatColors.bg,
-  },
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  pickerSheet: {
-    backgroundColor: chatColors.bg,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingBottom: 24,
-    maxHeight: '72%',
-    ...chatShadow,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: chatColors.textMuted,
-    alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  pickerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-  },
-  pickerTitle: {
-    fontFamily: chatFonts.semiBold,
-    fontSize: 16,
-    color: chatColors.text,
-  },
-  pickerScroll: {
-    paddingHorizontal: 14,
-  },
-  groupLabel: {
-    fontFamily: chatFonts.semiBold,
-    fontSize: 12,
-    color: chatColors.textMuted,
-    marginTop: 12,
-    marginBottom: 6,
-    marginLeft: 4,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  gridCell: {
-    width: '12.5%',
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-  },
-  gridCellActive: {
-    backgroundColor: 'rgba(15,166,166,0.16)',
-  },
-  gridEmoji: {
-    fontSize: 26,
   },
 });

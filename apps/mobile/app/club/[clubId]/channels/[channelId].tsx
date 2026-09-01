@@ -31,6 +31,7 @@ import { useToast } from '../../../../components/Toast';
 import { MessageBubble } from '../../../../components/chat/MessageBubble';
 import { ChatInput } from '../../../../components/chat/ChatInput';
 import { MessageActionsSheet } from '../../../../components/chat/MessageActionsSheet';
+import { MessageReactorsSheet } from '../../../../components/chat/MessageReactorsSheet';
 import { MediaViewer, type ViewerMediaItem } from '../../../../components/chat/MediaViewer';
 import { uploadChatAttachment } from '../../../../lib/chatAttachments';
 import { openProfile } from '../../../../lib/profileNavigation';
@@ -655,6 +656,7 @@ export default function ChannelChatScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pollSheetOpen, setPollSheetOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<MessageWithSender | null>(null);
+  const [reactorsTarget, setReactorsTarget] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const listRef = useRef<FlatList>(null);
 
@@ -993,6 +995,7 @@ export default function ChannelChatScreen() {
                       attachments={item.attachments}
                       reactions={item.reactions}
                       onToggleReaction={(e) => handleReact(item.id, myReaction === e ? null : e)}
+                      onPressReactions={() => setReactorsTarget(item.id)}
                       messageType={item.message_type}
                       createdAt={item.created_at}
                       isOwn={isOwn}
@@ -1065,6 +1068,14 @@ export default function ChannelChatScreen() {
         onSaveMedia={(id) => openMedia(id)}
         myReaction={actionTarget?.reactions?.find((r) => r.reactedByMe)?.emoji ?? null}
         onReact={handleReact}
+      />
+
+      {/* ── Who reacted with what ─────────────────────────────── */}
+      <MessageReactorsSheet
+        messageId={reactorsTarget}
+        currentUserId={userId}
+        onClose={() => setReactorsTarget(null)}
+        onRemoveOwn={(id) => handleReact(id, null)}
       />
 
       {/* ── Full-screen media viewer ──────────────────────────── */}

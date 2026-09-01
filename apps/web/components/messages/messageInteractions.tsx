@@ -21,7 +21,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { QUICK_REACTIONS, EMOJI_GROUPS } from "@weglue/shared";
+import EmojiPicker, { EmojiStyle, Theme, type EmojiClickData } from "emoji-picker-react";
+import { QUICK_REACTIONS } from "@weglue/shared";
 import { Avatar } from "../shared/Avatar";
 import { CloseIcon } from "../shared/icons";
 import {
@@ -131,16 +132,17 @@ export function QuickReactionRow({
 }
 
 /**
- * The full emoji picker — a curated grid, grouped, and it DOES include 👎.
- * Rendered as a centered modal (not an anchored popover) so it is never
- * clipped by the thread's scroll container, matching mobile's picker sheet.
+ * The full emoji picker — the real thing, WhatsApp-style: a bottom sheet with a
+ * search bar, "Frequently used", every category and a category bar. Backed by
+ * `emoji-picker-react` (native emoji, so it matches the rest of the product).
+ * Any emoji is a valid reaction (👎 included). Rendered as a fixed sheet so the
+ * thread's scroll container never clips it.
  */
 export function EmojiPickerPopover({
-  current,
   onPick,
   onClose,
 }: {
-  current: string | null;
+  current?: string | null;
   onPick: (emoji: string) => void;
   onClose: () => void;
 }): JSX.Element {
@@ -153,43 +155,26 @@ export function EmojiPickerPopover({
   }, [onClose]);
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[90] flex items-end justify-center bg-black/40 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label="Choose a reaction"
       onClick={onClose}
     >
       <div
-        className="max-h-[70vh] w-80 max-w-full overflow-y-auto rounded-2xl border bg-white p-3 shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
-        style={{ borderColor: "rgba(0,0,0,0.08)" }}
+        className="w-full max-w-sm overflow-hidden rounded-t-2xl shadow-[0_-8px_40px_rgba(0,0,0,0.35)] sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-2 flex items-center justify-between px-1">
-          <p className="text-sm font-semibold text-gray-900">Choose a reaction</p>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-full p-1 text-gray-500 hover:bg-black/5">
-            <CloseIcon size={16} />
-          </button>
-        </div>
-        {EMOJI_GROUPS.map((group) => (
-          <div key={group.label} className="mb-1.5">
-            <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.label}</p>
-            <div className="grid grid-cols-8 gap-0.5">
-              {group.emojis.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => onPick(emoji)}
-                  aria-label={`React ${emoji}`}
-                  className={`flex aspect-square items-center justify-center rounded-lg text-lg transition hover:bg-black/5 ${
-                    current === emoji ? "bg-teal/15" : ""
-                  }`}
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
+        <EmojiPicker
+          onEmojiClick={(data: EmojiClickData) => onPick(data.emoji)}
+          theme={Theme.DARK}
+          emojiStyle={EmojiStyle.NATIVE}
+          lazyLoadEmojis
+          skinTonesDisabled
+          previewConfig={{ showPreview: false }}
+          width="100%"
+          height={420}
+        />
       </div>
     </div>
   );
@@ -201,27 +186,26 @@ export function ReactionChips({
   messageId,
   reactions,
   align,
-  onToggle,
+  currentUserId,
+  onRemoveOwn,
 }: {
   messageId: string;
   reactions: MessageReactionSummary[];
   align: "start" | "end";
-  onToggle: (emoji: string) => void;
+  currentUserId?: string;
+  /** Remove the viewer's own reaction (invoked from the reactors sheet). */
+  onRemoveOwn?: () => void;
 }): JSX.Element | null {
   const [reactorsOpen, setReactorsOpen] = useState(false);
   if (!reactions.length) return null;
   return (
-    <div className={`relative mt-1 flex flex-wrap gap-1 ${align === "end" ? "justify-end" : "justify-start"}`}>
+    <div className={`mt-1 flex flex-wrap gap-1 ${align === "end" ? "justify-end" : "justify-start"}`}>
       {reactions.map((reaction) => (
         <button
           key={reaction.emoji}
           type="button"
-          onClick={() => onToggle(reaction.emoji)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setReactorsOpen(true);
-          }}
-          aria-label={`${reaction.emoji} ${reaction.count}${reaction.reactedByMe ? ", including you" : ""}`}
+          onClick={() => setReactorsOpen(true)}
+          aria-label={`${reaction.emoji} ${reaction.count}${reaction.reactedByMe ? ", including you" : ""} — see who reacted`}
           className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] leading-none transition ${
             reaction.reactedByMe ? "border-teal/40 bg-teal/15 text-teal" : "border-black/10 bg-white text-gray-500 hover:bg-black/[0.03]"
           }`}
@@ -230,73 +214,140 @@ export function ReactionChips({
           {reaction.count > 1 && <span className="font-semibold">{reaction.count}</span>}
         </button>
       ))}
-      <button
-        type="button"
-        onClick={() => setReactorsOpen(true)}
-        aria-label="See who reacted"
-        className="flex h-5 items-center rounded-full px-1 text-[11px] text-gray-400 hover:bg-black/5"
-      >
-        ⋯
-      </button>
       {reactorsOpen && (
-        <ReactorsPopover messageId={messageId} align={align} onClose={() => setReactorsOpen(false)} />
+        <ReactorsSheet
+          messageId={messageId}
+          currentUserId={currentUserId}
+          onRemoveOwn={onRemoveOwn}
+          onClose={() => setReactorsOpen(false)}
+        />
       )}
     </div>
   );
 }
 
-function ReactorsPopover({
+/**
+ * "Who reacted with what" — WhatsApp-style bottom sheet: an "All" tab plus one
+ * tab per emoji (emoji + count), and a list of every reactor showing the emoji
+ * they used. Tapping your own row removes your reaction.
+ */
+function ReactorsSheet({
   messageId,
-  align,
+  currentUserId,
+  onRemoveOwn,
   onClose,
 }: {
   messageId: string;
-  align: "start" | "end";
+  currentUserId?: string;
+  onRemoveOwn?: () => void;
   onClose: () => void;
 }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null);
+  const [filter, setFilter] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["messages", "reactors", messageId],
     queryFn: () => getMessageReactors(messageId),
-    staleTime: 10_000,
+    staleTime: 5_000,
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    const onDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
     document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onDown, true);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onDown, true);
-    };
+    return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const reactors = data ?? [];
+  const total = reactors.length;
+  const tabs = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of reactors) counts.set(r.emoji, (counts.get(r.emoji) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [reactors]);
+  const shown = reactors.filter((r) => !filter || r.emoji === filter);
+
   return (
     <div
-      ref={ref}
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/40 sm:items-center"
       role="dialog"
+      aria-modal="true"
       aria-label="People who reacted"
-      className={`absolute top-6 z-30 max-h-64 w-60 overflow-y-auto rounded-xl border bg-white p-1.5 shadow-[0_8px_28px_rgba(0,0,0,0.22)] ${
-        align === "end" ? "right-0" : "left-0"
-      }`}
-      style={{ borderColor: "rgba(0,0,0,0.08)" }}
+      onClick={onClose}
     >
-      {isLoading ? (
-        <p className="px-2 py-3 text-center text-xs text-gray-400">Loading…</p>
-      ) : !data || data.length === 0 ? (
-        <p className="px-2 py-3 text-center text-xs text-gray-400">No reactions</p>
-      ) : (
-        data.map((reactor) => (
-          <div key={`${reactor.userId}:${reactor.emoji}`} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-            <Avatar uri={reactor.avatarUrl} size={24} name={reactor.displayName} />
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-gray-900">{reactor.displayName}</span>
-            <span className="text-sm">{reactor.emoji}</span>
+      <div
+        className="max-h-[70vh] w-full max-w-sm overflow-hidden rounded-t-2xl bg-white shadow-[0_-8px_40px_rgba(0,0,0,0.35)] sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "rgba(0,0,0,0.06)" }}>
+          <span className="text-sm font-semibold text-gray-900">
+            {total} {total === 1 ? "Reaction" : "Reactions"}
+          </span>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-full p-1 text-gray-500 hover:bg-black/5">
+            <CloseIcon size={16} />
+          </button>
+        </div>
+
+        {tabs.length > 1 && (
+          <div className="flex gap-2 overflow-x-auto px-4 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <button
+              type="button"
+              onClick={() => setFilter(null)}
+              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                filter === null ? "bg-teal/15 text-teal" : "bg-black/[0.04] text-gray-500"
+              }`}
+            >
+              All {total}
+            </button>
+            {tabs.map(([emoji, count]) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => setFilter(emoji)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                  filter === emoji ? "bg-teal/15 text-teal" : "bg-black/[0.04] text-gray-500"
+                }`}
+              >
+                <span className="text-sm">{emoji}</span>
+                {count}
+              </button>
+            ))}
           </div>
-        ))
-      )}
+        )}
+
+        <div className="max-h-[46vh] overflow-y-auto px-2 py-1.5">
+          {isLoading ? (
+            <p className="px-2 py-6 text-center text-xs text-gray-400">Loading…</p>
+          ) : shown.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-gray-400">No reactions</p>
+          ) : (
+            shown.map((reactor, i) => {
+              const isMe = !!currentUserId && reactor.userId === currentUserId;
+              return (
+                <button
+                  key={`${reactor.userId}:${reactor.emoji}:${i}`}
+                  type="button"
+                  disabled={!isMe || !onRemoveOwn}
+                  onClick={() => {
+                    if (isMe && onRemoveOwn) {
+                      onRemoveOwn();
+                      onClose();
+                    }
+                  }}
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left enabled:hover:bg-black/[0.03]"
+                >
+                  <Avatar uri={reactor.avatarUrl} size={36} name={reactor.displayName} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-gray-900">
+                      {isMe ? "You" : reactor.displayName}
+                    </span>
+                    {isMe && onRemoveOwn && <span className="block text-xs text-gray-400">Tap to remove</span>}
+                  </span>
+                  <span className="text-lg">{reactor.emoji}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
     </div>
   );
 }

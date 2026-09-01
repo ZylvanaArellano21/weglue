@@ -14,6 +14,7 @@ import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { MediaViewer, type ViewerMediaItem } from './MediaViewer';
 import { MessageActionsSheet } from './MessageActionsSheet';
+import { MessageReactorsSheet } from './MessageReactorsSheet';
 import { PollComposer, type PollComposerPayload } from './PollComposer';
 import { PollMessage } from './PollMessage';
 import { EventShareCard } from './EventShareCard';
@@ -268,6 +269,7 @@ export function ConversationThread({
 
   // ── Long-press actions ──
   const [actionTarget, setActionTarget] = useState<ThreadMessage | null>(null);
+  const [reactorsTarget, setReactorsTarget] = useState<string | null>(null);
 
   const invalidateFor = useCallback(
     (id: string | undefined) => {
@@ -433,6 +435,7 @@ export function ConversationThread({
               const mine = m.reactions?.find((r) => r.reactedByMe)?.emoji;
               handleReact(m.id, mine === emoji ? null : emoji);
             }}
+            onPressReactions={() => setReactorsTarget(m.id)}
             messageType={m.message_type}
             createdAt={m.created_at}
             isOwn={isOwn}
@@ -525,6 +528,13 @@ export function ConversationThread({
         onSaveMedia={(messageId) => openMedia(messageId)}
         myReaction={actionTarget?.reactions?.find((r) => r.reactedByMe)?.emoji ?? null}
         onReact={handleReact}
+      />
+
+      <MessageReactorsSheet
+        messageId={reactorsTarget}
+        currentUserId={currentUserId}
+        onClose={() => setReactorsTarget(null)}
+        onRemoveOwn={(id) => handleReact(id, null)}
       />
 
       {allowPolls && (

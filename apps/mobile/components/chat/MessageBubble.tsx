@@ -30,6 +30,8 @@ interface Props {
   reactions?: MessageReactionSummary[];
   /** Toggle the viewer's reaction (null clears). */
   onToggleReaction?: (emoji: string) => void;
+  /** Tapping the reaction chips opens the "who reacted with what" sheet. */
+  onPressReactions?: () => void;
   /**
    * True when this sender's attachment payload is unavailable to the viewer
    * (a block in either direction). The message row is still rendered, as
@@ -220,10 +222,12 @@ function ReactionChips({
   reactions,
   isOwn,
   onToggle,
+  onPressReactions,
 }: {
   reactions: MessageReactionSummary[];
   isOwn: boolean;
   onToggle?: (emoji: string) => void;
+  onPressReactions?: () => void;
 }) {
   if (!reactions.length) return null;
   return (
@@ -232,8 +236,11 @@ function ReactionChips({
         <TouchableOpacity
           key={r.emoji}
           style={[styles.reactionChip, r.reactedByMe && styles.reactionChipMine]}
-          onPress={() => onToggle?.(r.emoji)}
-          disabled={!onToggle}
+          // Tap → "who reacted with what". Long-press → quick toggle of that
+          // emoji (fast path; also reachable from the long-press quick bar).
+          onPress={() => (onPressReactions ? onPressReactions() : onToggle?.(r.emoji))}
+          onLongPress={() => onToggle?.(r.emoji)}
+          disabled={!onPressReactions && !onToggle}
         >
           <Text style={styles.reactionEmoji}>{r.emoji}</Text>
           {r.count > 1 ? <Text style={styles.reactionCount}>{r.count}</Text> : null}
@@ -255,6 +262,7 @@ export function MessageBubble({
   attachments,
   reactions,
   onToggleReaction,
+  onPressReactions,
   attachmentUnavailable,
   messageType,
   createdAt,
@@ -413,7 +421,7 @@ export function MessageBubble({
           </TouchableOpacity>
         )}
 
-        <ReactionChips reactions={reactions ?? []} isOwn={isOwn} onToggle={onToggleReaction} />
+        <ReactionChips reactions={reactions ?? []} isOwn={isOwn} onToggle={onToggleReaction} onPressReactions={onPressReactions} />
 
         {failed ? (
           <View style={styles.failedRow}>
