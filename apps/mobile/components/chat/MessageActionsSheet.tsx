@@ -114,7 +114,9 @@ export function MessageActionsSheet({
 
   return (
     <>
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    {/* iOS presents one modal at a time — while the full emoji keyboard is up,
+        the action sheet's own modal steps aside so the keyboard is on top. */}
+    <Modal visible={visible && !emojiPickerOpen} transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.overlay} onPress={close}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -236,7 +238,7 @@ export function MessageActionsSheet({
       visible={emojiPickerOpen}
       current={myReaction}
       onPick={(e) => react(myReaction === e ? null : e)}
-      onClose={() => setEmojiPickerOpen(false)}
+      onClose={close}
     />
     </>
   );
