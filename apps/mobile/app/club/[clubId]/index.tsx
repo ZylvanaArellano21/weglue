@@ -20,6 +20,7 @@ import { Avatar } from '../../../components/shared/Avatar';
 import { AvatarStack } from '../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import { cardDepth } from '../../../components/shared/cardStyles';
+import { CarouselBadge } from '../../../components/shared/PhotoCarousel';
 import { openProfile } from '../../../lib/profileNavigation';
 import { useToast } from '../../../components/Toast';
 import { requestLeaveClub } from '../../../store/leaveClubStore';
@@ -1054,6 +1055,7 @@ export default function ClubProfileScreen() {
                   style={{ width: PHOTO_SIZE, height: PHOTO_SIZE, borderRadius: 8, backgroundColor: '#E5E7EB' }}
                   resizeMode="cover"
                 />
+                {photo.image_count > 1 ? <CarouselBadge /> : null}
               </TouchableOpacity>
             ))}
           </View>

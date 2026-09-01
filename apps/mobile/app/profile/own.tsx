@@ -22,6 +22,7 @@ import {
   useRemoveEventRsvp,
 } from '../../hooks/useOwnProfile';
 import { Avatar } from '../../components/shared/Avatar';
+import { CarouselBadge } from '../../components/shared/PhotoCarousel';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { InterestsLine } from '../../components/profile/InterestsLine';
 import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
@@ -228,6 +229,7 @@ export default function OwnProfileScreen() {
                           style={styles.gridItem}
                           resizeMode="cover"
                         />
+                        {post.image_count > 1 ? <CarouselBadge /> : null}
                       </TouchableOpacity>
                     ) : null,
                   )}

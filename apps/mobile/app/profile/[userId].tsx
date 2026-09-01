@@ -31,6 +31,7 @@ import { useToast } from '../../components/Toast';
 import type { UserWeeklyEvent } from '../../services/followService';
 import { openDirectChatWith } from '../../lib/chatNavigation';
 import { openProfile } from '../../lib/profileNavigation';
+import { CarouselBadge } from '../../components/shared/PhotoCarousel';
 import { useDidIBlock, useBlockUser, useUnblockUser } from '../../hooks/useBlocking';
 import {
   confirmBlock,
@@ -616,6 +617,7 @@ export default function UserProfileScreen() {
                               }}
                               resizeMode="cover"
                             />
+                            {post.image_count > 1 ? <CarouselBadge /> : null}
                           </TouchableOpacity>
                         ) : null,
                       )}

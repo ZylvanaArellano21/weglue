@@ -68,6 +68,8 @@ export interface ClubPhoto {
   post_id: string | null;
   caption: string | null;
   created_at: string;
+  /** >1 when the backing post is a multi-photo carousel (drives the grid badge). */
+  image_count: number;
 }
 
 // One source of truth for every Photos that Glue surface (club profile
@@ -96,7 +98,15 @@ export async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
   if (legacyError) throw legacyError;
   if (authoredError) throw authoredError;
 
-  const photos = (legacyRows ?? []) as ClubPhoto[];
+  const photos = ((legacyRows ?? []) as any[]).map((row) => ({
+    id: row.id,
+    url: row.url,
+    source: row.source,
+    post_id: row.post_id,
+    caption: row.caption,
+    created_at: row.created_at,
+    image_count: 1,
+  })) as ClubPhoto[];
   const existingPostIds = new Set(photos.map((photo) => photo.post_id).filter(Boolean));
   for (const post of (authoredRows ?? []) as any[]) {
     if (existingPostIds.has(post.id)) continue;
@@ -107,8 +117,26 @@ export async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
       post_id: post.id,
       caption: post.caption,
       created_at: post.created_at,
+      image_count: 1,
     });
   }
+
+  // One extra query fills in the carousel count for every photo backed by a post.
+  const postIds = [...new Set(photos.map((p) => p.post_id).filter(Boolean) as string[])];
+  if (postIds.length > 0) {
+    const { data: imgRows } = await supabase
+      .from('post_images')
+      .select('post_id')
+      .in('post_id', postIds);
+    const counts = new Map<string, number>();
+    for (const r of (imgRows ?? []) as { post_id: string }[]) {
+      counts.set(r.post_id, (counts.get(r.post_id) ?? 0) + 1);
+    }
+    for (const photo of photos) {
+      if (photo.post_id && counts.has(photo.post_id)) photo.image_count = counts.get(photo.post_id)!;
+    }
+  }
+
   photos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   return photos;
 }
