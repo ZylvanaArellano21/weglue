@@ -31,6 +31,8 @@ import {
   reportMessage,
   createPollAtomic,
   newClientTag,
+  setMessageReaction,
+  removeMessageReaction,
   type ThreadMessage,
 } from '../../services/messagingService';
 import { resolveAttachmentUrl, openAttachmentExternally } from '../../lib/chatAttachments';
@@ -197,32 +199,57 @@ export function ConversationThread({
   }, [jumpToMessageId, serverMessages.length]);
 
   // ── Media viewer ──
-  const mediaItems: ViewerMediaItem[] = useMemo(
+  // Grouped-media messages contribute one viewer entry per photo so a tap opens
+  // on the chosen image and swipes through that message's set.
+  const mediaEntries = useMemo(
     () =>
       serverMessages
         .filter(
           (m) =>
             (m.message_type === 'image' || m.message_type === 'video') &&
-            m.attachment_url &&
             !(m.sender_id && restrictedSenders.has(m.sender_id)),
         )
-        .map((m) => ({
-          messageId: m.id,
-          source: m.attachment_url!,
-          kind: m.message_type === 'video' ? ('video' as const) : ('image' as const),
-          senderName: displayNameOrFallback(m.sender),
-          sentAt: m.created_at,
-        })),
+        .flatMap((m) => {
+          const grouped = (m.attachments ?? []).filter((a) => a.kind !== 'file');
+          const sources =
+            grouped.length > 0
+              ? grouped.map((a) => ({ source: a.storage_path, kind: a.kind, position: a.position }))
+              : m.attachment_url
+                ? [{
+                    source: m.attachment_url,
+                    kind: m.message_type === 'video' ? ('video' as const) : ('image' as const),
+                    position: 0,
+                  }]
+                : [];
+          return sources.map((s) => ({
+            messageId: m.id,
+            attachmentIndex: s.position,
+            item: {
+              messageId: m.id,
+              source: s.source,
+              kind: s.kind as 'image' | 'video',
+              senderName: displayNameOrFallback(m.sender),
+              sentAt: m.created_at,
+            } satisfies ViewerMediaItem,
+          }));
+        }),
     [serverMessages, restrictedSenders],
+  );
+  const mediaItems: ViewerMediaItem[] = useMemo(
+    () => mediaEntries.map((e) => e.item),
+    [mediaEntries],
   );
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const openMedia = useCallback(
-    (messageId: string) => {
-      const idx = mediaItems.findIndex((i) => i.messageId === messageId);
+    (messageId: string, index = 0) => {
+      let idx = mediaEntries.findIndex(
+        (e) => e.messageId === messageId && e.attachmentIndex === index,
+      );
+      if (idx === -1) idx = mediaEntries.findIndex((e) => e.messageId === messageId);
       if (idx !== -1) setViewerIndex(idx);
     },
-    [mediaItems],
+    [mediaEntries],
   );
 
   const openFile = useCallback(
@@ -274,6 +301,17 @@ export function ConversationThread({
         .catch(() => Alert.alert('Could not delete the message. Please try again.'));
     },
     [invalidate, currentUserId],
+  );
+
+  // Reactions: optimistic isn't attempted — the canonical rows come back on the
+  // `reaction` broadcast + this invalidate. Errors are quiet (a failed react is
+  // low-stakes and self-corrects on the next thread read).
+  const handleReact = useCallback(
+    (messageId: string, emoji: string | null) => {
+      const p = emoji ? setMessageReaction(messageId, emoji) : removeMessageReaction(messageId);
+      p.then(invalidate).catch(() => invalidate());
+    },
+    [invalidate],
   );
 
   // Returns true only when the report is durably saved. The action sheet keeps
@@ -374,6 +412,12 @@ export function ConversationThread({
             attachmentName={m.attachment_name}
             attachmentSize={m.attachment_size}
             attachmentUnavailable={!!m.sender_id && restrictedSenders.has(m.sender_id)}
+            attachments={m.attachments}
+            reactions={m.reactions}
+            onToggleReaction={(emoji) => {
+              const mine = m.reactions?.find((r) => r.reactedByMe)?.emoji;
+              handleReact(m.id, mine === emoji ? null : emoji);
+            }}
             messageType={m.message_type}
             createdAt={m.created_at}
             isOwn={isOwn}
@@ -463,6 +507,8 @@ export function ConversationThread({
         onDeleteForMe={handleDeleteForMe}
         onReport={handleReport}
         onSaveMedia={(messageId) => openMedia(messageId)}
+        myReaction={actionTarget?.reactions?.find((r) => r.reactedByMe)?.emoji ?? null}
+        onReact={handleReact}
       />
 
       {allowPolls && (

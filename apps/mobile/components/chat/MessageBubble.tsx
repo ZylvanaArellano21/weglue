@@ -12,6 +12,7 @@ import {
   senderNameColor,
 } from './chatTheme';
 import { ATTACHMENT_UNAVAILABLE_TEXT } from '../../lib/blockPrompts';
+import type { MessageAttachment, MessageReactionSummary } from '../../services/messagingService';
 
 interface Props {
   id: string;
@@ -22,6 +23,13 @@ interface Props {
   attachmentUrl: string | null;
   attachmentName?: string | null;
   attachmentSize?: number | null;
+  /** Grouped media (1..5). When length > 1 renders a grid; falls back to
+   * attachmentUrl for legacy single messages. */
+  attachments?: MessageAttachment[];
+  /** Reaction summary, grouped by emoji, count desc. */
+  reactions?: MessageReactionSummary[];
+  /** Toggle the viewer's reaction (null clears). */
+  onToggleReaction?: (emoji: string) => void;
   /**
    * True when this sender's attachment payload is unavailable to the viewer
    * (a block in either direction). The message row is still rendered, as
@@ -44,7 +52,7 @@ interface Props {
   onRetry?: () => void;
   onDiscardFailed?: () => void;
   onLongPress?: (messageId: string) => void;
-  onPressMedia?: (messageId: string) => void;
+  onPressMedia?: (messageId: string, index?: number) => void;
   onPressFile?: (messageId: string) => void;
   onPressAvatar?: () => void;
   pollSlot?: React.ReactNode;
@@ -131,6 +139,110 @@ function MediaPreview({
   );
 }
 
+/** Signed-URL image tile for the grouped-media grid. */
+function GridImage({ path, style }: { path: string; style: object }) {
+  const uri = useAttachmentUri(path);
+  return uri ? (
+    <Image source={{ uri }} style={style} resizeMode="cover" />
+  ) : (
+    <View style={[style, styles.mediaLoading]}>
+      <ActivityIndicator size="small" color={chatColors.teal} />
+    </View>
+  );
+}
+
+/** 1..5 images as one rounded media group. Layout adapts to the count. */
+function GroupedMedia({
+  images,
+  onPress,
+  onLongPress,
+}: {
+  images: MessageAttachment[];
+  onPress: (index: number) => void;
+  onLongPress: () => void;
+}) {
+  const n = images.length;
+  const gap = 2;
+  const W = MEDIA_MAX_WIDTH;
+  const tile = (i: number, w: number, h: number) => (
+    <TouchableOpacity
+      key={images[i]!.id}
+      activeOpacity={0.9}
+      onPress={() => onPress(i)}
+      onLongPress={onLongPress}
+      style={{ width: w, height: h }}
+    >
+      <GridImage path={images[i]!.storage_path} style={{ width: '100%', height: '100%' }} />
+    </TouchableOpacity>
+  );
+
+  let layout: React.ReactNode;
+  if (n === 2) {
+    const s = (W - gap) / 2;
+    layout = <View style={styles.gridRow}>{tile(0, s, s)}<View style={{ width: gap }} />{tile(1, s, s)}</View>;
+  } else if (n === 3) {
+    const big = (W - gap) * 0.62;
+    const small = W - gap - big;
+    const sh = (big - gap) / 2;
+    layout = (
+      <View style={styles.gridRow}>
+        {tile(0, big, big)}
+        <View style={{ width: gap }} />
+        <View style={{ width: small }}>{tile(1, small, sh)}<View style={{ height: gap }} />{tile(2, small, sh)}</View>
+      </View>
+    );
+  } else if (n === 4) {
+    const s = (W - gap) / 2;
+    layout = (
+      <View>
+        <View style={styles.gridRow}>{tile(0, s, s)}<View style={{ width: gap }} />{tile(1, s, s)}</View>
+        <View style={{ height: gap }} />
+        <View style={styles.gridRow}>{tile(2, s, s)}<View style={{ width: gap }} />{tile(3, s, s)}</View>
+      </View>
+    );
+  } else {
+    // 5: one wide on top, 2×2 below
+    const s = (W - gap) / 2;
+    layout = (
+      <View>
+        {tile(0, W, s)}
+        <View style={{ height: gap }} />
+        <View style={styles.gridRow}>{tile(1, s, s)}<View style={{ width: gap }} />{tile(2, s, s)}</View>
+        <View style={{ height: gap }} />
+        <View style={styles.gridRow}>{tile(3, s, s)}<View style={{ width: gap }} />{tile(4, s, s)}</View>
+      </View>
+    );
+  }
+  return <View style={styles.groupedMedia}>{layout}</View>;
+}
+
+function ReactionChips({
+  reactions,
+  isOwn,
+  onToggle,
+}: {
+  reactions: MessageReactionSummary[];
+  isOwn: boolean;
+  onToggle?: (emoji: string) => void;
+}) {
+  if (!reactions.length) return null;
+  return (
+    <View style={[styles.reactionRow, isOwn ? styles.timeOwn : styles.timeOther]}>
+      {reactions.map((r) => (
+        <TouchableOpacity
+          key={r.emoji}
+          style={[styles.reactionChip, r.reactedByMe && styles.reactionChipMine]}
+          onPress={() => onToggle?.(r.emoji)}
+          disabled={!onToggle}
+        >
+          <Text style={styles.reactionEmoji}>{r.emoji}</Text>
+          {r.count > 1 ? <Text style={styles.reactionCount}>{r.count}</Text> : null}
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 export function MessageBubble({
   id,
   senderId,
@@ -140,6 +252,9 @@ export function MessageBubble({
   attachmentUrl,
   attachmentName,
   attachmentSize,
+  attachments,
+  reactions,
+  onToggleReaction,
   attachmentUnavailable,
   messageType,
   createdAt,
@@ -158,6 +273,8 @@ export function MessageBubble({
   pollSlot,
   cardSlot,
 }: Props) {
+  const groupImages = (attachments ?? []).filter((a) => a.kind === 'image');
+  const isGroupedMedia = groupImages.length > 1;
   const isPoll = messageType === 'poll' && pollSlot;
   const isCard = (messageType === 'shared_event' || messageType === 'shared_post') && cardSlot;
   const isMedia = messageType === 'image' || messageType === 'video';
@@ -215,12 +332,23 @@ export function MessageBubble({
               </Text>
             </View>
           </TouchableOpacity>
+        ) : isMedia && isGroupedMedia ? (
+          <View>
+            <GroupedMedia
+              images={groupImages}
+              onPress={(i) => onPressMedia?.(id, i)}
+              onLongPress={longPress}
+            />
+            {content ? (
+              <Text style={[styles.mediaCaption, isOwn ? styles.timeOwn : styles.timeOther]}>{content}</Text>
+            ) : null}
+          </View>
         ) : isMedia ? (
           <View>
             <MediaPreview
               raw={attachmentUrl}
               isVideo={messageType === 'video'}
-              onPress={() => onPressMedia?.(id)}
+              onPress={() => onPressMedia?.(id, 0)}
               onLongPress={longPress}
             />
             {content ? (
@@ -285,7 +413,7 @@ export function MessageBubble({
           </TouchableOpacity>
         )}
 
-        {/* Reaction chips are rendered here once Codex-B lands ThreadMessage.reactions. */}
+        <ReactionChips reactions={reactions ?? []} isOwn={isOwn} onToggle={onToggleReaction} />
 
         {failed ? (
           <View style={styles.failedRow}>
@@ -363,6 +491,42 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#00000010',
+  },
+  groupedMedia: {
+    width: MEDIA_MAX_WIDTH,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#00000010',
+  },
+  gridRow: {
+    flexDirection: 'row',
+  },
+  reactionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  reactionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    ...chatShadow,
+  },
+  reactionChipMine: {
+    backgroundColor: 'rgba(15,166,166,0.16)',
+  },
+  reactionEmoji: {
+    fontSize: 13,
+  },
+  reactionCount: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 11,
+    color: chatColors.textMuted,
   },
   mediaImage: {
     width: '100%',
