@@ -104,9 +104,13 @@ export default async function AdminPostsPage({
                 <RowLink key={p.id} href={`/admin/posts/${p.id}`}>
                   <Td>
                     <div className="flex items-center gap-3">
-                      {p.image_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.image_url} alt="" className="h-9 w-9 shrink-0 rounded-md object-cover" />
+                      {p.images.length > 0 ? (
+                        <div className="flex shrink-0 gap-1">
+                          {p.images.map((image) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img key={image.position} src={image.path} alt="" className="h-9 w-9 rounded-md object-cover" />
+                          ))}
+                        </div>
                       ) : (
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 text-sm">
                           {p.post_type === "event" ? "📅" : "🖼️"}
@@ -128,10 +132,25 @@ export default async function AdminPostsPage({
                     )}
                   </Td>
                   <Td>
-                    <IdentityCell name={p.author_name || p.author_username} sub={`@${p.author_username}`} />
+                    {p.author_kind === "club" ? (
+                      <div className="space-y-1">
+                        <Badge tone="teal">Club author</Badge>
+                        <p className="text-xs text-gray-600">
+                          <span className="font-medium">Officer / audit:</span> {p.author_name || `@${p.author_username}`}
+                        </p>
+                        {p.author_username ? <p className="text-xs text-gray-400">@{p.author_username}</p> : null}
+                      </div>
+                    ) : (
+                      <IdentityCell name={p.author_name || p.author_username} sub={`@${p.author_username}`} />
+                    )}
                   </Td>
                   <Td className="text-gray-600">
-                    {p.club_name ? `${p.club_name}` : <Badge tone="gray">Not tagged</Badge>}
+                    {p.club_name ? (
+                      <div>
+                        <p>{p.club_name}</p>
+                        {p.club_handle ? <p className="text-xs text-gray-400">@{p.club_handle}</p> : null}
+                      </div>
+                    ) : <Badge tone="gray">Not tagged</Badge>}
                   </Td>
                   <Td className="text-gray-600">{p.university ?? <span className="text-gray-300">—</span>}</Td>
                   <Td className="text-right tabular-nums">{p.media_count}</Td>

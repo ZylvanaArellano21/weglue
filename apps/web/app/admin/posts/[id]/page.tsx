@@ -36,14 +36,22 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
   const canonicalMutable = lifecycle.available && lifecycle.record?.state === "active";
 
   const primaryTag = post.tags.find((t) => t.primary) ?? post.tags[0] ?? null;
+  const primaryImage = post.images[0]?.path ?? post.image_url;
 
   const contentTab = (
     <div className="grid gap-6 md:grid-cols-3">
       <SectionCard title="Content" className="md:col-span-2">
         <div className="space-y-4 p-4">
-          {post.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={post.image_url} alt="" className="max-h-96 w-full rounded-lg object-contain" />
+          {post.images.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {post.images.map((image) => (
+                <figure key={image.position} className="overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={image.path} alt="" className="max-h-96 w-full object-contain" />
+                  <figcaption className="px-2 py-1 text-xs text-gray-400">Image {image.position + 1}</figcaption>
+                </figure>
+              ))}
+            </div>
           ) : (
             <div className="flex h-40 items-center justify-center rounded-lg bg-gray-50 text-3xl">
               {post.post_type === "event" ? "📅" : "🖼️"}
@@ -60,7 +68,10 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
       <SectionCard title="Details">
         <dl className="grid gap-4 p-4">
           <Field label="Type"><span className="capitalize">{post.post_type}</span></Field>
-          <Field label="Media">{post.image_url ? "1 image" : "None"}</Field>
+          <Field label="Author kind">
+            {post.author_kind === "club" ? <Badge tone="teal">Club-authored</Badge> : <Badge tone="gray">User-authored</Badge>}
+          </Field>
+          <Field label="Media">{post.images.length ? `${post.images.length} image${post.images.length === 1 ? "" : "s"}` : "None"}</Field>
           <Field label="Linked event">
             {post.linked_event_id ? (
               <Link href={`/admin/events/${post.linked_event_id}`} className="text-teal-700 hover:underline">
@@ -81,21 +92,51 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
 
   const authorTab = (
     <SectionCard title="Author">
-      <div className="flex items-center justify-between p-4">
-        <Link href={`/admin/users/${post.author_id}`} className="flex items-center gap-3 hover:opacity-80">
-          <Avatar uri={post.author_avatar} name={post.author_name} size={44} />
-          <div>
-            <p className="text-sm font-medium text-gray-900">{post.author_name || post.author_username}</p>
-            <p className="text-xs text-gray-500">
-              @{post.author_username}
-              {post.author_email ? ` · ${post.author_email}` : ""}
-            </p>
+      {post.author_kind === "club" ? (
+        <div className="space-y-4 p-4">
+          <Link href={`/admin/clubs/${post.club_id}`} className="flex items-center gap-3 hover:opacity-80">
+            <Avatar uri={post.club_avatar} name={post.club_name ?? "Club"} size={44} />
+            <div>
+              <p className="text-sm font-medium text-gray-900">{post.club_name || "Unknown club"}</p>
+              <p className="text-xs text-gray-500">{post.club_handle ? `@${post.club_handle}` : "Club identity"}</p>
+            </div>
+          </Link>
+          <div className="border-t border-gray-100 pt-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Officer / audit identity</p>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <Link href={`/admin/users/${post.author_id}`} className="flex items-center gap-3 hover:opacity-80">
+                <Avatar uri={post.author_avatar} name={post.author_name} size={36} />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{post.author_name || post.author_username}</p>
+                  <p className="text-xs text-gray-500">
+                    @{post.author_username}
+                    {post.author_email ? ` · ${post.author_email}` : ""}
+                  </p>
+                </div>
+              </Link>
+              <Link href={`/admin/users/${post.author_id}`} className="text-sm text-teal-600 hover:underline">
+                View officer →
+              </Link>
+            </div>
           </div>
-        </Link>
-        <Link href={`/admin/users/${post.author_id}`} className="text-sm text-teal-600 hover:underline">
-          View user →
-        </Link>
-      </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between p-4">
+          <Link href={`/admin/users/${post.author_id}`} className="flex items-center gap-3 hover:opacity-80">
+            <Avatar uri={post.author_avatar} name={post.author_name} size={44} />
+            <div>
+              <p className="text-sm font-medium text-gray-900">{post.author_name || post.author_username}</p>
+              <p className="text-xs text-gray-500">
+                @{post.author_username}
+                {post.author_email ? ` · ${post.author_email}` : ""}
+              </p>
+            </div>
+          </Link>
+          <Link href={`/admin/users/${post.author_id}`} className="text-sm text-teal-600 hover:underline">
+            View user →
+          </Link>
+        </div>
+      )}
     </SectionCard>
   );
 
@@ -124,11 +165,18 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
 
   const mediaTab = (
     <SectionCard title="Media">
-      {post.image_url ? (
-        <div className="p-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={post.image_url} alt="" className="max-h-[70vh] rounded-lg object-contain" />
-          <p className="mt-2 break-all text-xs text-gray-400">{post.image_url}</p>
+      {post.images.length > 0 ? (
+        <div className="space-y-4 p-4">
+          {post.images.map((image) => (
+            <div key={image.position} className="rounded-lg border border-gray-100 p-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={image.path} alt="" className="max-h-[70vh] w-full rounded-lg object-contain" />
+              <p className="mt-2 text-xs text-gray-500">Image {image.position + 1}</p>
+              <p className="text-xs text-gray-400">
+                {image.width && image.height ? `${image.width} × ${image.height}` : "Dimensions unavailable"}
+              </p>
+            </div>
+          ))}
         </div>
       ) : (
         <EmptyState icon="🖼️" title="No media" message="This post has no attached image." />
@@ -246,9 +294,9 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
       </Link>
 
       <div className="flex flex-wrap items-start gap-4 rounded-xl border border-gray-200 bg-white p-5">
-        {post.image_url ? (
+        {primaryImage ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={post.image_url} alt="" className="h-16 w-16 rounded-lg object-cover" />
+          <img src={primaryImage} alt="" className="h-16 w-16 rounded-lg object-cover" />
         ) : (
           <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-gray-100 text-2xl">
             {post.post_type === "event" ? "📅" : "🖼️"}
@@ -260,19 +308,28 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
               {post.caption ? post.caption.slice(0, 80) : "Untitled post"}
             </h1>
             <Badge tone="gray">{post.post_type}</Badge>
+            <Badge tone={post.author_kind === "club" ? "teal" : "gray"}>
+              {post.author_kind === "club" ? "Club-authored" : "User-authored"}
+            </Badge>
             {lifecycle.available && lifecycle.record ? (
               <LifecycleBadge status={lifecycle.record.displayStatus} />
             ) : (
               <Badge tone="amber">Lifecycle unavailable</Badge>
             )}
-            {primaryTag ? <Badge tone="teal">{primaryTag.name}</Badge> : <Badge tone="gray">Not tagged</Badge>}
+            {post.author_kind === "club" && post.club_name ? <Badge tone="teal">{post.club_name}</Badge> : primaryTag ? <Badge tone="teal">{primaryTag.name}</Badge> : <Badge tone="gray">Not tagged</Badge>}
             {post.reportCount > 0 ? <Badge tone="red">{post.reportCount} reports</Badge> : null}
           </div>
           <p className="mt-0.5 text-sm text-gray-500">
-            by{" "}
-            <Link href={`/admin/users/${post.author_id}`} className="text-teal-700 hover:underline">
-              @{post.author_username}
-            </Link>{" "}
+            {post.author_kind === "club" ? (
+              <>
+                published by <span className="font-medium text-gray-700">{post.club_name || "club"}</span> · Officer / audit{" "}
+                <Link href={`/admin/users/${post.author_id}`} className="text-teal-700 hover:underline">
+                  @{post.author_username}
+                </Link>{" "}
+              </>
+            ) : (
+              <>by{" "}<Link href={`/admin/users/${post.author_id}`} className="text-teal-700 hover:underline">@{post.author_username}</Link>{" "}</>
+            )}
             · {fmtDateTime(post.created_at)}
           </p>
         </div>
@@ -283,7 +340,7 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
           { key: "content", label: "Content", content: contentTab },
           { key: "author", label: "Author", content: authorTab },
           { key: "club", label: "Club", count: post.tags.length, content: clubTab },
-          { key: "media", label: "Media", count: post.image_url ? 1 : 0, content: mediaTab },
+          { key: "media", label: "Media", count: post.images.length, content: mediaTab },
           { key: "comments", label: "Comments", count: post.commentCount, content: commentsTab },
           { key: "reports", label: "Reports", count: post.reportCount, content: reportsTab },
           { key: "history", label: "History", content: historyTab },
