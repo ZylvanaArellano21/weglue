@@ -130,63 +130,67 @@ export function QuickReactionRow({
   );
 }
 
-/** The full emoji picker — a curated grid, grouped, and it DOES include 👎. */
+/**
+ * The full emoji picker — a curated grid, grouped, and it DOES include 👎.
+ * Rendered as a centered modal (not an anchored popover) so it is never
+ * clipped by the thread's scroll container, matching mobile's picker sheet.
+ */
 export function EmojiPickerPopover({
   current,
   onPick,
   onClose,
-  align = "start",
 }: {
   current: string | null;
   onPick: (emoji: string) => void;
   onClose: () => void;
-  align?: "start" | "end";
 }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    const onDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
     document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onDown, true);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onDown, true);
-    };
+    return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
     <div
-      ref={ref}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 p-4"
       role="dialog"
+      aria-modal="true"
       aria-label="Choose a reaction"
-      className={`absolute -top-2 z-30 max-h-72 w-72 -translate-y-full overflow-y-auto rounded-2xl border bg-white p-3 shadow-[0_8px_28px_rgba(0,0,0,0.22)] ${
-        align === "end" ? "right-0" : "left-0"
-      }`}
-      style={{ borderColor: "rgba(0,0,0,0.08)" }}
+      onClick={onClose}
     >
-      {EMOJI_GROUPS.map((group) => (
-        <div key={group.label} className="mb-1.5">
-          <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.label}</p>
-          <div className="grid grid-cols-8 gap-0.5">
-            {group.emojis.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => onPick(emoji)}
-                aria-label={`React ${emoji}`}
-                className={`flex aspect-square items-center justify-center rounded-lg text-lg transition hover:bg-black/5 ${
-                  current === emoji ? "bg-teal/15" : ""
-                }`}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
+      <div
+        className="max-h-[70vh] w-80 max-w-full overflow-y-auto rounded-2xl border bg-white p-3 shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
+        style={{ borderColor: "rgba(0,0,0,0.08)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-2 flex items-center justify-between px-1">
+          <p className="text-sm font-semibold text-gray-900">Choose a reaction</p>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-full p-1 text-gray-500 hover:bg-black/5">
+            <CloseIcon size={16} />
+          </button>
         </div>
-      ))}
+        {EMOJI_GROUPS.map((group) => (
+          <div key={group.label} className="mb-1.5">
+            <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.label}</p>
+            <div className="grid grid-cols-8 gap-0.5">
+              {group.emojis.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => onPick(emoji)}
+                  aria-label={`React ${emoji}`}
+                  className={`flex aspect-square items-center justify-center rounded-lg text-lg transition hover:bg-black/5 ${
+                    current === emoji ? "bg-teal/15" : ""
+                  }`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

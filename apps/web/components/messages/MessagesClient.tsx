@@ -1220,7 +1220,7 @@ function MessageBubble({ message, isOwn, showSender, isLastInGroup = true, isGro
           </div>
         )}
         {pickerOpen && (
-          <EmojiPickerPopover current={myReaction} align={align} onPick={react} onClose={() => setPickerOpen(false)} />
+          <EmojiPickerPopover current={myReaction} onPick={react} onClose={() => setPickerOpen(false)} />
         )}
 
         {isText ? (
