@@ -418,18 +418,6 @@ export function QrCodeIcon(p: IconProps): JSX.Element {
   );
 }
 
-/** Ionicons `refresh-outline` — Reset link (Share invite panel). */
-export function RefreshIcon(p: IconProps): JSX.Element {
-  return (
-    <svg {...svgProps(p)}>
-      <path d="M20 11a8 8 0 0 0-14.3-4.9" />
-      <path d="M4 4v5h5" />
-      <path d="M4 13a8 8 0 0 0 14.3 4.9" />
-      <path d="M20 20v-5h-5" />
-    </svg>
-  );
-}
-
 // ─── Brand icons (footer) ───────────────────────────────────────────────────
 // Redrawn as single-color outline glyphs so they match every other icon in
 // this file — no logo assets, no icon-library dependency.

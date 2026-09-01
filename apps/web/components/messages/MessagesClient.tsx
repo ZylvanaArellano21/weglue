@@ -12,7 +12,7 @@ import {
   ArchiveIcon, BellOffIcon, BlockIcon, CalendarIcon, CameraIcon, ChatBubbleOutlineIcon, ChatBubblesIcon,
   CheckboxIcon, CloseCircleIcon, CloseIcon, EllipsisIcon, ExitIcon, FlagIcon, ImageIcon, ListIcon,
   LockIcon, MegaphoneIcon, PaperclipIcon, PencilIcon, PeopleIcon, PersonAddIcon, PersonRemoveIcon,
-  PlusIcon, QrCodeIcon, RefreshIcon, SearchIcon, ShareIcon, TagIcon, TrashIcon,
+  PlusIcon, QrCodeIcon, SearchIcon, ShareIcon, TagIcon, TrashIcon,
 } from "../shared/icons";
 import qrcodegen from "qrcode-generator";
 import type { ReportEntityType } from "../../lib/hooks/useReport";
@@ -64,7 +64,7 @@ import {
   type Person,
   type PostingPermission,
   type ThreadMessage, sharedPostIsAvailable, sharedEventIsAvailable, conversationRestrictedSenders,
-  getInviteToken, rotateInviteToken, INVITE_BASE_URL } from "../../lib/messages/service";
+  getInviteToken, INVITE_BASE_URL } from "../../lib/messages/service";
 import {
   messageKeys,
   useConversationFlags,
@@ -2039,10 +2039,10 @@ function PermissionsSheet({ channel, participants, isOfficersChat, onClose, onSa
   </div>;
 }
 
-/** Copy link / Show QR code / Share… / Reset link — the same four rows and
- *  the same active invitation as mobile's ShareInviteSheet, because both call
- *  the identical get_or_create_chat_invitation / rotate_chat_invitation RPCs
- *  and build the link from the same INVITE_BASE_URL + token. */
+/** Copy link / Show QR code / Share… — the same rows and the same active
+ *  invitation as mobile's ShareInviteSheet, because both call the identical
+ *  get_or_create_chat_invitation RPC and build the link from the same
+ *  INVITE_BASE_URL + token. (The "Reset link" row was removed.) */
 function ShareInviteQr({ value, size }: { value: string; size: number }): JSX.Element {
   const rows = useMemo(() => {
     const qr = qrcodegen(0, "M");
@@ -2070,7 +2070,6 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
   const [loading, setLoading] = useState(true);
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEscapeAndOutside(ref, onClose);
 
@@ -2101,24 +2100,10 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
       // dismissed — no-op, matches mobile's Share.share() catch
     }
   }
-  async function resetLink() {
-    setResetting(true);
-    setError(null);
-    try {
-      const next = await rotateInviteToken(conversationId);
-      setToken(next);
-      setShowQr(false);
-    } catch {
-      setError("Could not reset the link. Please try again.");
-    } finally {
-      setResetting(false);
-    }
-  }
-
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
     <div ref={ref} role="dialog" aria-modal="true" aria-label={`Invite to ${conversationName}`} className="w-full max-w-md rounded-2xl bg-cream p-5 shadow-2xl">
       <h3 className="text-lg font-bold text-gray-950">Invite to {conversationName}</h3>
-      <p className="mt-1 text-sm text-gray-500">Anyone from your university with this link can join. The link doesn&apos;t expire — you can reset it anytime.</p>
+      <p className="mt-1 text-sm text-gray-500">Anyone from your university with this link can join. The link doesn&apos;t expire.</p>
       {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
       {loading || !link ? (
         <div className="my-8 flex justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-teal border-t-transparent" /></div>
@@ -2132,7 +2117,6 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
           <button type="button" onClick={() => void copyLink()} className="flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><ShareIcon size={20} />{copied ? "Copied!" : "Copy link"}</button>
           <button type="button" onClick={() => setShowQr(true)} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><QrCodeIcon size={20} />Show QR code</button>
           {canNativeShare && <button type="button" onClick={() => void nativeShare()} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><ShareIcon size={20} />Share…</button>}
-          <button type="button" disabled={resetting} onClick={() => void resetLink()} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"><RefreshIcon size={20} />{resetting ? "Resetting…" : "Reset link"}</button>
         </div>
       )}
       <div className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-full px-4 py-2 text-sm font-semibold text-gray-600">Close</button></div>

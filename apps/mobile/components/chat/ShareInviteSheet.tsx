@@ -13,17 +13,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import qrcodegen from 'qrcode-generator';
-import {
-  getInviteToken,
-  rotateInviteToken,
-  INVITE_BASE_URL,
-} from '../../services/messagingService';
+import { getInviteToken, INVITE_BASE_URL } from '../../services/messagingService';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
 
 // ─── Share sheet for chat invitations ────────────────────────────────────────
 // Only rendered for authorized managers (officers on Members chats, the
 // creator on custom groups) — and the server re-validates every call.
 // The link and the QR code point at the SAME opaque, non-expiring token.
+// There is no "reset link" action: the link-reset feature was removed.
 
 interface Props {
   visible: boolean;
@@ -102,31 +99,6 @@ export function ShareInviteSheet({ visible, conversationId, chatTitle, onClose }
     }
   }
 
-  function confirmRotate() {
-    Alert.alert(
-      'Reset invite link?',
-      'The current link and QR code will stop working and a new one will be created.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset link',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setLoading(true);
-              const t = await rotateInviteToken(conversationId);
-              setToken(t);
-            } catch {
-              Alert.alert('Could not reset the link. Please try again.');
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ],
-    );
-  }
-
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
@@ -134,8 +106,7 @@ export function ShareInviteSheet({ visible, conversationId, chatTitle, onClose }
           <View style={styles.handle} />
           <Text style={styles.title}>Invite to {chatTitle}</Text>
           <Text style={styles.sub}>
-            Anyone from your university with this link can join. The link doesn't expire — you can
-            reset it anytime.
+            Anyone from your university with this link can join. The link doesn't expire.
           </Text>
 
           {loading || !link ? (
@@ -168,13 +139,6 @@ export function ShareInviteSheet({ visible, conversationId, chatTitle, onClose }
                   <Ionicons name="share-outline" size={22} color={chatColors.teal} />
                 </View>
                 <Text style={styles.rowLabel}>Share…</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.row} onPress={confirmRotate} activeOpacity={0.7}>
-                <View style={styles.iconWrapDanger}>
-                  <Ionicons name="refresh-outline" size={22} color="#C62828" />
-                </View>
-                <Text style={[styles.rowLabel, { color: '#C62828' }]}>Reset link</Text>
               </TouchableOpacity>
             </>
           )}
@@ -230,14 +194,6 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: 'rgba(15,166,166,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconWrapDanger: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(198,40,40,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -100,7 +100,8 @@ CHAINS = {
               "mg:083_notification_coverage_audit_fixes.sql",
               "mg:084_notification_exactly_one_fixes.sql"],
     "wg085": [FIXTURE_085, "mg:085_student_joined_named_copy.sql"],
-    "wg086": [FIXTURE_086, "mg:086_members_only_chat_invitations.sql"],
+    "wg086": [FIXTURE_086, "mg:086_members_only_chat_invitations.sql",
+              "mg:115_disable_rotate_chat_invitation.sql"],
     "wg087": [FIXTURE_087, "mg:087_club_recommendation_launch_campus_null_fix.sql"],
 }
 

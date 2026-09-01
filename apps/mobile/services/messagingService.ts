@@ -617,14 +617,6 @@ export async function getInviteToken(conversationId: string): Promise<string> {
   return data as string;
 }
 
-export async function rotateInviteToken(conversationId: string): Promise<string> {
-  const { data, error } = await supabase.rpc('rotate_chat_invitation', {
-    p_conversation_id: conversationId,
-  });
-  if (error) throw error;
-  return data as string;
-}
-
 export interface InvitePreview {
   valid: boolean;
   type?: 'club_group' | 'group';
