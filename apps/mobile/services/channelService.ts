@@ -1,5 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { clientUuid } from '../lib/chatAttachments';
+import { applyThreadVisibility, loadThreadVisibility } from '@weglue/shared';
+import type { MessageAttachment, MessageReactionSummary } from './messagingService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +40,41 @@ export interface MessageWithSender {
   message_type: string;
   created_at: string;
   poll_id: string | null;
+  attachments: MessageAttachment[];
+  reactions: MessageReactionSummary[];
   sender: MessageSender;
+}
+
+export interface ChannelAttachmentInput {
+  path: string;
+  kind: 'image' | 'video' | 'file';
+  mime: string | null;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  fileName?: string | null;
+}
+
+function channelAttachments(m: any): MessageAttachment[] {
+  const rows = Array.isArray(m.message_attachments) && m.message_attachments.length
+    ? m.message_attachments
+    : m.attachment_url
+      ? [{ id: `legacy:${m.id}`, storage_path: m.attachment_url, kind: m.message_type === 'video' ? 'video' : m.message_type === 'file' ? 'file' : 'image', position: 0, mime: m.attachment_mime ?? null, width: null, height: null, byte_size: m.attachment_size ?? null, file_name: m.attachment_name ?? null }]
+      : [];
+  return rows.map((a: any) => ({ id: a.id, storage_path: a.storage_path, kind: a.kind, position: Number(a.position), mime: a.mime ?? null, width: a.width ?? null, height: a.height ?? null, byte_size: a.byte_size ?? null, file_name: a.file_name ?? null })).sort((a: MessageAttachment, b: MessageAttachment) => a.position - b.position);
+}
+
+function channelReactions(m: any, viewerId: string): MessageReactionSummary[] {
+  const groups = new Map<string, MessageReactionSummary & { firstCreatedAt: string }>();
+  for (const row of (Array.isArray(m.message_reactions) ? m.message_reactions : [])) {
+    const current = groups.get(row.emoji) ?? { emoji: row.emoji, count: 0, reactedByMe: false, userIds: [], firstCreatedAt: row.created_at ?? '' };
+    current.count += 1;
+    current.reactedByMe ||= row.user_id === viewerId;
+    if (current.userIds.length < 50) (current.userIds as string[]).push(row.user_id);
+    if (row.created_at && (!current.firstCreatedAt || row.created_at < current.firstCreatedAt)) current.firstCreatedAt = row.created_at;
+    groups.set(row.emoji, current);
+  }
+  return Array.from(groups.values()).sort((a, b) => b.count - a.count || a.firstCreatedAt.localeCompare(b.firstCreatedAt)).map(({ firstCreatedAt: _firstCreatedAt, ...reaction }) => reaction);
 }
 
 export interface MessagesPage {
@@ -328,7 +364,7 @@ export async function getChannelMessages(
   let query = supabase
     .from('messages')
     .select(
-      'id, conversation_id, channel_id, sender_id, content, attachment_url, message_type, created_at, polls(id), profiles!sender_id(id, username, avatar_url)',
+      'id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, created_at, polls(id), profiles!sender_id(id, username, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))',
     )
     .eq('channel_id', channelId)
     .order('created_at', { ascending: false })
@@ -338,18 +374,22 @@ export async function getChannelMessages(
     query = query.lt('created_at', cursor);
   }
 
-  const { data, error } = await query;
+  const [{ data, error }, auth] = await Promise.all([query, supabase.auth.getUser()]);
   if (error) throw error;
 
   const rows = (data ?? []) as any[];
+  const viewerId = auth.data.user?.id ?? '';
+  const visibility = rows.length > 0 ? await loadThreadVisibility(supabase, rows[0].conversation_id, viewerId) : { hiddenIds: new Set<string>(), clearedBefore: null };
 
-  const messages: MessageWithSender[] = rows.map((m) => ({
+  const messages: MessageWithSender[] = applyThreadVisibility(rows, visibility).map((m) => ({
     id: m.id,
     conversation_id: m.conversation_id,
     channel_id: m.channel_id,
     sender_id: m.sender_id,
     content: m.content,
     attachment_url: m.attachment_url,
+    attachments: channelAttachments(m),
+    reactions: channelReactions(m, viewerId),
     message_type: m.message_type,
     created_at: m.created_at,
     poll_id: Array.isArray(m.polls) ? (m.polls[0]?.id ?? null) : null,
@@ -372,7 +412,24 @@ export async function sendMessage(
   senderId: string,
   content: string,
   attachment?: Attachment,
+  attachments?: ChannelAttachmentInput[],
 ): Promise<void> {
+  if (attachments) {
+    if (attachments.length < 1 || attachments.length > 5) throw new Error('You can send between 1 and 5 attachments.');
+    const kind = attachments[0].kind;
+    if (attachments.some((item) => item.kind !== kind)) throw new Error('Grouped attachments must have one kind.');
+    if (attachments.length > 1 && kind !== 'image') throw new Error('Only images can be grouped.');
+    const { error } = await supabase.rpc('send_message_with_attachments', {
+      p_conversation_id: conversationId,
+      p_channel_id: channelId,
+      p_content: content || null,
+      p_message_type: kind,
+      p_client_tag: clientUuid(),
+      p_attachments: attachments,
+    });
+    if (error) throw error;
+    return;
+  }
   const messageType = attachment
     ? attachment.type === 'image'
       ? 'image'
@@ -390,6 +447,8 @@ export async function sendMessage(
 
   if (error) throw error;
 }
+
+export { setMessageReaction, removeMessageReaction, toggleMessageReaction, getMessageReactors } from './messagingService';
 
 export async function deleteMessage(messageId: string): Promise<void> {
   const { error } = await supabase.functions.invoke('delete-message', {

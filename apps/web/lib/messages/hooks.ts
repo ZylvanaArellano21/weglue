@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createSafeChannel, removeSafeChannel, subscribeBroadcast } from "../realtime";
+import { createSafeChannel, removeSafeChannel, subscribeBroadcastEvents } from "../realtime";
 import type { ThreadMessage, ThreadPage } from "./service";
 import {
   canPostInChannel,
@@ -245,7 +245,13 @@ export function useMessagesRealtime(conversationId: string | null, userId: strin
     ]);
     // The database emits an opaque Day 10E-style invalidation for every
     // message lifecycle event. Canonical RLS-backed refetches own visibility.
-    const removeMessageSync = subscribeBroadcast(`sync:message:${conversationId}`, "invalidate", invalidateOpen, invalidateOpen);
+    // Reactions and grouped-message metadata use this same existing private
+    // thread topic; both handlers refetch canonical rows under RLS.
+    const removeMessageSync = subscribeBroadcastEvents(
+      `sync:message:${conversationId}`,
+      { invalidate: invalidateOpen, reaction: invalidateOpen, message: invalidateOpen },
+      invalidateOpen,
+    );
     return () => {
       removeSafeChannel(open);
       removeMessageSync();
