@@ -60,12 +60,20 @@ function mergeTaggedClubs(
   primaryClubId: string | null,
   primaryClub: { id: string; name: string } | null | undefined,
   extraClubs: { id: string; name: string }[],
+  authorKind: 'user' | 'club' = 'user',
 ): { id: string; name: string }[] {
   const merged: { id: string; name: string }[] = [];
   const seen = new Set<string>();
-  if (primaryClubId && primaryClub) {
+  // A club-authored post IS the club's post — the club already renders as the
+  // author (avatar + name), so its own club_id is never shown as a "tag". Only
+  // student-authored Home posts surface a club tag.
+  if (authorKind !== 'club' && primaryClubId && primaryClub) {
     merged.push({ id: primaryClub.id, name: primaryClub.name });
     seen.add(primaryClub.id);
+  }
+  if (authorKind === 'club' && primaryClubId) {
+    // Never let the authoring club leak back in as an extra tag either.
+    seen.add(primaryClubId);
   }
   for (const club of extraClubs) {
     if (!seen.has(club.id)) {
@@ -260,7 +268,7 @@ export async function getHomePostsFeed(
     }),
     club: postClub(p),
     images: postImages(p, imageMap),
-    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
+    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? [], p.author_kind ?? 'user'),
     likes_count: likesCountMap.get(p.id) ?? 0,
     comments_count: commentsCountMap.get(p.id) ?? 0,
     user_has_liked: userLikedSet.has(p.id),
@@ -335,6 +343,7 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
       (p as any).club_id,
       (p as any).clubs,
       (extraTagRows as any[] ?? []).map((r) => ({ id: r.clubs.id, name: r.clubs.name })),
+      (p as any).author_kind ?? 'user',
     ),
     likes_count: likes.length,
     comments_count: (commentsRows ?? []).length,
@@ -434,7 +443,7 @@ export async function getUserPostsFeed(
     }),
     club: postClub(p),
     images: postImages(p, imageMap),
-    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
+    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? [], p.author_kind ?? 'user'),
     likes_count: likesCountMap.get(p.id) ?? 0,
     comments_count: commentsCountMap.get(p.id) ?? 0,
     user_has_liked: userLikedSet.has(p.id),
@@ -535,7 +544,7 @@ export async function getPostsByIds(
       }),
       club: postClub(p),
       images: postImages(p, imageMap),
-      tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
+      tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? [], p.author_kind ?? 'user'),
       likes_count: likesCountMap.get(p.id) ?? 0,
       comments_count: commentsCountMap.get(p.id) ?? 0,
       user_has_liked: userLikedSet.has(p.id),

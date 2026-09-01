@@ -67,14 +67,19 @@ function postAuthor(post: any, state: { is_following: boolean; is_requested: boo
 function mergeTaggedClubs(
   primaryClubId: string | null,
   primaryClub: { id: string; name: string } | null | undefined,
-  extraClubs: { id: string; name: string }[]
+  extraClubs: { id: string; name: string }[],
+  authorKind: "user" | "club" = "user"
 ): { id: string; name: string }[] {
   const merged: { id: string; name: string }[] = [];
   const seen = new Set<string>();
-  if (primaryClubId && primaryClub) {
+  // A club-authored post already renders the club as its author (avatar + name),
+  // so the club is never also shown as a "tag". Only student-authored Home posts
+  // carry a club tag.
+  if (authorKind !== "club" && primaryClubId && primaryClub) {
     merged.push({ id: primaryClub.id, name: primaryClub.name });
     seen.add(primaryClub.id);
   }
+  if (authorKind === "club" && primaryClubId) seen.add(primaryClubId);
   for (const club of extraClubs) {
     if (!seen.has(club.id)) {
       merged.push(club);
@@ -184,7 +189,7 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
     }),
     club: postClub(p),
     images: postImages(p, imageMap),
-    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? []),
+    tagged_clubs: mergeTaggedClubs(p.club_id, p.clubs, extraTaggedClubsMap.get(p.id) ?? [], p.author_kind ?? "user"),
     likes_count: likesCountMap.get(p.id) ?? 0,
     comments_count: commentsCountMap.get(p.id) ?? 0,
     user_has_liked: userLikedSet.has(p.id),
@@ -269,7 +274,7 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
     }),
     club: postClub(post),
     images: postImages(post, imageMap),
-    tagged_clubs: mergeTaggedClubs(post.club_id, post.clubs, extra.get(post.id) ?? []),
+    tagged_clubs: mergeTaggedClubs(post.club_id, post.clubs, extra.get(post.id) ?? [], post.author_kind ?? "user"),
     likes_count: likes.length,
     comments_count: ((commentsRows ?? []) as any[]).length,
     user_has_liked: likes.some((l) => l.user_id === userId),
