@@ -235,9 +235,18 @@ CREATE TRIGGER trg_broadcast_message_reaction
   AFTER INSERT OR UPDATE OR DELETE ON public.message_reactions
   FOR EACH ROW EXECUTE FUNCTION private.broadcast_message_reaction();
 
-REVOKE ALL ON FUNCTION public.message_reaction_emoji_is_valid(text) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION private.message_reaction_readable(uuid, uuid) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION private.message_reaction_writable(uuid) FROM PUBLIC, anon, authenticated;
+-- authenticated keeps EXECUTE: this IMMUTABLE validator backs the
+-- message_reactions_emoji_valid CHECK constraint, evaluated by the inserting
+-- role on every INSERT/UPDATE.
+REVOKE ALL ON FUNCTION public.message_reaction_emoji_is_valid(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.message_reaction_emoji_is_valid(text) TO authenticated;
+REVOKE ALL ON FUNCTION private.message_reaction_readable(uuid, uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION private.message_reaction_writable(uuid) FROM PUBLIC, anon;
+-- authenticated must keep EXECUTE: both helpers are invoked from message_reactions
+-- RLS policies that are TO authenticated (EXECUTE is checked before a SECURITY
+-- DEFINER function runs). Matches 067's can_receive_message_sync pattern.
+GRANT EXECUTE ON FUNCTION private.message_reaction_readable(uuid, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION private.message_reaction_writable(uuid) TO authenticated;
 REVOKE ALL ON FUNCTION private.broadcast_message_reaction() FROM PUBLIC, anon, authenticated, service_role;
 
 DO $$ BEGIN

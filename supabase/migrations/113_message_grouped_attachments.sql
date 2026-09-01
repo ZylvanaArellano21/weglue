@@ -451,7 +451,10 @@ $$;
 REVOKE ALL ON FUNCTION private.validate_message_attachments() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION private.ensure_legacy_message_attachment() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION private.sync_legacy_message_attachment() FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION private.message_attachment_readable(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.message_attachment_readable(uuid) FROM PUBLIC, anon;
+-- authenticated keeps EXECUTE: used in the message_attachments SELECT policy
+-- (TO authenticated). See 112 note.
+GRANT EXECUTE ON FUNCTION private.message_attachment_readable(uuid) TO authenticated;
 REVOKE ALL ON FUNCTION public.send_message_with_attachments(uuid, uuid, text, text, uuid, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.send_message_with_attachments(uuid, uuid, text, text, uuid, jsonb) TO authenticated;
 
