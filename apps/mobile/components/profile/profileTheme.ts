@@ -1,4 +1,5 @@
 import { Platform, type TextStyle, type ViewStyle } from 'react-native';
+import { cardDepth } from '../shared/cardStyles';
 
 /** Profile area design tokens (Figma ZaAzanItzMQgvheIs2iBkR) */
 export const profileColors = {
@@ -39,16 +40,9 @@ export const profileShadow = Platform.select({
   default: {},
 }) as ViewStyle;
 
-export const profileCardShadow = Platform.select({
-  ios: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-  },
-  android: { elevation: 2 },
-  default: {},
-}) as ViewStyle;
+/** Card depth — the shared, restrained card elevation (see cardStyles.ts),
+ *  so profile cards match posts, events, club and Discovery cards. */
+export const profileCardShadow = cardDepth;
 
 export const profileSizes = {
   screenPaddingH: 16,

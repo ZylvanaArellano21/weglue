@@ -138,12 +138,8 @@ function PostCard({
 
   return (
     <article
-      className="overflow-hidden rounded-xl"
-      style={{
-        background: "#FEFFF8",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.07)",
-        border: "1px solid rgba(0,0,0,0.04)",
-      }}
+      className="overflow-hidden rounded-2xl shadow-card"
+      style={{ background: "#FEFFF8" }}
     >
       <div className="flex items-center gap-2.5 px-3.5 py-3">
         <ClickableUserIdentity userId={post.author.id} ariaLabel={`Open ${post.author.username}'s profile`} className="flex min-w-0 flex-1 items-center gap-2.5">

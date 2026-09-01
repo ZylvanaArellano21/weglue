@@ -6,6 +6,7 @@ import { Avatar } from '../shared/Avatar';
 import { AvatarStack } from '../shared/AvatarStack';
 import { Pill } from '../shared/Pill';
 import { EventAudienceBadge } from '../events/EventAudienceBadge';
+import { CARD_RADIUS, cardClip, cardDepth } from '../shared/cardStyles';
 import type { HomeFeedEvent } from '../../services/eventService';
 import type { DesiredRsvp } from '../../hooks/useEventRsvp';
 import { getResizedImageUrl } from '../../lib/imageResize';
@@ -49,20 +50,8 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
   };
 
   return (
-    <View
-      style={{
-        backgroundColor: '#FEFFF8',
-        borderRadius: 10,
-        marginHorizontal: 20,
-        marginBottom: 16,
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.07,
-        shadowRadius: 8,
-        elevation: 3,
-      }}
-    >
+    <View style={{ marginHorizontal: 20, marginBottom: 16, borderRadius: CARD_RADIUS, ...cardDepth }}>
+    <View style={{ backgroundColor: '#FEFFF8', ...cardClip }}>
       {/* Club Row */}
       <View
         style={{
@@ -287,6 +276,7 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
           </TouchableOpacity>
         </View>
       </View>
+    </View>
     </View>
   );
 });

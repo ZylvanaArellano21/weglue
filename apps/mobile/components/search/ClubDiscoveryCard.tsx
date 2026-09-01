@@ -57,6 +57,7 @@ export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
       : null;
 
   return (
+    <View style={styles.cardOuter}>
     <TouchableOpacity
       style={styles.card}
       onPress={() =>
@@ -119,18 +120,25 @@ export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
         )}
       </View>
     </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  // Depth lives on the outer view (no clipping); the inner card clips the
+  // image to the rounded corners. One view can't do both on Android.
+  cardOuter: {
     width: CLUB_CARD_WIDTH,
+    borderRadius: searchSizes.clubCardRadius,
+    ...searchCardShadow,
+  },
+  card: {
+    width: '100%',
     // White body so the raised card pops off the cream page (was `cream`,
     // which blended into the background and killed the 3D look).
     backgroundColor: searchColors.cardBg,
     borderRadius: searchSizes.clubCardRadius,
     overflow: 'hidden',
-    ...searchCardShadow,
   },
   imageWrap: {
     width: '100%',

@@ -19,6 +19,7 @@ import { useOfficerStore } from '../../../store/officerStore';
 import { Avatar } from '../../../components/shared/Avatar';
 import { AvatarStack } from '../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../components/shared/SkeletonLoader';
+import { cardDepth } from '../../../components/shared/cardStyles';
 import { useToast } from '../../../components/Toast';
 import { requestLeaveClub } from '../../../store/leaveClubStore';
 import { ReportButton } from '../../../components/shared/ReportButton';
@@ -36,13 +37,10 @@ const ALERT_RED = '#F02719';
 const MUTED = '#5F5D5D';
 const INK = '#000000';
 
-const CARD_SHADOW = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.25,
-  shadowRadius: 5,
-  elevation: 3,
-} as const;
+// The shared, restrained card depth (see components/shared/cardStyles.ts) so
+// club-profile cards match posts, events and Discovery cards. Views that spread
+// this must NOT also set `overflow: 'hidden'` — clip on an inner column instead.
+const CARD_SHADOW = cardDepth;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatDate(dateStr: string): string {
