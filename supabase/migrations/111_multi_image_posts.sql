@@ -227,10 +227,12 @@ REVOKE ALL ON FUNCTION public.post_feed_json(uuid) FROM PUBLIC, anon, authentica
 
 -- Replace the 110 bootstrap definition with the full ordered response now
 -- that post_images and post_feed_json exist.
+DROP FUNCTION IF EXISTS public.create_club_post(uuid, text[], text);
 CREATE OR REPLACE FUNCTION public.create_club_post(
   p_club_id uuid,
   p_image_paths text[],
-  p_caption text
+  p_caption text,
+  p_client_tag uuid DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -260,9 +262,22 @@ BEGIN
     RAISE EXCEPTION 'image_path_required' USING ERRCODE = '22023';
   END IF;
 
-  INSERT INTO public.posts (author_id, club_id, author_kind, post_type, image_url, caption)
-  VALUES (v_actor, p_club_id, 'club', 'picture', p_image_paths[1], NULLIF(btrim(p_caption), ''))
+  INSERT INTO public.posts (author_id, club_id, author_kind, post_type, image_url, caption, client_tag)
+  VALUES (v_actor, p_club_id, 'club', 'picture', p_image_paths[1], NULLIF(btrim(p_caption), ''), p_client_tag)
+  ON CONFLICT (author_id, client_tag) WHERE client_tag IS NOT NULL DO NOTHING
   RETURNING * INTO v_post;
+
+  -- A retry with the same compose tag returns the original post, including
+  -- its already-persisted ordered images, instead of creating a duplicate.
+  IF v_post.id IS NULL THEN
+    SELECT * INTO v_post
+      FROM public.posts
+     WHERE author_id = v_actor AND client_tag = p_client_tag;
+    IF v_post.id IS NULL THEN
+      RAISE EXCEPTION 'post_create_conflict_unresolved' USING ERRCODE = '23505';
+    END IF;
+    RETURN public.post_feed_json(v_post.id);
+  END IF;
 
   INSERT INTO public.post_images (post_id, storage_path, position)
   SELECT v_post.id, path, (ord - 1)::smallint
@@ -274,18 +289,20 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.create_club_post(uuid, text[], text)
+REVOKE ALL ON FUNCTION public.create_club_post(uuid, text[], text, uuid)
   FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.create_club_post(uuid, text[], text)
+GRANT EXECUTE ON FUNCTION public.create_club_post(uuid, text[], text, uuid)
   TO authenticated, service_role;
 
 -- One RPC supports both a student multi-image post and a club-authored post.
 -- A NULL p_club_id never changes the existing tagged-club semantics: callers
 -- add post_club_tags after this row is created and the author_kind stays user.
+DROP FUNCTION IF EXISTS public.create_post(text, text[], uuid);
 CREATE OR REPLACE FUNCTION public.create_post(
   p_caption text,
   p_image_paths text[],
-  p_club_id uuid DEFAULT NULL
+  p_club_id uuid DEFAULT NULL,
+  p_client_tag uuid DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -301,7 +318,7 @@ BEGIN
     RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '28000';
   END IF;
   IF p_club_id IS NOT NULL THEN
-    v_club_result := public.create_club_post(p_club_id, p_image_paths, p_caption);
+    v_club_result := public.create_club_post(p_club_id, p_image_paths, p_caption, p_client_tag);
     RETURN jsonb_build_object(
       'post_id', (v_club_result->>'id')::uuid,
       'post', v_club_result
@@ -314,9 +331,25 @@ BEGIN
     RAISE EXCEPTION 'image_path_required' USING ERRCODE = '22023';
   END IF;
 
-  INSERT INTO public.posts (author_id, club_id, author_kind, post_type, image_url, caption)
-  VALUES (v_actor, NULL, 'user', 'picture', p_image_paths[1], NULLIF(btrim(p_caption), ''))
+  INSERT INTO public.posts (author_id, club_id, author_kind, post_type, image_url, caption, client_tag)
+  VALUES (v_actor, NULL, 'user', 'picture', p_image_paths[1], NULLIF(btrim(p_caption), ''), p_client_tag)
+  ON CONFLICT (author_id, client_tag) WHERE client_tag IS NOT NULL DO NOTHING
   RETURNING * INTO v_post;
+
+  -- The same client tag is the same logical post. Reuse its complete feed
+  -- shape, including the ordered image rows written by the first attempt.
+  IF v_post.id IS NULL THEN
+    SELECT * INTO v_post
+      FROM public.posts
+     WHERE author_id = v_actor AND client_tag = p_client_tag;
+    IF v_post.id IS NULL THEN
+      RAISE EXCEPTION 'post_create_conflict_unresolved' USING ERRCODE = '23505';
+    END IF;
+    RETURN jsonb_build_object(
+      'post_id', v_post.id,
+      'post', public.post_feed_json(v_post.id)
+    );
+  END IF;
 
   INSERT INTO public.post_images (post_id, storage_path, position)
   SELECT v_post.id, path, (ord - 1)::smallint
@@ -328,8 +361,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.create_post(text, text[], uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.create_post(text, text[], uuid) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.create_post(text, text[], uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_post(text, text[], uuid, uuid) TO authenticated, service_role;
 
 COMMENT ON TABLE public.post_images IS
   'Ordered post media, positions 0..4. posts.image_url is always the position-0 URL for legacy clients.';

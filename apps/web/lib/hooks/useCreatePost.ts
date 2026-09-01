@@ -67,6 +67,7 @@ async function createPost(
       p_caption: caption ?? null,
       p_image_paths: publicUrls,
       p_club_id: authoredClubId ?? null,
+      p_client_tag: tag,
     });
     if (error) throw error;
     const result = data as any;
