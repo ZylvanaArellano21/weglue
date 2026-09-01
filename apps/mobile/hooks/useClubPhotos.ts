@@ -33,13 +33,15 @@ async function buildClubPhotoFeed(
   viewerUserId: string,
 ): Promise<ClubPhotoFeedItem[]> {
   const photos = await getClubPhotos(clubId);
+  // Both tagged-post AND club-authored photos are backed by a real post the
+  // viewer opens on — an officer upload is the only source with no post.
   const postIds = photos
-    .filter((p) => p.source === 'tagged_post' && p.post_id)
+    .filter((p) => (p.source === 'tagged_post' || p.source === 'club_authored') && p.post_id)
     .map((p) => p.post_id!) as string[];
 
   const postsById = await getPostsByIds(viewerUserId, postIds);
 
-  // A tagged photo whose post has vanished since the photo query ran is
+  // A post-backed photo whose post has vanished since the photo query ran is
   // dropped — the viewer never renders a broken/imageless post block.
   return photos
     .map((photo) => ({
