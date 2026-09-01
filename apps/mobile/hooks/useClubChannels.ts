@@ -9,7 +9,10 @@ import {
   renameChannel,
   getClubConversationId,
   getConversationHub,
+  setMessageReaction,
+  removeMessageReaction,
   type Attachment,
+  type ChannelAttachmentInput,
 } from '../services/channelService';
 import { timedQuery } from '../lib/timedQuery';
 
@@ -63,11 +66,26 @@ export function useSendMessage(
     mutationFn: ({
       content,
       attachment,
+      attachments,
     }: {
       content: string;
       attachment?: Attachment;
-    }) => sendMessage(conversationId, channelId, senderId, content, attachment),
+      /** Grouped photo send (1..5). */
+      attachments?: ChannelAttachmentInput[];
+    }) => sendMessage(conversationId, channelId, senderId, content, attachment, attachments),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['channelMessages', channelId] });
+    },
+  });
+}
+
+/** Set (emoji) / clear (null) the viewer's reaction on a channel message. */
+export function useReactToChannelMessage(channelId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string | null }) =>
+      emoji ? setMessageReaction(messageId, emoji) : removeMessageReaction(messageId),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['channelMessages', channelId] });
     },
   });

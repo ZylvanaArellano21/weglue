@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@weglue/shared';
-import { useClubChannels, useChannelMessages, useSendMessage, useClubConversationId } from '../../../../hooks/useClubChannels';
+import { useClubChannels, useChannelMessages, useSendMessage, useClubConversationId, useReactToChannelMessage, useDeleteMessage } from '../../../../hooks/useClubChannels';
 import { useClubProfile } from '../../../../hooks/useClubProfile';
 import { useRealtimeMessages } from '../../../../hooks/useRealtimeChannel';
 import { useOfficerStore } from '../../../../store/officerStore';
@@ -28,10 +28,18 @@ import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { Avatar } from '../../../../components/shared/Avatar';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../../components/Toast';
-import * as ImagePicker from 'expo-image-picker';
+import { MessageBubble } from '../../../../components/chat/MessageBubble';
+import { ChatInput } from '../../../../components/chat/ChatInput';
+import { MessageActionsSheet } from '../../../../components/chat/MessageActionsSheet';
+import { MediaViewer, type ViewerMediaItem } from '../../../../components/chat/MediaViewer';
+import { uploadChatAttachment } from '../../../../lib/chatAttachments';
+import { openProfile } from '../../../../lib/profileNavigation';
 import { sendPoll, getClubPoll, votePoll } from '../../../../services/clubPollService';
+import { reportMessage } from '../../../../services/messagingService';
 import type { MessageWithSender } from '../../../../services/channelService';
+import type { MessageReactionSummary } from '../../../../services/messagingService';
 import type { ClubPoll } from '../../../../services/clubPollService';
+import type { ThreadMessage } from '../../../../services/messagingService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.72;
@@ -44,15 +52,6 @@ export type ChannelChatParams = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function formatMessageTime(isoString: string): string {
-  const date = new Date(isoString);
-  const h = date.getHours();
-  const m = date.getMinutes();
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const hour = h % 12 || 12;
-  return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
-}
-
 function formatDateDivider(isoString: string): string {
   const date = new Date(isoString);
   return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase();
@@ -196,93 +195,6 @@ function PollBubble({
       <Text style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginTop: 4 }}>
         {totalVotes} vote{totalVotes !== 1 ? 's' : ''}{isPollEnded ? ' · Ended' : ''}
       </Text>
-    </View>
-  );
-}
-
-// ─── Message Bubble ───────────────────────────────────────────────────────────
-function MessageBubble({
-  message,
-  isOwn,
-  userId,
-  onLongPress,
-}: {
-  message: MessageWithSender;
-  isOwn: boolean;
-  userId: string;
-  onLongPress?: () => void;
-}) {
-  const isPoll = message.message_type === 'poll' && !!message.poll_id;
-
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-        gap: 8,
-        marginBottom: 12,
-        paddingHorizontal: 16,
-        justifyContent: isOwn ? 'flex-end' : 'flex-start',
-      }}
-    >
-      {!isOwn && (
-        <Avatar uri={message.sender.avatar_url} size={32} username={message.sender.username} />
-      )}
-      <View style={{ maxWidth: '78%' }}>
-        {!isOwn && (
-          <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_500Medium', marginBottom: 3 }}>
-            {message.sender.username}
-          </Text>
-        )}
-        <Pressable
-          onLongPress={onLongPress}
-          delayLongPress={400}
-        >
-          {isPoll ? (
-            <PollBubble pollId={message.poll_id!} userId={userId} isOwn={isOwn} />
-          ) : (
-            <View
-              style={{
-                backgroundColor: isOwn ? '#0FA6A6' : '#fff',
-                borderRadius: 16,
-                borderBottomRightRadius: isOwn ? 4 : 16,
-                borderBottomLeftRadius: isOwn ? 16 : 4,
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.06,
-                shadowRadius: 3,
-                elevation: 1,
-              }}
-            >
-              {message.content ? (
-                <Text
-                  style={{
-                    fontSize: 15,
-                    color: isOwn ? '#fff' : '#111827',
-                    fontFamily: 'Inter_400Regular',
-                    lineHeight: 22,
-                  }}
-                >
-                  {message.content}
-                </Text>
-              ) : null}
-            </View>
-          )}
-        </Pressable>
-        <Text
-          style={{
-            fontSize: 11,
-            color: '#9CA3AF',
-            fontFamily: 'Inter_400Regular',
-            marginTop: 3,
-            textAlign: isOwn ? 'right' : 'left',
-          }}
-        >
-          {formatMessageTime(message.created_at)}
-        </Text>
-      </View>
     </View>
   );
 }
@@ -593,69 +505,6 @@ function PollSheet({
   );
 }
 
-// ─── Attachment Bottom Sheet ──────────────────────────────────────────────────
-function AttachmentSheet({
-  visible,
-  onClose,
-  onPickImage,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onPickImage: (source: 'camera' | 'library') => void;
-}) {
-  const OPTIONS = [
-    { icon: 'camera-outline' as const, label: 'Camera', action: () => onPickImage('camera') },
-    { icon: 'image-outline' as const, label: 'Photo Library', action: () => onPickImage('library') },
-    { icon: 'document-outline' as const, label: 'Document', action: () => Alert.alert('Coming soon', 'Document sharing is coming soon!') },
-  ];
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable
-        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}
-        onPress={onClose}
-      >
-        <Pressable onPress={() => {}} style={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32 }}>
-          <View style={{ alignItems: 'center', paddingTop: 10, marginBottom: 4 }}>
-            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB' }} />
-          </View>
-          {OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt.label}
-              onPress={() => { opt.action(); onClose(); }}
-              activeOpacity={0.7}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 16,
-                paddingHorizontal: 24,
-                paddingVertical: 16,
-              }}
-            >
-              <View
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 22,
-                  backgroundColor: '#F3F4F6',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons name={opt.icon} size={22} color="#374151" />
-              </View>
-              <Text style={{ fontSize: 16, color: '#111827', fontFamily: 'Inter_500Medium' }}>
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-// ─── Channel Drawer ───────────────────────────────────────────────────────────
 function ChannelDrawer({
   visible,
   clubId,
@@ -803,10 +652,10 @@ export default function ChannelChatScreen() {
 
   const [activeChannelId, setActiveChannelId] = useState(channelId ?? '');
   const [activeChannelName, setActiveChannelName] = useState(paramChannelName ?? '');
-  const [text, setText] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pollSheetOpen, setPollSheetOpen] = useState(false);
-  const [attachSheetOpen, setAttachSheetOpen] = useState(false);
+  const [actionTarget, setActionTarget] = useState<MessageWithSender | null>(null);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const listRef = useRef<FlatList>(null);
 
   const isOfficer = !!clubId && officerClubIds.includes(clubId);
@@ -815,7 +664,9 @@ export default function ChannelChatScreen() {
   const { data: channels } = useClubChannels(clubId);
   const { data: conversationId } = useClubConversationId(clubId);
   const { data: messagesPage, isLoading } = useChannelMessages(activeChannelId);
-  const { mutate: send, isPending: sending } = useSendMessage(conversationId ?? '', activeChannelId!, userId);
+  const { mutateAsync: sendAsync, isPending: sending } = useSendMessage(conversationId ?? '', activeChannelId!, userId);
+  const { mutate: react } = useReactToChannelMessage(activeChannelId!);
+  const { mutate: removeMessage } = useDeleteMessage(activeChannelId!);
 
   // Resolve active channel info from channels list when it loads
   useEffect(() => {
@@ -835,17 +686,95 @@ export default function ChannelChatScreen() {
     onNewMessage: handleNewMessage,
   });
 
-  function handleSend() {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    setText('');
-    send(
-      { content: trimmed },
-      {
-        onError: () => show('Failed to send message.', 'error'),
-      },
-    );
-  }
+  const handleSendText = useCallback(
+    (content: string) => {
+      sendAsync({ content }).catch(() => show('Failed to send message.', 'error'));
+    },
+    [sendAsync, show],
+  );
+
+  const handleSendPhotos = useCallback(
+    (photos: { uri: string }[]) => {
+      const cid = conversationId;
+      if (!cid) return { ok: false as const, error: 'Chat not ready yet.' };
+      void (async () => {
+        try {
+          const uploaded = await uploadChatAttachment({
+            conversationId: cid,
+            attachments: photos.map((p) => ({
+              conversationId: cid,
+              localUri: p.uri,
+              mime: 'image/jpeg',
+              kind: 'image' as const,
+            })),
+          });
+          await sendAsync({
+            content: '',
+            attachments: uploaded.map((u) => ({
+              path: u.path,
+              kind: 'image' as const,
+              mime: u.mime,
+              bytes: u.size,
+              fileName: u.fileName ?? null,
+            })),
+          });
+        } catch {
+          show('Could not send the photos. Try again.', 'error');
+        }
+      })();
+      return { ok: true as const };
+    },
+    [conversationId, sendAsync, show],
+  );
+
+  const handleSendAttachment = useCallback(
+    (draft: { localUri: string; kind: 'image' | 'video' | 'file'; name?: string | null; size?: number | null; mime: string }) => {
+      const cid = conversationId;
+      if (!cid) return { ok: false as const, error: 'Chat not ready yet.' };
+      void (async () => {
+        try {
+          const uploaded = await uploadChatAttachment({
+            conversationId: cid,
+            localUri: draft.localUri,
+            mime: draft.mime,
+            kind: draft.kind,
+            fileName: draft.name,
+          });
+          await sendAsync({
+            content: '',
+            attachments: [{
+              path: uploaded.path,
+              kind: draft.kind,
+              mime: uploaded.mime,
+              bytes: uploaded.size,
+              fileName: uploaded.fileName ?? null,
+            }],
+          });
+        } catch {
+          show('Could not send the attachment. Try again.', 'error');
+        }
+      })();
+      return { ok: true as const };
+    },
+    [conversationId, sendAsync, show],
+  );
+
+  const handleReact = useCallback(
+    (messageId: string, emoji: string | null) => react({ messageId, emoji }),
+    [react],
+  );
+
+  const handleReport = useCallback(
+    async (messageId: string, reason: string, details?: string): Promise<boolean> => {
+      try {
+        await reportMessage(messageId, reason, details);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
 
   async function handleSendPoll(input: {
     question: string;
@@ -863,29 +792,6 @@ export default function ChannelChatScreen() {
     });
     queryClient.invalidateQueries({ queryKey: ['channelMessages', activeChannelId] });
     show('Poll sent 📊');
-  }
-
-  async function handlePickImage(source: 'camera' | 'library') {
-    let result: ImagePicker.ImagePickerResult;
-    if (source === 'camera') {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Camera access needed', 'Please enable camera access in Settings to take photos.');
-        return;
-      }
-      result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    } else {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Photos access needed', 'Please enable photo library access in Settings to share photos.');
-        return;
-      }
-      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    }
-    if (!result.canceled && result.assets[0]) {
-      // Image selected — attachment sending handled by Claude Code backend
-      show('Image selected — upload coming soon', 'info');
-    }
   }
 
   function handleAddChannel() {
@@ -911,6 +817,37 @@ export default function ChannelChatScreen() {
   }
 
   const messages = [...(messagesPage?.messages ?? [])].reverse();
+
+  // Media viewer — grouped messages contribute one entry per photo.
+  const mediaEntries = messages.flatMap((m) => {
+    const imgs = (m.attachments ?? []).filter((a) => a.kind === 'image');
+    const sources = imgs.length > 0
+      ? imgs.map((a) => ({ source: a.storage_path, position: a.position }))
+      : m.message_type === 'image' && m.attachment_url
+        ? [{ source: m.attachment_url, position: 0 }]
+        : [];
+    return sources.map((s) => ({
+      messageId: m.id,
+      attachmentIndex: s.position,
+      item: {
+        messageId: m.id,
+        source: s.source,
+        kind: 'image' as const,
+        senderName: m.sender.username,
+        sentAt: m.created_at,
+      } satisfies ViewerMediaItem,
+    }));
+  });
+  const mediaItems: ViewerMediaItem[] = mediaEntries.map((e) => e.item);
+  const openMedia = useCallback(
+    (messageId: string, index = 0) => {
+      let i = mediaEntries.findIndex((e) => e.messageId === messageId && e.attachmentIndex === index);
+      if (i === -1) i = mediaEntries.findIndex((e) => e.messageId === messageId);
+      if (i !== -1) setViewerIndex(i);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [messages],
+  );
 
   // Check if active channel is restricted (officers only)
   const activeChannel = channels?.find((c) => c.id === activeChannelId);
@@ -1016,27 +953,57 @@ export default function ChannelChatScreen() {
             keyExtractor={(item) => item.id}
             renderItem={({ item, index }) => {
               const prevMsg = index > 0 ? messages[index - 1] : null;
+              const nextMsg = index < messages.length - 1 ? messages[index + 1] : null;
               const showDivider = !prevMsg || !isSameDay(prevMsg.created_at, item.created_at);
+              const showSenderInfo = showDivider || !prevMsg || prevMsg.sender_id !== item.sender_id;
+              const isLastInGroup =
+                !nextMsg || nextMsg.sender_id !== item.sender_id || !isSameDay(item.created_at, nextMsg.created_at);
+              const isOwn = item.sender_id === userId;
+              const myReaction =
+                item.reactions?.find((r: MessageReactionSummary) => r.reactedByMe)?.emoji ?? null;
               return (
                 <>
                   {showDivider && <DateDivider label={formatDateDivider(item.created_at)} />}
-                  <MessageBubble
-                    message={item}
-                    isOwn={item.sender_id === userId}
-                    userId={userId}
-                    onLongPress={() => {
-                      if (item.sender_id === userId || isOfficer) {
-                        Alert.alert('Message', '', [
-                          { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Delete',
-                            style: 'destructive',
-                            onPress: () => show('Message deleted', 'success'),
-                          },
-                        ]);
-                      }
-                    }}
-                  />
+                  {item.message_type === 'poll' && item.poll_id ? (
+                    <MessageBubble
+                      id={item.id}
+                      senderId={item.sender_id ?? ''}
+                      senderUsername={item.sender.username}
+                      senderAvatarUrl={item.sender.avatar_url}
+                      content={null}
+                      attachmentUrl={null}
+                      messageType="poll"
+                      createdAt={item.created_at}
+                      isOwn={isOwn}
+                      isGroup
+                      showSenderInfo={showSenderInfo}
+                      isLastInGroup={isLastInGroup}
+                      onLongPress={() => setActionTarget(item)}
+                      onPressAvatar={() => item.sender_id && openProfile(router, item.sender_id, userId)}
+                      pollSlot={<PollBubble pollId={item.poll_id} userId={userId} isOwn={isOwn} />}
+                    />
+                  ) : (
+                    <MessageBubble
+                      id={item.id}
+                      senderId={item.sender_id ?? ''}
+                      senderUsername={item.sender.username}
+                      senderAvatarUrl={item.sender.avatar_url}
+                      content={item.content}
+                      attachmentUrl={item.attachment_url}
+                      attachments={item.attachments}
+                      reactions={item.reactions}
+                      onToggleReaction={(e) => handleReact(item.id, myReaction === e ? null : e)}
+                      messageType={item.message_type}
+                      createdAt={item.created_at}
+                      isOwn={isOwn}
+                      isGroup
+                      showSenderInfo={showSenderInfo}
+                      isLastInGroup={isLastInGroup}
+                      onLongPress={() => setActionTarget(item)}
+                      onPressMedia={openMedia}
+                      onPressAvatar={() => item.sender_id && openProfile(router, item.sender_id, userId)}
+                    />
+                  )}
                 </>
               );
             }}
@@ -1053,99 +1020,18 @@ export default function ChannelChatScreen() {
           />
         )}
 
-        {/* ── Input / Restricted Banner ─────────────────────── */}
-        {!canPost ? (
-          <View
-            style={{
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderTopWidth: 1,
-              borderTopColor: '#F3F4F6',
-              backgroundColor: '#FFFBEB',
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 13, color: '#92400E', fontFamily: 'Inter_500Medium' }}>
-              🔒 Only officers can post here
-            </Text>
-          </View>
-        ) : (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'flex-end',
-              paddingHorizontal: 12,
-              paddingVertical: 10,
-              borderTopWidth: 1,
-              borderTopColor: '#F3F4F6',
-              backgroundColor: '#FEFCF0',
-              gap: 8,
-            }}
-          >
-            {/* Attachment icon */}
-            <TouchableOpacity
-              onPress={() => setAttachSheetOpen(true)}
-              activeOpacity={0.7}
-              style={{ paddingBottom: 10 }}
-            >
-              <Ionicons name="attach" size={22} color="#6B7280" />
-            </TouchableOpacity>
-
-            {/* Text input */}
-            <TextInput
-              value={text}
-              onChangeText={setText}
-              placeholder="Message..."
-              placeholderTextColor="#9CA3AF"
-              multiline
-              maxLength={2000}
-              style={{
-                flex: 1,
-                minHeight: 40,
-                maxHeight: 120,
-                backgroundColor: '#fff',
-                borderRadius: 20,
-                paddingHorizontal: 16,
-                paddingVertical: 10,
-                fontSize: 15,
-                color: '#111827',
-                fontFamily: 'Inter_400Regular',
-                borderWidth: 1,
-                borderColor: '#E5E7EB',
-              }}
-            />
-
-            {/* Poll icon */}
-            <TouchableOpacity
-              onPress={() => setPollSheetOpen(true)}
-              activeOpacity={0.7}
-              style={{ paddingBottom: 10 }}
-            >
-              <Ionicons name="list-outline" size={22} color="#6B7280" />
-            </TouchableOpacity>
-
-            {/* Send button */}
-            <TouchableOpacity
-              onPress={handleSend}
-              disabled={!text.trim() || sending}
-              activeOpacity={0.8}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: text.trim() ? '#0FA6A6' : '#E5E7EB',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="send" size={18} color={text.trim() ? '#fff' : '#9CA3AF'} />
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* ── Composer (WhatsApp structure, We Glue identity) ─── */}
+        <ChatInput
+          mode="group"
+          canPost={canPost}
+          blockedReason="Only officers can post here"
+          disabled={sending}
+          onSendText={handleSendText}
+          onSendAttachment={handleSendAttachment}
+          onSendPhotos={handleSendPhotos}
+          onAttachmentError={(m) => show(m, 'error')}
+          onOpenPoll={() => setPollSheetOpen(true)}
+        />
       </KeyboardAvoidingView>
 
       {/* ── Drawer ────────────────────────────────────────────── */}
@@ -1167,11 +1053,27 @@ export default function ChannelChatScreen() {
         onSend={handleSendPoll}
       />
 
-      {/* ── Attachment Sheet ──────────────────────────────────── */}
-      <AttachmentSheet
-        visible={attachSheetOpen}
-        onClose={() => setAttachSheetOpen(false)}
-        onPickImage={handlePickImage}
+      {/* ── Long-press actions + reactions ────────────────────── */}
+      <MessageActionsSheet
+        message={actionTarget as unknown as ThreadMessage | null}
+        isOwn={actionTarget?.sender_id === userId}
+        canModerate={isOfficer}
+        onClose={() => setActionTarget(null)}
+        onUnsend={(id) => removeMessage(id)}
+        onDeleteForMe={(id) => removeMessage(id)}
+        onReport={handleReport}
+        onSaveMedia={(id) => openMedia(id)}
+        myReaction={actionTarget?.reactions?.find((r) => r.reactedByMe)?.emoji ?? null}
+        onReact={handleReact}
+      />
+
+      {/* ── Full-screen media viewer ──────────────────────────── */}
+      <MediaViewer
+        visible={viewerIndex !== null}
+        items={mediaItems}
+        initialIndex={viewerIndex ?? 0}
+        onClose={() => setViewerIndex(null)}
+        currentUserId={userId}
       />
     </SafeAreaView>
   );
