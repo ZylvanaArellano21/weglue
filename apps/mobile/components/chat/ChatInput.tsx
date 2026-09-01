@@ -31,9 +31,10 @@ interface Props {
 }
 
 /**
- * Chat composer — no microphone (store compliance).
- * Empty input → attachment controls (paperclip / poll / image shortcut).
- * Typed text → the attachment icons give way to a Send button.
+ * Chat composer — WhatsApp interaction structure, We Glue identity.
+ * `+` attachment button on the left, a rounded typing capsule in the middle,
+ * a teal send action on the right once there is text. No microphone. Camera
+ * lives only inside the `+` menu. Poll (group chats) also lives in the `+` menu.
  * Sending never blocks the input: the field clears immediately, the keyboard
  * stays open, and delivery/retry is the send pipeline's job.
  */
@@ -58,7 +59,7 @@ export function ChatInput({
   const bottomInset = useComposerBottomInset();
 
   const effectiveCanPost = canPost !== undefined ? canPost : isRestricted ? isOfficer : true;
-  const showPoll = mode === 'group' && !!onOpenPoll;
+  const isGroup = mode === 'group';
   const hasText = text.trim().length > 0;
 
   if (!effectiveCanPost) {
@@ -81,62 +82,51 @@ export function ChatInput({
   return (
     <>
       <View style={[styles.bar, { paddingBottom: 10 + bottomInset }]}>
-        <TextInput
-          ref={inputRef}
-          style={styles.input}
-          placeholder="Message..."
-          placeholderTextColor={chatColors.text}
-          value={text}
-          onChangeText={setText}
-          multiline
-          maxLength={2000}
-          editable={!disabled}
-        />
+        <TouchableOpacity
+          style={styles.plusBtn}
+          onPress={() => setAttachOpen(true)}
+          disabled={disabled}
+          accessibilityLabel="Add attachment"
+        >
+          <Ionicons name="add" size={24} color={chatColors.teal} />
+        </TouchableOpacity>
 
-        <View style={styles.actions}>
-          {hasText ? (
-            <TouchableOpacity
-              style={styles.sendBtn}
-              onPress={handleSend}
-              disabled={disabled}
-              accessibilityLabel="Send message"
-            >
-              <Ionicons name="arrow-up" size={18} color={chatColors.cream} />
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={styles.iconBtn}
-                onPress={() => setAttachOpen(true)}
-                disabled={disabled}
-                accessibilityLabel="Attach"
-              >
-                <Ionicons name="attach" size={20} color={chatColors.text} />
-              </TouchableOpacity>
-
-              {showPoll && (
-                <TouchableOpacity
-                  style={styles.iconBtn}
-                  onPress={onOpenPoll}
-                  disabled={disabled}
-                  accessibilityLabel="Create poll"
-                >
-                  <Ionicons name="list" size={20} color={chatColors.text} />
-                </TouchableOpacity>
-              )}
-            </>
-          )}
+        <View style={styles.capsule}>
+          <TextInput
+            ref={inputRef}
+            style={styles.input}
+            placeholder="Message"
+            placeholderTextColor={chatColors.textMuted}
+            value={text}
+            onChangeText={setText}
+            multiline
+            maxLength={2000}
+            editable={!disabled}
+          />
         </View>
+
+        {hasText ? (
+          <TouchableOpacity
+            style={styles.sendBtn}
+            onPress={handleSend}
+            disabled={disabled}
+            accessibilityLabel="Send message"
+          >
+            <Ionicons name="arrow-up" size={20} color={chatColors.white} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <AttachmentSheet
         visible={attachOpen}
+        isGroup={isGroup}
         onClose={() => setAttachOpen(false)}
         onPicked={(draft) => {
           setAttachOpen(false);
           const res = onSendAttachment(draft);
           if (!res.ok && res.error) onAttachmentError?.(res.error);
         }}
+        onPoll={onOpenPoll ? () => { setAttachOpen(false); onOpenPoll(); } : undefined}
         onError={(message) => onAttachmentError?.(message)}
       />
     </>
@@ -146,40 +136,46 @@ export function ChatInput({
 const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     minHeight: chatSizes.inputBarHeight,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
     backgroundColor: chatColors.bg,
-    borderTopLeftRadius: chatSizes.inputBarRadius,
-    borderTopRightRadius: chatSizes.inputBarRadius,
+  },
+  plusBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  capsule: {
+    flex: 1,
+    minHeight: 38,
+    justifyContent: 'center',
+    backgroundColor: chatColors.composerCapsule,
+    borderRadius: chatSizes.composerCapsuleRadius,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     ...chatShadow,
   },
   input: {
-    flex: 1,
     fontFamily: chatFonts.regular,
-    fontSize: 14,
-    letterSpacing: 0.38,
+    fontSize: 15,
     color: chatColors.text,
-    maxHeight: 100,
-    paddingVertical: 4,
-  },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    marginLeft: 8,
-  },
-  iconBtn: {
-    padding: 6,
+    maxHeight: 110,
+    padding: 0,
   },
   sendBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: chatColors.teal,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 2,
   },
   restrictedBanner: {
     flexDirection: 'row',

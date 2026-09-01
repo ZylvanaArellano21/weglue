@@ -14,7 +14,35 @@ export const chatColors = {
   tagBg: '#E8E8E5',
   tagText: '#878784',
   gridPlaceholder: '#D9D9D9',
+  // WhatsApp-structured bubbles, We Glue identity: incoming = white bubble,
+  // yours = light "Teal Mist"; dark readable text on both.
+  bubbleIncoming: '#FFFFFF',
+  bubbleOwn: '#D7EFEE',
+  bubbleText: '#1A1A1A',
+  bubbleTime: '#8A8A87',
+  composerCapsule: '#FFFFFF',
 } as const;
+
+/**
+ * Stable per-sender name colour for group bubbles — the existing participant
+ * identity system (avatar preset palette) hashed into a readable teal-leaning
+ * set. Never used for your own messages.
+ */
+const SENDER_NAME_PALETTE = [
+  '#0A8080',
+  '#B4690E',
+  '#7A3E9D',
+  '#1E6F50',
+  '#B23A48',
+  '#2A5DAA',
+  '#8A6D1F',
+  '#3E7C4A',
+];
+export function senderNameColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return SENDER_NAME_PALETTE[Math.abs(h) % SENDER_NAME_PALETTE.length]!;
+}
 
 export const chatFonts = {
   regular: 'Inter_400Regular',
@@ -71,23 +99,35 @@ export const chatTypography = {
     letterSpacing: 0.38,
     color: chatColors.text,
   },
+  // Dark readable text on both bubble types (WhatsApp readability model).
   bubbleSent: {
-    fontFamily: chatFonts.semiBold,
-    fontSize: 14,
-    letterSpacing: 0.38,
-    color: chatColors.cream,
+    fontFamily: chatFonts.regular,
+    fontSize: 15,
+    lineHeight: 20,
+    color: chatColors.bubbleText,
   },
   bubbleReceived: {
+    fontFamily: chatFonts.regular,
+    fontSize: 15,
+    lineHeight: 20,
+    color: chatColors.bubbleText,
+  },
+  senderName: {
     fontFamily: chatFonts.semiBold,
-    fontSize: 14,
-    letterSpacing: 0.38,
-    color: chatColors.teal,
+    fontSize: 12.5,
+    marginBottom: 2,
   },
   timestamp: {
     fontFamily: chatFonts.semiBold,
     fontSize: 10,
     letterSpacing: 0.38,
     color: chatColors.textMuted,
+  },
+  /** Quiet timestamp shown in the lower portion of a message bubble. */
+  bubbleTimestamp: {
+    fontFamily: chatFonts.regular,
+    fontSize: 10.5,
+    color: chatColors.bubbleTime,
   },
   dateDivider: {
     fontFamily: chatFonts.semiBold,
@@ -139,9 +179,12 @@ export const chatSizes = {
   avatarMessage: 25,
   avatarHeader: 38,
   avatarInfo: 55,
-  bubbleRadius: 40,
+  bubbleRadius: 18,
+  /** Tight corner where consecutive bubbles from the same sender meet. */
+  bubbleRadiusGrouped: 6,
   inputBarHeight: 61,
   inputBarRadius: 22,
+  composerCapsuleRadius: 22,
   unreadBadge: 20,
   channelDrawerWidthRatio: 0.31,
 };

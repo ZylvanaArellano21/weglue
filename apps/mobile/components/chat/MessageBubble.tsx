@@ -3,7 +3,14 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } fr
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../lib/chatAttachments';
-import { chatColors, chatFonts, chatShadow, chatSizes, chatTypography } from './chatTheme';
+import {
+  chatColors,
+  chatFonts,
+  chatShadow,
+  chatSizes,
+  chatTypography,
+  senderNameColor,
+} from './chatTheme';
 import { ATTACHMENT_UNAVAILABLE_TEXT } from '../../lib/blockPrompts';
 
 interface Props {
@@ -25,7 +32,12 @@ interface Props {
   messageType: string;
   createdAt: string;
   isOwn: boolean;
+  /** This is a group conversation — show the sender's name in incoming bubbles. */
+  isGroup?: boolean;
+  /** First message of a consecutive run from this sender (show avatar + name). */
   showSenderInfo: boolean;
+  /** Last message of a consecutive run from this sender (drives corner + spacing). */
+  isLastInGroup?: boolean;
   /** Pending pipeline state (optimistic messages only). */
   pendingState?: 'uploading' | 'sending' | 'failed';
   uploadProgress?: number;
@@ -121,6 +133,7 @@ function MediaPreview({
 
 export function MessageBubble({
   id,
+  senderId,
   senderUsername,
   senderAvatarUrl,
   content,
@@ -131,7 +144,9 @@ export function MessageBubble({
   messageType,
   createdAt,
   isOwn,
+  isGroup,
   showSenderInfo,
+  isLastInGroup = true,
   pendingState,
   uploadProgress,
   onRetry,
@@ -148,14 +163,29 @@ export function MessageBubble({
   const isMedia = messageType === 'image' || messageType === 'video';
   const isFile = messageType === 'file';
   const failed = pendingState === 'failed';
+  const isTextBubble = !isPoll && !isCard && !isMedia && !isFile && !(attachmentUnavailable && isFile);
 
   const longPress = () => onLongPress?.(id);
+  const showName = !!isGroup && !isOwn && showSenderInfo;
+
+  // Consecutive bubbles from the same sender tuck their inner corner in.
+  const R = chatSizes.bubbleRadius;
+  const r = chatSizes.bubbleRadiusGrouped;
+  const groupedCorners = isOwn
+    ? { borderTopRightRadius: showSenderInfo ? R : r, borderBottomRightRadius: isLastInGroup ? R : r }
+    : { borderTopLeftRadius: showSenderInfo ? R : r, borderBottomLeftRadius: isLastInGroup ? R : r };
 
   return (
-    <View style={[styles.row, isOwn && styles.rowOwn]}>
+    <View
+      style={[
+        styles.row,
+        isOwn && styles.rowOwn,
+        { marginTop: showSenderInfo ? 6 : 2, marginBottom: isLastInGroup ? 6 : 2 },
+      ]}
+    >
       {!isOwn && (
         <View style={styles.avatarCol}>
-          {showSenderInfo ? (
+          {isLastInGroup ? (
             <TouchableOpacity onPress={onPressAvatar} disabled={!onPressAvatar}>
               <Avatar uri={senderAvatarUrl} size={chatSizes.avatarMessage} username={senderUsername} />
             </TouchableOpacity>
@@ -233,14 +263,29 @@ export function MessageBubble({
         ) : (
           <TouchableOpacity
             onLongPress={longPress}
-            activeOpacity={0.88}
-            style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, failed && styles.bubbleFailed]}
+            activeOpacity={0.9}
+            style={[
+              styles.bubble,
+              isOwn ? styles.bubbleOwn : styles.bubbleOther,
+              groupedCorners,
+              failed && styles.bubbleFailed,
+            ]}
           >
+            {showName ? (
+              <Text style={[chatTypography.senderName, { color: senderNameColor(senderId || senderUsername) }]}>
+                {senderUsername}
+              </Text>
+            ) : null}
             {content ? (
               <Text style={isOwn ? chatTypography.bubbleSent : chatTypography.bubbleReceived}>{content}</Text>
             ) : null}
+            <Text style={styles.bubbleTime}>
+              {pendingState ? 'Sending…' : formatTime(createdAt)}
+            </Text>
           </TouchableOpacity>
         )}
+
+        {/* Reaction chips are rendered here once Codex-B lands ThreadMessage.reactions. */}
 
         {failed ? (
           <View style={styles.failedRow}>
@@ -253,11 +298,11 @@ export function MessageBubble({
               <Text style={styles.discardText}>Discard</Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <Text style={[chatTypography.timestamp, isOwn ? styles.timeOwn : styles.timeOther]}>
+        ) : !isTextBubble ? (
+          <Text style={[chatTypography.bubbleTimestamp, isOwn ? styles.timeOwn : styles.timeOther]}>
             {pendingState ? 'Sending…' : formatTime(createdAt)}
           </Text>
-        )}
+        ) : null}
       </View>
     </View>
   );
@@ -267,7 +312,6 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    marginVertical: 4,
     paddingHorizontal: 15,
   },
   rowOwn: {
@@ -275,7 +319,7 @@ const styles = StyleSheet.create({
   },
   avatarCol: {
     marginRight: 8,
-    marginBottom: 14,
+    marginBottom: 2,
   },
   col: {
     maxWidth: '78%',
@@ -286,20 +330,24 @@ const styles = StyleSheet.create({
   },
   bubble: {
     borderRadius: chatSizes.bubbleRadius,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    minHeight: 34,
-    justifyContent: 'center',
-    ...chatShadow,
+    paddingHorizontal: 12,
+    paddingTop: 7,
+    paddingBottom: 5,
+    minHeight: 32,
   },
   bubbleOwn: {
-    backgroundColor: chatColors.teal,
+    backgroundColor: chatColors.bubbleOwn,
   },
   bubbleOther: {
-    backgroundColor: chatColors.bg,
+    backgroundColor: chatColors.bubbleIncoming,
   },
   bubbleFailed: {
     opacity: 0.65,
+  },
+  bubbleTime: {
+    ...chatTypography.bubbleTimestamp,
+    alignSelf: 'flex-end',
+    marginTop: 1,
   },
   timeOwn: {
     marginTop: 3,
@@ -358,8 +406,6 @@ const styles = StyleSheet.create({
     width: 240,
     backgroundColor: chatColors.white,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: chatColors.border,
     paddingHorizontal: 12,
     paddingVertical: 10,
     ...chatShadow,

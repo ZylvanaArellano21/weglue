@@ -36,6 +36,7 @@ import {
 import { resolveAttachmentUrl, openAttachmentExternally } from '../../lib/chatAttachments';
 import { getConversationRestrictedSenders } from '../../services/messagingService';
 import { displayNameOrFallback } from '../../lib/displayName';
+import { openProfile } from '../../lib/profileNavigation';
 import { markConversationRead } from '../../services/chatService';
 import { setActiveThread, clearActiveThread } from '../../lib/notifications/activeThread';
 import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
@@ -348,8 +349,15 @@ export function ConversationThread({
 
     const m = item.msg;
     const prev = prevRow?.kind === 'server' ? prevRow.msg : undefined;
-    const showSenderInfo = !prev || prev.sender_id !== m.sender_id;
+    const nextRow = rows[index + 1];
+    const next = nextRow?.kind === 'server' ? nextRow.msg : undefined;
     const showDateDivider = !prev || !isSameChatDay(prev.created_at, m.created_at);
+    const showSenderInfo =
+      showDateDivider || !prev || prev.sender_id !== m.sender_id;
+    const isLastInGroup =
+      !next ||
+      next.sender_id !== m.sender_id ||
+      !isSameChatDay(m.created_at, next.created_at);
     const isOwn = m.sender_id === currentUserId;
 
     return (
@@ -369,12 +377,19 @@ export function ConversationThread({
             messageType={m.message_type}
             createdAt={m.created_at}
             isOwn={isOwn}
+            isGroup={allowPolls}
             showSenderInfo={showSenderInfo}
+            isLastInGroup={isLastInGroup}
             onLongPress={() => setActionTarget(m)}
             onPressMedia={openMedia}
             onPressFile={openFile}
             onPressAvatar={
-              onOpenProfile && m.sender_id ? () => onOpenProfile(m.sender_id!) : undefined
+              m.sender_id
+                ? () => {
+                    if (onOpenProfile) onOpenProfile(m.sender_id!);
+                    else openProfile(router, m.sender_id, currentUserId);
+                  }
+                : undefined
             }
             pollSlot={
               m.message_type === 'poll' && m.poll_id ? (
