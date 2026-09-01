@@ -27,6 +27,8 @@ export interface PendingMessage {
   content: string | null;
   messageType: 'text' | 'image' | 'video' | 'file';
   localUri?: string;
+  /** Grouped photo send (1..5). Rendered as a local grid until the server row lands. */
+  localUris?: string[];
   attachmentName?: string | null;
   attachmentSize?: number | null;
   attachmentMime?: string | null;
@@ -203,6 +205,41 @@ export function useSendPipeline(opts: {
           return;
         }
 
+        // Grouped photo send (1..5): batch-upload then one message with an
+        // attachments[] payload (RPC send_message_with_attachments).
+        if (msg.localUris && msg.localUris.length > 0) {
+          patch(msg.clientTag, { status: 'uploading', conversationId: convId });
+          const uploaded = await uploadChatAttachment({
+            conversationId: convId,
+            attachments: msg.localUris.map((uri) => ({
+              conversationId: convId,
+              localUri: uri,
+              mime: 'image/jpeg',
+              kind: 'image' as const,
+            })),
+            onProgress: (f) => patch(msg.clientTag, { progress: f }),
+          });
+          patch(msg.clientTag, { status: 'sending', progress: 1 });
+          await sendMessage({
+            conversationId: convId,
+            channelId: msg.channelId,
+            content: msg.content,
+            messageType: 'image',
+            clientTag: msg.clientTag,
+            attachments: uploaded.map((u) => ({
+              path: u.path,
+              kind: 'image' as const,
+              mime: u.mime,
+              bytes: u.size,
+              fileName: u.fileName ?? null,
+            })),
+          });
+          patch(msg.clientTag, { status: 'sending', progress: 1, conversationId: convId });
+          finish(convId);
+          opts.onFirstSend?.(convId);
+          return;
+        }
+
         let attachmentPath: string | null = null;
         let size = msg.attachmentSize ?? null;
         let mime = msg.attachmentMime ?? null;
@@ -310,12 +347,36 @@ export function useSendPipeline(opts: {
     [opts.conversationId, opts.channelId, sendOne],
   );
 
+  /** Grouped photo send (1..5): one pending bubble, one grouped media message. */
+  const sendPhotos = useCallback(
+    (photos: { uri: string }[], caption?: string) => {
+      if (photos.length < 1 || photos.length > 5) {
+        return { ok: false as const, error: 'Choose 1 to 5 photos.' };
+      }
+      const msg: PendingMessage = {
+        clientTag: newClientTag(),
+        conversationId: opts.conversationId ?? '',
+        channelId: opts.channelId,
+        content: caption?.trim() || null,
+        messageType: 'image',
+        localUris: photos.map((p) => p.uri),
+        status: 'uploading',
+        progress: 0,
+        createdAt: new Date().toISOString(),
+      };
+      setPending((prev) => [...prev, msg]);
+      void sendOne(msg);
+      return { ok: true as const };
+    },
+    [opts.conversationId, opts.channelId, sendOne],
+  );
+
   const retry = useCallback(
     (clientTag: string) => {
       setPending((prev) => {
         const msg = prev.find((p) => p.clientTag === clientTag);
         if (msg && msg.status === 'failed') {
-          const reset: PendingMessage = { ...msg, status: msg.localUri ? 'uploading' : 'sending', progress: 0, errorText: undefined };
+          const reset: PendingMessage = { ...msg, status: msg.localUri || msg.localUris ? 'uploading' : 'sending', progress: 0, errorText: undefined };
           void sendOne(reset);
           return prev.map((p) => (p.clientTag === clientTag ? reset : p));
         }
@@ -337,5 +398,5 @@ export function useSendPipeline(opts: {
     });
   }, []);
 
-  return { pending, sendText, sendAttachment, retry, discardFailed, reconcile };
+  return { pending, sendText, sendAttachment, sendPhotos, retry, discardFailed, reconcile };
 }

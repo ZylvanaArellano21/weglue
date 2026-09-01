@@ -8,7 +8,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AttachmentSheet } from './AttachmentSheet';
+import { PhotoTrayModal } from '../media/PhotoTray';
 import type { AttachmentDraft } from '../../hooks/useConversation';
+import { pickPhotos } from '../../lib/media/pickPhotos';
+import type { PickedMedia } from '../../lib/media/types';
 import { useComposerBottomInset } from '../../lib/useComposerBottomInset';
 import { chatColors, chatFonts, chatShadow, chatSizes } from './chatTheme';
 
@@ -26,6 +29,8 @@ interface Props {
   onSendText: (content: string) => void;
   /** Returns {ok:false,error} for rejected files (size cap etc.). */
   onSendAttachment: (draft: AttachmentDraft) => { ok: boolean; error?: string };
+  /** Grouped photo send (1..5). */
+  onSendPhotos: (photos: { uri: string }[], caption?: string) => { ok: boolean; error?: string };
   onAttachmentError?: (message: string) => void;
   onOpenPoll?: () => void;
 }
@@ -47,11 +52,14 @@ export function ChatInput({
   disabled = false,
   onSendText,
   onSendAttachment,
+  onSendPhotos,
   onAttachmentError,
   onOpenPoll,
 }: Props) {
   const [text, setText] = useState('');
   const [attachOpen, setAttachOpen] = useState(false);
+  const [trayPhotos, setTrayPhotos] = useState<PickedMedia[]>([]);
+  const [trayOpen, setTrayOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
   // Keeps the composer off the home indicator when the keyboard is closed and
   // off the keyboard when it is open. The bar is opaque, so this padding is
@@ -77,6 +85,21 @@ export function ChatInput({
     setText('');
     // Keyboard stays open: no blur, no await.
     onSendText(trimmed);
+  }
+
+  async function handlePickPhotos() {
+    setAttachOpen(false);
+    const picked = await pickPhotos(5);
+    if (picked.length === 0) return;
+    setTrayPhotos(picked);
+    setTrayOpen(true);
+  }
+
+  function handleSendPhotos() {
+    const res = onSendPhotos(trayPhotos.map((p) => ({ uri: p.uri })));
+    setTrayOpen(false);
+    setTrayPhotos([]);
+    if (!res.ok && res.error) onAttachmentError?.(res.error);
   }
 
   return (
@@ -126,8 +149,23 @@ export function ChatInput({
           const res = onSendAttachment(draft);
           if (!res.ok && res.error) onAttachmentError?.(res.error);
         }}
+        onPickPhotos={handlePickPhotos}
         onPoll={onOpenPoll ? () => { setAttachOpen(false); onOpenPoll(); } : undefined}
         onError={(message) => onAttachmentError?.(message)}
+      />
+
+      <PhotoTrayModal
+        visible={trayOpen}
+        photos={trayPhotos}
+        onChange={setTrayPhotos}
+        onCancel={() => { setTrayOpen(false); setTrayPhotos([]); }}
+        onConfirm={handleSendPhotos}
+        onAddMore={async () => {
+          const more = await pickPhotos(5 - trayPhotos.length);
+          if (more.length) setTrayPhotos((prev) => [...prev, ...more].slice(0, 5));
+        }}
+        confirmLabel="Send"
+        aspectRatio={1}
       />
     </>
   );

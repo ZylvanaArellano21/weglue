@@ -373,6 +373,21 @@ export function ConversationThread({
           attachmentUrl={p.localUri ?? null}
           attachmentName={p.attachmentName}
           attachmentSize={p.attachmentSize}
+          attachments={
+            p.localUris && p.localUris.length > 1
+              ? p.localUris.map((uri, i) => ({
+                  id: `pending-${i}`,
+                  storage_path: uri,
+                  kind: 'image' as const,
+                  position: i,
+                  mime: null,
+                  width: null,
+                  height: null,
+                  byte_size: null,
+                  file_name: null,
+                }))
+              : undefined
+          }
           messageType={p.messageType}
           createdAt={p.createdAt}
           isOwn
@@ -486,6 +501,7 @@ export function ConversationThread({
         blockedReason={blockedReason}
         onSendText={pipeline.sendText}
         onSendAttachment={(draft) => pipeline.sendAttachment(draft)}
+        onSendPhotos={(photos, caption) => pipeline.sendPhotos(photos, caption)}
         onAttachmentError={(message) => Alert.alert('Attachment', message)}
         onOpenPoll={allowPolls ? () => setPollOpen(true) : undefined}
       />

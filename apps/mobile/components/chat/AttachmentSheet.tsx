@@ -27,6 +27,8 @@ interface Props {
   isGroup?: boolean;
   onClose: () => void;
   onPicked: (draft: AttachmentDraft) => void;
+  /** Photos tile — opens the multi-select (1..5) + preview/reorder flow. */
+  onPickPhotos: () => void;
   /** Present only for group chats. */
   onPoll?: () => void;
   onError: (message: string) => void;
@@ -38,7 +40,7 @@ interface Props {
  * Single chats: Camera · Photos · Documents.
  * (No Link option — links are pasted straight into the message field.)
  */
-export function AttachmentSheet({ visible, isGroup = false, onClose, onPicked, onPoll, onError }: Props) {
+export function AttachmentSheet({ visible, isGroup = false, onClose, onPicked, onPickPhotos, onPoll, onError }: Props) {
   // ─── Why pickers are deferred until the sheet is really gone ───────────────
   //
   // This sheet is a react-native <Modal>, which on iOS is a real
@@ -130,47 +132,6 @@ export function AttachmentSheet({ visible, isGroup = false, onClose, onPicked, o
     });
   }
 
-  async function pickLibrary() {
-    // Android: official system photo picker (allows video) + a We Glue confirm
-    // preview for images. Video keeps its existing path (no preview) so video
-    // sending is unchanged.
-    if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'library', quality: 0.85, allowVideo: true });
-      if (!picked) return;
-      onPicked({
-        localUri: picked.uri,
-        kind: picked.kind,
-        name: picked.fileName,
-        size: picked.fileSize,
-        mime: picked.mimeType,
-      });
-      return;
-    }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(
-        'Photo library access needed',
-        'To share photos and videos, allow photo access for We Glue in Settings.',
-      );
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      quality: 0.85,
-      videoMaxDuration: 120,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const a = result.assets[0];
-    const isVideo = a.type === 'video';
-    onPicked({
-      localUri: a.uri,
-      kind: isVideo ? 'video' : 'image',
-      name: a.fileName ?? (isVideo ? 'video.mp4' : 'photo.jpg'),
-      size: a.fileSize ?? null,
-      mime: a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
-    });
-  }
-
   async function pickFile() {
     let result: DocumentPicker.DocumentPickerResult;
     try {
@@ -254,7 +215,7 @@ export function AttachmentSheet({ visible, isGroup = false, onClose, onPicked, o
 
             <TouchableOpacity
               style={styles.tile}
-              onPress={() => runAfterDismiss(pickLibrary)}
+              onPress={onPickPhotos}
               activeOpacity={0.7}
             >
               <View style={styles.iconWrap}>
