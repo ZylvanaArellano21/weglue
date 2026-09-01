@@ -439,6 +439,15 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               onError: () => show("Could not remove the photo. Try again.", "error"),
             })
           }
+          onDeleteClubPost={(postId) =>
+            photoManage.deleteClubPost.mutate(postId, {
+              onSuccess: () => {
+                show("Post deleted.");
+                setOverlay(null);
+              },
+              onError: () => show("Could not delete the post. Try again.", "error"),
+            })
+          }
         />
       )}
 

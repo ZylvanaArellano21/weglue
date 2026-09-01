@@ -61,11 +61,12 @@ export function ComposePostModal({
       show("Please select a photo.", "error");
       return;
     }
-    // The locked club is the single source of truth for the tag in that mode —
-    // it is never read from component state, so no UI path can drop it.
-    const clubIds = lockedClub ? [lockedClub.id] : selected;
+    // Locked = posting from a Club Profile: the post is authored BY the club
+    // (author_kind='club'), not tagged. Home posts stay student-authored + tag.
+    const authoredClubId = lockedClub?.id;
+    const clubIds = lockedClub ? [] : selected;
     create.mutate(
-      { file, caption: caption.trim() || undefined, clubIds },
+      { file, caption: caption.trim() || undefined, clubIds, authoredClubId },
       {
         onSuccess: () => {
           show("Post shared! 📸");
@@ -129,7 +130,7 @@ export function ComposePostModal({
             className="mb-5 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
             style={{ borderColor: "#0FA6A6", background: "rgba(15,166,166,0.08)" }}
           >
-            <span className="text-gray-500">Posting to</span>
+            <span className="text-gray-500">Posting as</span>
             <span className="font-semibold text-gray-900">{lockedClub.name}</span>
           </div>
         ) : (

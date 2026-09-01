@@ -33,6 +33,7 @@ export function ClubMediaOverlay({
   onOpenAuthor,
   onRemovePost,
   onDeleteUpload,
+  onDeleteClubPost,
 }: {
   photos: ClubPhoto[];
   initialIndex: number;
@@ -45,6 +46,7 @@ export function ClubMediaOverlay({
   /** Detach a tagged post from THIS club. Never deletes the post. */
   onRemovePost: (postId: string) => void;
   onDeleteUpload: (photoId: string) => void;
+  onDeleteClubPost: (postId: string) => void;
 }): JSX.Element {
   const [index, setIndex] = useState(initialIndex);
   const photo = photos[Math.min(index, photos.length - 1)];
@@ -85,7 +87,7 @@ export function ClubMediaOverlay({
 
         {/* Info panel */}
         <div className="flex max-h-[86vh] flex-1 flex-col bg-cream md:w-[42%]">
-          {photo.source === "tagged_post" && photo.post_id ? (
+          {(photo.source === "tagged_post" || photo.source === "club_authored") && photo.post_id ? (
             <PostPanel
               key={photo.post_id}
               postId={photo.post_id}
@@ -94,7 +96,11 @@ export function ClubMediaOverlay({
               clubName={clubName}
               isOfficer={isOfficer}
               onOpenAuthor={onOpenAuthor}
-              onRemovePost={() => onRemovePost(photo.post_id!)}
+              onRemovePost={() =>
+                photo.source === "club_authored"
+                  ? onDeleteClubPost(photo.post_id!)
+                  : onRemovePost(photo.post_id!)
+              }
               photo={photo}
             />
           ) : (

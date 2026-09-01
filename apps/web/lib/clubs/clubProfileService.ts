@@ -40,10 +40,12 @@ export interface ClubEvent {
 export interface ClubPhoto {
   id: string;
   url: string;
-  source: "officer_upload" | "tagged_post";
+  source: "officer_upload" | "tagged_post" | "club_authored";
   post_id: string | null;
   caption: string | null;
   created_at: string;
+  /** >1 when the backing post is a multi-photo carousel (drives the grid badge). */
+  image_count: number;
 }
 
 export interface ClubGluemate {
@@ -101,12 +103,44 @@ async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
   ]);
   if (legacyError) throw legacyError;
   if (authoredError) throw authoredError;
-  const photos = (legacyRows ?? []) as ClubPhoto[];
+  const photos = ((legacyRows ?? []) as any[]).map((row) => ({
+    id: row.id,
+    url: row.url,
+    source: row.source as ClubPhoto["source"],
+    post_id: row.post_id,
+    caption: row.caption,
+    created_at: row.created_at,
+    image_count: 1,
+  })) as ClubPhoto[];
   const existingPostIds = new Set(photos.map((photo) => photo.post_id).filter(Boolean));
   for (const post of (authoredRows ?? []) as any[]) {
     if (existingPostIds.has(post.id)) continue;
-    photos.push({ id: post.id, url: post.image_url, source: "tagged_post", post_id: post.id, caption: post.caption, created_at: post.created_at });
+    photos.push({
+      id: post.id,
+      url: post.image_url,
+      source: "club_authored",
+      post_id: post.id,
+      caption: post.caption,
+      created_at: post.created_at,
+      image_count: 1,
+    });
   }
+
+  const postIds = [...new Set(photos.map((p) => p.post_id).filter(Boolean) as string[])];
+  if (postIds.length > 0) {
+    const { data: imgRows } = await supabase
+      .from("post_images")
+      .select("post_id")
+      .in("post_id", postIds);
+    const counts = new Map<string, number>();
+    for (const r of (imgRows ?? []) as { post_id: string }[]) {
+      counts.set(r.post_id, (counts.get(r.post_id) ?? 0) + 1);
+    }
+    for (const photo of photos) {
+      if (photo.post_id && counts.has(photo.post_id)) photo.image_count = counts.get(photo.post_id)!;
+    }
+  }
+
   photos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   return photos;
 }

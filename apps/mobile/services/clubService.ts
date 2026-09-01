@@ -64,7 +64,7 @@ export async function getAllClubs(): Promise<UserClub[]> {
 export interface ClubPhoto {
   id: string;
   url: string;
-  source: 'officer_upload' | 'tagged_post';
+  source: 'officer_upload' | 'tagged_post' | 'club_authored';
   post_id: string | null;
   caption: string | null;
   created_at: string;
@@ -113,7 +113,9 @@ export async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
     photos.push({
       id: post.id,
       url: post.image_url,
-      source: 'tagged_post',
+      // A club-authored post's club identity IS its authorship — removal is a
+      // full delete, not a detach (see clubPhotoRemoval planner).
+      source: 'club_authored',
       post_id: post.id,
       caption: post.caption,
       created_at: post.created_at,

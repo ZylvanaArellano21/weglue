@@ -149,6 +149,8 @@ export function EditClubModal({
     };
     if (plan.kind === "remove_post_from_club") {
       photoManage.removePost.mutate(photo.post_id!, { onSuccess: done, onError: failed });
+    } else if (plan.kind === "delete_club_post") {
+      photoManage.deleteClubPost.mutate(photo.post_id!, { onSuccess: done, onError: failed });
     } else {
       photoManage.deleteUpload.mutate(photo.id, { onSuccess: done, onError: failed });
     }
