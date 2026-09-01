@@ -6,6 +6,8 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
+import { messageAttachmentPaths } from "../_shared/messageAttachmentPaths.ts";
+
 const SECRET_HEADER = "x-weglue-message-privacy-secret";
 const WORKER_LABEL = "deleted-message-reconciler";
 
@@ -57,6 +59,7 @@ async function ensureObjectAbsent(admin: SupabaseClient, bucket: string, path: s
 async function processCleanup(admin: SupabaseClient, job: CleanupJob): Promise<void> {
   let retainedPath: string | null = null;
   try {
+    const cleanupPaths = await messageAttachmentPaths(admin, job.original_object_path);
     if (job.requires_evidence_copy) {
       if (!job.report_evidence_id) throw new Error("evidence_mapping_missing");
       // Deterministic key prevents duplicate files when a worker crashes after
@@ -71,9 +74,11 @@ async function processCleanup(admin: SupabaseClient, job: CleanupJob): Promise<v
       if (copyError) throw copyError;
     }
 
-    const { error: removeError } = await admin.storage.from(job.original_bucket).remove([job.original_object_path]);
+    const { error: removeError } = await admin.storage.from(job.original_bucket).remove(cleanupPaths);
     if (removeError) throw removeError;
-    await ensureObjectAbsent(admin, job.original_bucket, job.original_object_path);
+    for (const path of cleanupPaths) {
+      await ensureObjectAbsent(admin, job.original_bucket, path);
+    }
 
     const { error: completeError } = await admin.rpc("complete_message_attachment_cleanup", {
       p_job_id: job.job_id,
