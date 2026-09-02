@@ -3,22 +3,13 @@ import { redirect } from "next/navigation";
 import Image from "next/image";
 import { createClient } from "../../../lib/supabase/server";
 import { ClubProfileClient } from "../../../components/clubs/ClubProfileClient";
+import {
+  storeTargetFromUserAgent,
+  storeUrlFor,
+} from "../../../lib/deviceRouting";
 
 export const metadata = { title: "Club" };
 export const dynamic = "force-dynamic";
-
-// Same store links / referrer shape as apps/web/app/invite/[token]/page.tsx.
-const APP_STORE_URL = "https://apps.apple.com/app/we-glue/id6786491344";
-function playStoreUrl(clubId: string): string {
-  const referrer = encodeURIComponent(`club_id=${clubId}`);
-  return `https://play.google.com/store/apps/details?id=com.weglue.app&referrer=${referrer}`;
-}
-
-function detectPlatform(userAgent: string): "ios" | "android" | "desktop" {
-  if (/iPhone|iPad|iPod/i.test(userAgent)) return "ios";
-  if (/Android/i.test(userAgent)) return "android";
-  return "desktop";
-}
 
 // Canonical Club Profile — the SAME implementation opened from every entry point
 // (Club-tab sidebar/catalog/search, Home cards, notifications). Middleware
@@ -26,9 +17,11 @@ function detectPlatform(userAgent: string): "ios" | "android" | "desktop" {
 // the viewer may see.
 //
 // The one exception middleware lets through unauthenticated is a scanned club
-// QR (`?source=qr`): the installed app intercepts the link before the browser,
-// so a browser that gets here has no app — send it to the store, exactly like
-// the invite page. A signed-in phone-web user still gets the profile normally.
+// QR (`?source=qr`). The installed app intercepts the universal / app link
+// before the browser, so a browser that reaches this page has no app — route
+// it to the store exactly like /download does. It renders NOTHING about the
+// club and reads NO club data, so it cannot leak protected content. A signed-in
+// phone-web user falls through to the normal profile below.
 export default async function ClubProfilePage({
   params,
   searchParams,
@@ -45,17 +38,22 @@ export default async function ClubProfilePage({
     return <ClubProfileClient clubId={params.clubId} userId={user.id} />;
   }
 
-  const fromQr = searchParams.source === "qr";
-  if (!fromQr) redirect("/login");
-
-  const platform = detectPlatform(headers().get("user-agent") ?? "");
-  if (platform === "desktop") {
+  // Unauthenticated. Middleware only allows this for `?source=qr`; any other
+  // unauthenticated /club/* request was already redirected to /login.
+  if (searchParams.source !== "qr") {
     redirect(`/login?next=${encodeURIComponent(`/club/${params.clubId}`)}`);
   }
 
-  const storeUrl = platform === "ios" ? APP_STORE_URL : playStoreUrl(params.clubId);
+  const store = storeTargetFromUserAgent(headers().get("user-agent"));
+  if (!store) {
+    // Desktop / crawler / modern-iPadOS Safari — no app to install; let them
+    // sign in and view the club on the web.
+    redirect(`/login?next=${encodeURIComponent(`/club/${params.clubId}`)}`);
+  }
+
+  const storeUrl = storeUrlFor(store);
   const storeLabel =
-    platform === "ios" ? "Continue to App Store" : "Continue to Google Play";
+    store === "app-store" ? "Continue to App Store" : "Continue to Google Play";
 
   return (
     <main className="min-h-screen bg-[#FEFCF0] flex flex-col items-center justify-center px-6 py-12 text-center">
@@ -70,7 +68,7 @@ export default async function ClubProfilePage({
         Get We Glue to open this club
       </h1>
       <p className="text-sm text-[#5F5D5D] mb-8">
-        {platform === "ios" ? "Opening the App Store…" : "Opening Google Play…"}
+        {store === "app-store" ? "Opening the App Store…" : "Opening Google Play…"}
       </p>
       <a
         href={storeUrl}

@@ -9,19 +9,17 @@ interface PageProps {
   searchParams: { token_hash?: string; type?: string; code?: string };
 }
 
-// A recovery link must be verified in the PERSON'S OWN BROWSER, on their real
-// visit — never here in the server component.
+// The one-time recovery token is NEVER consumed here, and never on page load.
 //
-// This page used to call verifyOtp() / exchangeCodeForSession() on every GET.
-// A recovery token is single-use, and a GET to this URL is not always a human:
-// corporate mail scanners, link-preview crawlers and the mail client's own
-// prefetch all fetch the link first. That server-side fetch burned the token,
-// so by the time the person tapped it GoTrue reported "expired" — a freshly
-// issued link that had never been used by anyone.
+// A GET to this URL is not always a human — corporate mail scanners,
+// link-preview crawlers, the mail client's own prefetch, and (with click
+// tracking) the email provider's redirector all fetch the link first. Any of
+// them consuming the token is why a freshly issued link showed "expired" on a
+// link nobody had used.
 //
-// The server now only forwards the params. ResetPasswordClient consumes them
-// exactly once, client-side, where a scanner's plain GET (which runs no JS)
-// can never reach them.
+// The server component only forwards the params. ResetPasswordClient shows the
+// "create a new password" form and consumes the token exactly once — only when
+// the person deliberately submits their new password.
 export default function ResetPasswordPage({
   searchParams,
 }: PageProps): JSX.Element {

@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
-import { getSupabaseBrowser } from "../../../lib/supabase-browser";
+import { createBrowserClient } from "@supabase/ssr";
 import {
   checkPassword,
   passwordError,
   sendPasswordResetEmail,
 } from "../../../lib/authFlow";
 
-type View = "loading" | "form" | "success" | "expired";
+type View = "form" | "success" | "expired";
 
 const LogoBlock = () => (
   <div className="flex flex-col items-center mb-8">
@@ -22,16 +21,33 @@ const LogoBlock = () => (
   </div>
 );
 
+function readFragmentTokens(): { access_token: string; refresh_token: string } | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  if (!hash) return null;
+  const p = new URLSearchParams(hash);
+  const access_token = p.get("access_token");
+  if (!access_token || p.get("type") !== "recovery") return null;
+  return { access_token, refresh_token: p.get("refresh_token") ?? "" };
+}
+
 export default function ResetPasswordClient({
   tokenHash,
-  linkType,
+  linkType: _linkType,
   code,
 }: {
   tokenHash: string | null;
   linkType: string | null;
   code: string | null;
 }): JSX.Element | null {
-  const [view, setView] = useState<View>("loading");
+  // Is there any recovery credential attached to this visit? If not, there is
+  // nothing to reset — go straight to the self-serve resend.
+  const fragment = useMemo(readFragmentTokens, []);
+  const hasCredential = Boolean(tokenHash || code || fragment);
+
+  const [view, setView] = useState<View>(hasCredential ? "form" : "expired");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -50,86 +66,21 @@ export default function ResetPasswordClient({
     | { state: "error"; message: string }
   >({ state: "idle" });
 
-  // The verification runs exactly once. React can mount an effect twice (Strict
-  // Mode in dev) and a recovery token is single-use, so a ref guards it.
-  const resolvedRef = useRef(false);
-
-  useEffect(() => {
-    if (resolvedRef.current) return;
-    resolvedRef.current = true;
-
-    const supabase = getSupabaseBrowser();
-    let cancelled = false;
-
-    const hasFragmentToken =
-      typeof window !== "undefined" &&
-      /(?:^|[#&])access_token=/.test(window.location.hash);
-    // Nothing to work with — the link was malformed, or a proxy stripped the
-    // token. Straight to the self-serve resend; never let a pre-existing
-    // unrelated session on this browser stand in for a recovery link.
-    const hasCredential = Boolean(tokenHash || code || hasFragmentToken);
-
-    async function resolve() {
-      if (!hasCredential) {
-        setView("expired");
-        return;
-      }
-
-      // 1. token_hash link (?token_hash=…&type=recovery). detectSessionInUrl
-      //    does NOT touch token_hash, so we verify it explicitly — and only
-      //    now, in the real browser, on the real visit.
-      if (tokenHash) {
-        const { error } = await supabase.auth.verifyOtp({
-          token_hash: tokenHash,
-          type: "recovery",
-        });
-        if (cancelled) return;
-        if (!error) {
-          setView("form");
-          return;
-        }
-        // A used/expired token, or one this same person already spent by
-        // opening the link twice — fall through to the session check: a live
-        // recovery session from the first open still means "let them in".
-      }
-
-      // 2. ?code= (PKCE) or #access_token=… (implicit, e.g. after GoTrue's
-      //    /verify redirect). The browser client consumes either automatically
-      //    via detectSessionInUrl; that is async on init, so poll briefly for
-      //    the resulting session.
-      for (let i = 0; i < 16 && !cancelled; i++) {
-        const { data } = await supabase.auth.getSession();
-        if (data.session) {
-          setView("form");
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 250));
-      }
-
-      if (cancelled) return;
-      const { data } = await supabase.auth.getSession();
-      setView(data.session ? "form" : "expired");
-    }
-
-    // PASSWORD_RECOVERY fires when detectSessionInUrl finishes consuming a
-    // code / fragment — the specific recovery signal, caught directly instead
-    // of only relying on the poll above.
-    const { data: sub } = supabase.auth.onAuthStateChange(
-      (event: AuthChangeEvent, session: Session | null) => {
-        if (cancelled || !session || !hasCredential) return;
-        if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
-          setView("form");
-        }
-      }
-    );
-
-    void resolve();
-
-    return () => {
-      cancelled = true;
-      sub.subscription.unsubscribe();
-    };
-  }, [tokenHash, linkType, code]);
+  // A dedicated Supabase client with detectSessionInUrl DISABLED. The one-time
+  // recovery token must never be consumed just because this page loaded — not
+  // by a mail scanner, a link preview, or the app's own auto-detection. Nothing
+  // here touches the token until the person deliberately submits a new password
+  // below. (The app-wide client in providers.tsx keeps its normal behaviour;
+  // this page does its own thing.)
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        { auth: { detectSessionInUrl: false } }
+      ),
+    []
+  );
 
   // Live countdown for the resend cooldown.
   useEffect(() => {
@@ -138,11 +89,11 @@ export default function ResetPasswordClient({
       setResend({ state: "idle" });
       return;
     }
-    const id = setTimeout(
+    const id = window.setTimeout(
       () => setResend({ state: "cooldown", seconds: resend.seconds - 1 }),
       1000
     );
-    return () => clearTimeout(id);
+    return () => window.clearTimeout(id);
   }, [resend]);
 
   async function handleResendReset(e: React.FormEvent) {
@@ -168,6 +119,34 @@ export default function ResetPasswordClient({
     setResend({ state: "error", message: result.message });
   }
 
+  /** Consume the recovery credential — ONLY called from handleSubmit, i.e. only
+   *  after the person has deliberately entered a new password and pressed the
+   *  button. Returns true once a valid recovery session is established. */
+  async function establishRecoverySession(): Promise<boolean> {
+    if (tokenHash) {
+      const { error } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: "recovery",
+      });
+      if (!error) return true;
+    } else if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (!error) return true;
+    } else if (fragment) {
+      const { error } = await supabase.auth.setSession({
+        access_token: fragment.access_token,
+        refresh_token: fragment.refresh_token,
+      });
+      if (!error) return true;
+    }
+    // The explicit consumption above failed (token used / expired, or a PKCE
+    // code opened in a browser without its verifier). If the app-wide client
+    // already turned a fragment/code into a session on this same browser, that
+    // still counts.
+    const { data } = await supabase.auth.getSession();
+    return !!data.session;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -187,13 +166,20 @@ export default function ResetPasswordClient({
     }
 
     setLoading(true);
-    const supabase = getSupabaseBrowser();
-    const { error } = await supabase.auth.updateUser({ password });
+    setErrorMessage(null);
 
+    const ok = await establishRecoverySession();
+    if (!ok) {
+      setLoading(false);
+      // The link is spent or expired. Send them to the self-serve resend
+      // rather than a raw Supabase string.
+      setView("expired");
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({ password });
     if (error) {
       setLoading(false);
-      // The recovery session can lapse while the form sits open. Send the
-      // person to the self-serve resend instead of a raw Supabase string.
       const msg = (error.message ?? "").toLowerCase();
       if (
         msg.includes("session") ||
@@ -204,35 +190,20 @@ export default function ResetPasswordClient({
         setView("expired");
         return;
       }
+      if (msg.includes("same") && msg.includes("password")) {
+        setErrorMessage("Your new password must be different from your old one.");
+        return;
+      }
       setErrorMessage(error.message || "Something went wrong. Please try again.");
       return;
     }
 
-    // The recovery session has done its one job — end it so the user signs in
-    // freshly with the new password and is never left half-authenticated on
+    // The recovery session has done its one job — end it so the person signs
+    // in freshly with the new password and is never left half-authenticated on
     // this recovery route.
     await supabase.auth.signOut();
     setLoading(false);
     setView("success");
-  }
-
-  if (view === "loading") {
-    return (
-      <main
-        className="min-h-screen flex items-center justify-center"
-        style={{ backgroundColor: "#FEFCF0" }}
-      >
-        <div className="flex flex-col items-center gap-4">
-          <div
-            className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
-            style={{ borderColor: "#0FA6A6", borderTopColor: "transparent" }}
-          />
-          <p className="text-sm" style={{ color: "#6B7280" }}>
-            Verifying your link...
-          </p>
-        </div>
-      </main>
-    );
   }
 
   if (view === "success") {

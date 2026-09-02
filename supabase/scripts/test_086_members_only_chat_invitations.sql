@@ -18,8 +18,9 @@
 --   F  — a verified account redeems a club_group token successfully.
 --   G  — the partial unique index makes "one active token per conversation"
 --        a DB-enforced invariant, not just an RPC-level convention.
---   H  — Reset (rotate) invalidates the old token immediately; the new
---        token redeems correctly.
+--   H  — rotate_chat_invitation is a disabled no-op: it returns the current
+--        active token unchanged, mutates nothing (no revoke, no new row),
+--        and returns NULL when no active token exists.
 --   I  — redeeming while already an officer is a clean no-op: no duplicate
 --        club_members row, role stays 'officer'.
 --   J  — the migration's own data-fix retroactively revokes a pre-existing
@@ -225,8 +226,9 @@ BEGIN;
 ROLLBACK;
 
 -- ============================================================
--- TEST H: Disabled reset returns the current active token unchanged and
--- performs no invitation mutation; with no active token it returns NULL.
+-- TEST H: rotate_chat_invitation is a disabled no-op: it returns the current
+-- active token unchanged, mutates nothing (no revoke, no new row), and returns
+-- NULL when no active token exists.
 -- ============================================================
 BEGIN;
   INSERT INTO public.profiles (id, username, university) VALUES

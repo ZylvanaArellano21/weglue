@@ -389,8 +389,9 @@ MANIFEST = [
               "an unverified account cannot redeem, no membership leaks (E); "
               "a verified account redeems and gets default_channel_id (F); "
               "the new partial unique index makes one-active-token-per-"
-              "conversation DB-enforced, not just RPC convention (G); reset "
-              "immediately invalidates the old link (H); redeeming as an "
+              "conversation DB-enforced, not just RPC convention (G); disabled "
+              "rotate_chat_invitation returns the current token unchanged and "
+              "mutates nothing (H); redeeming as an "
               "existing officer is a clean no-op, role preserved (I); the "
               "migration's own data-fix retroactively revokes a pre-086 "
               "custom-group token (J); an invalid token leaks no data (K)."),

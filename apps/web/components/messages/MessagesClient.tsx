@@ -1863,7 +1863,7 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
         await queryClient.invalidateQueries({ queryKey: messageKeys.channels(conversationId) });
       } catch { onError("Couldn’t update posting permissions."); }
     }} />}
-    {shareOpen && <ShareInvitePanel conversationId={conversationId} conversationName={details.name} onClose={() => setShareOpen(false)} />}
+    {shareOpen && <ShareInvitePanel conversationId={conversationId} conversationName={details.name} isMembersChat={details.type === "club_group"} onClose={() => setShareOpen(false)} />}
     {addOpen && <AddPeoplePanel
       existingIds={new Set(details.participants.map((person) => person.user_id))}
       onClose={() => setAddOpen(false)}
@@ -2065,11 +2065,11 @@ function ShareInviteQr({ value, size }: { value: string; size: number }): JSX.El
   </svg>;
 }
 
-// "<Club> · Members" is the stored title for a club Members chat; the phone QR
-// screen shows the student-facing two-line form instead.
+// A club Members chat is stored with the title "<Club> · Members". Only for
+// that conversation type is it split into the student-facing two lines.
 const MEMBERS_SUFFIX = / · Members$/;
 
-function ShareInvitePanel({ conversationId, conversationName, onClose }: { conversationId: string; conversationName: string; onClose: () => void }): JSX.Element {
+function ShareInvitePanel({ conversationId, conversationName, isMembersChat, onClose }: { conversationId: string; conversationName: string; isMembersChat: boolean; onClose: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   const isPhone = useIsPhoneViewport();
   const [token, setToken] = useState<string | null>(null);
@@ -2080,8 +2080,10 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
   const [error, setError] = useState<string | null>(null);
   useEscapeAndOutside(ref, onClose);
 
-  const isMembersChat = MEMBERS_SUFFIX.test(conversationName);
-  const qrTitle = isMembersChat ? conversationName.replace(MEMBERS_SUFFIX, "") : conversationName;
+  const qrTitle =
+    isMembersChat && MEMBERS_SUFFIX.test(conversationName)
+      ? conversationName.replace(MEMBERS_SUFFIX, "")
+      : conversationName;
   const qrSubtitle = isMembersChat ? "Members Chat" : undefined;
 
   useEffect(() => {

@@ -28,14 +28,18 @@ import { QrShareScreen } from '../share/QrShareScreen';
 // (QrShareScreen). On iPad it keeps the existing inline QR — that larger-device
 // experience is intentionally left unchanged.
 
-// The stored title for a club Members chat is "<Club> · Members". The QR
-// screen shows the student-facing two-line form instead.
+// A club Members chat is stored with the title "<Club> · Members". Only for
+// that conversation type do we split it into the student-facing two lines
+// ("<Club>" / "Members Chat"); a custom group keeps its own name as-is.
 const MEMBERS_SUFFIX = / · Members$/;
 
 interface Props {
   visible: boolean;
   conversationId: string;
   chatTitle: string;
+  /** True when this is a club `club_group` conversation (the caller knows the
+   *  conversation type; we do not guess it from the title). */
+  isMembersChat: boolean;
   onClose: () => void;
 }
 
@@ -69,7 +73,13 @@ function QrCode({ value, size }: { value: string; size: number }) {
   );
 }
 
-export function ShareInviteSheet({ visible, conversationId, chatTitle, onClose }: Props) {
+export function ShareInviteSheet({
+  visible,
+  conversationId,
+  chatTitle,
+  isMembersChat,
+  onClose,
+}: Props) {
   const { width } = useWindowDimensions();
   const isPhone = width < 600;
 
@@ -79,8 +89,10 @@ export function ShareInviteSheet({ visible, conversationId, chatTitle, onClose }
   const [showQrScreen, setShowQrScreen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const isMembersChat = MEMBERS_SUFFIX.test(chatTitle);
-  const qrTitle = isMembersChat ? chatTitle.replace(MEMBERS_SUFFIX, '') : chatTitle;
+  const qrTitle =
+    isMembersChat && MEMBERS_SUFFIX.test(chatTitle)
+      ? chatTitle.replace(MEMBERS_SUFFIX, '')
+      : chatTitle;
   const qrSubtitle = isMembersChat ? 'Members Chat' : undefined;
 
   useEffect(() => {
