@@ -95,6 +95,21 @@
         },
         {
           "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "weglue.app",
+              "pathPrefix": "/club"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
           "data": [
             {
               "scheme": "weglue",
@@ -185,8 +200,8 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "We Glue needs access to your photo library to save photos and videos from your chats.",
-          "savePhotosPermission": "We Glue needs permission to save photos and videos from your chats.",
+          "photosPermission": "We Glue needs access to your photo library to save photos, videos and QR codes from We Glue.",
+          "savePhotosPermission": "We Glue needs permission to save photos, videos and QR codes from We Glue.",
           "isAccessMediaLocationEnabled": false
         }
       ],

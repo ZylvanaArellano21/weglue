@@ -961,7 +961,7 @@ export default function ChatInfo() {
 
       <MediaViewer visible={viewerIndex !== null} items={viewerItems} initialIndex={viewerIndex ?? 0} onClose={() => setViewerIndex(null)} currentUserId={userId} />
 
-      <ShareInviteSheet visible={shareOpen} conversationId={chatId} chatTitle={displayName} onClose={() => setShareOpen(false)} />
+      <ShareInviteSheet visible={shareOpen} conversationId={chatId} chatTitle={displayName} isMembersChat={isMembersChat} onClose={() => setShareOpen(false)} />
 
       {/* ─── Top overflow menu ─── */}
       <Modal visible={overflowOpen} transparent animationType="fade" onRequestClose={() => setOverflowOpen(false)}>

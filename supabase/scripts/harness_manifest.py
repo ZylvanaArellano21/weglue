@@ -100,7 +100,8 @@ CHAINS = {
               "mg:083_notification_coverage_audit_fixes.sql",
               "mg:084_notification_exactly_one_fixes.sql"],
     "wg085": [FIXTURE_085, "mg:085_student_joined_named_copy.sql"],
-    "wg086": [FIXTURE_086, "mg:086_members_only_chat_invitations.sql"],
+    "wg086": [FIXTURE_086, "mg:086_members_only_chat_invitations.sql",
+              "mg:115_disable_rotate_chat_invitation.sql"],
     "wg087": [FIXTURE_087, "mg:087_club_recommendation_launch_campus_null_fix.sql"],
 }
 
@@ -388,8 +389,9 @@ MANIFEST = [
               "an unverified account cannot redeem, no membership leaks (E); "
               "a verified account redeems and gets default_channel_id (F); "
               "the new partial unique index makes one-active-token-per-"
-              "conversation DB-enforced, not just RPC convention (G); reset "
-              "immediately invalidates the old link (H); redeeming as an "
+              "conversation DB-enforced, not just RPC convention (G); disabled "
+              "rotate_chat_invitation returns the current token unchanged and "
+              "mutates nothing (H); redeeming as an "
               "existing officer is a clean no-op, role preserved (I); the "
               "migration's own data-fix retroactively revokes a pre-086 "
               "custom-group token (J); an invalid token leaks no data (K)."),

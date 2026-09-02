@@ -2,7 +2,7 @@
 
 import { Avatar } from "../shared/Avatar";
 import { AvatarStack } from "../shared/AvatarStack";
-import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon, CalendarIcon, LocationIcon, EllipsisIcon } from "../shared/icons";
+import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon, CalendarIcon, LocationIcon, EllipsisIcon, ShareIcon } from "../shared/icons";
 import type { ClubProfileData } from "../../lib/clubs/clubProfileService";
 import { parseMeetingSchedule, formatEventTime, formatEventLocation } from "../../lib/datetime";
 
@@ -32,6 +32,7 @@ export function ClubProfileHeader({
   onOpenPeople,
   onBack,
   onReport,
+  onShare,
 }: {
   club: ClubProfileData;
   activeTab: ClubTab;
@@ -51,6 +52,10 @@ export function ClubProfileHeader({
    * ReportButton for the club itself. Desktop has no equivalent affordance
    * on this screen today, so this stays additive to phone only. */
   onReport: () => void;
+  /** Phone-only Share button, beside the "…" — opens the club QR share
+   * screen. Every valid club is shareable regardless of membership. The
+   * larger-device club profile is intentionally left unchanged. */
+  onShare: () => void;
 }): JSX.Element {
   return (
     // Negative margins cancel the parent <main>'s own px-4 sm:px-6 exactly,
@@ -101,6 +106,15 @@ export function ClubProfileHeader({
           className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-gray-800 shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:hidden"
         >
           <EllipsisIcon size={20} />
+        </button>
+        {/* Share — beside the "…", never inside it. Phone-only. */}
+        <button
+          type="button"
+          onClick={onShare}
+          aria-label={`Share ${club.name}`}
+          className="absolute bottom-3 right-14 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-gray-800 shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:hidden"
+        >
+          <ShareIcon size={18} />
         </button>
       </div>
 

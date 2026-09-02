@@ -407,8 +407,26 @@ export function Providers({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
+// The "Get the full We Glue experience" / "Open We Glue" prompt must never
+// appear on an authentication-link screen — password reset, email
+// verification, the /auth/confirm landing, or an expired/invalid link. Those
+// pages are opened straight from an email (often on a device that isn't the
+// one signed in) and the only thing that belongs there is the auth action
+// itself. The prompt stays on every normal in-app surface.
+function isAuthLinkRoute(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return (
+    pathname.startsWith("/auth/") ||
+    pathname === "/auth" ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password") ||
+    pathname.startsWith("/onboarding/verify-email")
+  );
+}
+
 function SessionRealtimeHub(): JSX.Element {
   const userId = useSessionRealtimeHub();
+  const pathname = usePathname();
   // Correction 3: the foreground banner overlay, layered above every page —
   // renders nothing until a notification actually arrives for this user.
   // Suspense is required here: ForegroundNotificationBanner reads
@@ -419,7 +437,7 @@ function SessionRealtimeHub(): JSX.Element {
       <Suspense fallback={null}>
         <ForegroundNotificationBanner userId={userId} />
       </Suspense>
-      <GetTheAppPrompt userId={userId} />
+      {!isAuthLinkRoute(pathname) && <GetTheAppPrompt userId={userId} />}
     </>
   );
 }

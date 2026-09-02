@@ -4,7 +4,7 @@
     "details": [
       {
         "appID": "VUHUD8DTLB.com.weglue.app",
-        "paths": ["/auth/confirm", "/auth/confirm/*", "/event/*", "/post/*", "/invite/*"]
+        "paths": ["/auth/confirm", "/auth/confirm/*", "/event/*", "/post/*", "/invite/*", "/club/*"]
       }
     ]
   }

@@ -8,11 +8,12 @@ import { PageOverlays } from "../shared/PageOverlays";
 import { Avatar } from "../shared/Avatar";
 import { ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { CountBadge } from "../shared/CountBadge";
+import { QrShareScreen, useIsPhoneViewport } from "../shared/QrShareScreen";
 import {
   ArchiveIcon, BellOffIcon, BlockIcon, CalendarIcon, CameraIcon, ChatBubbleOutlineIcon, ChatBubblesIcon,
   CheckboxIcon, CloseCircleIcon, CloseIcon, EllipsisIcon, ExitIcon, FlagIcon, ImageIcon, ListIcon,
   LockIcon, MegaphoneIcon, PaperclipIcon, PencilIcon, PeopleIcon, PersonAddIcon, PersonRemoveIcon,
-  PlusIcon, QrCodeIcon, RefreshIcon, SearchIcon, ShareIcon, TagIcon, TrashIcon,
+  PlusIcon, QrCodeIcon, SearchIcon, ShareIcon, TagIcon, TrashIcon,
 } from "../shared/icons";
 import qrcodegen from "qrcode-generator";
 import type { ReportEntityType } from "../../lib/hooks/useReport";
@@ -64,7 +65,7 @@ import {
   type Person,
   type PostingPermission,
   type ThreadMessage, sharedPostIsAvailable, sharedEventIsAvailable, conversationRestrictedSenders,
-  getInviteToken, rotateInviteToken, INVITE_BASE_URL } from "../../lib/messages/service";
+  getInviteToken, INVITE_BASE_URL } from "../../lib/messages/service";
 import {
   messageKeys,
   useConversationFlags,
@@ -1862,7 +1863,7 @@ function InfoPanel({ userId, conversationId, channelId, channel, details, isOffi
         await queryClient.invalidateQueries({ queryKey: messageKeys.channels(conversationId) });
       } catch { onError("Couldn’t update posting permissions."); }
     }} />}
-    {shareOpen && <ShareInvitePanel conversationId={conversationId} conversationName={details.name} onClose={() => setShareOpen(false)} />}
+    {shareOpen && <ShareInvitePanel conversationId={conversationId} conversationName={details.name} isMembersChat={details.type === "club_group"} onClose={() => setShareOpen(false)} />}
     {addOpen && <AddPeoplePanel
       existingIds={new Set(details.participants.map((person) => person.user_id))}
       onClose={() => setAddOpen(false)}
@@ -2039,10 +2040,10 @@ function PermissionsSheet({ channel, participants, isOfficersChat, onClose, onSa
   </div>;
 }
 
-/** Copy link / Show QR code / Share… / Reset link — the same four rows and
- *  the same active invitation as mobile's ShareInviteSheet, because both call
- *  the identical get_or_create_chat_invitation / rotate_chat_invitation RPCs
- *  and build the link from the same INVITE_BASE_URL + token. */
+/** Copy link / Show QR code / Share… — the same rows and the same active
+ *  invitation as mobile's ShareInviteSheet, because both call the identical
+ *  get_or_create_chat_invitation RPC and build the link from the same
+ *  INVITE_BASE_URL + token. (The "Reset link" row was removed.) */
 function ShareInviteQr({ value, size }: { value: string; size: number }): JSX.Element {
   const rows = useMemo(() => {
     const qr = qrcodegen(0, "M");
@@ -2064,15 +2065,26 @@ function ShareInviteQr({ value, size }: { value: string; size: number }): JSX.El
   </svg>;
 }
 
-function ShareInvitePanel({ conversationId, conversationName, onClose }: { conversationId: string; conversationName: string; onClose: () => void }): JSX.Element {
+// A club Members chat is stored with the title "<Club> · Members". Only for
+// that conversation type is it split into the student-facing two lines.
+const MEMBERS_SUFFIX = / · Members$/;
+
+function ShareInvitePanel({ conversationId, conversationName, isMembersChat, onClose }: { conversationId: string; conversationName: string; isMembersChat: boolean; onClose: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
+  const isPhone = useIsPhoneViewport();
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showQr, setShowQr] = useState(false);
+  const [showQrScreen, setShowQrScreen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEscapeAndOutside(ref, onClose);
+
+  const qrTitle =
+    isMembersChat && MEMBERS_SUFFIX.test(conversationName)
+      ? conversationName.replace(MEMBERS_SUFFIX, "")
+      : conversationName;
+  const qrSubtitle = isMembersChat ? "Members Chat" : undefined;
 
   useEffect(() => {
     let alive = true;
@@ -2101,24 +2113,11 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
       // dismissed — no-op, matches mobile's Share.share() catch
     }
   }
-  async function resetLink() {
-    setResetting(true);
-    setError(null);
-    try {
-      const next = await rotateInviteToken(conversationId);
-      setToken(next);
-      setShowQr(false);
-    } catch {
-      setError("Could not reset the link. Please try again.");
-    } finally {
-      setResetting(false);
-    }
-  }
-
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  return <>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
     <div ref={ref} role="dialog" aria-modal="true" aria-label={`Invite to ${conversationName}`} className="w-full max-w-md rounded-2xl bg-cream p-5 shadow-2xl">
       <h3 className="text-lg font-bold text-gray-950">Invite to {conversationName}</h3>
-      <p className="mt-1 text-sm text-gray-500">Anyone from your university with this link can join. The link doesn&apos;t expire — you can reset it anytime.</p>
+      <p className="mt-1 text-sm text-gray-500">Anyone from your university with this link can join. The link doesn&apos;t expire.</p>
       {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
       {loading || !link ? (
         <div className="my-8 flex justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-teal border-t-transparent" /></div>
@@ -2130,14 +2129,27 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
       ) : (
         <div className="mt-4">
           <button type="button" onClick={() => void copyLink()} className="flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><ShareIcon size={20} />{copied ? "Copied!" : "Copy link"}</button>
-          <button type="button" onClick={() => setShowQr(true)} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><QrCodeIcon size={20} />Show QR code</button>
+          <button type="button" onClick={() => (isPhone ? setShowQrScreen(true) : setShowQr(true))} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><QrCodeIcon size={20} />Show QR code</button>
           {canNativeShare && <button type="button" onClick={() => void nativeShare()} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><ShareIcon size={20} />Share…</button>}
-          <button type="button" disabled={resetting} onClick={() => void resetLink()} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"><RefreshIcon size={20} />{resetting ? "Resetting…" : "Reset link"}</button>
         </div>
       )}
       <div className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-full px-4 py-2 text-sm font-semibold text-gray-600">Close</button></div>
     </div>
-  </div>;
+    </div>
+
+    {isPhone && link && (
+      <QrShareScreen
+        open={showQrScreen}
+        onClose={() => setShowQrScreen(false)}
+        title={qrTitle}
+        subtitle={qrSubtitle}
+        url={link}
+        shareLabel="Share group chat"
+        shareMessage={`Join ${qrTitle}${qrSubtitle ? ` ${qrSubtitle}` : ""} on We Glue:`}
+        fileName={`weglue-${qrTitle.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-chat-qr`}
+      />
+    )}
+  </>;
 }
 
 function ConfirmSheet({ title, message, confirmLabel, onConfirm, onCancel }: { title: string; message: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void }): JSX.Element {

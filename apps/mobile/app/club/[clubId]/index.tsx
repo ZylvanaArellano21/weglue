@@ -25,6 +25,8 @@ import { openProfile } from '../../../lib/profileNavigation';
 import { useToast } from '../../../components/Toast';
 import { requestLeaveClub } from '../../../store/leaveClubStore';
 import { ReportButton } from '../../../components/shared/ReportButton';
+import { QrShareScreen } from '../../../components/share/QrShareScreen';
+import { getClubShareUrl } from '../../../lib/share';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../lib/chatNavigation';
 import { todayInAppTz } from '../../../lib/timezone';
@@ -33,6 +35,9 @@ import { parseMeetingSchedule, groupScheduleForDisplay } from '../../../lib/meet
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
+// The club-profile QR share screen is a phone-only surface (the app locks to
+// portrait, so width alone is a safe classifier). iPad keeps the profile as-is.
+const IS_PHONE = SCREEN_WIDTH < 600;
 const CREAM = '#FEFCF0';
 const TEAL = '#0FA6A6';
 const ALERT_RED = '#F02719';
@@ -496,7 +501,7 @@ function OfficerRow({ officer, currentUserId }: { officer: ClubOfficer; currentU
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ClubProfileScreen() {
   const { clubId } = useLocalSearchParams<{ clubId: string }>();
-  const { session } = useAuthStore();
+  const { session, isLoading: authLoading } = useAuthStore();
   const userId = session?.user.id;
   const router = useRouter();
   const { show, ToastComponent } = useToast();
@@ -510,6 +515,7 @@ export default function ClubProfileScreen() {
   // Pull-to-refresh state kept separate from first-load state so a background
   // refetch never swaps rendered content back to skeletons.
   const [refreshing, setRefreshing] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -531,6 +537,49 @@ export default function ClubProfileScreen() {
       });
     }
   };
+
+  // A club link (QR scan or shared URL) can open the app before — or without —
+  // a session. The profile query is disabled with no `userId`, so without this
+  // the screen would fall straight through to "Club not found." Wait for auth
+  // to settle, then send a signed-out visitor to Log in instead of a dead end.
+  if (!userId) {
+    if (authLoading) {
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
+          <View style={{ padding: 16, gap: 16 }}>
+            <Skeleton width="100%" height={200} borderRadius={0} />
+            <Skeleton width={200} height={22} />
+            <Skeleton width={120} height={14} />
+          </View>
+        </SafeAreaView>
+      );
+    }
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
+        <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={26} color={INK} />
+        </TouchableOpacity>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+          <Text style={{ fontSize: 18, fontFamily: 'Zain_800ExtraBold', color: INK, textAlign: 'center', marginBottom: 8 }}>
+            Log in to view this club
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', marginBottom: 20 }}>
+            Sign in to your We Glue account to see this club and join it.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.replace('/auth/login')}
+            activeOpacity={0.85}
+            style={{ paddingHorizontal: 28, paddingVertical: 12, borderRadius: 25, backgroundColor: TEAL }}
+          >
+            <Text style={{ color: CREAM, fontSize: 15, fontFamily: 'Inter_600SemiBold' }}>Log in</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.replace('/onboarding/interests')} activeOpacity={0.7} style={{ marginTop: 14 }}>
+            <Text style={{ color: TEAL, fontSize: 14, fontFamily: 'Inter_600SemiBold' }}>Create an account</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -650,6 +699,27 @@ export default function ClubProfileScreen() {
             clubId={clubId}
             style={{ position: 'absolute', bottom: 12, right: 12 }}
           />
+
+          {/* Share — a visible control beside the ⋯ menu, never hidden inside
+              it. Every valid club is shareable regardless of membership.
+              Phones only; iPad keeps the profile unchanged. */}
+          {IS_PHONE && (
+            <TouchableOpacity
+              onPress={() => setQrOpen(true)}
+              activeOpacity={0.7}
+              accessibilityLabel={`Share ${club.name}`}
+              style={{
+                position: 'absolute',
+                bottom: 12,
+                right: 60,
+                backgroundColor: 'rgba(255,255,255,0.85)',
+                borderRadius: 20,
+                padding: 8,
+              }}
+            >
+              <Ionicons name="share-outline" size={22} color={INK} />
+            </TouchableOpacity>
+          )}
 
           {/* Officer edit button */}
           {isOfficer && (
@@ -1079,6 +1149,17 @@ export default function ClubProfileScreen() {
         )}
       </ScrollView>
 
+      {IS_PHONE && (
+        <QrShareScreen
+          visible={qrOpen}
+          onClose={() => setQrOpen(false)}
+          title={club.name}
+          url={getClubShareUrl(clubId!)}
+          shareLabel="Share"
+          shareMessage={`Check out ${club.name} on We Glue:`}
+          fileName={`weglue-${club.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-qr`}
+        />
+      )}
     </SafeAreaView>
   );
 }

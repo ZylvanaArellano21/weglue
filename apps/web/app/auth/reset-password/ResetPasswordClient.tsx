@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { getSupabaseBrowser } from "../../../lib/supabase-browser";
+import { createBrowserClient } from "@supabase/ssr";
 import {
   checkPassword,
   passwordError,
-  resetPasswordRedirect,
+  sendPasswordResetEmail,
 } from "../../../lib/authFlow";
 
-type View = "loading" | "form" | "success" | "expired";
+type View = "form" | "success" | "expired";
 
 const LogoBlock = () => (
   <div className="flex flex-col items-center mb-8">
@@ -21,12 +21,33 @@ const LogoBlock = () => (
   </div>
 );
 
+function readFragmentTokens(): { access_token: string; refresh_token: string } | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  if (!hash) return null;
+  const p = new URLSearchParams(hash);
+  const access_token = p.get("access_token");
+  if (!access_token || p.get("type") !== "recovery") return null;
+  return { access_token, refresh_token: p.get("refresh_token") ?? "" };
+}
+
 export default function ResetPasswordClient({
-  serverExchanged,
+  tokenHash,
+  linkType: _linkType,
+  code,
 }: {
-  serverExchanged: boolean;
+  tokenHash: string | null;
+  linkType: string | null;
+  code: string | null;
 }): JSX.Element | null {
-  const [view, setView] = useState<View>("loading");
+  // Is there any recovery credential attached to this visit? If not, there is
+  // nothing to reset — go straight to the self-serve resend.
+  const [fragment] = useState(readFragmentTokens);
+  const hasCredential = Boolean(tokenHash || code || fragment);
+
+  const [view, setView] = useState<View>(hasCredential ? "form" : "expired");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -34,70 +55,95 @@ export default function ResetPasswordClient({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Expired view: self-serve "send me a new link" form
+  // Expired view: self-serve "send me a new link" form. It goes through the
+  // shared authFlow helper (claim-first 60s cooldown + real Supabase error
+  // mapping) — never a bare resetPasswordForEmail that collapses every failure,
+  // including a server cooldown, into "check the address".
   const [resendEmail, setResendEmail] = useState("");
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendResult, setResendResult] = useState<"sent" | "error" | null>(null);
+  const [resend, setResend] = useState<
+    | { state: "idle" | "sending" | "sent" }
+    | { state: "cooldown"; seconds: number }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
+
+  // A dedicated Supabase client with detectSessionInUrl DISABLED. The one-time
+  // recovery token must never be consumed just because this page loaded — not
+  // by a mail scanner, a link preview, or the app's own auto-detection. Nothing
+  // here touches the token until the person deliberately submits a new password
+  // below. (The app-wide client in providers.tsx keeps its normal behaviour;
+  // this page does its own thing.)
+  const [supabase] = useState(() =>
+    createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { detectSessionInUrl: false } }
+    )
+  );
+
+  // Live countdown for the resend cooldown.
+  useEffect(() => {
+    if (resend.state !== "cooldown") return;
+    if (resend.seconds <= 0) {
+      setResend({ state: "idle" });
+      return;
+    }
+    const id = window.setTimeout(
+      () => setResend({ state: "cooldown", seconds: resend.seconds - 1 }),
+      1000
+    );
+    return () => window.clearTimeout(id);
+  }, [resend]);
 
   async function handleResendReset(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = resendEmail.trim().toLowerCase();
     if (!trimmed || !trimmed.includes("@")) {
-      setResendResult("error");
+      setResend({
+        state: "error",
+        message: "Enter the email address you used to sign up.",
+      });
       return;
     }
-    setResendLoading(true);
-    setResendResult(null);
-    const supabase = getSupabaseBrowser();
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-      redirectTo: resetPasswordRedirect(),
-    });
-    setResendLoading(false);
-    setResendResult(error ? "error" : "sent");
+    setResend({ state: "sending" });
+    const result = await sendPasswordResetEmail(trimmed);
+    if (result.ok) {
+      setResend({ state: "sent" });
+      return;
+    }
+    if ("cooldown" in result) {
+      setResend({ state: "cooldown", seconds: result.cooldown });
+      return;
+    }
+    setResend({ state: "error", message: result.message });
   }
 
-  useEffect(() => {
-    async function resolveSession() {
-      const supabase = getSupabaseBrowser();
-
-      // The server already exchanged a `code` or `token_hash` query param
-      // (see page.tsx) — that set a session cookie shared with this browser
-      // client via @supabase/ssr. Confirm it actually landed before trusting
-      // it; getSession() reads the cookie, no network round trip.
-      if (serverExchanged) {
-        const { data } = await supabase.auth.getSession();
-        setView(data.session ? "form" : "expired");
-        return;
-      }
-
-      // Legacy implicit flow: tokens only ever exist in the URL fragment,
-      // which the server can never read, so this is the one case the server
-      // could not have already handled.
-      const hash = window.location.hash.startsWith("#")
-        ? window.location.hash.slice(1)
-        : window.location.hash;
-
-      if (hash) {
-        const hashParams = new URLSearchParams(hash);
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token") ?? "";
-        const type = hashParams.get("type");
-
-        if (accessToken && type === "recovery") {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          setView(error ? "expired" : "form");
-          return;
-        }
-      }
-
-      setView("expired");
+  /** Consume the recovery credential — ONLY called from handleSubmit, i.e. only
+   *  after the person has deliberately entered a new password and pressed the
+   *  button. Returns true once a valid recovery session is established. */
+  async function establishRecoverySession(): Promise<boolean> {
+    if (tokenHash) {
+      const { error } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: "recovery",
+      });
+      if (!error) return true;
+    } else if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (!error) return true;
+    } else if (fragment) {
+      const { error } = await supabase.auth.setSession({
+        access_token: fragment.access_token,
+        refresh_token: fragment.refresh_token,
+      });
+      if (!error) return true;
     }
-
-    resolveSession();
-  }, [serverExchanged]);
+    // The explicit consumption above failed (token used / expired, or a PKCE
+    // code opened in a browser without its verifier). If the app-wide client
+    // already turned a fragment/code into a session on this same browser, that
+    // still counts.
+    const { data } = await supabase.auth.getSession();
+    return !!data.session;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -118,40 +164,44 @@ export default function ResetPasswordClient({
     }
 
     setLoading(true);
-    const supabase = getSupabaseBrowser();
-    const { error } = await supabase.auth.updateUser({ password });
+    setErrorMessage(null);
 
+    const ok = await establishRecoverySession();
+    if (!ok) {
+      setLoading(false);
+      // The link is spent or expired. Send them to the self-serve resend
+      // rather than a raw Supabase string.
+      setView("expired");
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({ password });
     if (error) {
       setLoading(false);
+      const msg = (error.message ?? "").toLowerCase();
+      if (
+        msg.includes("session") ||
+        msg.includes("jwt") ||
+        msg.includes("token") ||
+        error.status === 401
+      ) {
+        setView("expired");
+        return;
+      }
+      if (msg.includes("same") && msg.includes("password")) {
+        setErrorMessage("Your new password must be different from your old one.");
+        return;
+      }
       setErrorMessage(error.message || "Something went wrong. Please try again.");
       return;
     }
 
-    // The recovery session has done its one job — end it so the user signs in
-    // freshly with the new password and is never left half-authenticated on
+    // The recovery session has done its one job — end it so the person signs
+    // in freshly with the new password and is never left half-authenticated on
     // this recovery route.
     await supabase.auth.signOut();
     setLoading(false);
     setView("success");
-  }
-
-  if (view === "loading") {
-    return (
-      <main
-        className="min-h-screen flex items-center justify-center"
-        style={{ backgroundColor: "#FEFCF0" }}
-      >
-        <div className="flex flex-col items-center gap-4">
-          <div
-            className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
-            style={{ borderColor: "#0FA6A6", borderTopColor: "transparent" }}
-          />
-          <p className="text-sm" style={{ color: "#6B7280" }}>
-            Verifying your link...
-          </p>
-        </div>
-      </main>
-    );
   }
 
   if (view === "success") {
@@ -220,6 +270,7 @@ export default function ResetPasswordClient({
   }
 
   if (view === "expired") {
+    const disabled = resend.state === "sending" || resend.state === "sent";
     return (
       <main
         className="min-h-screen flex items-center justify-center px-6"
@@ -273,42 +324,50 @@ export default function ResetPasswordClient({
                 value={resendEmail}
                 onChange={(e) => {
                   setResendEmail(e.target.value);
-                  setResendResult(null);
+                  if (resend.state === "error") setResend({ state: "idle" });
                 }}
                 placeholder="yourname@email.com"
                 className="h-[48px] rounded-xl border px-4 text-sm outline-none"
                 style={{
                   backgroundColor: "#FEFCF0",
-                  borderColor: resendResult === "error" ? "#F02719" : "rgba(0,0,0,0.2)",
+                  borderColor: resend.state === "error" ? "#F02719" : "rgba(0,0,0,0.2)",
                   color: "#1a1a1a",
                 }}
               />
               <button
                 type="submit"
-                disabled={resendLoading || resendResult === "sent"}
+                disabled={disabled || resend.state === "cooldown"}
                 className="h-[48px] rounded-full font-semibold text-sm text-white disabled:opacity-60 flex items-center justify-center"
                 style={{
                   backgroundColor: "#0FA6A6",
                   boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
                 }}
               >
-                {resendLoading
+                {resend.state === "sending"
                   ? "Sending…"
-                  : resendResult === "sent"
+                  : resend.state === "sent"
                   ? "Email sent!"
+                  : resend.state === "cooldown"
+                  ? `Resend in ${resend.seconds}s`
                   : "Send New Reset Link"}
               </button>
             </form>
 
-            {resendResult === "sent" && (
+            {resend.state === "sent" && (
               <p className="text-sm mt-3" style={{ color: "#16A34A" }}>
                 Check your inbox, spam, and junk folders for the new reset
                 link.
               </p>
             )}
-            {resendResult === "error" && (
+            {resend.state === "cooldown" && (
+              <p className="text-sm mt-3" style={{ color: "#4B5563" }}>
+                You just requested one. You can send another in {resend.seconds}{" "}
+                second{resend.seconds === 1 ? "" : "s"}.
+              </p>
+            )}
+            {resend.state === "error" && (
               <p className="text-sm mt-3" style={{ color: "#F02719" }}>
-                Couldn&apos;t send the email. Check the address and try again.
+                {resend.message}
               </p>
             )}
 

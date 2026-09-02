@@ -17,6 +17,15 @@ export function getPostShareUrl(postId: string): string {
   return `https://weglue.app/post/${postId}`;
 }
 
+// Club-profile share / QR target. `?source=qr` lets the web club route tell a
+// scanned-QR visit (bounce to the store when the app isn't installed) apart
+// from ordinary web navigation. An installed app opens the club profile
+// directly via the universal / app link; a signed-in phone-web user still
+// sees the profile normally. Same string for the QR, Copy link and Share.
+export function getClubShareUrl(clubId: string): string {
+  return `https://weglue.app/club/${clubId}?source=qr`;
+}
+
 export async function copyLinkToClipboard(url: string): Promise<boolean> {
   try {
     await Clipboard.setStringAsync(url);

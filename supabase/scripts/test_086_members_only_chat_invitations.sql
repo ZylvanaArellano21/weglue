@@ -18,8 +18,9 @@
 --   F  — a verified account redeems a club_group token successfully.
 --   G  — the partial unique index makes "one active token per conversation"
 --        a DB-enforced invariant, not just an RPC-level convention.
---   H  — Reset (rotate) invalidates the old token immediately; the new
---        token redeems correctly.
+--   H  — rotate_chat_invitation is a disabled no-op: it returns the current
+--        active token unchanged, mutates nothing (no revoke, no new row),
+--        and returns NULL when no active token exists.
 --   I  — redeeming while already an officer is a clean no-op: no duplicate
 --        club_members row, role stays 'officer'.
 --   J  — the migration's own data-fix retroactively revokes a pre-existing
@@ -225,42 +226,79 @@ BEGIN;
 ROLLBACK;
 
 -- ============================================================
--- TEST H: Reset (rotate) invalidates the old token immediately; the
--- new token redeems correctly.
+-- TEST H: rotate_chat_invitation is a disabled no-op: it returns the current
+-- active token unchanged, mutates nothing (no revoke, no new row), and returns
+-- NULL when no active token exists.
 -- ============================================================
 BEGIN;
   INSERT INTO public.profiles (id, username, university) VALUES
-    ('50505050-5050-5050-5050-505050505050','officer_h','Lone Star'),
-    ('60606060-6060-6060-6060-606060606060','joiner_h','Lone Star');
-  INSERT INTO auth.users (id, email_confirmed_at) VALUES
-    ('60606060-6060-6060-6060-606060606060', now());
+    ('50505050-5050-5050-5050-505050505050','officer_h','Lone Star');
   INSERT INTO public.clubs (id, name, university) VALUES
     ('70707070-7070-7070-7070-707070707070','Dance','Lone Star');
   INSERT INTO public.club_members (club_id, user_id, role) VALUES
     ('70707070-7070-7070-7070-707070707070','50505050-5050-5050-5050-505050505050','officer');
   INSERT INTO public.conversations (id, type, club_id) VALUES
-    ('80808080-8080-8080-8080-808080808080','club_group','70707070-7070-7070-7070-707070707070');
+    ('80808080-8080-8080-8080-808080808080','club_group','70707070-7070-7070-7070-707070707070'),
+    ('81818181-8181-8181-8181-818181818181','club_group','70707070-7070-7070-7070-707070707070');
   SET LOCAL request.jwt.claim.sub = '50505050-5050-5050-5050-505050505050';
   DO $$
-  DECLARE v_old_token TEXT; v_new_token TEXT;
+  DECLARE
+    v_current_token TEXT;
+    v_returned_token TEXT;
+    v_before_count INTEGER;
+    v_after_count INTEGER;
+    v_before_state TEXT;
+    v_after_state TEXT;
   BEGIN
-    v_old_token := public.get_or_create_chat_invitation('80808080-8080-8080-8080-808080808080');
-    v_new_token := public.rotate_chat_invitation('80808080-8080-8080-8080-808080808080');
-    ASSERT v_new_token <> v_old_token, 'TEST H FAILED: reset must mint a different token';
-  END $$;
-  SET LOCAL request.jwt.claim.sub = '60606060-6060-6060-6060-606060606060';
-  DO $$
-  DECLARE v_old_token TEXT;
-  BEGIN
-    SELECT token INTO v_old_token FROM public.chat_invitations
-      WHERE conversation_id = '80808080-8080-8080-8080-808080808080' AND revoked_at IS NOT NULL LIMIT 1;
-    BEGIN
-      PERFORM public.join_chat_invitation(v_old_token);
-      ASSERT false, 'TEST H FAILED: the OLD (reset) token must be rejected';
-    EXCEPTION WHEN OTHERS THEN
-      ASSERT SQLERRM = 'invitation_invalid', 'TEST H FAILED: expected invitation_invalid for the old token, got ' || SQLERRM;
-    END;
-    RAISE NOTICE 'TEST H PASSED: reset immediately invalidates the previous link';
+    v_current_token := public.get_or_create_chat_invitation('80808080-8080-8080-8080-808080808080');
+
+    SELECT count(*)::integer,
+           COALESCE(string_agg(token || '|' || COALESCE(revoked_at::text, '<NULL>'), ',' ORDER BY token), '')
+      INTO v_before_count, v_before_state
+      FROM public.chat_invitations
+     WHERE conversation_id = '80808080-8080-8080-8080-808080808080';
+
+    v_returned_token := public.rotate_chat_invitation('80808080-8080-8080-8080-808080808080');
+
+    SELECT count(*)::integer,
+           COALESCE(string_agg(token || '|' || COALESCE(revoked_at::text, '<NULL>'), ',' ORDER BY token), '')
+      INTO v_after_count, v_after_state
+      FROM public.chat_invitations
+     WHERE conversation_id = '80808080-8080-8080-8080-808080808080';
+
+    ASSERT v_returned_token = v_current_token,
+      'TEST H FAILED: disabled reset must return the current active token unchanged';
+    ASSERT v_after_count = v_before_count,
+      'TEST H FAILED: disabled reset must not create or remove invitation rows';
+    ASSERT v_after_state = v_before_state,
+      'TEST H FAILED: disabled reset must not change token or revoked_at state';
+    ASSERT NOT EXISTS (
+      SELECT 1 FROM public.chat_invitations
+       WHERE conversation_id = '80808080-8080-8080-8080-808080808080'
+         AND revoked_at IS NOT NULL
+    ), 'TEST H FAILED: disabled reset must not revoke the active invitation';
+
+    SELECT count(*)::integer,
+           COALESCE(string_agg(token || '|' || COALESCE(revoked_at::text, '<NULL>'), ',' ORDER BY token), '')
+      INTO v_before_count, v_before_state
+      FROM public.chat_invitations
+     WHERE conversation_id = '81818181-8181-8181-8181-818181818181';
+    ASSERT v_before_count = 0 AND v_before_state = '',
+      'TEST H FAILED: no-token conversation must start with no invitation rows';
+
+    v_returned_token := public.rotate_chat_invitation('81818181-8181-8181-8181-818181818181');
+
+    SELECT count(*)::integer,
+           COALESCE(string_agg(token || '|' || COALESCE(revoked_at::text, '<NULL>'), ',' ORDER BY token), '')
+      INTO v_after_count, v_after_state
+      FROM public.chat_invitations
+     WHERE conversation_id = '81818181-8181-8181-8181-818181818181';
+
+    ASSERT v_returned_token IS NULL,
+      'TEST H FAILED: disabled reset must return NULL when no active token exists';
+    ASSERT v_after_count = v_before_count AND v_after_state = v_before_state,
+      'TEST H FAILED: no-token reset must create nothing';
+    RAISE NOTICE 'TEST H PASSED: disabled reset preserves the active token and creates nothing';
   END $$;
 ROLLBACK;
 

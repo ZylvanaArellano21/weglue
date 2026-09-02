@@ -13,6 +13,7 @@ import { ClubMediaOverlay } from "./ClubMediaOverlay";
 import { ClubEventCard } from "./ClubEventCard";
 import { ReportModal } from "../shared/ReportModal";
 import { ClubProfileHeader, type ClubTab } from "./ClubProfileHeader";
+import { QrShareScreen, useIsPhoneViewport } from "../shared/QrShareScreen";
 import { ClubRightColumn } from "./ClubRightColumn";
 import { ClubHomeTab } from "./ClubHomeTab";
 import { ClubCalendarTab } from "./ClubCalendarTab";
@@ -86,6 +87,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [people, setPeople] = useState<"members" | "gluemates" | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const isPhone = useIsPhoneViewport();
 
   const invalidateClubContent = () => {
     void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
@@ -199,6 +202,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onOpenPeople={setPeople}
             onBack={() => router.back()}
             onReport={() => setReportOpen(true)}
+            onShare={() => setQrOpen(true)}
           />
 
           {/* Desktop/tablet — unchanged tab-switched content. */}
@@ -407,6 +411,18 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           clubId={clubId}
           onClose={() => setReportOpen(false)}
           onSubmitted={show}
+        />
+      )}
+
+      {isPhone && (
+        <QrShareScreen
+          open={qrOpen}
+          onClose={() => setQrOpen(false)}
+          title={club.name}
+          url={`https://weglue.app/club/${clubId}?source=qr`}
+          shareLabel="Share"
+          shareMessage={`Check out ${club.name} on We Glue:`}
+          fileName={`weglue-${club.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-qr`}
         />
       )}
 

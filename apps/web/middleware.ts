@@ -216,7 +216,13 @@ export async function middleware(request: NextRequest) {
   // ── Unauthenticated users ──────────────────────────────────────────────────
 
   if (!user) {
-    if (isProtected) {
+    // A club QR scanned without the app installed must reach the club page's
+    // own store-bounce (apps/web/app/club/[clubId]/page.tsx), not /login. The
+    // `?source=qr` marker is set only by the mobile/web QR share screens.
+    const isClubQr =
+      pathname.startsWith("/club/") &&
+      request.nextUrl.searchParams.get("source") === "qr";
+    if (isProtected && !isClubQr) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
     // The whole auth flow (surveys, signup, confirm-email, login, forgot
