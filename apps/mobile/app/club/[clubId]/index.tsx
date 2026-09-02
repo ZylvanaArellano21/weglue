@@ -25,6 +25,8 @@ import { openProfile } from '../../../lib/profileNavigation';
 import { useToast } from '../../../components/Toast';
 import { requestLeaveClub } from '../../../store/leaveClubStore';
 import { ReportButton } from '../../../components/shared/ReportButton';
+import { QrShareScreen } from '../../../components/share/QrShareScreen';
+import { getClubShareUrl } from '../../../lib/share';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../services/clubService';
 import { openClubChat, openOfficerChat, openDirectChatWith } from '../../../lib/chatNavigation';
 import { todayInAppTz } from '../../../lib/timezone';
@@ -33,6 +35,9 @@ import { parseMeetingSchedule, groupScheduleForDisplay } from '../../../lib/meet
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
+// The club-profile QR share screen is a phone-only surface (the app locks to
+// portrait, so width alone is a safe classifier). iPad keeps the profile as-is.
+const IS_PHONE = SCREEN_WIDTH < 600;
 const CREAM = '#FEFCF0';
 const TEAL = '#0FA6A6';
 const ALERT_RED = '#F02719';
@@ -510,6 +515,7 @@ export default function ClubProfileScreen() {
   // Pull-to-refresh state kept separate from first-load state so a background
   // refetch never swaps rendered content back to skeletons.
   const [refreshing, setRefreshing] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -650,6 +656,27 @@ export default function ClubProfileScreen() {
             clubId={clubId}
             style={{ position: 'absolute', bottom: 12, right: 12 }}
           />
+
+          {/* Share — a visible control beside the ⋯ menu, never hidden inside
+              it. Every valid club is shareable regardless of membership.
+              Phones only; iPad keeps the profile unchanged. */}
+          {IS_PHONE && (
+            <TouchableOpacity
+              onPress={() => setQrOpen(true)}
+              activeOpacity={0.7}
+              accessibilityLabel={`Share ${club.name}`}
+              style={{
+                position: 'absolute',
+                bottom: 12,
+                right: 60,
+                backgroundColor: 'rgba(255,255,255,0.85)',
+                borderRadius: 20,
+                padding: 8,
+              }}
+            >
+              <Ionicons name="share-outline" size={22} color={INK} />
+            </TouchableOpacity>
+          )}
 
           {/* Officer edit button */}
           {isOfficer && (
@@ -1079,6 +1106,17 @@ export default function ClubProfileScreen() {
         )}
       </ScrollView>
 
+      {IS_PHONE && (
+        <QrShareScreen
+          visible={qrOpen}
+          onClose={() => setQrOpen(false)}
+          title={club.name}
+          url={getClubShareUrl(clubId!)}
+          shareLabel="Share"
+          shareMessage={`Check out ${club.name} on We Glue:`}
+          fileName={`weglue-${club.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-qr`}
+        />
+      )}
     </SafeAreaView>
   );
 }

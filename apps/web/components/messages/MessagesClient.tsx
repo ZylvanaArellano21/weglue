@@ -8,6 +8,7 @@ import { PageOverlays } from "../shared/PageOverlays";
 import { Avatar } from "../shared/Avatar";
 import { ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { CountBadge } from "../shared/CountBadge";
+import { QrShareScreen, useIsPhoneViewport } from "../shared/QrShareScreen";
 import {
   ArchiveIcon, BellOffIcon, BlockIcon, CalendarIcon, CameraIcon, ChatBubbleOutlineIcon, ChatBubblesIcon,
   CheckboxIcon, CloseCircleIcon, CloseIcon, EllipsisIcon, ExitIcon, FlagIcon, ImageIcon, ListIcon,
@@ -2064,14 +2065,24 @@ function ShareInviteQr({ value, size }: { value: string; size: number }): JSX.El
   </svg>;
 }
 
+// "<Club> · Members" is the stored title for a club Members chat; the phone QR
+// screen shows the student-facing two-line form instead.
+const MEMBERS_SUFFIX = / · Members$/;
+
 function ShareInvitePanel({ conversationId, conversationName, onClose }: { conversationId: string; conversationName: string; onClose: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
+  const isPhone = useIsPhoneViewport();
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showQr, setShowQr] = useState(false);
+  const [showQrScreen, setShowQrScreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEscapeAndOutside(ref, onClose);
+
+  const isMembersChat = MEMBERS_SUFFIX.test(conversationName);
+  const qrTitle = isMembersChat ? conversationName.replace(MEMBERS_SUFFIX, "") : conversationName;
+  const qrSubtitle = isMembersChat ? "Members Chat" : undefined;
 
   useEffect(() => {
     let alive = true;
@@ -2100,7 +2111,8 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
       // dismissed — no-op, matches mobile's Share.share() catch
     }
   }
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  return <>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
     <div ref={ref} role="dialog" aria-modal="true" aria-label={`Invite to ${conversationName}`} className="w-full max-w-md rounded-2xl bg-cream p-5 shadow-2xl">
       <h3 className="text-lg font-bold text-gray-950">Invite to {conversationName}</h3>
       <p className="mt-1 text-sm text-gray-500">Anyone from your university with this link can join. The link doesn&apos;t expire.</p>
@@ -2115,13 +2127,27 @@ function ShareInvitePanel({ conversationId, conversationName, onClose }: { conve
       ) : (
         <div className="mt-4">
           <button type="button" onClick={() => void copyLink()} className="flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><ShareIcon size={20} />{copied ? "Copied!" : "Copy link"}</button>
-          <button type="button" onClick={() => setShowQr(true)} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><QrCodeIcon size={20} />Show QR code</button>
+          <button type="button" onClick={() => (isPhone ? setShowQrScreen(true) : setShowQr(true))} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><QrCodeIcon size={20} />Show QR code</button>
           {canNativeShare && <button type="button" onClick={() => void nativeShare()} className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white px-3 py-3 text-left text-[15px] font-semibold text-gray-950 hover:bg-teal/[0.04]"><ShareIcon size={20} />Share…</button>}
         </div>
       )}
       <div className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-full px-4 py-2 text-sm font-semibold text-gray-600">Close</button></div>
     </div>
-  </div>;
+    </div>
+
+    {isPhone && link && (
+      <QrShareScreen
+        open={showQrScreen}
+        onClose={() => setShowQrScreen(false)}
+        title={qrTitle}
+        subtitle={qrSubtitle}
+        url={link}
+        shareLabel="Share group chat"
+        shareMessage={`Join ${qrTitle}${qrSubtitle ? ` ${qrSubtitle}` : ""} on We Glue:`}
+        fileName={`weglue-${qrTitle.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-chat-qr`}
+      />
+    )}
+  </>;
 }
 
 function ConfirmSheet({ title, message, confirmLabel, onConfirm, onCancel }: { title: string; message: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void }): JSX.Element {

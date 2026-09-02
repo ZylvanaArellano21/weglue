@@ -320,6 +320,27 @@ export function ShareIcon(p: IconProps): JSX.Element {
   );
 }
 
+/** Ionicons `link-outline` — Copy link. */
+export function LinkIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  );
+}
+
+/** Ionicons `download-outline` — Download. */
+export function DownloadIcon(p: IconProps): JSX.Element {
+  return (
+    <svg {...svgProps(p)}>
+      <path d="M12 3v12" />
+      <path d="m7 12 5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+  );
+}
+
 /** Ionicons `exit-outline` — Leave (custom group). */
 export function ExitIcon(p: IconProps): JSX.Element {
   return (

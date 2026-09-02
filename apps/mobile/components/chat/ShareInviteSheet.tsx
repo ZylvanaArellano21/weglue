@@ -9,18 +9,28 @@ import {
   Share,
   ActivityIndicator,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import qrcodegen from 'qrcode-generator';
 import { getInviteToken, INVITE_BASE_URL } from '../../services/messagingService';
 import { chatColors, chatFonts, chatShadow, chatTypography } from './chatTheme';
+import { QrShareScreen } from '../share/QrShareScreen';
 
 // ─── Share sheet for chat invitations ────────────────────────────────────────
 // Only rendered for authorized managers (officers on Members chats, the
 // creator on custom groups) — and the server re-validates every call.
 // The link and the QR code point at the SAME opaque, non-expiring token.
 // There is no "reset link" action: the link-reset feature was removed.
+//
+// "Show QR code" on a PHONE opens the full We Glue QR share screen
+// (QrShareScreen). On iPad it keeps the existing inline QR — that larger-device
+// experience is intentionally left unchanged.
+
+// The stored title for a club Members chat is "<Club> · Members". The QR
+// screen shows the student-facing two-line form instead.
+const MEMBERS_SUFFIX = / · Members$/;
 
 interface Props {
   visible: boolean;
@@ -60,14 +70,23 @@ function QrCode({ value, size }: { value: string; size: number }) {
 }
 
 export function ShareInviteSheet({ visible, conversationId, chatTitle, onClose }: Props) {
+  const { width } = useWindowDimensions();
+  const isPhone = width < 600;
+
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const [showQrScreen, setShowQrScreen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const isMembersChat = MEMBERS_SUFFIX.test(chatTitle);
+  const qrTitle = isMembersChat ? chatTitle.replace(MEMBERS_SUFFIX, '') : chatTitle;
+  const qrSubtitle = isMembersChat ? 'Members Chat' : undefined;
 
   useEffect(() => {
     if (!visible) {
       setShowQr(false);
+      setShowQrScreen(false);
       setCopied(false);
       return;
     }
@@ -100,51 +119,70 @@ export function ShareInviteSheet({ visible, conversationId, chatTitle, onClose }
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.handle} />
-          <Text style={styles.title}>Invite to {chatTitle}</Text>
-          <Text style={styles.sub}>
-            Anyone from your university with this link can join. The link doesn't expire.
-          </Text>
+    <>
+      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+        <Pressable style={styles.overlay} onPress={onClose}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            <View style={styles.handle} />
+            <Text style={styles.title}>Invite to {chatTitle}</Text>
+            <Text style={styles.sub}>
+              Anyone from your university with this link can join. The link doesn't expire.
+            </Text>
 
-          {loading || !link ? (
-            <ActivityIndicator color={chatColors.teal} style={{ marginVertical: 32 }} />
-          ) : showQr ? (
-            <View style={styles.qrWrap}>
-              <QrCode value={link} size={220} />
-              <TouchableOpacity onPress={() => setShowQr(false)} style={styles.qrBack}>
-                <Text style={styles.qrBackLabel}>Hide QR code</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.row} onPress={copyLink} activeOpacity={0.7}>
-                <View style={styles.iconWrap}>
-                  <Ionicons name={copied ? 'checkmark' : 'link-outline'} size={22} color={chatColors.teal} />
-                </View>
-                <Text style={styles.rowLabel}>{copied ? 'Copied!' : 'Copy link'}</Text>
-              </TouchableOpacity>
+            {loading || !link ? (
+              <ActivityIndicator color={chatColors.teal} style={{ marginVertical: 32 }} />
+            ) : showQr ? (
+              <View style={styles.qrWrap}>
+                <QrCode value={link} size={220} />
+                <TouchableOpacity onPress={() => setShowQr(false)} style={styles.qrBack}>
+                  <Text style={styles.qrBackLabel}>Hide QR code</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.row} onPress={copyLink} activeOpacity={0.7}>
+                  <View style={styles.iconWrap}>
+                    <Ionicons name={copied ? 'checkmark' : 'link-outline'} size={22} color={chatColors.teal} />
+                  </View>
+                  <Text style={styles.rowLabel}>{copied ? 'Copied!' : 'Copy link'}</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity style={styles.row} onPress={() => setShowQr(true)} activeOpacity={0.7}>
-                <View style={styles.iconWrap}>
-                  <Ionicons name="qr-code-outline" size={22} color={chatColors.teal} />
-                </View>
-                <Text style={styles.rowLabel}>Show QR code</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.row}
+                  onPress={() => (isPhone ? setShowQrScreen(true) : setShowQr(true))}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.iconWrap}>
+                    <Ionicons name="qr-code-outline" size={22} color={chatColors.teal} />
+                  </View>
+                  <Text style={styles.rowLabel}>Show QR code</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity style={styles.row} onPress={nativeShare} activeOpacity={0.7}>
-                <View style={styles.iconWrap}>
-                  <Ionicons name="share-outline" size={22} color={chatColors.teal} />
-                </View>
-                <Text style={styles.rowLabel}>Share…</Text>
-              </TouchableOpacity>
-            </>
-          )}
+                <TouchableOpacity style={styles.row} onPress={nativeShare} activeOpacity={0.7}>
+                  <View style={styles.iconWrap}>
+                    <Ionicons name="share-outline" size={22} color={chatColors.teal} />
+                  </View>
+                  <Text style={styles.rowLabel}>Share…</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </Pressable>
         </Pressable>
-      </Pressable>
-    </Modal>
+      </Modal>
+
+      {isPhone && link && (
+        <QrShareScreen
+          visible={showQrScreen}
+          onClose={() => setShowQrScreen(false)}
+          title={qrTitle}
+          subtitle={qrSubtitle}
+          url={link}
+          shareLabel="Share group chat"
+          shareMessage={`Join ${qrTitle}${qrSubtitle ? ` ${qrSubtitle}` : ''} on We Glue:`}
+          fileName={`weglue-${qrTitle.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-chat-qr`}
+        />
+      )}
+    </>
   );
 }
 
