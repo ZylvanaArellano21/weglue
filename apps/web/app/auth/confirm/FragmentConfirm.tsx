@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
@@ -36,21 +36,19 @@ export default function FragmentConfirm(): JSX.Element {
   const linkType = params.get("type");
   const isEmailChange = params.get("flow") === "email_change";
 
-  const fragment = useMemo(readFragmentTokens, []);
+  const [fragment] = useState(readFragmentTokens);
   const hasCredential = Boolean(tokenHash || code || fragment);
 
   const [state, setState] = useState<State>(hasCredential ? "prompt" : "expired");
 
   // Dedicated client with detectSessionInUrl OFF — nothing auto-consumes a
-  // code / fragment just because this component mounted.
-  const supabase = useMemo(
-    () =>
-      createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        { auth: { detectSessionInUrl: false } }
-      ),
-    []
+  // code / fragment just because this component mounted. Created once.
+  const [supabase] = useState(() =>
+    createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { detectSessionInUrl: false } }
+    )
   );
 
   async function confirmEmail() {

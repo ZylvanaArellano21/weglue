@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { createBrowserClient } from "@supabase/ssr";
@@ -44,7 +44,7 @@ export default function ResetPasswordClient({
 }): JSX.Element | null {
   // Is there any recovery credential attached to this visit? If not, there is
   // nothing to reset — go straight to the self-serve resend.
-  const fragment = useMemo(readFragmentTokens, []);
+  const [fragment] = useState(readFragmentTokens);
   const hasCredential = Boolean(tokenHash || code || fragment);
 
   const [view, setView] = useState<View>(hasCredential ? "form" : "expired");
@@ -72,14 +72,12 @@ export default function ResetPasswordClient({
   // here touches the token until the person deliberately submits a new password
   // below. (The app-wide client in providers.tsx keeps its normal behaviour;
   // this page does its own thing.)
-  const supabase = useMemo(
-    () =>
-      createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        { auth: { detectSessionInUrl: false } }
-      ),
-    []
+  const [supabase] = useState(() =>
+    createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { detectSessionInUrl: false } }
+    )
   );
 
   // Live countdown for the resend cooldown.
