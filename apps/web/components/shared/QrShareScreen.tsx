@@ -82,22 +82,28 @@ export function QrShareScreen({
   const modules = useMemo(() => qrModules(url), [url]);
   const [copied, setCopied] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // Clicking the code opens a plain full-screen QR (just the code) so another
+  // phone can scan it from a distance.
+  const [zoomed, setZoomed] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (zoomed) setZoomed(false);
+      else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, zoomed]);
 
   useEffect(() => {
     if (!open) {
       setCopied(false);
       setNote(null);
+      setZoomed(false);
     }
   }, [open]);
 
@@ -107,6 +113,12 @@ export function QrShareScreen({
     typeof navigator !== "undefined" && typeof navigator.share === "function";
   const qrPx = 232;
   const cell = qrPx / modules.length;
+  // The enlarged QR fills the shorter screen edge (bounded so it stays sharp
+  // on a wide desktop window).
+  const zoomPx =
+    typeof window !== "undefined"
+      ? Math.min(window.innerWidth, window.innerHeight) - 48
+      : 320;
 
   async function copyLink() {
     try {
@@ -226,16 +238,16 @@ export function QrShareScreen({
         <div
           role="button"
           tabIndex={0}
-          onClick={() => void copyLink()}
+          onClick={() => setZoomed(true)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
-              void copyLink();
+              setZoomed(true);
             }
           }}
           className="w-full flex flex-col items-center rounded-[28px] bg-white px-7 pt-7 pb-6 shadow-xl cursor-pointer"
           style={{ maxWidth: 340 }}
-          aria-label={`Copy link to ${subtitle ? `${title} ${subtitle}` : title}`}
+          aria-label="Enlarge QR code"
         >
           <Image src="/logo.png" alt="We Glue" width={48} height={44} priority />
           <p
@@ -282,9 +294,7 @@ export function QrShareScreen({
           </p>
         </div>
         <p className="mt-4 text-center text-[13px] text-[#5F5D5D]">
-          {copied
-            ? "Link copied"
-            : `Scan this code to open ${subtitle ? `${title} ${subtitle}` : title}`}
+          {copied ? "Link copied" : "Click the code to enlarge it for scanning"}
         </p>
       </div>
 
@@ -305,6 +315,43 @@ export function QrShareScreen({
       <p className="pb-6 text-center text-[13px] font-medium text-[#0FA6A6] min-h-[20px]">
         {note ?? " "}
       </p>
+
+      {/* Full-screen QR — just the code on white, nothing else. Click anywhere
+          to go back. This is what opens when the code on the card is clicked. */}
+      {zoomed && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setZoomed(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
+              e.preventDefault();
+              setZoomed(false);
+            }
+          }}
+          aria-label="Close enlarged QR code"
+          className="absolute inset-0 z-[1010] flex flex-col items-center justify-center gap-5 bg-white cursor-pointer p-6"
+        >
+          <svg
+            width={zoomPx}
+            height={zoomPx}
+            viewBox={`0 0 ${modules.length} ${modules.length}`}
+            role="img"
+            aria-label="QR code"
+            shapeRendering="crispEdges"
+          >
+            <rect width={modules.length} height={modules.length} fill="#fff" />
+            {modules.map((row, r) =>
+              row.map((dark, c) =>
+                dark ? (
+                  <rect key={`z-${r}-${c}`} x={c} y={r} width={1.02} height={1.02} fill="#000" />
+                ) : null
+              )
+            )}
+          </svg>
+          <p className="text-center text-[13px] text-[#5F5D5D]">Click anywhere to close</p>
+        </div>
+      )}
     </div>
   );
 }

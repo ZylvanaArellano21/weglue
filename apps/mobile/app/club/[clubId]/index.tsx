@@ -501,7 +501,7 @@ function OfficerRow({ officer, currentUserId }: { officer: ClubOfficer; currentU
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ClubProfileScreen() {
   const { clubId } = useLocalSearchParams<{ clubId: string }>();
-  const { session } = useAuthStore();
+  const { session, isLoading: authLoading } = useAuthStore();
   const userId = session?.user.id;
   const router = useRouter();
   const { show, ToastComponent } = useToast();
@@ -537,6 +537,49 @@ export default function ClubProfileScreen() {
       });
     }
   };
+
+  // A club link (QR scan or shared URL) can open the app before — or without —
+  // a session. The profile query is disabled with no `userId`, so without this
+  // the screen would fall straight through to "Club not found." Wait for auth
+  // to settle, then send a signed-out visitor to Log in instead of a dead end.
+  if (!userId) {
+    if (authLoading) {
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
+          <View style={{ padding: 16, gap: 16 }}>
+            <Skeleton width="100%" height={200} borderRadius={0} />
+            <Skeleton width={200} height={22} />
+            <Skeleton width={120} height={14} />
+          </View>
+        </SafeAreaView>
+      );
+    }
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
+        <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={26} color={INK} />
+        </TouchableOpacity>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+          <Text style={{ fontSize: 18, fontFamily: 'Zain_800ExtraBold', color: INK, textAlign: 'center', marginBottom: 8 }}>
+            Log in to view this club
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', marginBottom: 20 }}>
+            Sign in to your We Glue account to see this club and join it.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.replace('/auth/login')}
+            activeOpacity={0.85}
+            style={{ paddingHorizontal: 28, paddingVertical: 12, borderRadius: 25, backgroundColor: TEAL }}
+          >
+            <Text style={{ color: CREAM, fontSize: 15, fontFamily: 'Inter_600SemiBold' }}>Log in</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.replace('/onboarding/interests')} activeOpacity={0.7} style={{ marginTop: 14 }}>
+            <Text style={{ color: TEAL, fontSize: 14, fontFamily: 'Inter_600SemiBold' }}>Create an account</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (isLoading) {
     return (

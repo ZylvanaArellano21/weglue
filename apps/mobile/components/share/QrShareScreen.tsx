@@ -4,10 +4,12 @@ import {
   Alert,
   Image,
   Modal,
+  Pressable,
   Share,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -56,10 +58,15 @@ function QrMatrix({ value, size }: { value: string; size: number }) {
     return grid;
   }, [value]);
 
-  const cell = size / rows.length;
+  // An integer cell size is essential: a fractional width leaves hairline white
+  // seams between modules (RN rounds each View's frame independently), which a
+  // scanner can misread — very visible once the code is blown up full-screen.
+  // The rendered grid is therefore a touch smaller than `size` and centred.
+  const cell = Math.max(1, Math.floor(size / rows.length));
+  const grid = cell * rows.length;
 
   return (
-    <View style={{ width: size, height: size, backgroundColor: '#fff' }}>
+    <View style={{ width: grid, height: grid, backgroundColor: '#fff' }}>
       {rows.map((row, r) => (
         <View key={r} style={{ flexDirection: 'row', height: cell }}>
           {row.map((dark, c) => (
@@ -127,9 +134,20 @@ export function QrShareScreen({
   fileName,
 }: QrShareScreenProps) {
   const cardRef = useRef<View>(null);
+  const { width, height } = useWindowDimensions();
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  // Tapping the code opens a plain full-bleed QR so it fills the screen and
+  // scans from across a room. Nothing else on that view — just the code.
+  const [zoomed, setZoomed] = useState(false);
+  const zoomSize = Math.min(width, height) - 56;
+
+  function handleClose() {
+    setZoomed(false);
+    setCopied(false);
+    onClose();
+  }
 
   async function copyLink() {
     try {
@@ -183,7 +201,7 @@ export function QrShareScreen({
     <Modal
       visible={visible}
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={zoomed ? () => setZoomed(false) : handleClose}
       presentationStyle="fullScreen"
       statusBarTranslucent
     >
@@ -194,7 +212,7 @@ export function QrShareScreen({
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
           <View style={styles.topBar}>
-            <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeBtn} activeOpacity={0.7}>
+            <TouchableOpacity onPress={handleClose} hitSlop={12} style={styles.closeBtn} activeOpacity={0.7}>
               <Ionicons name="close" size={26} color={INK} />
             </TouchableOpacity>
           </View>
@@ -203,9 +221,14 @@ export function QrShareScreen({
             {/* Everything inside this card is what Download captures — identity
                 + QR on cream, no action buttons. collapsable=false keeps the
                 view in the native tree for react-native-view-shot on Android.
-                A QR is for scanning, not tapping — but tapping copies the link
-                so the gesture is never a dead end. */}
-            <TouchableOpacity activeOpacity={0.9} onPress={copyLink}>
+                Tapping the code opens the full-screen QR (see the zoom overlay
+                below) so another phone can scan it from a distance. */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => setZoomed(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Enlarge QR code"
+            >
               <View ref={cardRef} collapsable={false} style={styles.card}>
                 <Image
                   source={require('../../assets/logo.png')}
@@ -227,9 +250,7 @@ export function QrShareScreen({
               </View>
             </TouchableOpacity>
             <Text style={styles.scanHint}>
-              {copied
-                ? 'Link copied'
-                : `Scan this code to open ${subtitle ? `${title} ${subtitle}` : title}`}
+              {copied ? 'Link copied' : 'Tap the code to enlarge it for scanning'}
             </Text>
           </View>
 
@@ -249,6 +270,22 @@ export function QrShareScreen({
           </View>
           <Text style={styles.savedNote}>{savedNote ?? ' '}</Text>
         </SafeAreaView>
+
+        {/* Full-screen QR — just the code on white, nothing else. Tap anywhere
+            to go back. This is what opens when the code on the card is tapped. */}
+        {zoomed ? (
+          <Pressable
+            style={styles.zoomOverlay}
+            onPress={() => setZoomed(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close enlarged QR code"
+          >
+            <View style={styles.zoomInner}>
+              <QrMatrix value={url} size={zoomSize} />
+            </View>
+            <Text style={styles.zoomHint}>Tap anywhere to close</Text>
+          </Pressable>
+        ) : null}
       </SafeAreaProvider>
     </Modal>
   );
@@ -355,5 +392,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 10,
     minHeight: 34,
+  },
+  zoomOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+  },
+  zoomInner: {
+    padding: 12,
+    backgroundColor: '#fff',
+  },
+  zoomHint: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: MUTED,
+    textAlign: 'center',
   },
 });
