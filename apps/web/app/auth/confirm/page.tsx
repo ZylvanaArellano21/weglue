@@ -1,212 +1,33 @@
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
-import Image from "next/image";
+import { Suspense } from "react";
+import type { Metadata } from "next";
 import FragmentConfirm from "./FragmentConfirm";
-import { WebContinue } from "../../../components/auth/WebContinue";
 
-interface PageProps {
-  searchParams: { token_hash?: string; type?: string; code?: string; flow?: string };
-}
+export const metadata: Metadata = {
+  title: "Confirm your email — We Glue",
+};
 
-export default async function AuthConfirmPage({ searchParams }: PageProps): Promise<JSX.Element> {
-  const { token_hash, type, code, flow } = searchParams;
-  // Our own marker (set on the emailRedirectTo we pass to updateUser/resend),
-  // not Supabase's `type` — reliable across every delivery path (token_hash+
-  // type, PKCE code with no type at all, and fragment-based implicit tokens).
-  const isEmailChange = flow === "email_change";
-
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          } catch {}
-        },
-      },
-    }
-  );
-
-  let success = false;
-
-  try {
-    if (token_hash && type) {
-      const { error } = await supabase.auth.verifyOtp({
-        token_hash,
-        type: type as "signup" | "email",
-      });
-      if (!error) success = true;
-    } else if (code) {
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (!error) success = true;
-    }
-  } catch {}
-
-  // The session established above exists only to consume the verification
-  // token (that exchange is what marks email_confirmed_at server-side).
-  // It must never itself log the user in — sign it back out immediately so
-  // they land here signed OUT and choose to Log In themselves, exactly like
-  // the native app's confirmed.tsx already does.
-  if (success) {
-    try {
-      await supabase.auth.signOut();
-    } catch {}
-  }
-
+// Thin server shell. All verification happens client-side in FragmentConfirm
+// (see the note there) so an email scanner's plain GET can never consume the
+// one-time confirmation token before the person taps the link.
+export default function AuthConfirmPage(): JSX.Element {
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Zain:wght@700&display=swap');
         .font-zain { font-family: 'Zain', serif; }
       `}</style>
-
-      {/*
-        Default-mailer confirmation flow: tokens arrive in the URL fragment
-        which the server cannot read. This client component reads them in the
-        browser and overlays the success screen. Renders null when absent.
-      */}
-      <FragmentConfirm isEmailChange={isEmailChange} />
-
-      <main className="min-h-screen bg-[#FEFCF0] flex items-center justify-center px-6">
-        <div className="max-w-[400px] mx-auto text-center">
-          <Image
-            src="/logo.png"
-            alt="We Glue"
-            width={100}
-            height={90}
-            className="mb-6 mx-auto"
-            priority
-          />
-
-          {success ? (
-            <>
-              <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
-                Your email has been confirmed
-              </h1>
-              <p className="text-sm text-gray-400 mb-8">
-                Connection starts with you
-              </p>
-
-              <div className="w-20 h-20 rounded-full border-2 border-[#0FA6A6] flex items-center justify-center mx-auto mb-8">
-                <svg
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#0FA6A6"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </div>
-
-              {isEmailChange ? (
-                <p className="text-sm text-gray-600 leading-relaxed">
-                  You can go back to We Glue now.
-                </p>
-              ) : (
-                <>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    You can go back to We Glue now and click{" "}
-                    <span className="text-[#0FA6A6] font-semibold">Login</span>.
-                  </p>
-
-                  {/* Only appears when this browser started a WEB signup. */}
-                  <WebContinue />
-                </>
-              )}
-            </>
-          ) : isEmailChange ? (
-            <>
-              <div className="w-20 h-20 rounded-full border-2 border-[#F02719] bg-red-50 flex items-center justify-center mx-auto mb-6">
-                <svg
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#F02719"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </div>
-
-              <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
-                Confirmation link expired
-              </h1>
-              <p className="text-sm text-gray-400 mb-6">
-                Please request a new confirmation email
-              </p>
-
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Go back to We Glue and try changing your email again from
-                Account Center.
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="w-20 h-20 rounded-full border-2 border-[#F02719] bg-red-50 flex items-center justify-center mx-auto mb-6">
-                <svg
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#F02719"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </div>
-
-              <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
-                Confirmation link expired
-              </h1>
-              <p className="text-sm text-gray-400 mb-6">
-                Please request a new confirmation email
-              </p>
-
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Return to We Glue and tap{" "}
-                <span className="font-semibold">&ldquo;Resend email&rdquo;</span>{" "}
-                to get a new link.
-              </p>
-
-              <a
-                href="weglue://auth/confirm-email"
-                className="inline-flex items-center justify-center h-[48px] px-8 mt-6 rounded-full font-semibold text-base text-white"
-                style={{
-                  backgroundColor: "#0FA6A6",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
-                }}
-              >
-                Open We Glue
-              </a>
-
-              <p className="text-xs text-gray-400 leading-relaxed mt-4">
-                Already tapped a link before? Your email may be verified
-                already — go back to We Glue and click{" "}
-                <span className="font-semibold">Login</span>.
-              </p>
-            </>
-          )}
-        </div>
-      </main>
+      <Suspense
+        fallback={
+          <main className="min-h-screen bg-[#FEFCF0] flex items-center justify-center">
+            <div
+              className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
+              style={{ borderColor: "#0FA6A6", borderTopColor: "transparent" }}
+            />
+          </main>
+        }
+      >
+        <FragmentConfirm />
+      </Suspense>
     </>
   );
 }

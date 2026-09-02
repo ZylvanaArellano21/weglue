@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import ResetPasswordClient from "./ResetPasswordClient";
 
 export const metadata: Metadata = {
@@ -11,58 +9,28 @@ interface PageProps {
   searchParams: { token_hash?: string; type?: string; code?: string };
 }
 
-// The reset-password link mails a token in one of three shapes depending on
-// how GoTrue's hosted /verify redirect resolves it: a PKCE `code`, a
-// `token_hash` (+ `type`), or — only when neither query param is present —
-// tokens in the URL fragment, which the server can never read (handled by
-// ResetPasswordClient). This mirrors exactly what /auth/confirm/page.tsx
-// already does successfully for signup verification; reset-password
-// previously only had client-side fragment/token_hash handling and NEVER
-// handled `code` at all, so a PKCE link failed every single time before a
-// human ever saw whether the token itself was valid.
-export default async function ResetPasswordPage({
+// A recovery link must be verified in the PERSON'S OWN BROWSER, on their real
+// visit — never here in the server component.
+//
+// This page used to call verifyOtp() / exchangeCodeForSession() on every GET.
+// A recovery token is single-use, and a GET to this URL is not always a human:
+// corporate mail scanners, link-preview crawlers and the mail client's own
+// prefetch all fetch the link first. That server-side fetch burned the token,
+// so by the time the person tapped it GoTrue reported "expired" — a freshly
+// issued link that had never been used by anyone.
+//
+// The server now only forwards the params. ResetPasswordClient consumes them
+// exactly once, client-side, where a scanner's plain GET (which runs no JS)
+// can never reach them.
+export default function ResetPasswordPage({
   searchParams,
-}: PageProps): Promise<JSX.Element> {
+}: PageProps): JSX.Element {
   const { token_hash, type, code } = searchParams;
-
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          } catch {}
-        },
-      },
-    }
+  return (
+    <ResetPasswordClient
+      tokenHash={token_hash ?? null}
+      linkType={type ?? null}
+      code={code ?? null}
+    />
   );
-
-  // True only when this request itself established a recovery session
-  // (a fresh cookie was just set). ResetPasswordClient still confirms via
-  // getSession() client-side before showing the form — this only tells it
-  // whether to also try the legacy fragment path.
-  let serverExchanged = false;
-
-  try {
-    if (token_hash && type) {
-      const { error } = await supabase.auth.verifyOtp({
-        token_hash,
-        type: type as "recovery" | "email",
-      });
-      if (!error) serverExchanged = true;
-    } else if (code) {
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (!error) serverExchanged = true;
-    }
-  } catch {}
-
-  return <ResetPasswordClient serverExchanged={serverExchanged} />;
 }
