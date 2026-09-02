@@ -112,7 +112,7 @@ export default function FragmentConfirm(): JSX.Element {
             className="mb-6 mx-auto"
             priority
           />
-          <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2" style={{ fontFamily: "Zain, serif" }}>
             {isEmailChange ? "Confirm your new email" : "Confirm your email"}
           </h1>
           <p className="text-sm text-gray-400 mb-8">Connection starts with you</p>
@@ -149,7 +149,7 @@ export default function FragmentConfirm(): JSX.Element {
 
         {state === "confirmed" ? (
           <>
-            <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2" style={{ fontFamily: "Zain, serif" }}>
               Your email has been confirmed
             </h1>
             <p className="text-sm text-gray-400 mb-8">Connection starts with you</p>
@@ -203,7 +203,7 @@ export default function FragmentConfirm(): JSX.Element {
               </svg>
             </div>
 
-            <h1 className="font-zain text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2" style={{ fontFamily: "Zain, serif" }}>
               Confirmation link expired
             </h1>
             <p className="text-sm text-gray-400 mb-6">
