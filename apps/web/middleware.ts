@@ -7,6 +7,7 @@ import {
   type AuthMethodEntry,
 } from "./lib/admin/adminEnv";
 import { platformAdminRedirectPath } from "./lib/auth/platformAdminGuard";
+import { storeTargetFromUserAgent, storeUrlFor } from "./lib/deviceRouting";
 import {
   restrictionRedirectPath,
   shouldLeaveRestrictedShell,
@@ -67,6 +68,22 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api/") ||
     /\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map)$/.test(pathname)
   ) {
+    return NextResponse.next({ request });
+  }
+
+  // -- We Glue smart download routing --------------------------------------
+  // `/download` is the single permanent QR destination. Resolve the obvious
+  // phone cases from the User-Agent here - instant, no page flash, no JS - and
+  // let everything a header cannot decide (desktop, crawlers, and modern
+  // iPadOS Safari's "Macintosh" UA) fall through to the page, which refines
+  // the call client-side via navigator.maxTouchPoints. Runs before getUser()
+  // so a QR scan costs no auth round-trip. Store URLs are external, so this
+  // can never loop.
+  if (pathname === "/download" || pathname === "/download/") {
+    const store = storeTargetFromUserAgent(request.headers.get("user-agent"));
+    if (store) {
+      return NextResponse.redirect(storeUrlFor(store));
+    }
     return NextResponse.next({ request });
   }
 
