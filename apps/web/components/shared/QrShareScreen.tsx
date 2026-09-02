@@ -18,7 +18,10 @@ const CREAM = "#FEFCF0";
 const TEAL = "#0FA6A6";
 const INK = "#1A1A1A";
 
-const PHONE_MAX_WIDTH = 640;
+// Matches the `md:hidden` breakpoint (Tailwind `md` = 768px) used for the
+// phone-only banner controls, so the Share button and this screen appear and
+// disappear together.
+const PHONE_MAX_WIDTH = 767;
 
 /**
  * True at phone width. The full-screen QR share screen is a phones-only
