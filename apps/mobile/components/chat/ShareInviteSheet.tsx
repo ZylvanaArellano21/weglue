@@ -121,10 +121,12 @@ export function ShareInviteSheet({
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const shareLabelName = qrSubtitle ? `${qrTitle} ${qrSubtitle}` : qrTitle;
+
   async function nativeShare() {
     if (!link) return;
     try {
-      await Share.share({ message: `Join ${chatTitle} on We Glue: ${link}` });
+      await Share.share({ message: `Join ${shareLabelName} on We Glue: ${link}` });
     } catch {
       // dismissed
     }
@@ -190,7 +192,7 @@ export function ShareInviteSheet({
           subtitle={qrSubtitle}
           url={link}
           shareLabel="Share group chat"
-          shareMessage={`Join ${qrTitle}${qrSubtitle ? ` ${qrSubtitle}` : ''} on We Glue:`}
+          shareMessage={`Join ${shareLabelName} on We Glue:`}
           fileName={`weglue-${qrTitle.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-chat-qr`}
         />
       )}
