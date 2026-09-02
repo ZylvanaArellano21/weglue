@@ -10,7 +10,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  initialWindowMetrics,
+} from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import * as MediaLibrary from 'expo-media-library';
@@ -181,55 +185,71 @@ export function QrShareScreen({
       animationType="slide"
       onRequestClose={onClose}
       presentationStyle="fullScreen"
+      statusBarTranslucent
     >
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <View style={styles.topBar}>
-          <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeBtn} activeOpacity={0.7}>
-            <Ionicons name="close" size={26} color={INK} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.body}>
-          {/* Everything inside this card is what Download captures — identity +
-              QR on cream, no action buttons. collapsable=false keeps the view
-              in the native tree for react-native-view-shot on Android. */}
-          <View ref={cardRef} collapsable={false} style={styles.card}>
-            <Image
-              source={require('../../assets/logo.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-            <Text style={styles.title} numberOfLines={2}>
-              {title}
-            </Text>
-            {subtitle ? (
-              <Text style={styles.subtitle} numberOfLines={1}>
-                {subtitle}
-              </Text>
-            ) : null}
-            <View style={styles.qrWrap}>
-              <QrMatrix value={url} size={232} />
-            </View>
-            <Text style={styles.brand}>We Glue</Text>
+      {/* A React Native <Modal> is its own window and is NOT a child of the
+          app's SafeAreaProvider, so a plain SafeAreaView inside it reads zero
+          insets and the close button ends up under the notch / status bar.
+          Its own provider fixes the top + bottom insets on every device. */}
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeBtn} activeOpacity={0.7}>
+              <Ionicons name="close" size={26} color={INK} />
+            </TouchableOpacity>
           </View>
-        </View>
 
-        <View style={styles.actions}>
-          <ActionButton
-            icon={copied ? 'checkmark' : 'link-outline'}
-            label={copied ? 'Copied' : 'Copy link'}
-            onPress={copyLink}
-          />
-          <ActionButton icon="share-outline" label={shareLabel} onPress={share} />
-          <ActionButton
-            icon="download-outline"
-            label={saving ? 'Saving…' : 'Download'}
-            onPress={download}
-            busy={saving}
-          />
-        </View>
-        <Text style={styles.savedNote}>{savedNote ?? ' '}</Text>
-      </SafeAreaView>
+          <View style={styles.body}>
+            {/* Everything inside this card is what Download captures — identity
+                + QR on cream, no action buttons. collapsable=false keeps the
+                view in the native tree for react-native-view-shot on Android.
+                A QR is for scanning, not tapping — but tapping copies the link
+                so the gesture is never a dead end. */}
+            <TouchableOpacity activeOpacity={0.9} onPress={copyLink}>
+              <View ref={cardRef} collapsable={false} style={styles.card}>
+                <Image
+                  source={require('../../assets/logo.png')}
+                  style={styles.logo}
+                  resizeMode="contain"
+                />
+                <Text style={styles.title} numberOfLines={2}>
+                  {title}
+                </Text>
+                {subtitle ? (
+                  <Text style={styles.subtitle} numberOfLines={1}>
+                    {subtitle}
+                  </Text>
+                ) : null}
+                <View style={styles.qrWrap}>
+                  <QrMatrix value={url} size={232} />
+                </View>
+                <Text style={styles.brand}>We Glue</Text>
+              </View>
+            </TouchableOpacity>
+            <Text style={styles.scanHint}>
+              {copied
+                ? 'Link copied'
+                : `Scan this code to open ${subtitle ? `${title} ${subtitle}` : title}`}
+            </Text>
+          </View>
+
+          <View style={styles.actions}>
+            <ActionButton
+              icon={copied ? 'checkmark' : 'link-outline'}
+              label={copied ? 'Copied' : 'Copy link'}
+              onPress={copyLink}
+            />
+            <ActionButton icon="share-outline" label={shareLabel} onPress={share} />
+            <ActionButton
+              icon="download-outline"
+              label={saving ? 'Saving…' : 'Download'}
+              onPress={download}
+              busy={saving}
+            />
+          </View>
+          <Text style={styles.savedNote}>{savedNote ?? ' '}</Text>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -294,6 +314,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Zain_700Bold',
     fontSize: 16,
     color: TEAL,
+    marginTop: 16,
+  },
+  scanHint: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: MUTED,
+    textAlign: 'center',
     marginTop: 16,
   },
   actions: {

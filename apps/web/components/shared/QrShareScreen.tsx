@@ -222,10 +222,20 @@ export function QrShareScreen({
         </button>
       </div>
 
-      <div className="flex-1 flex items-center justify-center px-6">
+      <div className="flex-1 flex flex-col items-center justify-center px-6">
         <div
-          className="w-full flex flex-col items-center rounded-[28px] bg-white px-7 pt-7 pb-6 shadow-xl"
+          role="button"
+          tabIndex={0}
+          onClick={() => void copyLink()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              void copyLink();
+            }
+          }}
+          className="w-full flex flex-col items-center rounded-[28px] bg-white px-7 pt-7 pb-6 shadow-xl cursor-pointer"
           style={{ maxWidth: 340 }}
+          aria-label={`Copy link to ${subtitle ? `${title} ${subtitle}` : title}`}
         >
           <Image src="/logo.png" alt="We Glue" width={48} height={44} priority />
           <p
@@ -271,6 +281,11 @@ export function QrShareScreen({
             We Glue
           </p>
         </div>
+        <p className="mt-4 text-center text-[13px] text-[#5F5D5D]">
+          {copied
+            ? "Link copied"
+            : `Scan this code to open ${subtitle ? `${title} ${subtitle}` : title}`}
+        </p>
       </div>
 
       <div className="flex items-start justify-center gap-3 px-6 pb-2">
