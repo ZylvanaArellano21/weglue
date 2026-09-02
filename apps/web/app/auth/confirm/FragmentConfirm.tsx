@@ -41,7 +41,19 @@ export default function FragmentConfirm(): JSX.Element {
     let cancelled = false;
 
     async function run() {
-      let ok = false;
+      const hadSessionBefore = !!(await supabase.auth.getSession()).data.session;
+
+      const hasFragment =
+        typeof window !== "undefined" &&
+        /(?:^|[#&])access_token=/.test(window.location.hash);
+      const hasCredential = Boolean(tokenHash || code || hasFragment);
+
+      // Did THIS visit consume a verification credential? Only then is the
+      // session a throwaway confirm session we should sign back out — never
+      // sign the person out just because they were already logged in on this
+      // browser and happened to open a stale link (the classic logout trap
+      // the native app guards against too).
+      let consumedHere = false;
 
       if (tokenHash) {
         const otpType = (linkType ??
@@ -54,41 +66,42 @@ export default function FragmentConfirm(): JSX.Element {
           token_hash: tokenHash,
           type: otpType,
         });
-        if (!error) ok = true;
+        if (!error) consumedHere = true;
       }
 
-      const hasFragment =
-        typeof window !== "undefined" &&
-        /(?:^|[#&])access_token=/.test(window.location.hash);
-
-      if (!ok && (code || hasFragment)) {
+      if (!consumedHere && (code || hasFragment) && !hadSessionBefore) {
         for (let i = 0; i < 16 && !cancelled; i++) {
           const { data } = await supabase.auth.getSession();
           if (data.session) {
-            ok = true;
+            consumedHere = true;
             break;
           }
           await new Promise((r) => setTimeout(r, 250));
         }
       }
 
-      if (!ok && !cancelled) {
-        // The person may have already verified from an earlier tap of the
-        // same link — an existing session still means "you're confirmed".
-        const { data } = await supabase.auth.getSession();
-        ok = !!data.session;
-      }
-
       if (cancelled) return;
 
-      if (ok) {
-        // A signup-confirmation session exists ONLY to mark the email
+      const hasSessionNow = !!(await supabase.auth.getSession()).data.session;
+      if (cancelled) return;
+
+      // Confirmed if this visit consumed the token, or the person already has
+      // a session (a session requires a confirmed email, so they're verified).
+      const confirmed = consumedHere || hasSessionNow;
+      // Nothing to verify and no session — the link was malformed/stripped.
+      if (!confirmed && !hasCredential) {
+        setState("expired");
+        return;
+      }
+
+      if (confirmed) {
+        // The throwaway confirm session exists ONLY to mark the email
         // confirmed server-side — sign it back out so the person lands here
         // signed OUT and logs in themselves (matches the native app's
-        // confirmed.tsx and its notification-permission gating). An
-        // email-change confirmation is meant to apply to the already
-        // signed-in user, so that session is left alone.
-        if (!isEmailChange) {
+        // confirmed.tsx and its notification-permission gating). Do NOT sign
+        // out a pre-existing session, and never for an email-change (meant to
+        // apply to the signed-in user).
+        if (consumedHere && !hadSessionBefore && !isEmailChange) {
           try {
             await supabase.auth.signOut();
           } catch {}

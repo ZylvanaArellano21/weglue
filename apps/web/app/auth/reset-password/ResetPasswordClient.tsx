@@ -61,7 +61,20 @@ export default function ResetPasswordClient({
     const supabase = getSupabaseBrowser();
     let cancelled = false;
 
+    const hasFragmentToken =
+      typeof window !== "undefined" &&
+      /(?:^|[#&])access_token=/.test(window.location.hash);
+    // Nothing to work with — the link was malformed, or a proxy stripped the
+    // token. Straight to the self-serve resend; never let a pre-existing
+    // unrelated session on this browser stand in for a recovery link.
+    const hasCredential = Boolean(tokenHash || code || hasFragmentToken);
+
     async function resolve() {
+      if (!hasCredential) {
+        setView("expired");
+        return;
+      }
+
       // 1. token_hash link (?token_hash=…&type=recovery). detectSessionInUrl
       //    does NOT touch token_hash, so we verify it explicitly — and only
       //    now, in the real browser, on the real visit.
@@ -75,27 +88,22 @@ export default function ResetPasswordClient({
           setView("form");
           return;
         }
-        // A used/expired token, or the token was already spent by this same
-        // person opening the link twice — fall through to the session check.
+        // A used/expired token, or one this same person already spent by
+        // opening the link twice — fall through to the session check: a live
+        // recovery session from the first open still means "let them in".
       }
 
       // 2. ?code= (PKCE) or #access_token=… (implicit, e.g. after GoTrue's
       //    /verify redirect). The browser client consumes either automatically
       //    via detectSessionInUrl; that is async on init, so poll briefly for
-      //    the resulting session / PASSWORD_RECOVERY state.
-      const hasFragmentToken =
-        typeof window !== "undefined" &&
-        /(?:^|[#&])access_token=/.test(window.location.hash);
-
-      if (code || hasFragmentToken || tokenHash) {
-        for (let i = 0; i < 16 && !cancelled; i++) {
-          const { data } = await supabase.auth.getSession();
-          if (data.session) {
-            setView("form");
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 250));
+      //    the resulting session.
+      for (let i = 0; i < 16 && !cancelled; i++) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          setView("form");
+          return;
         }
+        await new Promise((r) => setTimeout(r, 250));
       }
 
       if (cancelled) return;
@@ -103,16 +111,13 @@ export default function ResetPasswordClient({
       setView(data.session ? "form" : "expired");
     }
 
-    // PASSWORD_RECOVERY / SIGNED_IN fires when detectSessionInUrl finishes —
-    // catch it directly instead of only relying on the poll above.
+    // PASSWORD_RECOVERY fires when detectSessionInUrl finishes consuming a
+    // code / fragment — the specific recovery signal, caught directly instead
+    // of only relying on the poll above.
     const { data: sub } = supabase.auth.onAuthStateChange(
       (event: AuthChangeEvent, session: Session | null) => {
-        if (cancelled || !session) return;
-        if (
-          event === "PASSWORD_RECOVERY" ||
-          event === "SIGNED_IN" ||
-          event === "INITIAL_SESSION"
-        ) {
+        if (cancelled || !session || !hasCredential) return;
+        if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
           setView("form");
         }
       }
