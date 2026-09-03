@@ -26,6 +26,7 @@ import { Avatar } from '../../components/shared/Avatar';
 import { Skeleton } from '../../components/shared/SkeletonLoader';
 import { openReportFlow } from '../../components/shared/ReportButton';
 import { InterestsLine } from '../../components/profile/InterestsLine';
+import { OfficerClubTags } from '../../components/profile/OfficerClubTags';
 import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { useToast } from '../../components/Toast';
 import type { UserWeeklyEvent } from '../../services/followService';
@@ -399,43 +400,13 @@ export default function UserProfileScreen() {
               Hidden interests come back empty from RLS, so nothing renders. */}
           <InterestsLine interests={profile.interests} />
 
-          {/* Club Roles */}
-          {profile.club_roles.length > 0 && (
-            <View style={{ marginBottom: 16 }}>
-              {profile.club_roles.map((role) => (
-                <TouchableOpacity
-                  key={role.club_id}
-                  onPress={() => {
-                    // Guard: never route to a missing/deleted club id.
-                    if (!role.club_id) return;
-                    router.push({ pathname: '/club/[clubId]', params: { clubId: role.club_id } });
-                  }}
-                  activeOpacity={0.7}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: '#0FA6A6',
-                      fontWeight: '600',
-                      fontFamily: 'Inter_600SemiBold',
-                    }}
-                  >
-                    @{role.club_name}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: '#9CA3AF',
-                      fontFamily: 'Inter_400Regular',
-                    }}
-                  >
-                    {role.role_title}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          {/* Club Roles — up to 3, then "+N more" expands the card in place */}
+          <OfficerClubTags
+            roles={profile.club_roles}
+            onOpenClub={(clubId) =>
+              router.push({ pathname: '/club/[clubId]', params: { clubId } })
+            }
+          />
 
           {/* Action Buttons — only shown when not own profile */}
           {!isOwnProfile && (

@@ -8,6 +8,7 @@ import { CloseIcon, BookmarkIcon, HeartIcon } from "../shared/icons";
 import { useOwnProfile, useOwnClubs } from "../../lib/hooks/useOwnProfile";
 import { useSavedEventsCount } from "../../lib/hooks/useSavedEvents";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
+import { OfficerClubTags } from "../profile/OfficerClubTags";
 import { useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import {
   usePicturePromptState,
@@ -27,9 +28,9 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
   const { mutate: dismissPrompt } = useDismissPicturePrompt(userId);
 
   const notifications = summary?.unread_notifications ?? 0;
-  const handles = (clubs ?? [])
-    .filter((c) => c.role === "officer" && !!c.club_handle)
-    .slice(0, 3);
+  const officerClubs = (clubs ?? []).filter(
+    (c) => c.role === "officer" && !!c.club_handle,
+  );
 
   // New accounts only, and only until they act on it (mirrors mobile exactly).
   const showPicturePrompt =
@@ -57,19 +58,21 @@ export function ProfileSidebar({ userId }: { userId: string }): JSX.Element {
             <p className="text-sm italic text-gray-500">{profile.major}</p>
           )}
         </button>
-        {handles.length > 0 && (
-          <div className="mt-1 text-sm font-medium" style={{ color: "#0FA6A6" }}>
-            {handles.map((club) => (
+        {officerClubs.length > 0 && (
+          <OfficerClubTags
+            items={officerClubs}
+            itemKey={(club) => club.club_id}
+            className="mt-1 text-sm font-medium text-teal"
+            renderItem={(club) => (
               <ClickableClubIdentity
-                key={club.club_id}
                 clubId={club.club_id}
                 ariaLabel={`Open ${club.club_name}`}
-                className="block w-fit cursor-pointer"
+                className="cursor-pointer hover:underline"
               >
                 @{club.club_handle}
               </ClickableClubIdentity>
-            ))}
-          </div>
+            )}
+          />
         )}
 
         {showPicturePrompt && (
