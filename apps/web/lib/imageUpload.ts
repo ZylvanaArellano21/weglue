@@ -7,6 +7,25 @@ import { getSupabaseBrowser } from "./supabase-browser";
 // Storage bucket + path convention mobile uses, and cache-busts the fixed-path
 // URL so the new avatar shows immediately everywhere (React Query keys by URL).
 
+/**
+ * Intrinsic pixel dimensions of an image blob. A proportional downscale keeps
+ * the same aspect ratio, so the source dimensions are all a caller needs to
+ * store for "show this image at its natural aspect" (migration 117).
+ */
+export async function imageDimensions(file: Blob): Promise<{ width: number; height: number }> {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = () => reject(new Error("Could not read the image"));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 // Accepts a Blob, not just a File, so a camera capture (canvas.toBlob) goes
 // through the exact same downscale + upload path as a picked file.
 export async function resizeToJpeg(file: Blob, maxDimension: number): Promise<Blob> {

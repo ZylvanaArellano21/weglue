@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { clampPostImageRatio, POST_IMAGE_FALLBACK_RATIO } from '@weglue/shared';
 import { getResizedImageUrl } from '../../lib/imageResize';
 
 /**
@@ -37,14 +38,28 @@ export function CarouselBadge({ size = 16 }: { size?: number }) {
 
 export interface CarouselImage {
   uri: string;
+  /** Intrinsic pixel size, when known — lets a single image render at its
+   *  natural aspect with zero layout shift. */
+  width?: number | null;
+  height?: number | null;
 }
 
 interface PhotoCarouselProps {
   images: CarouselImage[];
   /** Width of the viewport the carousel lives in (usually the card content width). */
   width: number;
-  /** height / width of each photo. Posts use 4/5, events 3/2. Default 4/5. */
+  /**
+   * width / height of each photo. Posts/events pass a fixed value (4/5, 3/2).
+   * Ignored for a SINGLE image when `naturalSingle` is set. Default 4/5.
+   */
   aspectRatio?: number;
+  /**
+   * Single-image posts only: render the lone image at its natural aspect
+   * (clamped to the feed-safe range) instead of the fixed `aspectRatio`, so a
+   * portrait stays portrait and a landscape stays landscape and nothing is
+   * arbitrarily cropped. A multi-image carousel always uses one shared ratio.
+   */
+  naturalSingle?: boolean;
   /** Open the full-screen viewer on this index. */
   onImagePress?: (index: number) => void;
   /** Rounded corners on each photo. Default true. */
@@ -57,6 +72,33 @@ const GAP = 8;
 /** Fraction of the viewport the next photo peeks in from the right. */
 const PEEK_RATIO = 0.13;
 const RADIUS = 16;
+
+/** Resolves the display ratio (w/h) for a lone image: its known dimensions,
+ *  else a measured size, else the stable fallback box — all clamped. */
+function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number {
+  const known =
+    image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
+  const [measured, setMeasured] = useState<number | null>(null);
+
+  useEffect(() => {
+    setMeasured(null);
+    if (!enabled || known || !image?.uri) return;
+    let alive = true;
+    Image.getSize(
+      image.uri,
+      (w, h) => {
+        if (alive && w > 0 && h > 0) setMeasured(w / h);
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [enabled, known, image?.uri]);
+
+  if (!enabled) return NaN; // caller falls back to the fixed aspectRatio
+  return clampPostImageRatio(known ?? measured ?? POST_IMAGE_FALLBACK_RATIO);
+}
 
 /**
  * We Glue photo carousel.
@@ -72,6 +114,7 @@ export const PhotoCarousel = memo(function PhotoCarousel({
   images,
   width,
   aspectRatio = 4 / 5,
+  naturalSingle = false,
   onImagePress,
   rounded = true,
   style,
@@ -79,9 +122,12 @@ export const PhotoCarousel = memo(function PhotoCarousel({
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
 
-  const height = Math.round(width / aspectRatio);
   const count = images.length;
   const multi = count > 1;
+
+  const singleRatio = useSingleImageRatio(images[0], naturalSingle && count === 1);
+  const effectiveRatio = !multi && Number.isFinite(singleRatio) ? singleRatio : aspectRatio;
+  const height = Math.round(width / effectiveRatio);
 
   // Each slide leaves room for the next photo to peek in from the right.
   const slideWidth = multi ? Math.round(width * (1 - PEEK_RATIO)) : width;
@@ -95,12 +141,22 @@ export const PhotoCarousel = memo(function PhotoCarousel({
   };
 
   const renderPhoto = (img: CarouselImage, i: number) => {
-    const resized = getResizedImageUrl(img.uri, slideWidth * 2, height * 2) ?? img.uri;
+    // A lone natural-aspect image is shown whole (contain-fit): the box already
+    // IS its ratio, so there is nothing to crop. Every other case keeps the
+    // cover crop into the shared box.
+    const wholeImage = !multi && naturalSingle && Number.isFinite(singleRatio);
+    const resized =
+      getResizedImageUrl(
+        img.uri,
+        slideWidth * 2,
+        height * 2,
+        wholeImage ? 'contain' : 'cover',
+      ) ?? img.uri;
     const photo = (
       <Image
         source={{ uri: resized }}
         style={{ width: '100%', height: '100%', borderRadius: radius }}
-        resizeMode="cover"
+        resizeMode={wholeImage ? 'contain' : 'cover'}
         fadeDuration={0}
       />
     );

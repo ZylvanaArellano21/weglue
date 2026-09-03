@@ -1,11 +1,10 @@
-import { View, Text, Image, TouchableOpacity, Dimensions, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Dimensions, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
 import { PhotoCarousel } from '../shared/PhotoCarousel';
 import { timeAgo } from '../home/PostCard';
-import { getResizedImageUrl } from '../../lib/imageResize';
 import { openReportFlow } from '../shared/ReportButton';
 import { openProfile } from '../../lib/profileNavigation';
 import { profileColors, profileFonts } from '../profile/profileTheme';
@@ -38,11 +37,12 @@ export function PostViewerBlock({
   const router = useRouter();
 
   const isOwnPost = post.author.id === viewerUserId;
-  const images = post.images && post.images.length > 0
-    ? post.images
-    : post.image_url
-      ? [{ path: post.image_url, position: 0 }]
-      : [];
+  const images: Array<{ path: string; width?: number | null; height?: number | null }> =
+    post.images && post.images.length > 0
+      ? post.images
+      : post.image_url
+        ? [{ path: post.image_url }]
+        : [];
 
   const pressAuthor = () => {
     if (post.author_kind === 'club') {
@@ -147,23 +147,18 @@ export function PostViewerBlock({
         )}
       </View>
 
-      {/* Media — one image, or a swipeable carousel for up to 5 */}
-      {images.length > 1 ? (
+      {/* Media. A single image keeps its natural aspect; a carousel of up to 5
+          uses one shared ratio so its height never jumps while swiping. */}
+      {images.length > 0 ? (
         <PhotoCarousel
-          images={images.map((img) => ({ uri: img.path }))}
+          images={images.map((img) => ({
+            uri: img.path,
+            width: img.width ?? null,
+            height: img.height ?? null,
+          }))}
           width={SCREEN_WIDTH}
           aspectRatio={4 / 5}
-        />
-      ) : images.length === 1 ? (
-        <Image
-          source={{
-            uri:
-              getResizedImageUrl(images[0]!.path, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ??
-              undefined,
-          }}
-          style={styles.media}
-          resizeMode="cover"
-          fadeDuration={0}
+          naturalSingle
         />
       ) : null}
 
@@ -218,11 +213,6 @@ export function PostViewerBlock({
 
 const styles = StyleSheet.create({
   postBlock: { marginBottom: 18 },
-  media: {
-    width: '100%',
-    aspectRatio: 4 / 5,
-    backgroundColor: profileColors.border,
-  },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -182,11 +182,21 @@ function PostCard({
         )}
       </div>
 
-      {post.images && post.images.length > 1 ? (
-        <PhotoCarousel images={post.images.map((im) => ({ uri: im.path }))} aspectRatio={4 / 5} />
+      {post.images && post.images.length > 0 ? (
+        // A single image keeps its natural aspect (portrait stays portrait,
+        // landscape stays landscape); a carousel of up to 5 uses one shared
+        // ratio so its height never jumps while swiping.
+        <PhotoCarousel
+          images={post.images.map((im) => ({
+            uri: im.path,
+            width: im.width ?? null,
+            height: im.height ?? null,
+          }))}
+          aspectRatio={4 / 5}
+          naturalSingle
+        />
       ) : post.image_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={post.image_url} alt={post.caption ?? "post"} className="w-full object-cover" />
+        <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalSingle />
       ) : (
         <div
           className="flex aspect-square w-full items-center justify-center"

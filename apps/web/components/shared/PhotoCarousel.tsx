@@ -1,15 +1,30 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { clampPostImageRatio, POST_IMAGE_FALLBACK_RATIO } from "@weglue/shared";
 
 export interface CarouselImage {
   uri: string;
+  /** Intrinsic pixel size, when known — lets a single image render at its
+   *  natural aspect with zero layout shift. */
+  width?: number | null;
+  height?: number | null;
 }
 
 interface PhotoCarouselProps {
   images: CarouselImage[];
-  /** height / width of each photo. Posts use 4/5, events 3/2. Default 4/5. */
+  /**
+   * width / height of each photo. Posts/events pass a fixed value (4/5, 3/2).
+   * Ignored for a SINGLE image when `naturalSingle` is set. Default 4/5.
+   */
   aspectRatio?: number;
+  /**
+   * Single-image posts only: render the lone image at its natural aspect
+   * (clamped to the feed-safe range) instead of the fixed `aspectRatio`, so a
+   * portrait stays portrait and a landscape stays landscape and nothing is
+   * arbitrarily cropped. A multi-image carousel always uses one shared ratio.
+   */
+  naturalSingle?: boolean;
   onImageClick?: (index: number) => void;
   rounded?: boolean;
   className?: string;
@@ -17,6 +32,34 @@ interface PhotoCarouselProps {
 
 const PEEK = "13%";
 const GAP = 8;
+
+/** Resolves the display ratio (w/h) for a lone image: its known dimensions,
+ *  else a measured size, else the stable fallback — all clamped. */
+function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number | null {
+  const known =
+    image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
+  const [measured, setMeasured] = useState<number | null>(null);
+
+  useEffect(() => {
+    setMeasured(null);
+    if (!enabled || known || !image?.uri || typeof window === "undefined") return;
+    let alive = true;
+    const probe = new window.Image();
+    probe.onload = () => {
+      if (alive && probe.naturalWidth > 0 && probe.naturalHeight > 0) {
+        setMeasured(probe.naturalWidth / probe.naturalHeight);
+      }
+    };
+    probe.src = image.uri;
+    return () => {
+      alive = false;
+      probe.onload = null;
+    };
+  }, [enabled, known, image?.uri]);
+
+  if (!enabled) return null; // caller falls back to the fixed aspectRatio
+  return clampPostImageRatio(known ?? measured ?? POST_IMAGE_FALLBACK_RATIO);
+}
 
 /**
  * We Glue photo carousel (web).
@@ -30,6 +73,7 @@ const GAP = 8;
 export function PhotoCarousel({
   images,
   aspectRatio = 4 / 5,
+  naturalSingle = false,
   onImageClick,
   rounded = true,
   className = "",
@@ -40,7 +84,13 @@ export function PhotoCarousel({
   const count = images.length;
   const multi = count > 1;
   const radius = rounded ? "rounded-2xl" : "";
-  const paddingTop = `${(1 / aspectRatio) * 100}%`;
+
+  const singleRatio = useSingleImageRatio(images[0], naturalSingle && count === 1);
+  const effectiveRatio = !multi && singleRatio ? singleRatio : aspectRatio;
+  const paddingTop = `${(1 / effectiveRatio) * 100}%`;
+  // A lone natural-aspect image is shown whole (contain-fit): the box already
+  // IS its ratio, so there is nothing to crop.
+  const fit = !multi && naturalSingle && singleRatio ? "bg-contain bg-no-repeat" : "bg-cover";
 
   const onScroll = () => {
     const el = trackRef.current;
@@ -53,7 +103,7 @@ export function PhotoCarousel({
   const Photo = ({ img, i }: { img: CarouselImage; i: number }) => {
     const inner = (
       <span
-        className={`block h-full w-full bg-gray-200 bg-cover bg-center ${radius}`}
+        className={`block h-full w-full bg-center bg-gray-200 ${fit} ${radius}`}
         style={{ backgroundImage: `url(${img.uri})` }}
         role="img"
         aria-label={`Photo ${i + 1} of ${count}`}

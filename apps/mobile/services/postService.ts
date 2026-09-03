@@ -617,13 +617,15 @@ export async function addComment(
   throw error;
 }
 
-async function compressImage(uri: string): Promise<string> {
+async function compressImage(
+  uri: string,
+): Promise<{ uri: string; width: number; height: number }> {
   const result = await ImageManipulator.manipulateAsync(
     uri,
     [{ resize: { width: 1080 } }],
     { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
   );
-  return result.uri;
+  return { uri: result.uri, width: result.width, height: result.height };
 }
 
 export async function createPost(
@@ -642,10 +644,10 @@ export async function createPost(
     throw new Error('Posts must contain between 1 and 5 images');
   }
 
-  const publicUrls = await Promise.all(imageUris.map(async (uri, position) => {
-    const compressedUri = await compressImage(uri);
+  const uploaded = await Promise.all(imageUris.map(async (uri, position) => {
+    const compressed = await compressImage(uri);
     const filename = `${userId}/${Date.now()}-${position}.jpg`;
-    const response = await fetch(compressedUri);
+    const response = await fetch(compressed.uri);
     const blob = await response.blob();
     const arrayBuffer = await new Response(blob).arrayBuffer();
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -655,80 +657,41 @@ export async function createPost(
         upsert: false,
       });
     if (uploadError || !uploadData) throw uploadError ?? new Error('Upload failed');
-    return supabase.storage.from('posts').getPublicUrl(uploadData.path).data.publicUrl;
+    return {
+      url: supabase.storage.from('posts').getPublicUrl(uploadData.path).data.publicUrl,
+      width: compressed.width,
+      height: compressed.height,
+    };
   }));
 
-  // A post made from a Club Profile is authored by the club. A Home post can
-  // still tag one or more clubs and remains student-authored.
-  if (authoredClubId || publicUrls.length > 1) {
-    const { data, error } = await supabase.rpc('create_post', {
-      p_caption: caption ?? null,
-      p_image_paths: publicUrls,
-      p_club_id: authoredClubId ?? null,
-      p_client_tag: clientTag,
-    });
-    if (error) throw error;
-    const result = data as any;
-    const postId = result?.post_id ?? result?.post?.id ?? result?.id;
-    if (!postId) throw new Error('Failed to create post');
+  // Every post (1..5 images) goes through the one create_post RPC, which
+  // handles club-authored vs student posts, the retry-returns-existing
+  // idempotency (migration 100), and stores each image's dimensions so a
+  // single image can render at its natural aspect with no layout shift
+  // (migration 117). A Club Profile post is authored BY the club; a Home post
+  // stays student-authored and may tag one or more clubs via post_club_tags.
+  const { data, error } = await supabase.rpc('create_post', {
+    p_caption: caption ?? null,
+    p_image_paths: uploaded.map((u) => u.url),
+    p_club_id: authoredClubId ?? null,
+    p_client_tag: clientTag,
+    p_image_dimensions: uploaded.map((u) => ({ width: u.width, height: u.height })),
+  });
+  if (error) throw error;
+  const result = data as any;
+  const postId = result?.post_id ?? result?.post?.id ?? result?.id;
+  if (!postId) throw new Error('Failed to create post');
 
-    if (!authoredClubId && clubIds && clubIds.length > 0) {
-      const { error: tagError } = await supabase
-        .from('post_club_tags')
-        .upsert(clubIds.map((clubId) => ({ post_id: postId, club_id: clubId })), {
-          onConflict: 'post_id,club_id',
-          ignoreDuplicates: true,
-        });
-      if (tagError) throw tagError;
-    }
-    return postId;
-  }
-
-  const primaryClubId = clubIds && clubIds.length > 0 ? clubIds[0] : null;
-
-  const { data: post, error } = await supabase
-    .from('posts')
-    .insert({
-      author_id: userId,
-      club_id: primaryClubId,
-      post_type: 'picture',
-      image_url: publicUrls[0],
-      caption: caption ?? null,
-      client_tag: clientTag,
-    })
-    .select('id')
-    .single();
-
-  let postId: string;
-  if (error) {
-    // A retry whose first attempt actually landed: resolve the existing post by
-    // its tag. Any other 23505 is a real error.
-    if (!isClientTagConflict(error, 'uq_posts_author_client_tag')) throw error;
-    const { data: existing, error: fetchError } = await supabase
-      .from('posts')
-      .select('id')
-      .eq('author_id', userId)
-      .eq('client_tag', clientTag)
-      .single();
-    if (fetchError || !existing) throw fetchError ?? error;
-    postId = existing.id;
-  } else {
-    if (!post) throw new Error('Failed to create post');
-    postId = post.id;
-  }
-
-  // Idempotent on both paths: a retry that lost its response before the tags
-  // landed still gets them; UNIQUE(post_id, club_id) makes the repeat a no-op.
-  if (clubIds && clubIds.length > 1) {
-    const additionalTags = clubIds.slice(1).map((cid) => ({
-      post_id: postId,
-      club_id: cid,
-    }));
+  if (!authoredClubId && clubIds && clubIds.length > 0) {
+    // Idempotent: a retry that lost its response before the tags landed still
+    // gets them; UNIQUE(post_id, club_id) makes the repeat a no-op.
     const { error: tagError } = await supabase
       .from('post_club_tags')
-      .upsert(additionalTags, { onConflict: 'post_id,club_id', ignoreDuplicates: true });
+      .upsert(clubIds.map((clubId) => ({ post_id: postId, club_id: clubId })), {
+        onConflict: 'post_id,club_id',
+        ignoreDuplicates: true,
+      });
     if (tagError) throw tagError;
   }
-
   return postId;
 }
