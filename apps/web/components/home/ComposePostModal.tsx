@@ -6,6 +6,7 @@ import { ImageIcon, CloseIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { useAllClubs, useCreatePost } from "../../lib/hooks/useCreatePost";
 import { PhotoCarousel } from "../shared/PhotoCarousel";
+import { ImageCropper } from "../shared/ImageCropper";
 
 // Desktop create-post (Share a Glue → Picture). Same model as mobile: a
 // required image, an optional caption, and optional multi-select club tags.
@@ -40,6 +41,8 @@ export function ComposePostModal({
   const [caption, setCaption] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [clubQuery, setClubQuery] = useState("");
+  // Index of the photo being re-framed into the shared 4:5 carousel ratio.
+  const [cropIdx, setCropIdx] = useState<number | null>(null);
 
   const previews = files.map((f) => ({ f, url: URL.createObjectURL(f) }));
 
@@ -93,6 +96,22 @@ export function ComposePostModal({
   };
 
   return (
+    <>
+    {cropIdx !== null && previews[cropIdx] && (
+      <ImageCropper
+        src={previews[cropIdx].url}
+        aspect={[4, 5]}
+        title={`Position photo ${cropIdx + 1}`}
+        onCancel={() => setCropIdx(null)}
+        onConfirm={({ blob }) => {
+          const idx = cropIdx;
+          setFiles((prev) =>
+            prev.map((f, i) => (i === idx ? new File([blob], `photo-${idx + 1}.jpg`, { type: "image/jpeg" }) : f)),
+          );
+          setCropIdx(null);
+        }}
+      />
+    )}
     <Modal onClose={onClose} labelledBy="compose-post-title" maxWidth={520}>
       <div className="p-5 sm:p-6">
         <h2 id="compose-post-title" className="mb-4 text-center text-lg font-bold text-gray-900">
@@ -120,6 +139,18 @@ export function ComposePostModal({
                     <button type="button" disabled={i === 0} onClick={() => move(i, -1)} className="rounded bg-black/55 px-1 text-[11px] text-white disabled:opacity-30">‹</button>
                     <button type="button" disabled={i === previews.length - 1} onClick={() => move(i, 1)} className="rounded bg-black/55 px-1 text-[11px] text-white disabled:opacity-30">›</button>
                   </span>
+                  {previews.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setCropIdx(i)}
+                      aria-label={`Reposition photo ${i + 1}`}
+                      className="absolute -left-1.5 -top-1.5 rounded-full bg-black/70 p-0.5 text-white"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                        <path d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               ))}
               {files.length < 5 && (
@@ -206,5 +237,6 @@ export function ComposePostModal({
         </button>
       </div>
     </Modal>
+    </>
   );
 }

@@ -86,7 +86,7 @@ export function ImageCropper({
   const tyRef = useRef(0);
   const [, force] = useState(0);
 
-  const gestureStart = useRef({ scale: 1, tx: 0, ty: 0, dist: 0 });
+  const gestureStart = useRef({ scale: 1, tx: 0, ty: 0, dist: 0, panDx: 0, panDy: 0, touches: 0 });
 
   const clamp = (scale: number, tx: number, ty: number) => {
     const s = Math.min(MAX_ZOOM, Math.max(1, scale));
@@ -109,17 +109,35 @@ export function ImageCropper({
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
+      onPanResponderGrant: (e, g) => {
         gestureStart.current = {
           scale: scaleRef.current,
           tx: txRef.current,
           ty: tyRef.current,
           dist: touchDistance(e),
+          panDx: g.dx,
+          panDy: g.dy,
+          touches: e.nativeEvent.touches.length,
         };
       },
       onPanResponderMove: (e: GestureResponderEvent, g: PanResponderGestureState) => {
-        const start = gestureStart.current;
-        if (e.nativeEvent.touches.length >= 2 && start.dist > 0) {
+        const count = e.nativeEvent.touches.length;
+        let start = gestureStart.current;
+        // Re-seed whenever the number of fingers changes, so adding or lifting a
+        // finger never makes the image jump.
+        if (count !== start.touches) {
+          start = {
+            scale: scaleRef.current,
+            tx: txRef.current,
+            ty: tyRef.current,
+            dist: touchDistance(e),
+            panDx: g.dx,
+            panDy: g.dy,
+            touches: count,
+          };
+          gestureStart.current = start;
+        }
+        if (count >= 2 && start.dist > 0) {
           const ratio = touchDistance(e) / start.dist;
           const next = clamp(start.scale * ratio, start.tx, start.ty);
           scaleRef.current = next.scale;
@@ -128,8 +146,8 @@ export function ImageCropper({
         } else {
           const next = clamp(
             scaleRef.current,
-            start.tx + g.dx,
-            start.ty + g.dy,
+            start.tx + (g.dx - start.panDx),
+            start.ty + (g.dy - start.panDy),
           );
           txRef.current = next.tx;
           tyRef.current = next.ty;
