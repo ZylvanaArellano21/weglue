@@ -14,7 +14,6 @@ import {
   TouchableWithoutFeedback,
   Animated,
   BackHandler,
-  Linking,
   Platform,
   StyleSheet,
   ScrollView,
@@ -49,12 +48,6 @@ import { profileColors, profileFonts, profileShadow } from '../profile/profileTh
 const LABEL_OVERRIDES: Partial<Record<SidebarItemKey, string>> = {
   terms: 'Terms & Conditions',
 };
-
-// Same two literals as apps/web/app/invite/[token]/page.tsx / download/page.tsx
-// — duplicated per that file's own convention (different bundle, not shared
-// code), not imported.
-const APP_STORE_URL = 'https://apps.apple.com/app/we-glue/id6786491344';
-const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.weglue.app';
 
 const MENU_KEYS: SidebarItemKey[] = [
   'savedEvents',
@@ -129,12 +122,9 @@ export function SidebarOverlay() {
   };
 
   const handleUpdatePress = () => {
-    if (updateAvailable) {
-      // Skip the internal screen entirely — straight to the real store
-      // listing. No extra confirmation step inside We Glue.
-      void Linking.openURL(Platform.OS === 'ios' ? APP_STORE_URL : PLAY_STORE_URL);
-      return;
-    }
+    // One consistent surface: the Update screen reflects the shared status
+    // (checking / update available / up to date / couldn't check) and its
+    // "Update now" button opens the correct store listing.
     openSidebarDestination(router, pathname, '/account-center/update');
   };
 
