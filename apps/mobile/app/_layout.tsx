@@ -30,6 +30,7 @@ import { useAccessSynchronization } from "../hooks/useAccessSynchronization";
 import { LeaveClubHost } from "../components/club/LeaveClubHost";
 import { SidebarHost } from "../components/sidebar/SidebarHost";
 import { MediaPickerHost } from "../components/media/MediaPickerHost";
+import { ImageCropHost } from "../components/media/ImageCropHost";
 import { PushNotificationsHost } from "../components/notifications/PushNotificationsHost";
 import { timedQuery } from "../lib/timedQuery";
 import { withTimeout } from "../lib/withTimeout";
@@ -633,6 +634,11 @@ export default function RootLayout() {
           which keeps its existing expo-image-picker flow (screens raise
           requests via pickMedia). */}
       <MediaPickerHost />
+      {/* The single app-wide in-app crop / zoom / reposition host — cross
+          platform. Every ratio-constrained image (profile picture, club
+          banner, event image, carousel frame) raises a request via
+          pickImageForFeature / cropExistingImage / requestCrop. */}
+      <ImageCropHost />
       {/* App-wide push + unread-badge wiring. Must live inside the query
           provider; renders nothing. */}
       <PushNotificationsHost />

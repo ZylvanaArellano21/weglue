@@ -14,8 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
+import { pickImageForFeature } from '../../lib/media/pickMedia';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
 import { createEvent, updateEvent, getEventForEdit, searchEventAudienceMembers, type EventAudienceMember } from '../../services/eventService';
@@ -177,28 +176,17 @@ export default function NewEventScreen() {
   };
 
   const handlePickImage = async () => {
-    // Android: shared We Glue flow. Single "add image" tap → 'choose' shows
-    // Take Photo / Photo Library first, then camera or picker + confirm
-    // preview. iOS keeps its existing library-only path. Event 4:5 preserved.
-    if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'choose', aspect: [4, 5], allowsEditing: true, quality: 0.8 });
-      if (picked) await uploadSelectedEventImage(picked.uri);
-      return;
-    }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      show('Photo library access is required to add an event image.', 'error');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+    // One "add image" tap → Take Photo / Photo Library, then the in-app 4:5
+    // crop/zoom/reposition step. Same on iOS and Android; the OS editor is
+    // never used.
+    const picked = await pickImageForFeature({
+      source: 'choose',
       aspect: [4, 5],
       quality: 0.8,
+      onDenied: () =>
+        show('Photo library access is required to add an event image.', 'error'),
     });
-    if (!result.canceled && result.assets[0]) {
-      await uploadSelectedEventImage(result.assets[0].uri);
-    }
+    if (picked?.uri) await uploadSelectedEventImage(picked.uri);
   };
 
   const handleUserSearch = useCallback(async (q: string) => {

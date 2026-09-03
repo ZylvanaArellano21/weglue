@@ -15,8 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
+import { pickImageForFeature } from '../../lib/media/pickMedia';
 import { useAuthStore } from '@weglue/shared';
 import { useOwnProfile, useUpdateProfileAvatar } from '../../hooks/useOwnProfile';
 import { uploadImageToBucket } from '../../lib/imageUpload';
@@ -61,8 +60,8 @@ export default function EditProfilePicScreen() {
     !!previewUri || !!previewPreset || (showTextInput && !!textInput.trim());
   const hasPendingChange = hasUnsavedSelection && !saved;
 
-  // Android routes through the shared We Glue flow (custom camera + confirm
-  // preview); iOS keeps its existing expo-image-picker path unchanged.
+  // Both platforms route through the shared feature-image flow: pick (or shoot,
+  // never the OS editor) then frame it 1:1 in the in-app cropper.
   const applyPickedAvatar = (uri: string, source: 'photo' | 'camera') => {
     setPreviewUri(uri);
     setPendingUriType(source);
@@ -73,66 +72,31 @@ export default function EditProfilePicScreen() {
   };
 
   const onPickFromLibrary = async () => {
-    if (useWeGlueMediaFlow) {
-      setPhotoDenied(false);
-      const picked = await pickMedia({ source: 'library', aspect: [1, 1], allowsEditing: true, quality: 0.8 });
-      if (picked) applyPickedAvatar(picked.uri, 'photo');
-      return;
-    }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status === 'denied') {
-      setPhotoDenied(true);
-      setCameraDenied(false);
-      return;
-    }
-    if (status !== 'granted') return;
     setPhotoDenied(false);
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+    const picked = await pickImageForFeature({
+      source: 'library',
       aspect: [1, 1],
       quality: 0.8,
+      onDenied: () => {
+        setPhotoDenied(true);
+        setCameraDenied(false);
+      },
     });
-    if (!result.canceled && result.assets[0]) {
-      setPreviewUri(result.assets[0].uri);
-      setPendingUriType('photo');
-      setPreviewPreset(null);
-      setTextInput('');
-      setShowTextInput(false);
-      setSaved(false);
-    }
+    if (picked?.uri) applyPickedAvatar(picked.uri, 'photo');
   };
 
   const onPickFromCamera = async () => {
-    if (useWeGlueMediaFlow) {
-      setCameraDenied(false);
-      const picked = await pickMedia({ source: 'camera', aspect: [1, 1], quality: 0.8 });
-      if (picked) applyPickedAvatar(picked.uri, 'camera');
-      return;
-    }
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status === 'denied') {
-      setCameraDenied(true);
-      setPhotoDenied(false);
-      return;
-    }
-    if (status !== 'granted') return;
     setCameraDenied(false);
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
+    const picked = await pickImageForFeature({
+      source: 'camera',
       aspect: [1, 1],
       quality: 0.8,
+      onDenied: () => {
+        setCameraDenied(true);
+        setPhotoDenied(false);
+      },
     });
-    if (!result.canceled && result.assets[0]) {
-      setPreviewUri(result.assets[0].uri);
-      setPendingUriType('camera');
-      setPreviewPreset(null);
-      setTextInput('');
-      setShowTextInput(false);
-      setSaved(false);
-    }
+    if (picked?.uri) applyPickedAvatar(picked.uri, 'camera');
   };
 
   const onSelectPreset = (id: PresetAvatarId) => {

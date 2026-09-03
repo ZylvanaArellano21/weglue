@@ -17,7 +17,7 @@ import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
 import { pickPhotos } from '../../lib/media/pickPhotos';
 import type { PickedMedia } from '../../lib/media/types';
 import { PhotoTray } from '../../components/media/PhotoTray';
-import { useAuthStore } from '@weglue/shared';
+import { useAuthStore, clampPostImageRatio } from '@weglue/shared';
 import { createPost } from '../../services/postService';
 import { clientUuid } from '../../lib/chatAttachments';
 import { getAllClubs, UserClub } from '../../services/clubService';
@@ -78,6 +78,16 @@ export default function NewPostScreen() {
     setPhotos(next.slice(0, 5));
     composeTagRef.current = clientUuid();
   };
+
+  const multiCropAspect: [number, number] | undefined =
+    photos.length > 1
+      ? [4, 5]
+      : photos.length === 1 && photos[0]!.width && photos[0]!.height
+        ? [
+            Math.round(clampPostImageRatio(photos[0]!.width / photos[0]!.height) * 1000),
+            1000,
+          ]
+        : undefined;
 
   // Multi-select up to 5, familiar numbered OS picker. Posts are images only
   // and keep their free-form (uncropped) framing.
@@ -240,6 +250,11 @@ export default function NewPostScreen() {
                 onAddMore={photos.length < 5 ? addMorePhotos : undefined}
                 showConfirm={false}
                 aspectRatio={4 / 5}
+                // Multi-photo: every image is framed into the ONE shared 4:5
+                // carousel ratio. Single photo: the frame is its own clamped
+                // natural ratio, so an in-range image is untouched and only an
+                // extreme one needs repositioning.
+                cropAspect={multiCropAspect}
               />
             </View>
           ) : (

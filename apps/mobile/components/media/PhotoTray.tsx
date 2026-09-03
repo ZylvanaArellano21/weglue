@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { PhotoCarousel } from '../shared/PhotoCarousel';
 import { MAX_PHOTOS } from '../../lib/media/pickPhotos';
+import { cropExistingImage } from '../../lib/media/pickMedia';
 import type { PickedMedia } from '../../lib/media/types';
 
 const TEAL = '#0FA6A6';
@@ -33,6 +34,12 @@ interface Props {
   limit?: number;
   /** Carousel preview aspect (posts 4/5, chat 1/1-ish). Default 4/5. */
   aspectRatio?: number;
+  /**
+   * When set, each photo gets a crop button that re-frames THAT image into this
+   * ratio [w, h] with the in-app cropper — so every image of a carousel can be
+   * positioned individually into the one shared display ratio.
+   */
+  cropAspect?: [number, number];
 }
 
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -60,9 +67,22 @@ export function PhotoTray({
   busy = false,
   limit = MAX_PHOTOS,
   aspectRatio = 4 / 5,
+  cropAspect,
 }: Props) {
   const width = Math.min(Dimensions.get('window').width - 32, 420);
   const canAddMore = !!onAddMore && photos.length < limit;
+
+  const cropPhoto = async (index: number) => {
+    const photo = photos[index];
+    if (!photo || !cropAspect) return;
+    const cropped = await cropExistingImage({
+      uri: photo.uri,
+      width: photo.width || 1,
+      height: photo.height || 1,
+      aspect: cropAspect,
+    });
+    if (cropped) onChange(photos.map((p, i) => (i === index ? cropped : p)));
+  };
 
   return (
     <View style={styles.wrap}>
@@ -101,6 +121,16 @@ export function PhotoTray({
             >
               <Ionicons name="close" size={13} color="#FFFFFF" />
             </TouchableOpacity>
+            {cropAspect ? (
+              <TouchableOpacity
+                style={styles.cropBtn}
+                onPress={() => void cropPhoto(i)}
+                hitSlop={8}
+                accessibilityLabel={`Reposition photo ${i + 1}`}
+              >
+                <Ionicons name="crop-outline" size={12} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : null}
             <View style={styles.moveRow}>
               <TouchableOpacity
                 disabled={i === 0}
@@ -265,6 +295,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -6,
     right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cropBtn: {
+    position: 'absolute',
+    top: -6,
+    left: -6,
     width: 20,
     height: 20,
     borderRadius: 10,

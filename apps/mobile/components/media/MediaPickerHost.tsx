@@ -7,6 +7,7 @@ import { applyFeatureCrop } from '../../lib/media/imageOps';
 import type { PickMediaRequest, PickedMedia } from '../../lib/media/types';
 import { AndroidCameraScreen } from './AndroidCameraScreen';
 import { AndroidPreviewScreen } from './AndroidPreviewScreen';
+import { ImageCropper } from './ImageCropper';
 import { CameraPermissionScreen } from './CameraPermissionScreen';
 import { PhotoSourceSheet } from './PhotoSourceSheet';
 import { mediaColors } from './mediaTheme';
@@ -246,7 +247,31 @@ export function MediaPickerHost() {
           />
         ) : null}
 
-        {stage.kind === 'preview' ? (
+        {stage.kind === 'preview' && aspect ? (
+          // Ratio-constrained flows (avatar, club banner, event, carousel
+          // frame) get the interactive move / zoom / reposition crop step.
+          <ImageCropper
+            uri={stage.picked.uri}
+            sourceWidth={stage.picked.width || 1}
+            sourceHeight={stage.picked.height || 1}
+            aspect={aspect}
+            redoLabel={stage.mode === 'camera' ? 'Retake' : 'Choose Another'}
+            onRedo={handleRedo}
+            onCancel={() => finish(null)}
+            onConfirm={(result) =>
+              finish({
+                ...stage.picked,
+                uri: result.uri,
+                width: result.width,
+                height: result.height,
+                mimeType: 'image/jpeg',
+                fileSize: null,
+              })
+            }
+          />
+        ) : stage.kind === 'preview' ? (
+          // Free-form flows (posts, chat) keep the simple confirm preview —
+          // the image is never forced into a ratio here.
           <AndroidPreviewScreen
             picked={stage.picked}
             mode={stage.mode}
