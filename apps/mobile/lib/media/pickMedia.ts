@@ -4,15 +4,20 @@ import { requestMedia } from '../../store/mediaPickerStore';
 import { requestCrop } from '../../store/imageCropStore';
 import type { PickMediaRequest, PickedMedia } from './types';
 
-// ─── The one entry point for Android image selection ─────────────────────────
+// ─── Image-selection entry points ───────────────────────────────────────────
 //
-// Android only, by design. iOS keeps the working expo-image-picker flow it has
-// today: every caller branches on Platform.OS and leaves its existing iOS code
-// path byte-for-byte untouched, so nothing about the shipped iOS camera,
-// library, crop or permission behavior can regress from this change.
+// pickMedia()           — Android-only shared camera / library + confirm
+//                         preview (free-form: posts, chat). iOS callers keep
+//                         their own expo-image-picker path for this.
+// pickImageForFeature() — CROSS-PLATFORM ratio flow (profile picture, club
+//                         banner, event image): pick or shoot (never the OS
+//                         editor) then frame it in the in-app ImageCropper.
+// cropExistingImage()   — cross-platform re-frame of an image already in hand.
 //
-// On Android this hands off to the single MediaPickerHost, which owns the
-// We Glue camera, the confirm-before-upload preview, and the permission UI.
+// On Android, pickMedia and pickImageForFeature both hand off to the single
+// MediaPickerHost (the We Glue camera, the preview / cropper, the permission
+// UI). On iOS, pickImageForFeature drives the OS picker itself and then the
+// shared ImageCropHost.
 
 /** True when this call site should use the shared We Glue Android flow. */
 export const useWeGlueMediaFlow = Platform.OS === 'android';
