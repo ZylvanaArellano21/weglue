@@ -70,3 +70,69 @@ export async function publishAppRelease(platform: string, version: string): Prom
 
   return { ok: true, data: { platform: platform as Platform, version: cleanVersion } };
 }
+
+export interface StoreSyncResult {
+  checks: Array<{
+    platform: Platform;
+    checkedAt: string;
+    detectedVersion: string | null;
+    ok: boolean;
+    error: string | null;
+    changed: boolean;
+  }>;
+}
+
+/** Run the protected store poller on demand; the Edge Function remains the
+ * only place that can turn a verified store result into a public row. */
+export async function checkStoreVersions(): Promise<ActionResult<StoreSyncResult>> {
+  const actor = await requireRecentMfaWrite();
+  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
+  const secret = process.env.SYNC_STORE_VERSIONS_SECRET;
+  if (!baseUrl || !secret) {
+    return { ok: false, error: "Store sync is not configured." };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/functions/v1/sync-store-versions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+      cache: "no-store",
+    });
+  } catch {
+    return { ok: false, error: "Could not reach the store sync function." };
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  if (!response.ok || !payload || typeof payload !== "object" || !Array.isArray((payload as { checks?: unknown }).checks)) {
+    // Operational trace contains only the actor id and HTTP outcome; the
+    // bearer is never logged or returned to the browser.
+    // eslint-disable-next-line no-console
+    console.error(JSON.stringify({ tag: "admin_app_release_store_check", ts: new Date().toISOString(), actorId: actor.id, ok: false, status: response.status }));
+    return { ok: false, error: "Store sync did not complete." };
+  }
+
+  const checks = (payload as { checks: unknown[] }).checks.filter((item): item is StoreSyncResult["checks"][number] => {
+    if (!item || typeof item !== "object") return false;
+    const value = item as Record<string, unknown>;
+    return (value.platform === "ios" || value.platform === "android")
+      && typeof value.checkedAt === "string"
+      && (value.detectedVersion === null || typeof value.detectedVersion === "string")
+      && typeof value.ok === "boolean"
+      && (value.error === null || typeof value.error === "string")
+      && typeof value.changed === "boolean";
+  });
+
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify({ tag: "admin_app_release_store_check", ts: new Date().toISOString(), actorId: actor.id, ok: true, changed: checks.filter((check) => check.changed).length }));
+  return { ok: true, data: { checks } };
+}

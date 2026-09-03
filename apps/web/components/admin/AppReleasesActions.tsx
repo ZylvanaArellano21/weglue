@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { publishAppRelease } from "../../lib/admin/appReleasesActions";
+import { checkStoreVersions, publishAppRelease } from "../../lib/admin/appReleasesActions";
 import type { Platform } from "../../lib/admin/appReleasesData";
 
 /**
@@ -20,6 +20,9 @@ export function AppReleasesActions() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkConfirming, setCheckConfirming] = useState(false);
+  const [checkSuccess, setCheckSuccess] = useState<string | null>(null);
   const inFlight = useRef(false);
 
   const trimmedVersion = version.trim();
@@ -46,6 +49,31 @@ export function AppReleasesActions() {
       .finally(() => {
         inFlight.current = false;
         setPending(false);
+      });
+  }
+
+  function checkNow() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setChecking(true);
+    setError(null);
+    setSuccess(null);
+    setCheckSuccess(null);
+    setCheckConfirming(false);
+    checkStoreVersions()
+      .then((res) => {
+        if (res.ok) {
+          const changed = res.data.checks.filter((check) => check.changed);
+          setCheckSuccess(changed.length > 0 ? `Store check complete; ${changed.length} new release detected.` : "Store check complete; no newer automated release detected.");
+          router.refresh();
+        } else {
+          setError(res.error);
+        }
+      })
+      .catch(() => setError("Something went wrong."))
+      .finally(() => {
+        inFlight.current = false;
+        setChecking(false);
       });
   }
 
@@ -80,7 +108,7 @@ export function AppReleasesActions() {
             className="w-32 rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
           />
         </div>
-        {!confirming ? (
+        {!confirming && !checkConfirming ? (
           <button
             disabled={pending || !versionValid}
             onClick={() => setConfirming(true)}
@@ -88,7 +116,7 @@ export function AppReleasesActions() {
           >
             Publish
           </button>
-        ) : (
+        ) : confirming ? (
           <div className="flex items-center gap-2">
             <button
               disabled={pending}
@@ -105,8 +133,34 @@ export function AppReleasesActions() {
               Cancel
             </button>
           </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              disabled={checking}
+              onClick={checkNow}
+              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {checking ? "Checking…" : "Confirm: check stores"}
+            </button>
+            <button
+              disabled={checking}
+              onClick={() => setCheckConfirming(false)}
+              className="rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
         )}
       </div>
+      {!confirming && !checkConfirming ? (
+        <button
+          disabled={pending || checking}
+          onClick={() => setCheckConfirming(true)}
+          className="rounded-md border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+        >
+          Check now
+        </button>
+      ) : null}
       <p className="text-xs text-gray-400">
         Only mark a version public once it is 100% publicly downloadable from the store — never for a
         TestFlight, internal-testing, or in-review build. This immediately sends a real push to every user with
@@ -114,6 +168,7 @@ export function AppReleasesActions() {
       </p>
       {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
       {success ? <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{success}</div> : null}
+      {checkSuccess ? <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{checkSuccess}</div> : null}
     </div>
   );
 }
