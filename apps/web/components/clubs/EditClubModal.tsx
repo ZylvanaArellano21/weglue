@@ -18,6 +18,7 @@ import { useDeleteEvent } from "../../lib/hooks/useEventDetail";
 import { ClubPhotoRemovalDialog } from "./ClubPhotoRemoval";
 import type { ClubPhotoRemovalPlan } from "../../lib/clubs/clubPhotoRemoval";
 import { uploadToBucket } from "../../lib/imageUpload";
+import { ImageCropper } from "../shared/ImageCropper";
 import { parseMeetingSchedule, WEEK_DAYS, type MeetingSlot } from "../../lib/datetime";
 import type { ClubProfileData, ClubPhoto, ClubEvent, ClubOfficer } from "../../lib/clubs/clubProfileService";
 
@@ -122,8 +123,25 @@ export function EditClubModal({
     setSchedule(schedule.map((s) => (s.day === day ? { ...s, [field]: fromTimeInput(value) } : s)));
   };
 
-  const handleUpload = async (kind: "banner" | "avatar", file: File | undefined) => {
+  const [crop, setCrop] = useState<{ url: string; kind: "banner" | "avatar" } | null>(null);
+
+  const onPickImage = (kind: "banner" | "avatar", file: File | undefined) => {
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      show("Please choose an image file.", "error");
+      return;
+    }
+    setCrop({ url: URL.createObjectURL(file), kind });
+  };
+
+  const closeCrop = () => {
+    setCrop((cur) => {
+      if (cur) URL.revokeObjectURL(cur.url);
+      return null;
+    });
+  };
+
+  const handleUpload = async (kind: "banner" | "avatar", file: File) => {
     setUploading(kind);
     try {
       const bucket = kind === "banner" ? "club-covers" : "club-avatars";
@@ -255,6 +273,21 @@ export function EditClubModal({
   };
 
   return (
+    <>
+    {crop && (
+      <ImageCropper
+        src={crop.url}
+        aspect={crop.kind === "banner" ? [16, 9] : [1, 1]}
+        title={crop.kind === "banner" ? "Position the club banner" : "Position the club picture"}
+        busy={uploading === crop.kind}
+        onCancel={closeCrop}
+        onConfirm={({ blob }) => {
+          const kind = crop.kind;
+          void handleUpload(kind, new File([blob], `${kind}.jpg`, { type: "image/jpeg" }));
+          closeCrop();
+        }}
+      />
+    )}
     <Modal onClose={onClose} labelledBy="edit-club-title" maxWidth={620}>
       <div className="max-h-[85vh] overflow-y-auto p-5 sm:p-6">
         {/* Header — matches native's exactly: back/close (Modal's own X),
@@ -287,7 +320,7 @@ export function EditClubModal({
           >
             {uploading === "banner" ? "…" : <CameraGlyph />}
           </button>
-          <input ref={bannerInput} type="file" accept="image/*" className="hidden" onChange={(e) => handleUpload("banner", e.target.files?.[0])} />
+          <input ref={bannerInput} type="file" accept="image/*" className="hidden" onChange={(e) => onPickImage("banner", e.target.files?.[0])} />
         </div>
 
         {/* Profile Picture */}
@@ -299,7 +332,7 @@ export function EditClubModal({
               {uploading === "avatar" ? "…" : <PencilIcon size={12} />}
             </span>
           </button>
-          <input ref={avatarInput} type="file" accept="image/*" className="hidden" onChange={(e) => handleUpload("avatar", e.target.files?.[0])} />
+          <input ref={avatarInput} type="file" accept="image/*" className="hidden" onChange={(e) => onPickImage("avatar", e.target.files?.[0])} />
         </div>
 
         {/* Club Name */}
@@ -573,6 +606,7 @@ export function EditClubModal({
         />
       )}
     </Modal>
+    </>
   );
 }
 

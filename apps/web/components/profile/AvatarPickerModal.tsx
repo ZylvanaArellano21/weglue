@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "../shared/Modal";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
+import { ImageCropper } from "../shared/ImageCropper";
 import { Avatar, parsePresetColor, parseTextAvatar } from "../shared/Avatar";
 import { CameraIcon, CloseCircleIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
@@ -74,6 +75,8 @@ export function AvatarPickerModal({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The picked/captured image waiting to be framed 1:1 in the cropper.
+  const [cropSource, setCropSource] = useState<{ url: string; source: "photo" | "camera" } | null>(null);
 
   // Synchronous re-entry guard: `busy` only blocks the SECOND click after a
   // re-render, so two clicks in one frame would both start an upload.
@@ -133,7 +136,14 @@ export function AvatarPickerModal({
       return;
     }
 
-    setPendingImage(file, "photo");
+    setCropSource({ url: URL.createObjectURL(file), source: "photo" });
+  };
+
+  const closeCrop = () => {
+    setCropSource((cur) => {
+      if (cur) URL.revokeObjectURL(cur.url);
+      return null;
+    });
   };
 
   const onSave = async () => {
@@ -387,7 +397,20 @@ export function AvatarPickerModal({
           onCancel={() => setCameraOpen(false)}
           onCapture={(blob) => {
             setCameraOpen(false);
-            setPendingImage(blob, "camera");
+            setCropSource({ url: URL.createObjectURL(blob), source: "camera" });
+          }}
+        />
+      )}
+
+      {cropSource && (
+        <ImageCropper
+          src={cropSource.url}
+          aspect={[1, 1]}
+          title="Position your picture"
+          onCancel={closeCrop}
+          onConfirm={({ blob }) => {
+            setPendingImage(blob, cropSource.source);
+            closeCrop();
           }}
         />
       )}
@@ -527,26 +550,15 @@ function CameraCapture({
 
   const capture = () => {
     const video = videoRef.current;
-    if (!video) return;
-    // Square centre crop, matching mobile's aspect [1, 1].
-    const side = Math.min(video.videoWidth, video.videoHeight);
-    if (!side) return;
+    if (!video || !video.videoWidth || !video.videoHeight) return;
+    // Full frame — the 1:1 framing happens afterwards in the in-app cropper,
+    // so the student can reposition rather than accept a fixed centre crop.
     const canvas = document.createElement("canvas");
-    canvas.width = side;
-    canvas.height = side;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(
-      video,
-      (video.videoWidth - side) / 2,
-      (video.videoHeight - side) / 2,
-      side,
-      side,
-      0,
-      0,
-      side,
-      side
-    );
+    ctx.drawImage(video, 0, 0);
     canvas.toBlob(
       (blob) => {
         if (!blob) return;

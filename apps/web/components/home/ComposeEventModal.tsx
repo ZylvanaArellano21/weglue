@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
+import { ImageCropper } from "../shared/ImageCropper";
 import { ImageIcon, CloseIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { uploadToBucket } from "../../lib/imageUpload";
@@ -83,14 +84,22 @@ export function ComposeEventModal({
     setSeeded(true);
   }, [isEdit, seeded, editing]);
 
+  const [cropUrl, setCropUrl] = useState<string | null>(null);
+
   const onFile = (f: File | undefined) => {
     if (!f) return;
     if (!f.type.startsWith("image/")) {
       show("Please choose an image file.", "error");
       return;
     }
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
+    setCropUrl(URL.createObjectURL(f));
+  };
+
+  const closeCrop = () => {
+    setCropUrl((cur) => {
+      if (cur) URL.revokeObjectURL(cur);
+      return null;
+    });
   };
 
   // In edit mode the cover already exists, so a new file isn't required.
@@ -177,6 +186,21 @@ export function ComposeEventModal({
   const inputStyle = { borderColor: "#E5E7EB" };
 
   return (
+    <>
+    {cropUrl && (
+      <ImageCropper
+        src={cropUrl}
+        aspect={[4, 5]}
+        title="Position the event image"
+        onCancel={closeCrop}
+        onConfirm={({ blob }) => {
+          const cropped = new File([blob], "event.jpg", { type: "image/jpeg" });
+          setFile(cropped);
+          setPreview(URL.createObjectURL(cropped));
+          closeCrop();
+        }}
+      />
+    )}
     <Modal onClose={onClose} labelledBy="compose-event-title" maxWidth={560}>
       <div className="max-h-[80vh] overflow-y-auto p-5 sm:p-6">
         <h2 id="compose-event-title" className="mb-4 text-center text-lg font-bold text-gray-900">
@@ -372,5 +396,6 @@ export function ComposeEventModal({
         </button>
       </div>
     </Modal>
+    </>
   );
 }
