@@ -36,6 +36,7 @@ import {
   authLinkRecentlyConsumed,
   markAuthLinkConsumed,
   __resetAuthLinkConsumed,
+  __resetRecentCredential,
 } from "../useAuthDeepLink";
 
 const CONFIRM = "https://weglue.app/auth/confirm";
@@ -44,6 +45,7 @@ const okResult = { data: {}, error: null };
 beforeEach(() => {
   vi.clearAllMocks();
   __resetAuthLinkConsumed();
+  __resetRecentCredential();
   auth.getSession.mockResolvedValue({ data: { session: null } });
   auth.setSession.mockResolvedValue(okResult);
   auth.exchangeCodeForSession.mockResolvedValue(okResult);
@@ -143,6 +145,49 @@ describe("bad links never throw or mutate the session", () => {
     // @ts-expect-error
     await handleUrl(123);
     expect(routerReplace).not.toHaveBeenCalled();
+  });
+});
+
+describe("duplicate delivery of the SAME credential is a no-op (Expo cold-start quirk)", () => {
+  // Regression: getInitialURL() and the first 'url' event can both fire for
+  // one cold-start launch, calling handleUrl() twice for the identical link.
+  // Without a dedup guard, the second call hits an already-consumed token,
+  // and its error-routing can override the first call's successful
+  // navigation — a real confirmation ending up shown as "link expired".
+  it("only calls verifyOtp once when the same token_hash+type arrives twice", async () => {
+    await handleUrl(`${CONFIRM}?token_hash=th&type=signup`);
+    await handleUrl(`${CONFIRM}?token_hash=th&type=signup`);
+
+    expect(auth.verifyOtp).toHaveBeenCalledTimes(1);
+  });
+
+  it("only calls exchangeCodeForSession once when the same code arrives twice", async () => {
+    await handleUrl(`${CONFIRM}?code=fresh`);
+    await handleUrl(`${CONFIRM}?code=fresh`);
+
+    expect(auth.exchangeCodeForSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("only calls setSession once when the same implicit-flow tokens arrive twice", async () => {
+    await handleUrl(`${CONFIRM}#access_token=AAA&refresh_token=BBB`);
+    await handleUrl(`${CONFIRM}#access_token=AAA&refresh_token=BBB`);
+
+    expect(auth.setSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not block a genuinely different token arriving shortly after", async () => {
+    await handleUrl(`${CONFIRM}?token_hash=th1&type=signup`);
+    await handleUrl(`${CONFIRM}?token_hash=th2&type=signup`);
+
+    expect(auth.verifyOtp).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows the same credential again once the cooldown window has passed", async () => {
+    await handleUrl(`${CONFIRM}?token_hash=th&type=signup`);
+    vi.advanceTimersByTime(4001);
+    await handleUrl(`${CONFIRM}?token_hash=th&type=signup`);
+
+    expect(auth.verifyOtp).toHaveBeenCalledTimes(2);
   });
 });
 

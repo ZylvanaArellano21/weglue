@@ -27,7 +27,7 @@ vi.mock('../supabase', () => ({
   supabase: { auth: { resetPasswordForEmail: h.resetPasswordForEmail } },
 }));
 
-import { sendPasswordResetEmail, getResetCooldownRemaining } from '../authFlow';
+import { sendPasswordResetEmail, getResetCooldownRemaining, friendlyEmailSendError } from '../authFlow';
 
 beforeEach(() => {
   h.store.clear();
@@ -73,5 +73,34 @@ describe('sendPasswordResetEmail', () => {
   it('rejects an empty email without touching the network', async () => {
     expect(await sendPasswordResetEmail('   ')).toMatchObject({ ok: false });
     expect(h.resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe('friendlyEmailSendError — never blames the address', () => {
+  it('maps the per-IP request throttle without telling the user to wait an hour', () => {
+    const msg = friendlyEmailSendError({ code: 'over_request_rate_limit' });
+    expect(msg).toMatch(/network|wait a moment/i);
+    expect(msg).not.toMatch(/hour/i);
+  });
+  // Regression: Supabase's per-EMAIL-ADDRESS resend cooldown (a normal ~60s
+  // wait right after a signup or a previous resend) also arrives as a bare
+  // HTTP 429, distinguished only by this message. It was previously caught by
+  // the generic 429 check and told the user to wait an HOUR — a real
+  // production incident (a user's genuine short cooldown was reported as the
+  // project-wide hourly quota).
+  it('maps the per-address resend cooldown to a short wait, never the hourly message', () => {
+    const msg = friendlyEmailSendError({
+      status: 429,
+      message: 'For security purposes, you can only request this after 43 seconds.',
+    });
+    expect(msg).toMatch(/seconds/i);
+    expect(msg).not.toMatch(/hour/i);
+  });
+  it('still reports the real hourly quota when the explicit code is present', () => {
+    const msg = friendlyEmailSendError({ code: 'over_email_send_rate_limit' });
+    expect(msg).toMatch(/hour/i);
+  });
+  it('maps a bare 429 with no message to a server-limit message', () => {
+    expect(friendlyEmailSendError({ status: 429 })).toMatch(/rate limited|email limit/i);
   });
 });
