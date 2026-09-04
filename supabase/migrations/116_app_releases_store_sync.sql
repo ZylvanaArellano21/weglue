@@ -160,7 +160,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_recipient RECORD;
+  v_recipient                RECORD;
+  v_had_known_public_release boolean;
+  v_is_new_release           boolean;
 BEGIN
   IF COALESCE(current_setting('request.jwt.claim.role', true), '') <> 'service_role' THEN
     RAISE EXCEPTION 'service_role_required' USING ERRCODE = '42501';
@@ -168,6 +170,18 @@ BEGIN
   IF p_platform NOT IN ('ios', 'android') OR NULLIF(btrim(p_version), '') IS NULL THEN
     RAISE EXCEPTION 'invalid store release';
   END IF;
+
+  -- Safe by construction, not by deployment order — see migration 118's
+  -- 4-arg replacement of this function for the full rationale. This 3-arg
+  -- version is superseded (DROPped) within the same migration run by 118,
+  -- but is fixed identically so the ledger never records an unsafe version,
+  -- even transiently.
+  SELECT EXISTS (
+    SELECT 1 FROM public.app_releases WHERE platform = p_platform AND is_public = true
+  ) INTO v_had_known_public_release;
+  v_is_new_release := NOT EXISTS (
+    SELECT 1 FROM public.app_releases WHERE platform = p_platform AND version = p_version
+  );
 
   INSERT INTO public.app_releases (platform, version, is_public, source, store_url, released_at, updated_at)
   VALUES (p_platform, p_version, true, 'store', NULLIF(btrim(p_store_url), ''), now(), now())
@@ -178,28 +192,31 @@ BEGIN
         released_at = now(),
         updated_at = now();
 
-  -- enqueue_push() owns the unique dedupe constraint. Concurrent polls and
-  -- retries can therefore call this helper safely without repeat pushes.
-  FOR v_recipient IN
-    SELECT DISTINCT pt.user_id
-      FROM public.push_tokens pt
-     WHERE pt.platform = p_platform
-       AND pt.status = 'active'
-       AND pt.environment = 'production'
-  LOOP
-    PERFORM public.enqueue_push(
-      v_recipient.user_id,
-      NULL,
-      'app_update',
-      'A new We Glue update is ready',
-      'Update now to get the latest improvements.',
-      jsonb_build_object('screen', 'update'),
-      'app_update:' || p_platform || ':' || p_version,
-      'app_update:' || p_platform || ':' || p_version || ':' || v_recipient.user_id,
-      0
-    );
-  END LOOP;
-  PERFORM public.invoke_push_dispatch();
+  -- enqueue_push() owns the unique dedupe constraint too, as extra defense —
+  -- but this gate is what stops a baseline/re-detection call from even
+  -- attempting to enqueue in the first place.
+  IF v_is_new_release AND v_had_known_public_release THEN
+    FOR v_recipient IN
+      SELECT DISTINCT pt.user_id
+        FROM public.push_tokens pt
+       WHERE pt.platform = p_platform
+         AND pt.status = 'active'
+         AND pt.environment = 'production'
+    LOOP
+      PERFORM public.enqueue_push(
+        v_recipient.user_id,
+        NULL,
+        'app_update',
+        'A new We Glue update is ready',
+        'Update now to get the latest improvements.',
+        jsonb_build_object('screen', 'update'),
+        'app_update:' || p_platform || ':' || p_version,
+        'app_update:' || p_platform || ':' || p_version || ':' || v_recipient.user_id,
+        0
+      );
+    END LOOP;
+    PERFORM public.invoke_push_dispatch();
+  END IF;
 END;
 $$;
 

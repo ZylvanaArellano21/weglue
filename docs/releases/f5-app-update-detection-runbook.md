@@ -23,17 +23,35 @@ enabled, `weglue-play-version-checker` service account created, JSON key
 issued, added to Play Console with read-only access. Everything below is the
 Supabase/Vercel side.
 
-## Why the order below matters
+## Two independent layers keep this from ever false-alarming
 
-The **Vault secret is what arms the 45-minute cron** (migration 116's job
-guards its own `net.http_post` with `WHERE EXISTS (SELECT ... FROM
-vault.decrypted_secrets WHERE name = 'store_version_sync_api_key')` — no
-secret, no HTTP call, ever). Everything that must happen before the cron can
-legitimately fire — applying the migrations that create the new columns, and
-seeding `app_releases` with today's already-public versions — is ordered
-**before** the step that creates that Vault secret, specifically so there is
-no window where an armed-but-unseeded cron could push "update available" to
-every user who is already on the current version. Follow the steps in order.
+**The push gate is safe by construction, not just by this runbook's
+ordering** (2026-09-04 correction). `sync_store_app_release()` (migration
+118) only enqueues a push when it has confirmed BOTH: (a) the platform
+already had a prior known public release on file, AND (b) this call
+recorded a version/build that wasn't already on file. A platform's very
+first detected release can never satisfy (a) — there is nothing yet to be
+"newer than" — so a baseline/seed call can never push, regardless of
+whether `app_releases` was pre-seeded first. Re-detecting an unchanged
+version/build never satisfies (b). See
+`supabase/scripts/test_118_sync_store_app_release_push_safety.sql` for the
+committed regression test (first-ever baseline → no push; same version
+again → no push; genuinely newer → one push per eligible user; repeated
+detection of that newer version → no duplicate) — run against the real
+`enqueue_push`/`user_wants_push`/`register_push_token`/`push_queue`
+functions and tables in a throwaway `postgres:17` container on 2026-09-04:
+13/13 assertions passed.
+
+That said, **Step 6 below (seed the current versions) is still followed
+before Step 7 (create the Vault secret, which arms the cron)** — belt and
+suspenders. Two independent reasons a false push can't happen; neither one
+is load-bearing on its own:
+1. The RPC's own newer-than-previous gate (just described).
+2. This runbook's ordering — migrations and the seed land before the cron
+   can ever fire at all.
+
+Follow the steps in order regardless; there's no cost to keeping both
+protections active.
 
 ---
 
@@ -151,16 +169,20 @@ SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_cron','pg_net
 
 ### Step 6 — Seed the current public versions in `app_releases`
 
-**Do this before Step 7 creates the Vault secret.** Without it, the first
-live detection would write today's already-public version as a brand-new
-`app_releases` row and push "A new We Glue update is ready" to every device
-already on that exact version.
+**Do this before Step 7 creates the Vault secret**, as the second, redundant
+layer described above. `sync_store_app_release()`'s own gate already means
+the first live detection would record today's already-public version
+WITHOUT pushing (it has no prior known public release to be newer than) —
+but seeding first is still the right call: it makes `app_releases`
+correctly reflect history from day one, and it means the very first live
+detection is a routine "no change" run instead of "an app_releases row for
+this platform appears out of nowhere."
 
-Both `publish_app_release()` and `sync_store_app_release()` unconditionally
-fan out that push on every call — including a call whose only news is "this
-is the version you already have". So seed with a **plain INSERT**, never
-through either RPC, run directly in the Studio SQL editor (or `psql`) as a
-privileged session:
+`publish_app_release()` — the SEPARATE, deliberate admin-publish path, not
+touched by this correction — still fans out its push unconditionally on
+every call, by design (a human clicking "publish" always means to notify).
+So seed with a **plain INSERT**, never through `publish_app_release()`, run
+directly in the Studio SQL editor (or `psql`) as a privileged session:
 
 - [ ] Look up the exact version currently live on each public store:
   - App Store Connect → the app's current **public** version (marketing
