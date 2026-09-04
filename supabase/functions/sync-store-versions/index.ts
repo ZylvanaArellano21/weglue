@@ -1,17 +1,17 @@
-// Poll public store metadata and project only verified public releases into
-// app_releases. Android intentionally remains manual-only: the Play Developer
-// API is authenticated and track-oriented, while scraping public listing HTML
-// is not a stable enough source for an update badge.
-//
-// The bearer must be a valid service-role JWT in the deployed project because
-// this task is not allowed to add a supabase/config.toml verify_jwt=false entry.
-// It is compared to SYNC_STORE_VERSIONS_SECRET and never logged or returned.
+// Poll public App Store and Google Play metadata and project only verified
+// public releases into app_releases. Google Play is read through the official
+// Android Publisher API: the function creates an edit, reads production, and
+// always abandons the edit without committing it.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const IOS_BUNDLE_LOOKUP = "https://itunes.apple.com/lookup?bundleId=com.weglue.app";
 const IOS_ID_LOOKUP = "https://itunes.apple.com/lookup?id=6786491344";
-const ANDROID_MANUAL_ONLY = "android_store_detection_manual_only";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_SCOPE = "https://www.googleapis.com/auth/androidpublisher";
+const GOOGLE_API_BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3";
+const ANDROID_STORE_URL = "https://play.google.com/store/apps/details?id=com.weglue.app";
+const ANDROID_NOT_CONFIGURED = "android_play_api_not_configured";
 const CHECK_TIMEOUT_MS = 12_000;
 
 type Platform = "ios" | "android";
@@ -25,10 +25,9 @@ type StoreCheckResult = {
   changed: boolean;
 };
 
-type ItunesResult = {
-  version?: unknown;
-  trackViewUrl?: unknown;
-};
+type ItunesResult = { version?: unknown; trackViewUrl?: unknown };
+type ServiceAccount = { client_email: string; private_key: string };
+type AndroidPlayRelease = { status?: unknown; versionCodes?: unknown; name?: unknown };
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -43,6 +42,43 @@ function safeError(error: unknown, fallback: string): string {
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted-token]")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
     .slice(0, 240);
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function encodeJson(value: unknown): string {
+  return base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function pemToBytes(pem: string): Uint8Array {
+  const base64 = pem
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s/g, "");
+  return base64UrlDecode(base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""));
+}
+
+function parseServiceAccount(): ServiceAccount | null {
+  const raw = Deno.env.get("PLAY_ANDROID_PUBLISHER_KEY");
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<ServiceAccount>;
+    if (typeof value.client_email !== "string" || typeof value.private_key !== "string") return null;
+    return value as ServiceAccount;
+  } catch {
+    return null;
+  }
 }
 
 function parseSemver(value: string): { major: number; minor: number; patch: number; prerelease: string[] } {
@@ -81,14 +117,25 @@ function compareSemver(left: string, right: string): number {
   return 0;
 }
 
+function serviceRoleFromAuthorization(req: Request): boolean {
+  const authorization = req.headers.get("Authorization") ?? "";
+  if (!authorization.startsWith("Bearer ")) return false;
+  const token = authorization.slice(7);
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    const claims = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1]))) as { role?: unknown };
+    return claims.role === "service_role";
+  } catch {
+    return false;
+  }
+}
+
 async function fetchJson(url: string): Promise<{ results?: ItunesResult[] }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
+    const response = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
     if (!response.ok) throw new Error(`itunes_http_${response.status}`);
     const payload = await response.json() as { results?: ItunesResult[] };
     if (!Array.isArray(payload.results)) throw new Error("itunes_invalid_response");
@@ -114,17 +161,23 @@ async function lookupIos(): Promise<{ version: string; storeUrl: string }> {
   return { version, storeUrl };
 }
 
-async function latestPublicRelease(admin: SupabaseClient, platform: Platform): Promise<string | null> {
+type PublicRelease = { version: string | null; buildNumber: number | null };
+
+async function latestPublicRelease(admin: SupabaseClient, platform: Platform): Promise<PublicRelease | null> {
   const { data, error } = await admin
     .from("app_releases")
-    .select("version")
+    .select("version, build_number")
     .eq("platform", platform)
     .eq("is_public", true)
     .order("released_at", { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
   if (error) throw new Error("database_latest_release_failed");
-  return typeof data?.version === "string" ? data.version : null;
+  if (!data) return null;
+  return {
+    version: typeof data.version === "string" ? data.version : null,
+    buildNumber: Number.isSafeInteger(data.build_number) ? Number(data.build_number) : null,
+  };
 }
 
 async function recordCheck(
@@ -151,9 +204,7 @@ async function checkIos(admin: SupabaseClient): Promise<StoreCheckResult> {
     const store = await lookupIos();
     detectedVersion = store.version;
     const current = await latestPublicRelease(admin, "ios");
-    if (current !== null && compareSemver(store.version, current) <= 0) {
-      // The public store is current or older than the manually published row.
-    } else {
+    if (!current || !current.version || compareSemver(store.version, current.version) > 0) {
       const { error: syncError } = await admin.rpc("sync_store_app_release", {
         p_platform: "ios",
         p_version: store.version,
@@ -174,32 +225,160 @@ async function checkIos(admin: SupabaseClient): Promise<StoreCheckResult> {
   return { platform: "ios", checkedAt, detectedVersion, ok: error === null, error, changed };
 }
 
-async function checkAndroidManualOnly(admin: SupabaseClient): Promise<StoreCheckResult> {
+async function signServiceAccountAssertion(account: ServiceAccount): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = encodeJson({ alg: "RS256", typ: "JWT" });
+  const payload = encodeJson({
+    iss: account.client_email,
+    scope: GOOGLE_SCOPE,
+    aud: GOOGLE_TOKEN_URL,
+    iat: now,
+    exp: now + 3600,
+  });
+  const signingInput = `${header}.${payload}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToBytes(account.private_key),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    { name: "RSASSA-PKCS1-v1_5" },
+    key,
+    new TextEncoder().encode(signingInput),
+  );
+  return `${signingInput}.${base64UrlEncode(new Uint8Array(signature))}`;
+}
+
+async function androidAccessToken(account: ServiceAccount): Promise<string> {
+  const assertion = await signServiceAccountAssertion(account);
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
+  });
+  if (!response.ok) throw new Error(`google_oauth_http_${response.status}`);
+  const payload = await response.json() as { access_token?: unknown };
+  if (typeof payload.access_token !== "string" || !payload.access_token) {
+    throw new Error("google_oauth_missing_access_token");
+  }
+  return payload.access_token;
+}
+
+async function googleJson(url: string, accessToken: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!response.ok) throw new Error(`google_play_http_${response.status}`);
+  return await response.json() as Record<string, unknown>;
+}
+
+async function readAndroidProduction(account: ServiceAccount): Promise<{ buildNumber: number; version: string | null }> {
+  const accessToken = await androidAccessToken(account);
+  const appPath = `${GOOGLE_API_BASE}/applications/com.weglue.app`;
+  const edit = await googleJson(`${appPath}/edits`, accessToken, { method: "POST", body: "{}" });
+  const editId = typeof edit.id === "string" ? edit.id : "";
+  if (!editId) throw new Error("google_play_missing_edit_id");
+
+  let result: { buildNumber: number; version: string | null } | null = null;
+  let operationError: unknown = null;
+  try {
+    const track = await googleJson(`${appPath}/edits/${encodeURIComponent(editId)}/tracks/production`, accessToken);
+    const releases = Array.isArray(track.releases) ? track.releases as AndroidPlayRelease[] : [];
+    const completed = releases.filter((release) => release.status === "completed");
+    for (const release of completed) {
+      const releaseVersionCodes = (Array.isArray(release.versionCodes) ? release.versionCodes : [])
+        .map((value) => typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN)
+        .filter((value) => Number.isSafeInteger(value));
+      if (!releaseVersionCodes.length) continue;
+      const releaseBuildNumber = Math.max(...releaseVersionCodes);
+      if (!result || releaseBuildNumber > result.buildNumber) {
+        const releaseName = typeof release.name === "string" && /^\d+(\.\d+){1,3}$/.test(release.name)
+          ? release.name
+          : null;
+        result = { buildNumber: releaseBuildNumber, version: releaseName };
+      }
+    }
+    if (!result) throw new Error("google_play_no_completed_production_release");
+  } catch (error) {
+    operationError = error;
+  } finally {
+    try {
+      const response = await fetch(`${appPath}/edits/${encodeURIComponent(editId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok && operationError === null) operationError = new Error(`google_play_abandon_http_${response.status}`);
+    } catch (error) {
+      if (operationError === null) operationError = error;
+    }
+  }
+  if (operationError) throw operationError;
+  if (!result) throw new Error("google_play_read_failed");
+  return result;
+}
+
+async function checkAndroid(admin: SupabaseClient): Promise<StoreCheckResult> {
+  const account = parseServiceAccount();
+  if (!account) {
+    const checkedAt = await recordCheck(admin, {
+      platform: "android",
+      detectedVersion: null,
+      ok: false,
+      error: ANDROID_NOT_CONFIGURED,
+    });
+    return { platform: "android", checkedAt, detectedVersion: null, ok: false, error: ANDROID_NOT_CONFIGURED, changed: false };
+  }
+
+  let detectedVersion: string | null = null;
+  let error: string | null = null;
+  let changed = false;
+  try {
+    const store = await readAndroidProduction(account);
+    detectedVersion = store.version;
+    const current = await latestPublicRelease(admin, "android");
+    let newer = !current;
+    if (current?.buildNumber !== null && current?.buildNumber !== undefined) {
+      newer = store.buildNumber > current.buildNumber;
+    } else if (current?.version) {
+      if (!store.version) throw new Error("android_marketing_version_unavailable");
+      newer = compareSemver(store.version, current.version) > 0;
+    }
+    if (newer) {
+      const { error: syncError } = await admin.rpc("sync_store_app_release", {
+        p_platform: "android",
+        p_version: store.version,
+        p_store_url: ANDROID_STORE_URL,
+        p_build_number: store.buildNumber,
+      });
+      if (syncError) throw new Error("database_store_release_sync_failed");
+      changed = true;
+    }
+  } catch (caught) {
+    const raw = caught instanceof Error ? caught.message : "";
+    error = /google_play_http_(401|403)/.test(raw) ? ANDROID_NOT_CONFIGURED : safeError(caught, "android_play_check_failed");
+  }
   const checkedAt = await recordCheck(admin, {
     platform: "android",
-    detectedVersion: null,
-    ok: false,
-    error: ANDROID_MANUAL_ONLY,
+    detectedVersion,
+    ok: error === null,
+    error,
   });
-  return {
-    platform: "android",
-    checkedAt,
-    detectedVersion: null,
-    ok: false,
-    error: ANDROID_MANUAL_ONLY,
-    changed: false,
-  };
+  return { platform: "android", checkedAt, detectedVersion, ok: error === null, error, changed };
 }
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-
-  const expectedSecret = Deno.env.get("SYNC_STORE_VERSIONS_SECRET");
-  const authorization = req.headers.get("Authorization") ?? "";
-  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!expectedSecret || !bearer || bearer !== expectedSecret) {
-    return json({ error: "Unauthorized" }, 401);
-  }
+  if (!serviceRoleFromAuthorization(req)) return json({ error: "Unauthorized" }, 401);
 
   const url = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -208,13 +387,20 @@ Deno.serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const checks: StoreCheckResult[] = [];
   try {
-    checks.push(await checkIos(admin));
-    checks.push(await checkAndroidManualOnly(admin));
+    const checks = await Promise.all([checkIos(admin), checkAndroid(admin)]);
+    return json({
+      ok: checks.every((check) => check.ok),
+      checks: checks.map(({ platform, checkedAt, detectedVersion, ok, error, changed }) => ({
+        platform,
+        checkedAt,
+        detectedVersion,
+        ok,
+        error,
+        changed,
+      })),
+    });
   } catch (error) {
-    // A failed check-row write is operationally distinct from a store failure;
-    // return a generic status and keep credentials/database errors out of logs.
     console.error(JSON.stringify({
       tag: "sync_store_versions",
       ok: false,
@@ -222,16 +408,4 @@ Deno.serve(async (req) => {
     }));
     return json({ error: "Store sync failed" }, 500);
   }
-
-  return json({
-    ok: checks.every((check) => check.ok || check.error === ANDROID_MANUAL_ONLY),
-    checks: checks.map(({ platform, checkedAt, detectedVersion, ok, error, changed }) => ({
-      platform,
-      checkedAt,
-      detectedVersion,
-      ok,
-      error,
-      changed,
-    })),
-  });
 });

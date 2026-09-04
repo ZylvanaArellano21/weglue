@@ -403,9 +403,9 @@ function GroupedTile({
 }
 
 /**
- * 1..5 images as one rounded block, matching mobile's `GroupedMedia`. A single
- * image keeps its natural aspect; multiple images are STACKED, each keeping its
- * own natural aspect ratio — chat images are never forced into a shared ratio.
+ * 1..5 images as one rounded block, matching mobile's `GroupedMedia`: a
+ * natural-ratio vertical stack on both platforms. Images are never cropped into
+ * a shared-ratio grid.
  */
 export function GroupedMedia({
   attachments,

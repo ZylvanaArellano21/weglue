@@ -86,42 +86,25 @@ export interface StoreSyncResult {
  * only place that can turn a verified store result into a public row. */
 export async function checkStoreVersions(): Promise<ActionResult<StoreSyncResult>> {
   const actor = await requireRecentMfaWrite();
-  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
-  const secret = process.env.SYNC_STORE_VERSIONS_SECRET;
-  if (!baseUrl || !secret) {
-    return { ok: false, error: "Store sync is not configured." };
-  }
-
-  let response: Response;
+  const admin = createAdminClient();
+  let data: unknown;
+  let error: { message?: string } | null = null;
   try {
-    response = await fetch(`${baseUrl}/functions/v1/sync-store-versions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${secret}`,
-        "Content-Type": "application/json",
-      },
-      body: "{}",
-      cache: "no-store",
-    });
+    const result = await admin.functions.invoke("sync-store-versions", { body: {} });
+    data = result.data;
+    error = result.error;
   } catch {
     return { ok: false, error: "Could not reach the store sync function." };
   }
-
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-  if (!response.ok || !payload || typeof payload !== "object" || !Array.isArray((payload as { checks?: unknown }).checks)) {
-    // Operational trace contains only the actor id and HTTP outcome; the
-    // bearer is never logged or returned to the browser.
+  if (error || !data || typeof data !== "object" || !Array.isArray((data as { checks?: unknown }).checks)) {
+    // Operational trace contains only the actor id and outcome; no credential
+    // or function error payload is logged or returned to the browser.
     // eslint-disable-next-line no-console
-    console.error(JSON.stringify({ tag: "admin_app_release_store_check", ts: new Date().toISOString(), actorId: actor.id, ok: false, status: response.status }));
+    console.error(JSON.stringify({ tag: "admin_app_release_store_check", ts: new Date().toISOString(), actorId: actor.id, ok: false }));
     return { ok: false, error: "Store sync did not complete." };
   }
 
-  const checks = (payload as { checks: unknown[] }).checks.filter((item): item is StoreSyncResult["checks"][number] => {
+  const checks = (data as { checks: unknown[] }).checks.filter((item): item is StoreSyncResult["checks"][number] => {
     if (!item || typeof item !== "object") return false;
     const value = item as Record<string, unknown>;
     return (value.platform === "ios" || value.platform === "android")

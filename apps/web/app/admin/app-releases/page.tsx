@@ -2,7 +2,6 @@ import { getAppReleasesOverview } from "../../../lib/admin/appReleasesData";
 import { SectionCard, Badge, EmptyState } from "../../../components/admin/primitives";
 import { Table, Th, Td } from "../../../components/admin/Table";
 import { AppReleasesActions } from "../../../components/admin/AppReleasesActions";
-import type { Platform } from "../../../lib/admin/appReleasesData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -18,10 +17,7 @@ function fmtDate(iso: string | null): string {
   });
 }
 
-const ANDROID_MANUAL_ONLY = "android_store_detection_manual_only";
-
-function checkStatus(platform: Platform, checkedAt: string | null, ok: boolean | null, error: string | null): string {
-  if (platform === "android" && error === ANDROID_MANUAL_ONLY) return "Manual publish required";
+function checkStatus(checkedAt: string | null, ok: boolean | null, error: string | null): string {
   if (!checkedAt) return "No check recorded";
   if (!ok) return "Last check failed";
   if (Date.now() - new Date(checkedAt).getTime() > 2 * 60 * 60 * 1000) return "Check is stale";
@@ -51,8 +47,8 @@ export default async function AdminAppReleasesPage() {
               <Badge tone="gray">No public release yet</Badge>
             )}
             <p className="mt-2 text-xs text-gray-500">Last checked: {fmtDate(lastCheckByPlatform.ios?.checkedAt ?? null)}</p>
-            <p className={`mt-1 text-xs ${checkStatus("ios", lastCheckByPlatform.ios?.checkedAt ?? null, lastCheckByPlatform.ios?.ok ?? null, lastCheckByPlatform.ios?.error ?? null) === "Healthy" ? "text-green-700" : "text-amber-700"}`}>
-              {checkStatus("ios", lastCheckByPlatform.ios?.checkedAt ?? null, lastCheckByPlatform.ios?.ok ?? null, lastCheckByPlatform.ios?.error ?? null)}
+            <p className={`mt-1 text-xs ${checkStatus(lastCheckByPlatform.ios?.checkedAt ?? null, lastCheckByPlatform.ios?.ok ?? null, lastCheckByPlatform.ios?.error ?? null) === "Healthy" ? "text-green-700" : "text-amber-700"}`}>
+              {checkStatus(lastCheckByPlatform.ios?.checkedAt ?? null, lastCheckByPlatform.ios?.ok ?? null, lastCheckByPlatform.ios?.error ?? null)}
             </p>
           </div>
         </SectionCard>
@@ -65,7 +61,7 @@ export default async function AdminAppReleasesPage() {
             )}
             <p className="mt-2 text-xs text-gray-500">Last checked: {fmtDate(lastCheckByPlatform.android?.checkedAt ?? null)}</p>
             <p className="mt-1 text-xs text-amber-700">
-              {checkStatus("android", lastCheckByPlatform.android?.checkedAt ?? null, lastCheckByPlatform.android?.ok ?? null, lastCheckByPlatform.android?.error ?? null)}
+              {checkStatus(lastCheckByPlatform.android?.checkedAt ?? null, lastCheckByPlatform.android?.ok ?? null, lastCheckByPlatform.android?.error ?? null)}
             </p>
           </div>
         </SectionCard>
@@ -95,7 +91,7 @@ export default async function AdminAppReleasesPage() {
             {releases.map((r) => (
               <tr key={r.id} className="text-gray-700">
                 <Td>{r.platform === "ios" ? "iOS" : "Android"}</Td>
-                <Td className="font-mono">{r.version}</Td>
+                <Td className="font-mono">{r.version ?? (r.buildNumber !== null ? `versionCode ${r.buildNumber}` : "—")}</Td>
                 <Td>
                   {r.isPublic ? <Badge tone="green">Public</Badge> : <Badge tone="gray">Not public</Badge>}
                 </Td>

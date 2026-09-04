@@ -36,6 +36,22 @@ END $$;
 ALTER TABLE public.app_releases
   ADD COLUMN IF NOT EXISTS store_url text;
 
+-- A previous draft used a bespoke shared secret name. Preserve the secret
+-- value without reading or logging it, while making the cron contract explicit:
+-- this is the project's real service-role credential, held in Vault only.
+DO $$
+BEGIN
+  IF to_regclass('vault.secrets') IS NOT NULL THEN
+    UPDATE vault.secrets
+       SET name = 'store_version_sync_service_key'
+     WHERE name = 'store_version_sync_secret'
+       AND NOT EXISTS (
+         SELECT 1 FROM vault.secrets
+          WHERE name = 'store_version_sync_service_key'
+       );
+  END IF;
+END $$;
+
 -- One append-only row per completed attempt. The dashboard reads the latest
 -- row per platform; clients never receive this operational table.
 CREATE TABLE IF NOT EXISTS public.app_release_store_checks (
@@ -54,8 +70,9 @@ ALTER TABLE public.app_release_store_checks ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.app_release_store_checks FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT ON TABLE public.app_release_store_checks TO service_role;
 
--- The mobile contract is a public-release read, including the pre-auth client
--- path.  RLS remains the row-level boundary: drafts are still invisible.
+-- The mobile contract is an authenticated public-release read. RLS remains
+-- the row-level boundary: drafts are still invisible, and anon has no table
+-- privilege per migration 092.
 REVOKE ALL ON public.app_releases FROM anon, authenticated;
 GRANT SELECT ON public.app_releases TO authenticated;
 GRANT SELECT ON public.app_releases TO service_role;
@@ -194,12 +211,10 @@ $$;
 REVOKE ALL ON FUNCTION public.sync_store_app_release(text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.sync_store_app_release(text, text, text) TO service_role;
 
--- Secrets are selected at execution time from Vault; no credential is stored
--- in cron.job.command or cron.job_run_details. Because this function is not
--- adding an unapproved config.toml verify_jwt=false entry, provision the same
--- valid service-role JWT value as both the SYNC_STORE_VERSIONS_SECRET Edge
--- Function secret and this Vault name. It is used only server-to-server and is
--- never returned or logged.
+-- The function keeps the default platform JWT verification. The Vault value is
+-- the project's service-role credential, selected at execution time so no
+-- credential is stored in cron.job.command or cron.job_run_details. It is used
+-- only server-to-server and is never returned or logged.
 DO $$
 BEGIN
   BEGIN
@@ -219,14 +234,18 @@ BEGIN
       $job$SELECT net.http_post(
         url := 'https://yoozrnosmqtaiksgcixc.supabase.co/functions/v1/sync-store-versions',
         headers := jsonb_build_object(
-          'Authorization', 'Bearer ' || s.decrypted_secret,
+          'Authorization', 'Bearer ' || (SELECT decrypted_secret
+            FROM vault.decrypted_secrets
+           WHERE name = 'store_version_sync_service_key'),
           'Content-Type', 'application/json'
         ),
         body := '{}'::jsonb,
         timeout_milliseconds := 30000
       )
-      FROM vault.decrypted_secrets s
-      WHERE s.name = 'store_version_sync_secret';$job$
+      WHERE EXISTS (
+        SELECT 1 FROM vault.decrypted_secrets
+         WHERE name = 'store_version_sync_service_key'
+      );$job$
     );
   EXCEPTION WHEN OTHERS THEN
     RAISE WARNING 'schedule sync-store-versions failed: %', SQLERRM;

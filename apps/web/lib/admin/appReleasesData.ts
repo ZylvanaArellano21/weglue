@@ -22,7 +22,8 @@ export type Platform = "ios" | "android";
 export interface AppReleaseRow {
   id: string;
   platform: Platform;
-  version: string;
+  version: string | null;
+  buildNumber: number | null;
   isPublic: boolean;
   releasedAt: string | null;
   createdAt: string;
@@ -51,14 +52,15 @@ export async function getAppReleasesOverview(): Promise<AppReleasesOverview> {
 
   const { data, error } = await admin
     .from("app_releases")
-    .select("id, platform, version, is_public, released_at, created_at, source, store_url")
+    .select("id, platform, version, build_number, is_public, released_at, created_at, source, store_url")
     .order("platform", { ascending: true })
     .order("released_at", { ascending: false, nullsFirst: false });
 
   const rows = (error || !data ? [] : data) as {
     id: string;
     platform: Platform;
-    version: string;
+    version: string | null;
+    build_number: number | null;
     is_public: boolean;
     released_at: string | null;
     created_at: string;
@@ -70,6 +72,7 @@ export async function getAppReleasesOverview(): Promise<AppReleasesOverview> {
     id: r.id,
     platform: r.platform,
     version: r.version,
+    buildNumber: r.build_number,
     isPublic: r.is_public,
     releasedAt: r.released_at,
     createdAt: r.created_at,
@@ -107,7 +110,7 @@ export async function getAppReleasesOverview(): Promise<AppReleasesOverview> {
     if (r.isPublic && currentByPlatform[r.platform] === null) {
       // First match per platform wins: rows are already ordered by
       // released_at DESC, so this is the most recent public release.
-      currentByPlatform[r.platform] = r.version;
+      currentByPlatform[r.platform] = r.version ?? (r.buildNumber !== null ? `versionCode ${r.buildNumber}` : null);
     }
   }
 
