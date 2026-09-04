@@ -82,7 +82,7 @@ async function createPost(
   // apps/mobile/services/postService.ts. It handles club-authored vs student
   // posts, the retry-returns-existing idempotency (migration 100), and stores
   // each image's dimensions so a single image can render at its natural aspect
-  // with no layout shift (migration 117). A locked club is a club-authored
+  // with no layout shift (migration 118). A locked club is a club-authored
   // post; a Home post stays student-authored and may tag clubs via
   // post_club_tags.
   const { data, error } = await supabase.rpc("create_post", {

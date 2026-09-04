@@ -1,5 +1,5 @@
 -- ============================================================
--- Verification for migration 118's sync_store_app_release() push gate
+-- Verification for migration 119's sync_store_app_release() push gate
 -- (2026-09-04 security correction): the function must be safe BY
 -- CONSTRUCTION, not merely by deployment order (seeding app_releases
 -- before the poller's Vault secret is created). It must only enqueue an

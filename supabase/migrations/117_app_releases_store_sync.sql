@@ -1,5 +1,5 @@
 -- ============================================================================
--- 116 — store-backed app release detection
+-- 117 — store-backed app release detection
 --
 -- The store poller is deliberately separate from publish_app_release(). Manual
 -- publishing keeps its existing signature and notification behavior; the
