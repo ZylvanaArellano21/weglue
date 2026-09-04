@@ -10,7 +10,7 @@ import { getSupabaseBrowser } from "./supabase-browser";
 /**
  * Intrinsic pixel dimensions of an image blob. A proportional downscale keeps
  * the same aspect ratio, so the source dimensions are all a caller needs to
- * store for "show this image at its natural aspect" (migration 117).
+ * store for "show this image at its natural aspect" (migration 118).
  */
 export async function imageDimensions(file: Blob): Promise<{ width: number; height: number }> {
   const url = URL.createObjectURL(file);

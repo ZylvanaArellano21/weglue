@@ -7,7 +7,7 @@ stays undeployed until the founder runs these steps.
 
 ## What this ships
 
-- Migrations **116, 117, 118** (`app_releases` gains `source`/`store_url`/
+- Migrations **117, 118, 119** (`app_releases` gains `source`/`store_url`/
   `build_number`; `create_post`/`create_club_post` gain
   `p_image_dimensions`; `sync_store_app_release` becomes the 4-arg
   build-number-aware version).
@@ -27,14 +27,14 @@ Supabase/Vercel side.
 
 **The push gate is safe by construction, not just by this runbook's
 ordering** (2026-09-04 correction). `sync_store_app_release()` (migration
-118) only enqueues a push when it has confirmed BOTH: (a) the platform
+119) only enqueues a push when it has confirmed BOTH: (a) the platform
 already had a prior known public release on file, AND (b) this call
 recorded a version/build that wasn't already on file. A platform's very
 first detected release can never satisfy (a) — there is nothing yet to be
 "newer than" — so a baseline/seed call can never push, regardless of
 whether `app_releases` was pre-seeded first. Re-detecting an unchanged
 version/build never satisfies (b). See
-`supabase/scripts/test_118_sync_store_app_release_push_safety.sql` for the
+`supabase/scripts/test_119_sync_store_app_release_push_safety.sql` for the
 committed regression test (first-ever baseline → no push; same version
 again → no push; genuinely newer → one push per eligible user; repeated
 detection of that newer version → no duplicate) — run against the real
@@ -112,7 +112,7 @@ is a `"use server"` action that reads this from `process.env`).
 - [ ] Redeploy the web app (or trigger the next deploy normally) so the new
   env var is picked up.
 
-### Step 4 — Apply migrations 116, 117, 118
+### Step 4 — Apply migrations 117, 118, 119
 
 ```bash
 supabase link --project-ref yoozrnosmqtaiksgcixc   # if not already linked
@@ -123,11 +123,11 @@ This creates the `sync-store-versions` cron job (schedule `*/45 * * * *`),
 but it stays fully inert — zero HTTP calls — until Step 7 creates the Vault
 secret it checks for.
 
-- [ ] Confirm the migration ledger now ends at 118:
+- [ ] Confirm the migration ledger now ends at 119:
   ```sql
   SELECT version FROM supabase_migrations.schema_migrations ORDER BY version DESC LIMIT 5;
   ```
-- [ ] Confirm 116's own fail-closed self-check passed (it raises inside the
+- [ ] Confirm 117's own fail-closed self-check passed (it raises inside the
   migration transaction if it didn't, so a clean `db push` already proves
   this — worth re-confirming directly):
   ```sql
@@ -148,13 +148,13 @@ assume:
 SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_cron','pg_net');
 ```
 
-- [ ] Both rows present. If either is missing, migration 116's own
+- [ ] Both rows present. If either is missing, migration 117's own
   `CREATE EXTENSION IF NOT EXISTS` already attempted it during Step 4 — a
   missing extension there logs `WARNING: store version sync extensions: …`
   instead of failing the migration; if you see that warning, enable the
   extension manually (Dashboard → Database → Extensions) and re-run just
-  the cron-scheduling `DO $$ … $$` block from the tail of migration 116, or
-  re-apply 116.
+  the cron-scheduling `DO $$ … $$` block from the tail of migration 117, or
+  re-apply 117.
 - [ ] Confirm the job exists and is scheduled:
   ```sql
   SELECT jobname, schedule, active FROM cron.job WHERE jobname = 'sync-store-versions';
@@ -319,13 +319,13 @@ entry:
   (optional — an unscheduled/unauthenticated function sitting idle is not a
   live risk, since `verify_jwt = false` still requires the correct `apikey`).
 - None of the above touches `app_releases` data already written, or removes
-  migrations 116-118 (rolling those back is a separate, not-recommended,
+  migrations 117-119 (rolling those back is a separate, not-recommended,
   schema decision).
 
 ## Post-deploy Admin Dashboard parity check
 
 No schema/RPC/RLS/storage shape changed by this runbook beyond what
-migrations 116-118 already introduced (reviewed and validated separately —
+migrations 117-119 already introduced (reviewed and validated separately —
 see `project_media_reload_tags_update_task` memory, Round 3/4). This runbook
 only provisions secrets and runs the migrations/deploy that were already
 built and tested. `Admin Dashboard Impact: VERIFIED — NO UPDATE REQUIRED`.

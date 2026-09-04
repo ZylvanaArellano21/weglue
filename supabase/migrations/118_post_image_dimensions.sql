@@ -1,5 +1,5 @@
 -- ============================================================================
--- 117 — client-supplied post image dimensions
+-- 118 — client-supplied post image dimensions
 --
 -- Migration 111 already contains these nullable columns in the current schema
 -- snapshot. IF NOT EXISTS makes this migration safe for both a database that

@@ -697,7 +697,7 @@ export async function createPost(
   // handles club-authored vs student posts, the retry-returns-existing
   // idempotency (migration 100), and stores each image's dimensions so a
   // single image can render at its natural aspect with no layout shift
-  // (migration 117). A Club Profile post is authored BY the club; a Home post
+  // (migration 118). A Club Profile post is authored BY the club; a Home post
   // stays student-authored and may tag one or more clubs via post_club_tags.
   const { data, error } = await supabase.rpc('create_post', {
     p_caption: caption ?? null,

@@ -25,7 +25,7 @@ description of intent.
 ### Transition ① → ②: a public release exists → the store detector queries it
 
 - **Owns it:** `supabase/functions/sync-store-versions/index.ts` — `lookupIos()` (iTunes) and `checkAndroid()` → `readAndroidProduction()` (Android Publisher API).
-- **Trigger:** pg_cron job `sync-store-versions`, schedule `*/45 * * * *`, created by migration 116's tail `DO $$ ... cron.schedule(...) $$`. Also triggerable on demand via Admin Dashboard "Check now" → the same function.
+- **Trigger:** pg_cron job `sync-store-versions`, schedule `*/45 * * * *`, created by migration 117's tail `DO $$ ... cron.schedule(...) $$`. Also triggerable on demand via Admin Dashboard "Check now" → the same function.
 - **Data/state change:** none yet — this is a read of two *external* systems (Apple, Google), not yet a write to our own database.
 - **Evidence — [LIVE], fetched this session:**
   - iOS: `GET https://itunes.apple.com/lookup?bundleId=com.weglue.app` → `{"version":"1.0.5","trackViewUrl":"https://apps.apple.com/us/app/we-glue/id6786491344?uo=4", ...}` — We Glue genuinely is public on the App Store today.
@@ -35,10 +35,10 @@ description of intent.
 
 ### Transition ② → ③: the detector writes `app_releases`
 
-- **Owns it:** `checkIos`/`checkAndroid` → `admin.rpc("sync_store_app_release", {...})` → migration 118's `sync_store_app_release()` (the 4-arg version; 116's 3-arg predecessor is dropped by 118 in the same migration run).
+- **Owns it:** `checkIos`/`checkAndroid` → `admin.rpc("sync_store_app_release", {...})` → migration 119's `sync_store_app_release()` (the 4-arg version; 117's 3-arg predecessor is dropped by 119 in the same migration run).
 - **Trigger:** ONLY when the detector's own pre-check decides the store value is genuinely newer than what we already have on file: `compareSemver(store.version, current.version) > 0` (iOS), or `store.buildNumber > current.buildNumber` / a semver fallback when no build number is on file (Android). If not newer, the RPC is never called at all — that tick is a silent no-op.
 - **Data/state change:** `app_releases` gets a new row (or an existing row's `is_public`/`store_url`/`released_at` refreshed) with `source = 'store'`.
-- **Evidence:** `supabase/scripts/test_118_sync_store_app_release_push_safety.sql` — **13/13 assertions pass**, run this session against a fixture using the real `enqueue_push`/`user_wants_push`/`register_push_token`/`push_queue` bodies (verbatim from migrations 046/057) plus the actual (fixed) `sync_store_app_release`. Migrations 116→117→118 re-validated clean in a throwaway `postgres:17` container (grants, signatures, idempotency).
+- **Evidence:** `supabase/scripts/test_119_sync_store_app_release_push_safety.sql` — **13/13 assertions pass**, run this session against a fixture using the real `enqueue_push`/`user_wants_push`/`register_push_token`/`push_queue` bodies (verbatim from migrations 046/057) plus the actual (fixed) `sync_store_app_release`. Migrations 117→118→119 re-validated clean in a throwaway `postgres:17` container (grants, signatures, idempotency).
 - **If the store API fails:** covered above — this transition simply never fires that tick.
 - **Duplicate prevention:** the RPC's own row-matching (`SELECT ... FOR UPDATE` by `build_number` for Android, by `version` otherwise) plus `ON CONFLICT DO NOTHING`/UPDATE semantics mean a re-detected value updates the SAME row rather than creating a second one — confirmed by test `2b iOS re-detection does not create a second row`.
 
@@ -117,6 +117,6 @@ description of intent.
 
 ## Claude's review of the backend: agree, no remaining gap
 
-I reviewed and personally executed the Codex-authored backend (`sync-store-versions/index.ts`, migrations 116/117/118) this session, including running its exact Apple and Android logic against the real live APIs, and I did not find a gap between what it claims to do and what it actually does. The one weakness I found (push firing on a baseline/first detection, making deployment order the only safety net) was already identified and fixed this session, with the fix verified by a permanent, real-schema test — not just reviewed, executed.
+I reviewed and personally executed the Codex-authored backend (`sync-store-versions/index.ts`, migrations 117/118/119) this session, including running its exact Apple and Android logic against the real live APIs, and I did not find a gap between what it claims to do and what it actually does. The one weakness I found (push firing on a baseline/first detection, making deployment order the only safety net) was already identified and fixed this session, with the fix verified by a permanent, real-schema test — not just reviewed, executed.
 
-**What is NOT yet true, and must not be implied by the above:** none of this is live in production. Migrations 116-118 are not applied, the function is not deployed, no Vault/function secret exists, the cron cannot fire. Every "yes" above is "yes, this is what the code does, proven against real external systems" — not "yes, this is currently happening for real users." That gap closes only when `docs/releases/f5-app-update-detection-runbook.md` is executed, which remains a separate, later, explicitly-not-yet-approved step.
+**What is NOT yet true, and must not be implied by the above:** none of this is live in production. Migrations 117-119 are not applied, the function is not deployed, no Vault/function secret exists, the cron cannot fire. Every "yes" above is "yes, this is what the code does, proven against real external systems" — not "yes, this is currently happening for real users." That gap closes only when `docs/releases/f5-app-update-detection-runbook.md` is executed, which remains a separate, later, explicitly-not-yet-approved step.
