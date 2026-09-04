@@ -13,11 +13,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
+import {
+  pickMedia,
+  useWeGlueMediaFlow,
+  cropExistingImage,
+  postCropAspectOptions,
+} from '../../lib/media/pickMedia';
 import { pickPhotos } from '../../lib/media/pickPhotos';
 import type { PickedMedia } from '../../lib/media/types';
 import { PhotoTray } from '../../components/media/PhotoTray';
-import { useAuthStore } from '@weglue/shared';
+import { useAuthStore, clampPostImageRatio, naturalCropAspect } from '@weglue/shared';
 import { createPost } from '../../services/postService';
 import { clientUuid } from '../../lib/chatAttachments';
 import { getAllClubs, UserClub } from '../../services/clubService';
@@ -77,6 +82,47 @@ export default function NewPostScreen() {
   const applyPhotos = (next: PickedMedia[]) => {
     setPhotos(next.slice(0, 5));
     composeTagRef.current = clientUuid();
+  };
+
+  // Replace one photo with its adjusted version. A framing change is a genuinely
+  // different image, so it starts a new idempotency tag (a later retry can't be
+  // deduped against a post made from the earlier framing).
+  const replacePhoto = (index: number, next: PickedMedia) => {
+    setPhotos((prev) => prev.map((p, i) => (i === index ? next : p)));
+    composeTagRef.current = clientUuid();
+  };
+
+  // "Adjust" on a photo. The first photo of a post (or a lone photo) gets the
+  // full Original / 1:1 / 4:5 ratio picker — and for a carousel its choice
+  // becomes the shared slide ratio. Every later carousel photo is repositioned
+  // into that same shared ratio (no picker — the batch ratio is already set).
+  const handleAdjust = async (index: number) => {
+    const photo = photos[index];
+    if (!photo) return;
+    const w = photo.width || 1;
+    const h = photo.height || 1;
+
+    if (photos.length <= 1 || index === 0) {
+      const adjusted = await cropExistingImage({
+        uri: photo.uri,
+        width: w,
+        height: h,
+        aspect: naturalCropAspect(w, h),
+        aspectOptions: postCropAspectOptions(w, h),
+      });
+      if (adjusted) replacePhoto(index, adjusted);
+      return;
+    }
+
+    const first = photos[0]!;
+    const shared = clampPostImageRatio((first.width || 1) / (first.height || 1));
+    const adjusted = await cropExistingImage({
+      uri: photo.uri,
+      width: w,
+      height: h,
+      aspect: [Math.round(shared * 1000), 1000],
+    });
+    if (adjusted) replacePhoto(index, adjusted);
   };
 
   // Multi-select up to 5, familiar numbered OS picker. Posts are images only
@@ -150,6 +196,14 @@ export default function NewPostScreen() {
       // may tag clubs.
       const authoredClubId = locked ? lockedClubId! : undefined;
       const clubIds = locked ? undefined : selectedClubs.map((c) => c.id);
+      // A carousel shares one slide ratio — the first image's. Any image the
+      // user didn't adjust is centre-cropped to it at upload so every stored
+      // dimension matches and the carousel height never jumps.
+      const first = photos[0]!;
+      const carouselRatio =
+        photos.length > 1 && first.width && first.height
+          ? clampPostImageRatio(first.width / first.height)
+          : undefined;
       const newPostId = await createPost(
         userId,
         photos.map((p) => p.uri),
@@ -157,6 +211,7 @@ export default function NewPostScreen() {
         clubIds && clubIds.length > 0 ? clubIds : undefined,
         composeTagRef.current,
         authoredClubId,
+        carouselRatio,
       );
       // Post landed — the next compose (if the user comes back) is a new draft.
       composeTagRef.current = clientUuid();
@@ -192,8 +247,11 @@ export default function NewPostScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
+        keyboardVerticalOffset={0}
       >
-        {/* Header */}
+        {/* Header. The centred title is a pointerEvents:none VIEW inset clear of
+            the buttons — on Android `pointerEvents` is unreliable on <Text>, and
+            a full-width absolute title there silently swallows the back tap. */}
         <View
           style={{
             flexDirection: 'row',
@@ -206,24 +264,35 @@ export default function NewPostScreen() {
             onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
             activeOpacity={0.7}
             hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={{ width: 40, height: 40, justifyContent: 'center', zIndex: 1 }}
           >
             <Ionicons name="chevron-back" size={26} color="#111827" />
           </TouchableOpacity>
-          <Text
+          <View
             pointerEvents="none"
             style={{
               position: 'absolute',
-              left: 0,
-              right: 0,
-              textAlign: 'center',
-              fontSize: 18,
-              fontWeight: '700',
-              color: '#111827',
-              fontFamily: 'Zain_700Bold',
+              left: 56,
+              right: 56,
+              top: 0,
+              bottom: 0,
+              justifyContent: 'center',
             }}
           >
-            New Post
-          </Text>
+            <Text
+              style={{
+                textAlign: 'center',
+                fontSize: 18,
+                fontWeight: '700',
+                color: '#111827',
+                fontFamily: 'Zain_700Bold',
+              }}
+            >
+              New Post
+            </Text>
+          </View>
         </View>
 
         <ScrollView
@@ -240,6 +309,10 @@ export default function NewPostScreen() {
                 onAddMore={photos.length < 5 ? addMorePhotos : undefined}
                 showConfirm={false}
                 aspectRatio={4 / 5}
+                // Posts render at the first image's natural ratio — a single
+                // landscape stays landscape, a carousel shares that one ratio.
+                naturalRatio
+                onAdjust={handleAdjust}
               />
             </View>
           ) : (

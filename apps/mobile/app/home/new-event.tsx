@@ -14,8 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import { pickMedia, useWeGlueMediaFlow } from '../../lib/media/pickMedia';
+import { pickImageForFeature } from '../../lib/media/pickMedia';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
 import { createEvent, updateEvent, getEventForEdit, searchEventAudienceMembers, type EventAudienceMember } from '../../services/eventService';
@@ -177,28 +176,17 @@ export default function NewEventScreen() {
   };
 
   const handlePickImage = async () => {
-    // Android: shared We Glue flow. Single "add image" tap → 'choose' shows
-    // Take Photo / Photo Library first, then camera or picker + confirm
-    // preview. iOS keeps its existing library-only path. Event 4:5 preserved.
-    if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'choose', aspect: [4, 5], allowsEditing: true, quality: 0.8 });
-      if (picked) await uploadSelectedEventImage(picked.uri);
-      return;
-    }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      show('Photo library access is required to add an event image.', 'error');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+    // One "add image" tap → Take Photo / Photo Library, then the in-app 4:5
+    // crop/zoom/reposition step. Same on iOS and Android; the OS editor is
+    // never used.
+    const picked = await pickImageForFeature({
+      source: 'choose',
       aspect: [4, 5],
       quality: 0.8,
+      onDenied: () =>
+        show('Photo library access is required to add an event image.', 'error'),
     });
-    if (!result.canceled && result.assets[0]) {
-      await uploadSelectedEventImage(result.assets[0].uri);
-    }
+    if (picked?.uri) await uploadSelectedEventImage(picked.uri);
   };
 
   const handleUserSearch = useCallback(async (q: string) => {
@@ -366,24 +354,38 @@ export default function NewEventScreen() {
             onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
             activeOpacity={0.7}
             hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={{ width: 40, height: 40, justifyContent: 'center', zIndex: 1 }}
           >
             <Ionicons name="chevron-back" size={26} color="#111827" />
           </TouchableOpacity>
-          <Text
+          {/* pointerEvents:none VIEW inset clear of the buttons — on Android
+              `pointerEvents` is unreliable on <Text> and a full-width absolute
+              title there can swallow the back tap. */}
+          <View
             pointerEvents="none"
             style={{
               position: 'absolute',
-              left: 0,
-              right: 0,
-              textAlign: 'center',
-              fontSize: 18,
-              fontWeight: '700',
-              color: '#111827',
-              fontFamily: 'Zain_700Bold',
+              left: 56,
+              right: 56,
+              top: 0,
+              bottom: 0,
+              justifyContent: 'center',
             }}
           >
-            {isEditMode ? 'Edit Event' : 'New Event'}
-          </Text>
+            <Text
+              style={{
+                textAlign: 'center',
+                fontSize: 18,
+                fontWeight: '700',
+                color: '#111827',
+                fontFamily: 'Zain_700Bold',
+              }}
+            >
+              {isEditMode ? 'Edit Event' : 'New Event'}
+            </Text>
+          </View>
         </View>
 
         <ScrollView

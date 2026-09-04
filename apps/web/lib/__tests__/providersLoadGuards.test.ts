@@ -52,4 +52,19 @@ describe("student-content navigation invalidation (risk #16)", () => {
     expect(src).toMatch(/`sync:university:\$\{universityId\}`[\s\S]*?refreshPermissionSensitiveStudentContent\(queryClient\)/);
     expect(src).toMatch(/const recover = \(\) => invalidateStudentContentQueries\(queryClient\)/);
   });
+
+  it("(re)subscribing to the campus broadcast does NOT clear — only a received message does", () => {
+    // subscribeBroadcast(topic, event, onMessage, onSubscribed). onSubscribed
+    // fires on the initial connect AND on every socket reconnect (token-refresh
+    // re-auth, network blip, refocus). Using the clearing form there blanked
+    // every open screen back to a skeleton on every reconnect; the reconnect
+    // path must be a background invalidation.
+    const call = src.match(
+      /subscribeBroadcast\(\s*`sync:university:\$\{universityId\}`,[\s\S]*?\);/,
+    );
+    expect(call).not.toBeNull();
+    const [onMessageCb, onSubscribedCb] = (call![0].match(/\(\) => \w+\(queryClient\)/g) ?? []);
+    expect(onMessageCb).toContain("refreshPermissionSensitiveStudentContent");
+    expect(onSubscribedCb).toContain("invalidateStudentContentQueries");
+  });
 });

@@ -29,10 +29,11 @@ export interface SidebarActionHandlers {
   // hosts the modals. Navigation-only items stay here.
   onHelp: () => void;
   onLogout: () => void;
-  // Update branches on live update-availability, decided by SidebarOverlay
-  // (the only owner of useAppUpdateStatus here): available → straight to the
-  // store, no internal screen; not available → the "You're up to date"
-  // screen. Never a plain `go()` push — the destination depends on state.
+  // Update always opens the Update screen (/account-center/update), owned by
+  // SidebarOverlay. That one screen reflects the shared status — checking /
+  // update available / up to date / couldn't check — and its "Update now"
+  // button opens the correct store listing. Kept a handler (not a plain
+  // `go()`) so the row can stay a single consistent entry point.
   onUpdatePress: () => void;
 }
 

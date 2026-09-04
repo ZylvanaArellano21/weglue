@@ -25,6 +25,7 @@ import { Avatar } from '../../components/shared/Avatar';
 import { CarouselBadge } from '../../components/shared/PhotoCarousel';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { InterestsLine } from '../../components/profile/InterestsLine';
+import { OfficerClubTags } from '../../components/profile/OfficerClubTags';
 import { ShowMoreSheet } from '../../components/profile/ShowMoreSheet';
 import { SwipeableDeleteRow } from '../../components/profile/SwipeableDeleteRow';
 import { ProfileConfirmationModal } from '../../components/profile/ProfileConfirmationModal';
@@ -35,7 +36,6 @@ import { openProfile } from '../../lib/profileNavigation';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_ITEM_SIZE = (SCREEN_WIDTH - 32 - 8) / 3;
-const ROLES_CAP = 2;
 
 type ProfileTab = 'posts' | 'weekly_events';
 
@@ -68,7 +68,6 @@ export default function OwnProfileScreen() {
   const removeRsvp = useRemoveEventRsvp(userId);
 
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
-  const [rolesSheetOpen, setRolesSheetOpen] = useState(false);
   const [clubsSheetOpen, setClubsSheetOpen] = useState(false);
   const [gluematesSheetOpen, setGluematesSheetOpen] = useState(false);
   const [deleteEventId, setDeleteEventId] = useState<string | null>(null);
@@ -83,8 +82,6 @@ export default function OwnProfileScreen() {
 
   const interests = profile?.interests ?? [];
   const roles = profile?.club_roles ?? [];
-  const showMoreRoles = roles.length > ROLES_CAP;
-  const visibleRoles = roles.slice(0, ROLES_CAP);
 
   const handleConfirmRemoveRsvp = async () => {
     if (!deleteEventId) return;
@@ -154,32 +151,16 @@ export default function OwnProfileScreen() {
           {/* Interests — first 5, inline Show more / Show less */}
           <InterestsLine interests={interests} />
 
-          {/* Officer roles */}
-          {roles.length > 0 && (
-            <View style={styles.rolesSection}>
-              {visibleRoles.map((role) => (
-                <TouchableOpacity
-                  key={role.club_id}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/club/[clubId]',
-                      params: { clubId: role.club_id },
-                    } as any)
-                  }
-                  activeOpacity={0.7}
-                  style={styles.roleRow}
-                >
-                  <Text style={styles.roleClub}>@{role.club_name}</Text>
-                  <Text style={styles.roleTitle}>{role.role_title}</Text>
-                </TouchableOpacity>
-              ))}
-              {showMoreRoles && (
-                <TouchableOpacity onPress={() => setRolesSheetOpen(true)} activeOpacity={0.7}>
-                  <Text style={styles.showMore}>Show more</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+          {/* Officer roles — up to 3, then "+N more" expands in place */}
+          <OfficerClubTags
+            roles={roles}
+            onOpenClub={(clubId) =>
+              router.push({
+                pathname: '/club/[clubId]',
+                params: { clubId },
+              } as any)
+            }
+          />
 
           {/* Edit Profile */}
           <TouchableOpacity style={styles.editBtn} onPress={onEditProfile} activeOpacity={0.85}>
@@ -281,20 +262,6 @@ export default function OwnProfileScreen() {
           )}
         </View>
       </ScrollView>
-
-      {/* Roles sheet */}
-      <ShowMoreSheet
-        visible={rolesSheetOpen}
-        title="Officer Roles"
-        onClose={() => setRolesSheetOpen(false)}
-      >
-        {roles.map((role) => (
-          <View key={role.club_id} style={styles.sheetRoleRow}>
-            <Text style={styles.roleClub}>@{role.club_name}</Text>
-            <Text style={styles.roleTitle}>{role.role_title}</Text>
-          </View>
-        ))}
-      </ShowMoreSheet>
 
       {/* Clubs sheet */}
       <ShowMoreSheet
@@ -442,8 +409,6 @@ const styles = StyleSheet.create({
     color: profileColors.teal,
     marginTop: 4,
   },
-  rolesSection: { marginBottom: 16 },
-  roleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
   roleClub: {
     fontFamily: profileFonts.semiBold,
     fontSize: 13,

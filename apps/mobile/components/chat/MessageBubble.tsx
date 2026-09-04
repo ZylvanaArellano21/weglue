@@ -141,19 +141,57 @@ function MediaPreview({
   );
 }
 
-/** Signed-URL image tile for the grouped-media grid. */
-function GridImage({ path, style }: { path: string; style: object }) {
+/** One signed-URL image in a multi-image message, at its OWN natural aspect
+ *  (clamped so neither a panorama nor a very tall screenshot takes over the
+ *  thread) — never cropped into a shared grid cell. */
+function GroupedMediaImage({
+  path,
+  onPress,
+  onLongPress,
+}: {
+  path: string;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
   const uri = useAttachmentUri(path);
-  return uri ? (
-    <Image source={{ uri }} style={style} resizeMode="cover" />
-  ) : (
-    <View style={[style, styles.mediaLoading]}>
-      <ActivityIndicator size="small" color={chatColors.teal} />
-    </View>
+  const [aspect, setAspect] = useState(4 / 3);
+
+  useEffect(() => {
+    if (!uri) return;
+    let alive = true;
+    Image.getSize(
+      uri,
+      (w, h) => {
+        if (alive && w > 0 && h > 0) setAspect(w / h);
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [uri]);
+
+  return (
+    <TouchableOpacity activeOpacity={0.9} onPress={onPress} onLongPress={onLongPress}>
+      <View
+        style={[
+          styles.groupedTile,
+          { aspectRatio: Math.max(0.5, Math.min(2, aspect)) },
+        ]}
+      >
+        {uri ? (
+          <Image source={{ uri }} style={styles.mediaImage} resizeMode="cover" />
+        ) : (
+          <View style={styles.mediaLoading}>
+            <ActivityIndicator size="small" color={chatColors.teal} />
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
   );
 }
 
-/** 1..5 images as one rounded media group. Layout adapts to the count. */
+/** 2..5 images stacked, each keeping its OWN natural aspect ratio. */
 function GroupedMedia({
   images,
   onPress,
@@ -163,59 +201,18 @@ function GroupedMedia({
   onPress: (index: number) => void;
   onLongPress: () => void;
 }) {
-  const n = images.length;
-  const gap = 2;
-  const W = MEDIA_MAX_WIDTH;
-  const tile = (i: number, w: number, h: number) => (
-    <TouchableOpacity
-      key={images[i]!.id}
-      activeOpacity={0.9}
-      onPress={() => onPress(i)}
-      onLongPress={onLongPress}
-      style={{ width: w, height: h }}
-    >
-      <GridImage path={images[i]!.storage_path} style={{ width: '100%', height: '100%' }} />
-    </TouchableOpacity>
+  return (
+    <View style={styles.groupedMedia}>
+      {images.map((img, i) => (
+        <GroupedMediaImage
+          key={img.id}
+          path={img.storage_path}
+          onPress={() => onPress(i)}
+          onLongPress={onLongPress}
+        />
+      ))}
+    </View>
   );
-
-  let layout: React.ReactNode;
-  if (n === 2) {
-    const s = (W - gap) / 2;
-    layout = <View style={styles.gridRow}>{tile(0, s, s)}<View style={{ width: gap }} />{tile(1, s, s)}</View>;
-  } else if (n === 3) {
-    const big = (W - gap) * 0.62;
-    const small = W - gap - big;
-    const sh = (big - gap) / 2;
-    layout = (
-      <View style={styles.gridRow}>
-        {tile(0, big, big)}
-        <View style={{ width: gap }} />
-        <View style={{ width: small }}>{tile(1, small, sh)}<View style={{ height: gap }} />{tile(2, small, sh)}</View>
-      </View>
-    );
-  } else if (n === 4) {
-    const s = (W - gap) / 2;
-    layout = (
-      <View>
-        <View style={styles.gridRow}>{tile(0, s, s)}<View style={{ width: gap }} />{tile(1, s, s)}</View>
-        <View style={{ height: gap }} />
-        <View style={styles.gridRow}>{tile(2, s, s)}<View style={{ width: gap }} />{tile(3, s, s)}</View>
-      </View>
-    );
-  } else {
-    // 5: one wide on top, 2×2 below
-    const s = (W - gap) / 2;
-    layout = (
-      <View>
-        {tile(0, W, s)}
-        <View style={{ height: gap }} />
-        <View style={styles.gridRow}>{tile(1, s, s)}<View style={{ width: gap }} />{tile(2, s, s)}</View>
-        <View style={{ height: gap }} />
-        <View style={styles.gridRow}>{tile(3, s, s)}<View style={{ width: gap }} />{tile(4, s, s)}</View>
-      </View>
-    );
-  }
-  return <View style={styles.groupedMedia}>{layout}</View>;
 }
 
 function ReactionChips({
@@ -505,9 +502,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#00000010',
+    gap: 2,
   },
-  gridRow: {
-    flexDirection: 'row',
+  groupedTile: {
+    width: '100%',
+    backgroundColor: '#00000010',
   },
   reactionRow: {
     flexDirection: 'row',

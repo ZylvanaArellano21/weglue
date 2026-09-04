@@ -78,11 +78,18 @@ export function PostModal({
             )}
           </div>
 
-          {post.images && post.images.length > 1 ? (
-            <PhotoCarousel images={post.images.map((im) => ({ uri: im.path }))} aspectRatio={4 / 5} />
+          {post.images && post.images.length > 0 ? (
+            <PhotoCarousel
+              images={post.images.map((im) => ({
+                uri: im.path,
+                width: im.width ?? null,
+                height: im.height ?? null,
+              }))}
+              aspectRatio={4 / 5}
+              naturalRatio
+            />
           ) : post.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={post.image_url} alt={post.caption ?? "post"} className="w-full object-cover" />
+            <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalRatio />
           ) : (
             <div className="flex aspect-square w-full items-center justify-center" style={{ background: "#E5E7EB", color: "#9CA3AF" }}>
               <ImageIcon size={44} />

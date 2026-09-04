@@ -12,6 +12,7 @@ import {
 } from "@weglue/shared";
 import { Avatar } from "../../../components/shared/Avatar";
 import { CameraIcon, ImageIcon } from "../../../components/shared/icons";
+import { ImageCropper } from "../../../components/shared/ImageCropper";
 import { uploadPendingAvatar } from "../../../lib/imageUpload";
 import { readOnboardingState, writeOnboardingState } from "../../../lib/onboardingState";
 
@@ -40,6 +41,8 @@ export default function OnboardingProfilePicturePage(): JSX.Element {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [pending, setPending] = useState<Pending>({ kind: "none" });
+  const [cropSource, setCropSource] = useState<{ url: string; source: "photo" | "camera" } | null>(null);
+  const closeCrop = () => setCropSource((cur) => { if (cur) URL.revokeObjectURL(cur.url); return null; });
   const [textDraft, setTextDraft] = useState("");
   const [textOpen, setTextOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -98,7 +101,7 @@ export default function OnboardingProfilePicturePage(): JSX.Element {
       setError("We couldn't read that image. Please try a different file.");
       return;
     }
-    setPendingImage(file, "photo");
+    setCropSource({ url: URL.createObjectURL(file), source: "photo" });
   };
 
   const hasSelection = pending.kind !== "none";
@@ -311,7 +314,20 @@ export default function OnboardingProfilePicturePage(): JSX.Element {
           onCancel={() => setCameraOpen(false)}
           onCapture={(blob) => {
             setCameraOpen(false);
-            setPendingImage(blob, "camera");
+            setCropSource({ url: URL.createObjectURL(blob), source: "camera" });
+          }}
+        />
+      )}
+
+      {cropSource && (
+        <ImageCropper
+          src={cropSource.url}
+          aspect={[1, 1]}
+          title="Position your picture"
+          onCancel={closeCrop}
+          onConfirm={({ blob }) => {
+            setPendingImage(blob, cropSource.source);
+            closeCrop();
           }}
         />
       )}
@@ -426,15 +442,14 @@ function CameraCapture({
 
   const capture = () => {
     const video = videoRef.current;
-    if (!video) return;
-    const side = Math.min(video.videoWidth, video.videoHeight);
-    if (!side) return;
+    if (!video || !video.videoWidth || !video.videoHeight) return;
+    // Full frame — the 1:1 framing happens afterwards in the in-app cropper.
     const canvas = document.createElement("canvas");
-    canvas.width = side;
-    canvas.height = side;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, side, side);
+    ctx.drawImage(video, 0, 0);
     canvas.toBlob(
       (blob) => {
         if (!blob) return;

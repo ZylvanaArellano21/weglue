@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { QueryClient } from '@tanstack/react-query';
 
 // `studentSynchronization` now clears the local attachment cache too, and
@@ -143,5 +144,30 @@ describe('clearing must not strand mounted screens', () => {
     expect(removeQueries).not.toHaveBeenCalled();
     expect(resetQueries).toHaveBeenCalled();
     expect(resetQueries.mock.calls.map(([arg]) => arg.queryKey)).toContainEqual(['messages']);
+  });
+});
+
+/**
+ * The campus broadcast channel re-subscribes on every socket reconnect (a
+ * token-refresh re-auth, a network blip, a return to the foreground). Wiring
+ * the clearing form to that reconnect callback blanked every open screen back
+ * to a loader on every reconnect — the reconnect path must be a background
+ * invalidation; only a RECEIVED broadcast may clear.
+ */
+describe('StudentSynchronizationHost reconnect wiring', () => {
+  it('passes refresh (invalidate) — not recover (clear) — as the resubscribe callback', () => {
+    const src = readFileSync(
+      decodeURIComponent(new URL('../../components/synchronization/StudentSynchronizationHost.tsx', import.meta.url).pathname),
+      'utf8',
+    );
+    const call = src.match(/subscribeBroadcast\(\s*`sync:university:\$\{universityId\}`,[\s\S]*?\);/);
+    expect(call).not.toBeNull();
+    // subscribeBroadcast(topic, event, onMessage, onSubscribed)
+    const args = call![0]
+      .replace(/\/\/[^\n]*/g, '')
+      .split(/,\s*\n/)
+      .map((s) => s.trim());
+    expect(args[2]).toBe('recover');
+    expect(args[3]).toContain('refresh');
   });
 });

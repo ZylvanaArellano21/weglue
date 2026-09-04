@@ -478,3 +478,10 @@ verify_jwt = false
 
 [functions.reconcile-deleted-messages]
 verify_jwt = false
+
+# The store-version poller is invoked only server-to-server — pg_cron (Vault
+# secret) and the Admin Dashboard's server action (server-only env var) — and
+# enforces the dedicated STORE_SYNC_API_KEY in the `apikey` header itself, so
+# the gateway's JWT check must be off. It is never called by a client.
+[functions.sync-store-versions]
+verify_jwt = false

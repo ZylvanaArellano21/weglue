@@ -14,8 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
-import { pickMedia, useWeGlueMediaFlow } from "../../lib/media/pickMedia";
+import { pickImageForFeature } from "../../lib/media/pickMedia";
 import { uploadImageToBucket } from "../../lib/imageUpload";
 import {
   useOnboardingStore,
@@ -57,56 +56,31 @@ export default function OnboardingProfilePictureScreen() {
   };
 
   const onPickFromLibrary = async () => {
-    if (useWeGlueMediaFlow) {
-      setPhotoDenied(false);
-      const picked = await pickMedia({ source: "library", aspect: [1, 1], allowsEditing: true, quality: 0.8 });
-      if (picked) applyPickedAvatar(picked.uri, "photo");
-      return;
-    }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status === "denied") {
-      setPhotoDenied(true);
-      setCameraDenied(false);
-      return;
-    }
-    if (status !== "granted") return;
     setPhotoDenied(false);
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+    const picked = await pickImageForFeature({
+      source: "library",
       aspect: [1, 1],
       quality: 0.8,
+      onDenied: () => {
+        setPhotoDenied(true);
+        setCameraDenied(false);
+      },
     });
-    if (!result.canceled && result.assets[0]) {
-      applyPickedAvatar(result.assets[0].uri, "photo");
-    }
+    if (picked?.uri) applyPickedAvatar(picked.uri, "photo");
   };
 
   const onPickFromCamera = async () => {
-    if (useWeGlueMediaFlow) {
-      setCameraDenied(false);
-      const picked = await pickMedia({ source: "camera", aspect: [1, 1], quality: 0.8 });
-      if (picked) applyPickedAvatar(picked.uri, "camera");
-      return;
-    }
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status === "denied") {
-      setCameraDenied(true);
-      setPhotoDenied(false);
-      return;
-    }
-    if (status !== "granted") return;
     setCameraDenied(false);
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
+    const picked = await pickImageForFeature({
+      source: "camera",
       aspect: [1, 1],
       quality: 0.8,
+      onDenied: () => {
+        setCameraDenied(true);
+        setPhotoDenied(false);
+      },
     });
-    if (!result.canceled && result.assets[0]) {
-      applyPickedAvatar(result.assets[0].uri, "camera");
-    }
+    if (picked?.uri) applyPickedAvatar(picked.uri, "camera");
   };
 
   const onSelectPreset = (id: PresetAvatarId) => {

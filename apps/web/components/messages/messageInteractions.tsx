@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import EmojiPicker, { EmojiStyle, Theme, type EmojiClickData } from "emoji-picker-react";
-import { QUICK_REACTIONS } from "@weglue/shared";
+import { QUICK_REACTIONS, clampChatImageAspect } from "@weglue/shared";
 import { Avatar } from "../shared/Avatar";
 import { CloseIcon } from "../shared/icons";
 import {
@@ -354,12 +354,58 @@ function ReactorsSheet({
 
 // ─── Grouped media (1..5) ─────────────────────────────────────────────────
 
-const TILE = "block h-full w-full bg-cover bg-center bg-gray-200";
+/**
+ * One image in a multi-image message, at its OWN natural aspect (clamped so
+ * neither a panorama nor a very tall screenshot takes over the thread) — never
+ * cropped into a shared grid cell.
+ */
+function GroupedTile({
+  url,
+  index,
+  count,
+  onOpen,
+}: {
+  url: string | undefined;
+  index: number;
+  count: number;
+  onOpen: (index: number) => void;
+}): JSX.Element {
+  const [aspect, setAspect] = useState<number | null>(null);
+  const ratio = clampChatImageAspect(aspect);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(index)}
+      aria-label={`Open photo ${index + 1} of ${count}`}
+      className="relative block w-full overflow-hidden bg-gray-200"
+      style={{ aspectRatio: String(ratio) }}
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt=""
+          className="h-full w-full object-cover"
+          onLoad={(event) => {
+            const image = event.currentTarget;
+            if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+              setAspect(image.naturalWidth / image.naturalHeight);
+            }
+          }}
+        />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center bg-black/5">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-teal border-t-transparent" />
+        </span>
+      )}
+    </button>
+  );
+}
 
 /**
- * 1..5 images as one rounded block. Layout adapts to the count, matching
- * mobile's `GroupedMedia`. A single image keeps its natural aspect; 2+ use
- * fixed geometry so the block never reflows once the bytes land.
+ * 1..5 images as one rounded block, matching mobile's `GroupedMedia`: a
+ * natural-ratio vertical stack on both platforms. Images are never cropped into
+ * a shared-ratio grid.
  */
 export function GroupedMedia({
   attachments,
@@ -373,71 +419,17 @@ export function GroupedMedia({
   const images = attachments.filter((a) => a.kind === "image");
   const n = images.length;
 
-  const Tile = ({ i, className }: { i: number; className: string }): JSX.Element => {
-    const url = urls.get(images[i]!.storage_path);
-    return (
-      <button
-        type="button"
-        onClick={() => onOpen(i)}
-        aria-label={`Open photo ${i + 1} of ${n}`}
-        className={`relative overflow-hidden ${className}`}
-      >
-        {url ? (
-          <span className={TILE} style={{ backgroundImage: `url(${url})` }} role="img" aria-label="" />
-        ) : (
-          <span className="flex h-full w-full items-center justify-center bg-black/5">
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-teal border-t-transparent" />
-          </span>
-        )}
-      </button>
-    );
-  };
-
-  if (n === 1) {
-    return (
-      <div className="max-w-[300px] overflow-hidden rounded-2xl">
-        <div className="aspect-[4/5] w-[300px] max-w-full">
-          <Tile i={0} className="h-full w-full" />
-        </div>
-      </div>
-    );
-  }
-
-  const box = "grid w-[300px] max-w-full gap-0.5 overflow-hidden rounded-2xl";
-  if (n === 2) {
-    return (
-      <div className={`${box} aspect-[2/1] grid-cols-2`}>
-        <Tile i={0} className="h-full w-full" />
-        <Tile i={1} className="h-full w-full" />
-      </div>
-    );
-  }
-  if (n === 3) {
-    return (
-      <div className={`${box} aspect-square grid-cols-3 grid-rows-2`}>
-        <Tile i={0} className="col-span-2 row-span-2 h-full w-full" />
-        <Tile i={1} className="h-full w-full" />
-        <Tile i={2} className="h-full w-full" />
-      </div>
-    );
-  }
-  if (n === 4) {
-    return (
-      <div className={`${box} aspect-square grid-cols-2 grid-rows-2`}>
-        {[0, 1, 2, 3].map((i) => (
-          <Tile key={i} i={i} className="h-full w-full" />
-        ))}
-      </div>
-    );
-  }
-  // 5 — one wide on top, 2×2 below
   return (
-    <div className={`${box} aspect-[4/5] grid-cols-2 grid-rows-3`}>
-      <Tile i={0} className="col-span-2 h-full w-full" />
-      <Tile i={1} className="h-full w-full" />
-      <Tile i={2} className="h-full w-full" />
-      <Tile i={3} className="h-full w-full" />
-      <Tile i={4} className="h-full w-full" />
+    <div className="flex w-[300px] max-w-full flex-col gap-0.5 overflow-hidden rounded-2xl">
+      {images.map((img, i) => (
+        <GroupedTile
+          key={img.storage_path}
+          url={urls.get(img.storage_path)}
+          index={i}
+          count={n}
+          onOpen={onOpen}
+        />
+      ))}
     </div>
   );
 }

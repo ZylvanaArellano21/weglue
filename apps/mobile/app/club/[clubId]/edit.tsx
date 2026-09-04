@@ -24,8 +24,7 @@ import { Skeleton } from '../../../components/shared/SkeletonLoader';
 import { useToast } from '../../../components/Toast';
 import { Avatar } from '../../../components/shared/Avatar';
 import { AddOfficerSheet } from '../../../components/club/AddOfficerSheet';
-import * as ImagePicker from 'expo-image-picker';
-import { pickMedia, useWeGlueMediaFlow } from '../../../lib/media/pickMedia';
+import { pickImageForFeature } from '../../../lib/media/pickMedia';
 import {
   updateClubProfile,
   updateClubGoals,
@@ -570,36 +569,22 @@ export default function EditClubScreen() {
 
   async function pickImage(type: 'banner' | 'avatar') {
     const aspect: [number, number] = type === 'banner' ? [16, 9] : [1, 1];
-    let localUri: string;
 
-    // Android: shared We Glue flow. The screen has a single "change image" tap
-    // with no source buttons, so 'choose' shows Take Photo / Photo Library
-    // first, then the custom camera or OS picker + confirm preview. iOS keeps
-    // its existing library-only path. Banner 16:9 / avatar 1:1 ratios preserved.
-    if (useWeGlueMediaFlow) {
-      const picked = await pickMedia({ source: 'choose', aspect, allowsEditing: true, quality: 0.85 });
-      if (!picked) return;
-      localUri = picked.uri;
-    } else {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
+    // One "change image" tap → Take Photo / Photo Library, then the in-app
+    // crop/zoom/reposition step at the banner 16:9 / avatar 1:1 ratio. Same on
+    // iOS and Android; the OS editor is never used.
+    const picked = await pickImageForFeature({
+      source: 'choose',
+      aspect,
+      quality: 0.85,
+      onDenied: () =>
         Alert.alert(
           'Photos access needed',
           'Please enable photo library access in Settings to update club images.',
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect,
-        quality: 0.85,
-      });
-
-      if (result.canceled || !result.assets[0]) return;
-      localUri = result.assets[0].uri;
-    }
+        ),
+    });
+    if (!picked?.uri) return;
+    const localUri = picked.uri;
 
     if (type === 'banner') {
       setUploadingBanner(true);

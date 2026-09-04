@@ -2,9 +2,9 @@
 
 import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isClientTagConflict } from "@weglue/shared";
+import { clampPostImageRatio } from "@weglue/shared";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { uploadToBucket } from "../imageUpload";
+import { cropBlobToRatio, imageDimensions, uploadToBucket } from "../imageUpload";
 import { clientTag } from "../messages/service";
 
 // Web port of apps/mobile/services/postService.ts::createPost + the New Post
@@ -54,78 +54,58 @@ async function createPost(
     throw new Error("Posts must contain between 1 and 5 images");
   }
   const uploadStamp = Date.now();
-  const publicUrls = await Promise.all(
-    files.map((image, position) =>
-      uploadToBucket("posts", `${userId}/${uploadStamp}-${position}.jpg`, image)
-    )
+
+  // A carousel shares one slide ratio — the first image's natural ratio. Any
+  // image the user didn't individually frame is centre-cropped to it, so every
+  // stored dimension matches and the carousel height never jumps. A single
+  // image keeps its natural ratio (no target). Mirrors mobile's compressImage.
+  let targetRatio = 0;
+  if (files.length > 1) {
+    const first = await imageDimensions(files[0]!).catch(() => ({ width: 0, height: 0 }));
+    if (first.width > 0 && first.height > 0) {
+      targetRatio = clampPostImageRatio(first.width / first.height);
+    }
+  }
+
+  const uploaded = await Promise.all(
+    files.map(async (image, position) => {
+      const framed = targetRatio > 0 ? await cropBlobToRatio(image, targetRatio) : image;
+      const [url, dims] = await Promise.all([
+        uploadToBucket("posts", `${userId}/${uploadStamp}-${position}.jpg`, framed),
+        imageDimensions(framed).catch(() => ({ width: 0, height: 0 })),
+      ]);
+      return { url, width: dims.width || null, height: dims.height || null };
+    })
   );
 
-  // An explicitly locked club is a club-authored post. Ordinary Home posts
-  // keep the existing student author and optional club-tag behavior.
-  if (authoredClubId || publicUrls.length > 1) {
-    const { data, error } = await supabase.rpc("create_post", {
-      p_caption: caption ?? null,
-      p_image_paths: publicUrls,
-      p_club_id: authoredClubId ?? null,
-      p_client_tag: tag,
-    });
-    if (error) throw error;
-    const result = data as any;
-    const postId = result?.post_id ?? result?.post?.id ?? result?.id;
-    if (!postId) throw new Error("Failed to create post");
-    if (!authoredClubId && clubIds.length > 0) {
-      const { error: tagError } = await supabase
-        .from("post_club_tags")
-        .upsert(clubIds.map((clubId) => ({ post_id: postId, club_id: clubId })), {
-          onConflict: "post_id,club_id",
-          ignoreDuplicates: true,
-        });
-      if (tagError) throw tagError;
-    }
-    return postId;
-  }
+  // Every post (1..5 images) goes through the one create_post RPC — matching
+  // apps/mobile/services/postService.ts. It handles club-authored vs student
+  // posts, the retry-returns-existing idempotency (migration 100), and stores
+  // each image's dimensions so a single image can render at its natural aspect
+  // with no layout shift (migration 117). A locked club is a club-authored
+  // post; a Home post stays student-authored and may tag clubs via
+  // post_club_tags.
+  const { data, error } = await supabase.rpc("create_post", {
+    p_caption: caption ?? null,
+    p_image_paths: uploaded.map((u) => u.url),
+    p_club_id: authoredClubId ?? null,
+    p_client_tag: tag,
+    p_image_dimensions: uploaded.map((u) => ({ width: u.width, height: u.height })),
+  });
+  if (error) throw error;
+  const result = data as any;
+  const postId = result?.post_id ?? result?.post?.id ?? result?.id;
+  if (!postId) throw new Error("Failed to create post");
 
-  const publicUrl = publicUrls[0]!;
-
-  const primaryClubId = clubIds.length > 0 ? clubIds[0]! : null;
-
-  const { data: post, error } = await supabase
-    .from("posts")
-    .insert({
-      author_id: userId,
-      club_id: primaryClubId,
-      post_type: "picture",
-      image_url: publicUrl,
-      caption: caption ?? null,
-      client_tag: tag,
-    })
-    .select("id")
-    .single();
-  let postId: string;
-  if (error) {
-    // Retry of a create that already landed: resolve the post by its tag. Other
-    // 23505s are real.
-    if (!isClientTagConflict(error, "uq_posts_author_client_tag")) throw error;
-    const { data: existing, error: fetchError } = await supabase
-      .from("posts")
-      .select("id")
-      .eq("author_id", userId)
-      .eq("client_tag", tag)
-      .single();
-    if (fetchError || !existing) throw fetchError ?? error;
-    postId = (existing as any).id;
-  } else {
-    if (!post) throw new Error("Failed to create post");
-    postId = (post as any).id;
-  }
-
-  // Idempotent on both paths: UNIQUE(post_id, club_id) makes a repeat a no-op,
-  // so a lost-response retry still lands the tags.
-  if (clubIds.length > 1) {
-    const extra = clubIds.slice(1).map((cid) => ({ post_id: postId, club_id: cid }));
+  if (!authoredClubId && clubIds.length > 0) {
+    // Idempotent: UNIQUE(post_id, club_id) makes a repeat a no-op, so a
+    // lost-response retry still lands the tags.
     const { error: tagError } = await supabase
       .from("post_club_tags")
-      .upsert(extra, { onConflict: "post_id,club_id", ignoreDuplicates: true });
+      .upsert(clubIds.map((clubId) => ({ post_id: postId, club_id: clubId })), {
+        onConflict: "post_id,club_id",
+        ignoreDuplicates: true,
+      });
     if (tagError) throw tagError;
   }
   return postId;

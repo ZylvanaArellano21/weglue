@@ -2,7 +2,6 @@ import { memo, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   Pressable,
   Dimensions,
@@ -14,7 +13,6 @@ import { Pill } from '../shared/Pill';
 import { cardSurface, cardClip, cardDepth } from '../shared/cardStyles';
 import { PhotoCarousel } from '../shared/PhotoCarousel';
 import { openProfile } from '../../lib/profileNavigation';
-import { getResizedImageUrl } from '../../lib/imageResize';
 import type { FeedPost } from '../../services/postService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -62,11 +60,12 @@ export const PostCard = memo(function PostCard({
     router.push({ pathname: '/club/[clubId]', params: { clubId } });
   };
 
-  const images = post.images && post.images.length > 0
-    ? post.images
-    : post.image_url
-      ? [{ path: post.image_url, position: 0 }]
-      : [];
+  const images: Array<{ path: string; width?: number | null; height?: number | null }> =
+    post.images && post.images.length > 0
+      ? post.images
+      : post.image_url
+        ? [{ path: post.image_url }]
+        : [];
 
   const isOwnPost = post.author.id === viewerUserId;
 
@@ -146,19 +145,19 @@ export const PostCard = memo(function PostCard({
         )}
       </View>
 
-      {/* Post image(s) — one image, or a swipeable carousel for up to 5 */}
-      {images.length > 1 ? (
+      {/* Post image(s). A single image keeps its natural aspect (portrait stays
+          portrait, landscape stays landscape); a carousel of up to 5 uses the
+          first image's ratio, shared, so its height never jumps while swiping. */}
+      {images.length > 0 ? (
         <PhotoCarousel
-          images={images.map((img) => ({ uri: img.path }))}
+          images={images.map((img) => ({
+            uri: img.path,
+            width: img.width ?? null,
+            height: img.height ?? null,
+          }))}
           width={SCREEN_WIDTH - 32}
           aspectRatio={4 / 5}
-        />
-      ) : images.length === 1 ? (
-        <Image
-          source={{ uri: getResizedImageUrl(images[0]!.path, SCREEN_WIDTH * 2, SCREEN_WIDTH * 2 * 1.25) ?? undefined }}
-          style={{ width: '100%', aspectRatio: 4 / 5 }}
-          resizeMode="cover"
-          fadeDuration={0}
+          naturalRatio
         />
       ) : null}
 

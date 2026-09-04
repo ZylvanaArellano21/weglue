@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Avatar } from "../shared/Avatar";
+import { OfficerClubTags } from "./OfficerClubTags";
 import { CalendarIcon, ChevronRightIcon, LocationIcon, PlusIcon } from "../shared/icons";
 import { formatEventDate, formatEventLocation, formatEventTime } from "../../lib/datetime";
 import type { GridPost } from "../../lib/hooks/useOwnProfile";
@@ -60,7 +61,6 @@ interface ProfileLayoutProps {
   hideEvents?: boolean;
 }
 
-const ROLES_CAP = 2;
 const INTERESTS_CAP = 5;
 
 // Desktop profile — the layout of the web reference, driven entirely by the
@@ -100,10 +100,8 @@ export function ProfileLayout({
   hideInterests,
   hideEvents,
 }: ProfileLayoutProps): JSX.Element {
-  const [showAllRoles, setShowAllRoles] = useState(false);
   const [showAllInterests, setShowAllInterests] = useState(false);
 
-  const visibleRoles = showAllRoles ? roles : roles.slice(0, ROLES_CAP);
   const visibleInterests = showAllInterests ? interests : interests.slice(0, INTERESTS_CAP);
   const displayName = fullName || username;
 
@@ -185,9 +183,13 @@ export function ProfileLayout({
           )}
 
           {roles.length > 0 && (
-            <div className="mt-1.5 space-y-0.5">
-              {visibleRoles.map((r) => (
-                <p key={r.club_id} className="text-[15px] italic">
+            <OfficerClubTags
+              items={roles}
+              itemKey={(r) => r.club_id}
+              className="mt-1.5 space-y-0.5"
+              rowClassName="text-[15px] italic leading-relaxed"
+              renderItem={(r) => (
+                <>
                   <button
                     type="button"
                     onClick={() => onOpenClub?.(r.club_id)}
@@ -197,18 +199,9 @@ export function ProfileLayout({
                     @{r.club_name}
                   </button>{" "}
                   <span className="text-gray-700">{r.role_title}</span>
-                </p>
-              ))}
-              {roles.length > ROLES_CAP && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllRoles((v) => !v)}
-                  className="text-[13px] font-medium text-teal hover:underline focus:outline-none focus-visible:underline"
-                >
-                  {showAllRoles ? "Show less" : "Show more"}
-                </button>
+                </>
               )}
-            </div>
+            />
           )}
         </div>
       </div>

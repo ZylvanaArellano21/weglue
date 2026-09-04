@@ -1,22 +1,69 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { clampPostImageRatio, POST_IMAGE_FALLBACK_RATIO } from "@weglue/shared";
 
 export interface CarouselImage {
   uri: string;
+  /** Intrinsic pixel size, when known — lets a single image render at its
+   *  natural aspect with zero layout shift. */
+  width?: number | null;
+  height?: number | null;
 }
 
 interface PhotoCarouselProps {
   images: CarouselImage[];
-  /** height / width of each photo. Posts use 4/5, events 3/2. Default 4/5. */
+  /**
+   * width / height of each photo. Events pass a fixed value (3/2). Ignored for
+   * posts when `naturalRatio` is set. Default 4/5.
+   */
   aspectRatio?: number;
+  /**
+   * Posts: derive the display ratio from the FIRST image's natural size
+   * (clamped to the feed-safe range) instead of the fixed `aspectRatio`. A
+   * single portrait stays portrait, a single landscape stays landscape; a
+   * carousel uses the first image's ratio as the one shared slide ratio so its
+   * height never jumps while swiping.
+   */
+  naturalRatio?: boolean;
   onImageClick?: (index: number) => void;
+  /** Fires with the slide index as the user swipes the carousel. */
+  onIndexChange?: (index: number) => void;
   rounded?: boolean;
   className?: string;
 }
 
 const PEEK = "13%";
 const GAP = 8;
+
+/** Resolves the display ratio (w/h) from an image's dimensions: known, else
+ *  measured, else the stable fallback — all clamped. For a carousel this is the
+ *  first image and the result is the shared slide ratio. */
+function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number | null {
+  const known =
+    image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
+  const [measured, setMeasured] = useState<number | null>(null);
+
+  useEffect(() => {
+    setMeasured(null);
+    if (!enabled || known || !image?.uri || typeof window === "undefined") return;
+    let alive = true;
+    const probe = new window.Image();
+    probe.onload = () => {
+      if (alive && probe.naturalWidth > 0 && probe.naturalHeight > 0) {
+        setMeasured(probe.naturalWidth / probe.naturalHeight);
+      }
+    };
+    probe.src = image.uri;
+    return () => {
+      alive = false;
+      probe.onload = null;
+    };
+  }, [enabled, known, image?.uri]);
+
+  if (!enabled) return null; // caller falls back to the fixed aspectRatio
+  return clampPostImageRatio(known ?? measured ?? POST_IMAGE_FALLBACK_RATIO);
+}
 
 /**
  * We Glue photo carousel (web).
@@ -30,7 +77,9 @@ const GAP = 8;
 export function PhotoCarousel({
   images,
   aspectRatio = 4 / 5,
+  naturalRatio = false,
   onImageClick,
+  onIndexChange,
   rounded = true,
   className = "",
 }: PhotoCarouselProps) {
@@ -40,20 +89,31 @@ export function PhotoCarousel({
   const count = images.length;
   const multi = count > 1;
   const radius = rounded ? "rounded-2xl" : "";
-  const paddingTop = `${(1 / aspectRatio) * 100}%`;
+
+  // For posts the ratio comes from the first image (single: that image; multi:
+  // the one shared slide ratio). Events keep the fixed `aspectRatio`.
+  const sharedRatio = useSingleImageRatio(images[0], naturalRatio && count >= 1);
+  const effectiveRatio = sharedRatio ?? aspectRatio;
+  const paddingTop = `${(1 / effectiveRatio) * 100}%`;
+  // A lone natural-aspect image is shown whole (contain-fit): the box already
+  // IS its ratio, so there is nothing to crop. A carousel slide stays cover.
+  const fit = !multi && naturalRatio && sharedRatio ? "bg-contain bg-no-repeat" : "bg-cover";
 
   const onScroll = () => {
     const el = trackRef.current;
     if (!el) return;
     const slide = el.scrollWidth / count;
     const next = Math.round(el.scrollLeft / slide);
-    if (next !== index && next >= 0 && next < count) setIndex(next);
+    if (next !== index && next >= 0 && next < count) {
+      setIndex(next);
+      onIndexChange?.(next);
+    }
   };
 
   const Photo = ({ img, i }: { img: CarouselImage; i: number }) => {
     const inner = (
       <span
-        className={`block h-full w-full bg-gray-200 bg-cover bg-center ${radius}`}
+        className={`block h-full w-full bg-center bg-gray-200 ${fit} ${radius}`}
         style={{ backgroundImage: `url(${img.uri})` }}
         role="img"
         aria-label={`Photo ${i + 1} of ${count}`}

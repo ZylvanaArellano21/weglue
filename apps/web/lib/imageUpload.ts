@@ -7,6 +7,73 @@ import { getSupabaseBrowser } from "./supabase-browser";
 // Storage bucket + path convention mobile uses, and cache-busts the fixed-path
 // URL so the new avatar shows immediately everywhere (React Query keys by URL).
 
+/**
+ * Intrinsic pixel dimensions of an image blob. A proportional downscale keeps
+ * the same aspect ratio, so the source dimensions are all a caller needs to
+ * store for "show this image at its natural aspect" (migration 117).
+ */
+export async function imageDimensions(file: Blob): Promise<{ width: number; height: number }> {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = () => reject(new Error("Could not read the image"));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Centre-crop an image blob to a target width/height ratio. Used for the photos
+ * of a multi-image post the user did not individually frame, so every carousel
+ * slide is the same shape (the web sibling of mobile's compressImage
+ * `targetRatio`). A blob already at the ratio is returned untouched.
+ */
+export async function cropBlobToRatio(file: Blob, targetRatio: number): Promise<Blob> {
+  if (!(targetRatio > 0)) return file;
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Could not read the image file"));
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load the image"));
+    image.src = dataUrl;
+  });
+
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (!(w > 0) || !(h > 0) || Math.abs(w / h - targetRatio) <= 0.01) return file;
+
+  let cropW = w;
+  let cropH = h;
+  let originX = 0;
+  let originY = 0;
+  if (w / h > targetRatio) {
+    cropW = Math.round(h * targetRatio);
+    originX = Math.round((w - cropW) / 2);
+  } else {
+    cropH = Math.round(w / targetRatio);
+    originY = Math.round((h - cropH) / 2);
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = cropW;
+  canvas.height = cropH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(img, originX, originY, cropW, cropH, 0, 0, cropW, cropH);
+  return await new Promise<Blob>((resolve) =>
+    canvas.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.9),
+  );
+}
+
 // Accepts a Blob, not just a File, so a camera capture (canvas.toBlob) goes
 // through the exact same downscale + upload path as a picked file.
 export async function resizeToJpeg(file: Blob, maxDimension: number): Promise<Blob> {
@@ -88,7 +155,7 @@ export async function uploadPendingAvatar(token: string, file: Blob): Promise<vo
 export async function uploadToBucket(
   bucket: string,
   path: string,
-  file: File,
+  file: Blob,
   maxDimension = 1280
 ): Promise<string> {
   const supabase = getSupabaseBrowser();
