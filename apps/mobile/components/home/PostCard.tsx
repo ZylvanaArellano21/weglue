@@ -146,8 +146,8 @@ export const PostCard = memo(function PostCard({
       </View>
 
       {/* Post image(s). A single image keeps its natural aspect (portrait stays
-          portrait, landscape stays landscape); a carousel of up to 5 uses one
-          shared ratio so its height never jumps while swiping. */}
+          portrait, landscape stays landscape); a carousel of up to 5 uses the
+          first image's ratio, shared, so its height never jumps while swiping. */}
       {images.length > 0 ? (
         <PhotoCarousel
           images={images.map((img) => ({
@@ -157,7 +157,7 @@ export const PostCard = memo(function PostCard({
           }))}
           width={SCREEN_WIDTH - 32}
           aspectRatio={4 / 5}
-          naturalSingle
+          naturalRatio
         />
       ) : null}
 

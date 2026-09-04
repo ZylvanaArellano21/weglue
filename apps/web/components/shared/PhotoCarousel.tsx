@@ -14,18 +14,21 @@ export interface CarouselImage {
 interface PhotoCarouselProps {
   images: CarouselImage[];
   /**
-   * width / height of each photo. Posts/events pass a fixed value (4/5, 3/2).
-   * Ignored for a SINGLE image when `naturalSingle` is set. Default 4/5.
+   * width / height of each photo. Events pass a fixed value (3/2). Ignored for
+   * posts when `naturalRatio` is set. Default 4/5.
    */
   aspectRatio?: number;
   /**
-   * Single-image posts only: render the lone image at its natural aspect
-   * (clamped to the feed-safe range) instead of the fixed `aspectRatio`, so a
-   * portrait stays portrait and a landscape stays landscape and nothing is
-   * arbitrarily cropped. A multi-image carousel always uses one shared ratio.
+   * Posts: derive the display ratio from the FIRST image's natural size
+   * (clamped to the feed-safe range) instead of the fixed `aspectRatio`. A
+   * single portrait stays portrait, a single landscape stays landscape; a
+   * carousel uses the first image's ratio as the one shared slide ratio so its
+   * height never jumps while swiping.
    */
-  naturalSingle?: boolean;
+  naturalRatio?: boolean;
   onImageClick?: (index: number) => void;
+  /** Fires with the slide index as the user swipes the carousel. */
+  onIndexChange?: (index: number) => void;
   rounded?: boolean;
   className?: string;
 }
@@ -33,8 +36,9 @@ interface PhotoCarouselProps {
 const PEEK = "13%";
 const GAP = 8;
 
-/** Resolves the display ratio (w/h) for a lone image: its known dimensions,
- *  else a measured size, else the stable fallback — all clamped. */
+/** Resolves the display ratio (w/h) from an image's dimensions: known, else
+ *  measured, else the stable fallback — all clamped. For a carousel this is the
+ *  first image and the result is the shared slide ratio. */
 function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number | null {
   const known =
     image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
@@ -73,8 +77,9 @@ function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean)
 export function PhotoCarousel({
   images,
   aspectRatio = 4 / 5,
-  naturalSingle = false,
+  naturalRatio = false,
   onImageClick,
+  onIndexChange,
   rounded = true,
   className = "",
 }: PhotoCarouselProps) {
@@ -85,19 +90,24 @@ export function PhotoCarousel({
   const multi = count > 1;
   const radius = rounded ? "rounded-2xl" : "";
 
-  const singleRatio = useSingleImageRatio(images[0], naturalSingle && count === 1);
-  const effectiveRatio = !multi && singleRatio ? singleRatio : aspectRatio;
+  // For posts the ratio comes from the first image (single: that image; multi:
+  // the one shared slide ratio). Events keep the fixed `aspectRatio`.
+  const sharedRatio = useSingleImageRatio(images[0], naturalRatio && count >= 1);
+  const effectiveRatio = sharedRatio ?? aspectRatio;
   const paddingTop = `${(1 / effectiveRatio) * 100}%`;
   // A lone natural-aspect image is shown whole (contain-fit): the box already
-  // IS its ratio, so there is nothing to crop.
-  const fit = !multi && naturalSingle && singleRatio ? "bg-contain bg-no-repeat" : "bg-cover";
+  // IS its ratio, so there is nothing to crop. A carousel slide stays cover.
+  const fit = !multi && naturalRatio && sharedRatio ? "bg-contain bg-no-repeat" : "bg-cover";
 
   const onScroll = () => {
     const el = trackRef.current;
     if (!el) return;
     const slide = el.scrollWidth / count;
     const next = Math.round(el.scrollLeft / slide);
-    if (next !== index && next >= 0 && next < count) setIndex(next);
+    if (next !== index && next >= 0 && next < count) {
+      setIndex(next);
+      onIndexChange?.(next);
+    }
   };
 
   const Photo = ({ img, i }: { img: CarouselImage; i: number }) => {

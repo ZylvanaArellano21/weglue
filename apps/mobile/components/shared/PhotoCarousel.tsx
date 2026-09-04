@@ -49,19 +49,22 @@ interface PhotoCarouselProps {
   /** Width of the viewport the carousel lives in (usually the card content width). */
   width: number;
   /**
-   * width / height of each photo. Posts/events pass a fixed value (4/5, 3/2).
-   * Ignored for a SINGLE image when `naturalSingle` is set. Default 4/5.
+   * width / height of each photo. Events pass a fixed value (3/2). Ignored for
+   * posts when `naturalRatio` is set. Default 4/5.
    */
   aspectRatio?: number;
   /**
-   * Single-image posts only: render the lone image at its natural aspect
-   * (clamped to the feed-safe range) instead of the fixed `aspectRatio`, so a
-   * portrait stays portrait and a landscape stays landscape and nothing is
-   * arbitrarily cropped. A multi-image carousel always uses one shared ratio.
+   * Posts: derive the display ratio from the FIRST image's natural size
+   * (clamped to the feed-safe range) instead of the fixed `aspectRatio`. A
+   * single portrait stays portrait, a single landscape stays landscape; a
+   * carousel uses the first image's ratio as the one shared slide ratio so its
+   * height never jumps while swiping.
    */
-  naturalSingle?: boolean;
+  naturalRatio?: boolean;
   /** Open the full-screen viewer on this index. */
   onImagePress?: (index: number) => void;
+  /** Fires with the slide index as the user swipes the carousel. */
+  onIndexChange?: (index: number) => void;
   /** Rounded corners on each photo. Default true. */
   rounded?: boolean;
   /** Extra style for the outer container. */
@@ -73,8 +76,9 @@ const GAP = 8;
 const PEEK_RATIO = 0.13;
 const RADIUS = 16;
 
-/** Resolves the display ratio (w/h) for a lone image: its known dimensions,
- *  else a measured size, else the stable fallback box — all clamped. */
+/** Resolves the display ratio (w/h) from an image's dimensions: known, else
+ *  measured, else the stable fallback box — all clamped. For a carousel this is
+ *  the first image and the result is the shared slide ratio. */
 function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number {
   const known =
     image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
@@ -114,8 +118,9 @@ export const PhotoCarousel = memo(function PhotoCarousel({
   images,
   width,
   aspectRatio = 4 / 5,
-  naturalSingle = false,
+  naturalRatio = false,
   onImagePress,
+  onIndexChange,
   rounded = true,
   style,
 }: PhotoCarouselProps) {
@@ -125,8 +130,10 @@ export const PhotoCarousel = memo(function PhotoCarousel({
   const count = images.length;
   const multi = count > 1;
 
-  const singleRatio = useSingleImageRatio(images[0], naturalSingle && count === 1);
-  const effectiveRatio = !multi && Number.isFinite(singleRatio) ? singleRatio : aspectRatio;
+  // For posts the ratio comes from the first image (single: that image; multi:
+  // the one shared slide ratio). Events keep the fixed `aspectRatio`.
+  const sharedRatio = useSingleImageRatio(images[0], naturalRatio && count >= 1);
+  const effectiveRatio = Number.isFinite(sharedRatio) ? sharedRatio : aspectRatio;
   const height = Math.round(width / effectiveRatio);
 
   // Each slide leaves room for the next photo to peek in from the right.
@@ -137,14 +144,17 @@ export const PhotoCarousel = memo(function PhotoCarousel({
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const next = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
-    if (next !== index && next >= 0 && next < count) setIndex(next);
+    if (next !== index && next >= 0 && next < count) {
+      setIndex(next);
+      onIndexChange?.(next);
+    }
   };
 
   const renderPhoto = (img: CarouselImage, i: number) => {
     // A lone natural-aspect image is shown whole (contain-fit): the box already
-    // IS its ratio, so there is nothing to crop. Every other case keeps the
+    // IS its ratio, so there is nothing to crop. A carousel slide keeps the
     // cover crop into the shared box.
-    const wholeImage = !multi && naturalSingle && Number.isFinite(singleRatio);
+    const wholeImage = !multi && naturalRatio && Number.isFinite(sharedRatio);
     const resized =
       getResizedImageUrl(
         img.uri,

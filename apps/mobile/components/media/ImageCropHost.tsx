@@ -42,6 +42,7 @@ export function ImageCropHost() {
             sourceWidth={request.sourceWidth}
             sourceHeight={request.sourceHeight}
             aspect={request.aspect}
+            aspectOptions={request.aspectOptions}
             onCancel={() => finish(null)}
             onConfirm={(result) => finish(result)}
           />

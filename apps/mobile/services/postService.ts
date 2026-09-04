@@ -619,12 +619,37 @@ export async function addComment(
 
 async function compressImage(
   uri: string,
+  /** Multi-photo posts: centre-crop to this shared width/height ratio first, so
+   *  every carousel slide is the same shape. Single photos pass nothing and
+   *  keep their natural ratio. Images the user already framed to this ratio are
+   *  left as-is (the crop is skipped when they already match). */
+  targetRatio?: number,
 ): Promise<{ uri: string; width: number; height: number }> {
-  const result = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ resize: { width: 1080 } }],
-    { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-  );
+  const actions: ImageManipulator.Action[] = [];
+
+  if (targetRatio && targetRatio > 0) {
+    const meta = await ImageManipulator.manipulateAsync(uri, [], {});
+    const { width: w, height: h } = meta;
+    if (w > 0 && h > 0 && Math.abs(w / h - targetRatio) > 0.01) {
+      if (w / h > targetRatio) {
+        const cropW = Math.round(h * targetRatio);
+        actions.push({
+          crop: { originX: Math.round((w - cropW) / 2), originY: 0, width: cropW, height: h },
+        });
+      } else {
+        const cropH = Math.round(w / targetRatio);
+        actions.push({
+          crop: { originX: 0, originY: Math.round((h - cropH) / 2), width: w, height: cropH },
+        });
+      }
+    }
+  }
+
+  actions.push({ resize: { width: 1080 } });
+  const result = await ImageManipulator.manipulateAsync(uri, actions, {
+    compress: 0.8,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
   return { uri: result.uri, width: result.width, height: result.height };
 }
 
@@ -638,14 +663,18 @@ export async function createPost(
   clientTag: string,
   /** Set only for the locked Club Profile flow; Home tags remain user posts. */
   authoredClubId?: string,
+  /** Multi-photo posts: the shared carousel slide ratio (w/h). Undefined for a
+   *  single-image post, which keeps its natural ratio. */
+  carouselRatio?: number,
 ): Promise<string> {
   const imageUris = Array.isArray(imageUri) ? imageUri : [imageUri];
   if (imageUris.length < 1 || imageUris.length > 5) {
     throw new Error('Posts must contain between 1 and 5 images');
   }
+  const targetRatio = imageUris.length > 1 ? carouselRatio : undefined;
 
   const uploaded = await Promise.all(imageUris.map(async (uri, position) => {
-    const compressed = await compressImage(uri);
+    const compressed = await compressImage(uri, targetRatio);
     const filename = `${userId}/${Date.now()}-${position}.jpg`;
     const response = await fetch(compressed.uri);
     const blob = await response.blob();

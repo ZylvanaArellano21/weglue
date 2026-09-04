@@ -184,8 +184,8 @@ function PostCard({
 
       {post.images && post.images.length > 0 ? (
         // A single image keeps its natural aspect (portrait stays portrait,
-        // landscape stays landscape); a carousel of up to 5 uses one shared
-        // ratio so its height never jumps while swiping.
+        // landscape stays landscape); a carousel of up to 5 uses the first
+        // image's ratio, shared, so its height never jumps while swiping.
         <PhotoCarousel
           images={post.images.map((im) => ({
             uri: im.path,
@@ -193,10 +193,10 @@ function PostCard({
             height: im.height ?? null,
           }))}
           aspectRatio={4 / 5}
-          naturalSingle
+          naturalRatio
         />
       ) : post.image_url ? (
-        <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalSingle />
+        <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalRatio />
       ) : (
         <div
           className="flex aspect-square w-full items-center justify-center"

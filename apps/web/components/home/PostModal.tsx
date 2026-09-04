@@ -86,10 +86,10 @@ export function PostModal({
                 height: im.height ?? null,
               }))}
               aspectRatio={4 / 5}
-              naturalSingle
+              naturalRatio
             />
           ) : post.image_url ? (
-            <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalSingle />
+            <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalRatio />
           ) : (
             <div className="flex aspect-square w-full items-center justify-center" style={{ background: "#E5E7EB", color: "#9CA3AF" }}>
               <ImageIcon size={44} />

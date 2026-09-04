@@ -1,8 +1,24 @@
 import { ActionSheetIOS, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { naturalCropAspect } from '@weglue/shared';
 import { requestMedia } from '../../store/mediaPickerStore';
 import { requestCrop } from '../../store/imageCropStore';
+import type { CropAspectOption } from '../../components/media/ImageCropper';
 import type { PickMediaRequest, PickedMedia } from './types';
+
+/**
+ * The post-compose ratio picker: "Original" (the image's own ratio — landscape
+ * stays landscape), "1:1" and "4:5". Built from the source pixel size so
+ * "Original" is truly that image's aspect. Shared by the single-photo and
+ * carousel-frame flows on both platforms.
+ */
+export function postCropAspectOptions(width: number, height: number): CropAspectOption[] {
+  return [
+    { key: 'original', label: 'Original', ratio: naturalCropAspect(width, height) },
+    { key: 'square', label: '1:1', ratio: [1, 1] },
+    { key: 'portrait', label: '4:5', ratio: [4, 5] },
+  ];
+}
 
 // ─── Image-selection entry points ───────────────────────────────────────────
 //
@@ -163,18 +179,23 @@ export async function pickImageForFeature(req: {
  * Cross-platform: re-frame an image the caller ALREADY has (e.g. one photo of a
  * multi-photo post) into `aspect` with the in-app cropper. Resolves null if the
  * user cancelled.
+ *
+ * `aspectOptions` (post compose only) turns on the Original / 1:1 / 4:5 ratio
+ * picker; `aspect` is then the initial selection.
  */
 export async function cropExistingImage(input: {
   uri: string;
   width: number;
   height: number;
   aspect: [number, number];
+  aspectOptions?: CropAspectOption[];
 }): Promise<PickedMedia | null> {
   const cropped = await requestCrop({
     uri: input.uri,
     sourceWidth: input.width || 1,
     sourceHeight: input.height || 1,
     aspect: input.aspect,
+    aspectOptions: input.aspectOptions,
   });
   if (!cropped) return null;
   return {

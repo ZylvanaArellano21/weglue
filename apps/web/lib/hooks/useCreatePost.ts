@@ -2,8 +2,9 @@
 
 import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { clampPostImageRatio } from "@weglue/shared";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { imageDimensions, uploadToBucket } from "../imageUpload";
+import { cropBlobToRatio, imageDimensions, uploadToBucket } from "../imageUpload";
 import { clientTag } from "../messages/service";
 
 // Web port of apps/mobile/services/postService.ts::createPost + the New Post
@@ -53,11 +54,25 @@ async function createPost(
     throw new Error("Posts must contain between 1 and 5 images");
   }
   const uploadStamp = Date.now();
+
+  // A carousel shares one slide ratio — the first image's natural ratio. Any
+  // image the user didn't individually frame is centre-cropped to it, so every
+  // stored dimension matches and the carousel height never jumps. A single
+  // image keeps its natural ratio (no target). Mirrors mobile's compressImage.
+  let targetRatio = 0;
+  if (files.length > 1) {
+    const first = await imageDimensions(files[0]!).catch(() => ({ width: 0, height: 0 }));
+    if (first.width > 0 && first.height > 0) {
+      targetRatio = clampPostImageRatio(first.width / first.height);
+    }
+  }
+
   const uploaded = await Promise.all(
     files.map(async (image, position) => {
+      const framed = targetRatio > 0 ? await cropBlobToRatio(image, targetRatio) : image;
       const [url, dims] = await Promise.all([
-        uploadToBucket("posts", `${userId}/${uploadStamp}-${position}.jpg`, image),
-        imageDimensions(image).catch(() => ({ width: 0, height: 0 })),
+        uploadToBucket("posts", `${userId}/${uploadStamp}-${position}.jpg`, framed),
+        imageDimensions(framed).catch(() => ({ width: 0, height: 0 })),
       ]);
       return { url, width: dims.width || null, height: dims.height || null };
     })

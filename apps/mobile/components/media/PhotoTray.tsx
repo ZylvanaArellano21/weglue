@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +14,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { PhotoCarousel } from '../shared/PhotoCarousel';
 import { MAX_PHOTOS } from '../../lib/media/pickPhotos';
-import { cropExistingImage } from '../../lib/media/pickMedia';
 import type { PickedMedia } from '../../lib/media/types';
 
 const TEAL = '#0FA6A6';
@@ -32,14 +32,20 @@ interface Props {
   onAddMore?: () => void;
   busy?: boolean;
   limit?: number;
-  /** Carousel preview aspect (posts 4/5, chat 1/1-ish). Default 4/5. */
+  /** Carousel preview aspect (posts pass the shared ratio, chat 1/1-ish). Default 4/5. */
   aspectRatio?: number;
   /**
-   * When set, each photo gets a crop button that re-frames THAT image into this
-   * ratio [w, h] with the in-app cropper — so every image of a carousel can be
-   * positioned individually into the one shared display ratio.
+   * Single-image posts: show the lone image at its own natural ratio in the
+   * preview instead of `aspectRatio`. Multi-image posts: use the first image's
+   * natural ratio as the shared carousel ratio. (Chat leaves this off.)
    */
-  cropAspect?: [number, number];
+  naturalRatio?: boolean;
+  /**
+   * Post compose only: open the adjust / crop / ratio step for photo `index`.
+   * When set, tapping a thumbnail or the "Adjust" control on the preview calls
+   * this. Omit for chat, which keeps every image's natural framing untouched.
+   */
+  onAdjust?: (index: number) => void;
 }
 
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -51,11 +57,13 @@ function move<T>(arr: T[], from: number, to: number): T[] {
 }
 
 /**
- * Preview + reorder before posting/sending a multi-photo carousel.
+ * Preview + reorder + adjust before posting/sending a multi-photo carousel.
  *
  * The carousel preview at the top shows exactly how the published post will
- * behave. The numbered thumbnail strip lets the user drop a photo (×) or move
- * it earlier/later (‹ ›) — the order here is the order everyone sees.
+ * behave. "Adjust" (bottom-left, post compose only) opens the ratio / crop /
+ * reposition step for the photo currently on screen. The thumbnail strip below
+ * lets the user drop a photo (×), reorder it (‹ ›) or tap it to adjust — the
+ * order here is the order everyone sees.
  */
 export function PhotoTray({
   photos,
@@ -67,39 +75,52 @@ export function PhotoTray({
   busy = false,
   limit = MAX_PHOTOS,
   aspectRatio = 4 / 5,
-  cropAspect,
+  naturalRatio = false,
+  onAdjust,
 }: Props) {
   const width = Math.min(Dimensions.get('window').width - 32, 420);
   const canAddMore = !!onAddMore && photos.length < limit;
-
-  const cropPhoto = async (index: number) => {
-    const photo = photos[index];
-    if (!photo || !cropAspect) return;
-    const cropped = await cropExistingImage({
-      uri: photo.uri,
-      width: photo.width || 1,
-      height: photo.height || 1,
-      aspect: cropAspect,
-    });
-    if (cropped) onChange(photos.map((p, i) => (i === index ? cropped : p)));
-  };
+  const [current, setCurrent] = useState(0);
+  const activeIndex = Math.min(current, Math.max(0, photos.length - 1));
 
   return (
     <View style={styles.wrap}>
       {photos.length > 0 ? (
-        <PhotoCarousel
-          images={photos.map((p) => ({ uri: p.uri }))}
-          width={width}
-          aspectRatio={aspectRatio}
-          style={{ alignSelf: 'center' }}
-        />
+        <View style={{ alignSelf: 'center' }}>
+          <PhotoCarousel
+            images={photos.map((p) => ({
+              uri: p.uri,
+              width: p.width || null,
+              height: p.height || null,
+            }))}
+            width={width}
+            aspectRatio={aspectRatio}
+            naturalRatio={naturalRatio}
+            onIndexChange={setCurrent}
+          />
+          {onAdjust ? (
+            <TouchableOpacity
+              style={styles.adjustPill}
+              onPress={() => onAdjust(activeIndex)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                photos.length > 1 ? `Adjust photo ${activeIndex + 1}` : 'Adjust photo'
+              }
+            >
+              <Ionicons name="crop" size={15} color="#FFFFFF" />
+              <Text style={styles.adjustLabel}>Adjust</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       ) : null}
 
       <View style={styles.stripHeader}>
         <Text style={styles.stripTitle}>
-          {photos.length}/{limit} photo{photos.length === 1 ? '' : 's'}
+          {photos.length} of {limit}
         </Text>
-        <Text style={styles.stripHint}>Tap ‹ › to reorder</Text>
+        <Text style={styles.stripHint}>
+          {onAdjust ? 'Tap a photo to adjust · ‹ › to reorder' : 'Tap ‹ › to reorder'}
+        </Text>
       </View>
 
       <ScrollView
@@ -108,55 +129,66 @@ export function PhotoTray({
         contentContainerStyle={styles.strip}
       >
         {photos.map((p, i) => (
-          <View key={`${p.uri}-${i}`} style={styles.thumbWrap}>
-            <Image source={{ uri: p.uri }} style={styles.thumb} />
-            <View style={styles.orderBadge}>
-              <Text style={styles.orderText}>{i + 1}</Text>
-            </View>
+          <View key={`${p.uri}-${i}`} style={styles.cell}>
             <TouchableOpacity
-              style={styles.removeBtn}
-              onPress={() => onChange(photos.filter((_, idx) => idx !== i))}
-              hitSlop={8}
-              accessibilityLabel={`Remove photo ${i + 1}`}
+              activeOpacity={onAdjust ? 0.8 : 1}
+              disabled={!onAdjust}
+              onPress={() => onAdjust?.(i)}
+              style={styles.thumbWrap}
+              accessibilityRole={onAdjust ? 'button' : 'image'}
+              accessibilityLabel={onAdjust ? `Adjust photo ${i + 1}` : `Photo ${i + 1}`}
             >
-              <Ionicons name="close" size={13} color="#FFFFFF" />
+              <Image source={{ uri: p.uri }} style={styles.thumb} />
+              <View style={styles.orderBadge}>
+                <Text style={styles.orderText}>{i + 1}</Text>
+              </View>
+              <View style={styles.removeBtn}>
+                <TouchableOpacity
+                  onPress={() => onChange(photos.filter((_, idx) => idx !== i))}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove photo ${i + 1}`}
+                >
+                  <Ionicons name="close" size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
             </TouchableOpacity>
-            {cropAspect ? (
-              <TouchableOpacity
-                style={styles.cropBtn}
-                onPress={() => void cropPhoto(i)}
-                hitSlop={8}
-                accessibilityLabel={`Reposition photo ${i + 1}`}
-              >
-                <Ionicons name="crop-outline" size={12} color="#FFFFFF" />
-              </TouchableOpacity>
+
+            {photos.length > 1 ? (
+              <View style={styles.moveRow}>
+                <TouchableOpacity
+                  disabled={i === 0}
+                  onPress={() => onChange(move(photos, i, i - 1))}
+                  style={[styles.moveBtn, i === 0 && styles.moveBtnOff]}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Move photo ${i + 1} earlier`}
+                >
+                  <Ionicons name="chevron-back" size={18} color={INK} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  disabled={i === photos.length - 1}
+                  onPress={() => onChange(move(photos, i, i + 1))}
+                  style={[styles.moveBtn, i === photos.length - 1 && styles.moveBtnOff]}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Move photo ${i + 1} later`}
+                >
+                  <Ionicons name="chevron-forward" size={18} color={INK} />
+                </TouchableOpacity>
+              </View>
             ) : null}
-            <View style={styles.moveRow}>
-              <TouchableOpacity
-                disabled={i === 0}
-                onPress={() => onChange(move(photos, i, i - 1))}
-                style={[styles.moveBtn, i === 0 && styles.moveBtnOff]}
-                hitSlop={6}
-                accessibilityLabel={`Move photo ${i + 1} earlier`}
-              >
-                <Ionicons name="chevron-back" size={14} color="#FFFFFF" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={i === photos.length - 1}
-                onPress={() => onChange(move(photos, i, i + 1))}
-                style={[styles.moveBtn, i === photos.length - 1 && styles.moveBtnOff]}
-                hitSlop={6}
-                accessibilityLabel={`Move photo ${i + 1} later`}
-              >
-                <Ionicons name="chevron-forward" size={14} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
           </View>
         ))}
 
         {canAddMore ? (
-          <TouchableOpacity style={styles.addTile} onPress={onAddMore} accessibilityLabel="Add more photos">
-            <Ionicons name="add" size={26} color={TEAL} />
+          <TouchableOpacity
+            style={styles.addTile}
+            onPress={onAddMore}
+            accessibilityRole="button"
+            accessibilityLabel="Add more photos"
+          >
+            <Ionicons name="add" size={28} color={TEAL} />
           </TouchableOpacity>
         ) : null}
       </ScrollView>
@@ -189,6 +221,8 @@ interface ModalProps {
   busy?: boolean;
   limit?: number;
   aspectRatio?: number;
+  naturalRatio?: boolean;
+  onAdjust?: (index: number) => void;
   title?: string;
 }
 
@@ -217,7 +251,7 @@ export function PhotoTrayModal({
   );
 }
 
-const THUMB = 68;
+const THUMB = 88;
 
 const styles = StyleSheet.create({
   modalRoot: {
@@ -241,7 +275,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   wrap: {
-    gap: 12,
+    gap: 14,
+  },
+  adjustPill: {
+    position: 'absolute',
+    left: 10,
+    bottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  adjustLabel: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+    color: '#FFFFFF',
   },
   stripHeader: {
     flexDirection: 'row',
@@ -258,11 +309,17 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: 12,
     color: MUTED,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   strip: {
-    gap: 12,
+    gap: 16,
     paddingHorizontal: 16,
-    paddingBottom: 4,
+    paddingVertical: 4,
+  },
+  cell: {
+    width: THUMB,
+    gap: 6,
   },
   thumbWrap: {
     width: THUMB,
@@ -271,71 +328,60 @@ const styles = StyleSheet.create({
   thumb: {
     width: THUMB,
     height: THUMB,
-    borderRadius: 10,
+    borderRadius: 14,
     backgroundColor: '#E5E7EB',
   },
   orderBadge: {
     position: 'absolute',
-    top: 4,
-    left: 4,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 4,
-    borderRadius: 9,
+    top: 6,
+    left: 6,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 10,
     backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   orderText: {
     fontFamily: 'Inter_700Bold',
-    fontSize: 11,
+    fontSize: 12,
     color: '#FFFFFF',
   },
   removeBtn: {
     position: 'absolute',
-    top: -6,
-    right: -6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cropBtn: {
-    position: 'absolute',
-    top: -6,
-    left: -6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    top: -8,
+    right: -8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderWidth: 1.5,
+    borderColor: '#FEFCF0',
     alignItems: 'center',
     justifyContent: 'center',
   },
   moveRow: {
-    position: 'absolute',
-    bottom: 3,
-    left: 3,
-    right: 3,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   moveBtn: {
-    width: 22,
-    height: 20,
-    borderRadius: 6,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    width: 40,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   moveBtnOff: {
-    opacity: 0.3,
+    opacity: 0.35,
   },
   addTile: {
     width: THUMB,
     height: THUMB,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1.5,
     borderColor: TEAL,
     borderStyle: 'dashed',

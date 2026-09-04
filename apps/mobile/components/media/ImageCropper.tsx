@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -23,13 +23,29 @@ export interface CropResult {
   height: number;
 }
 
+/** One selectable framing in the ratio picker (posts only). */
+export interface CropAspectOption {
+  key: string;
+  label: string;
+  ratio: [number, number];
+}
+
 interface Props {
   uri: string;
   /** Natural pixel size of `uri`. */
   sourceWidth: number;
   sourceHeight: number;
-  /** Target frame ratio as [w, h] (avatar [1,1], event [4,5], carousel [4,5]). */
+  /** Target frame ratio as [w, h] (avatar [1,1], event [4,5], carousel [4,5]).
+   *  Also the initial selection when `aspectOptions` is provided. */
   aspect: [number, number];
+  /**
+   * Post compose only: when given (2+ entries), a ratio picker is shown —
+   * "Original", "1:1", "4:5". The frame re-fits and the image re-centres on
+   * every change, fully reversible until "Use Photo". Omit for the
+   * ratio-locked flows (avatar, club banner, club icon, event), which keep the
+   * single fixed `aspect`.
+   */
+  aspectOptions?: CropAspectOption[];
   /** 'Retake' (camera) or 'Choose Another' (library) — shown as the left action. */
   redoLabel?: string;
   onRedo?: () => void;
@@ -46,12 +62,18 @@ const MAX_ZOOM = 4;
  * kept. Drag to reposition, pinch to zoom. The image can never be dragged so
  * far that a gap shows inside the frame. Nothing is written until "Use Photo";
  * Cancel returns without changing the caller's current image.
+ *
+ * With `aspectOptions` a small ratio picker appears (Instagram-style): the user
+ * chooses "Original" (the image's own ratio — landscape stays landscape), "1:1"
+ * or "4:5", and re-frames within it. Without it the frame is the single fixed
+ * `aspect`.
  */
 export function ImageCropper({
   uri,
   sourceWidth,
   sourceHeight,
   aspect,
+  aspectOptions,
   redoLabel,
   onRedo,
   onCancel,
@@ -62,18 +84,34 @@ export function ImageCropper({
   const [busy, setBusy] = useState(false);
   const usedRef = useRef(false);
 
+  const showPicker = !!aspectOptions && aspectOptions.length > 1;
+  // Which framing is active. Starts on the option matching `aspect`, else the
+  // first option, else the fixed `aspect`.
+  const [activeKey, setActiveKey] = useState<string | null>(() => {
+    if (!showPicker) return null;
+    const match = aspectOptions!.find(
+      (o) => o.ratio[0] / o.ratio[1] === aspect[0] / aspect[1],
+    );
+    return (match ?? aspectOptions![0]!).key;
+  });
+  const activeAspect: [number, number] = useMemo(() => {
+    if (!showPicker) return aspect;
+    return (aspectOptions!.find((o) => o.key === activeKey) ?? aspectOptions![0]!).ratio;
+  }, [showPicker, aspect, aspectOptions, activeKey]);
+
   // The crop frame: as wide as the screen allows, height from the target ratio,
   // capped to the vertical space between the top and bottom bars.
   const frame = useMemo(() => {
-    const availH = winH - insets.top - insets.bottom - 220;
+    const chrome = showPicker ? 288 : 220;
+    const availH = winH - insets.top - insets.bottom - chrome;
     let w = winW - 32;
-    let h = (w * aspect[1]) / aspect[0];
+    let h = (w * activeAspect[1]) / activeAspect[0];
     if (h > availH) {
       h = availH;
-      w = (h * aspect[0]) / aspect[1];
+      w = (h * activeAspect[0]) / activeAspect[1];
     }
     return { w, h };
-  }, [winW, winH, insets.top, insets.bottom, aspect]);
+  }, [winW, winH, insets.top, insets.bottom, activeAspect, showPicker]);
 
   // Cover-fit the source into the frame at zoom 1 (no gaps possible).
   const baseScale = Math.max(frame.w / sourceWidth, frame.h / sourceHeight);
@@ -85,6 +123,15 @@ export function ImageCropper({
   const txRef = useRef(0);
   const tyRef = useRef(0);
   const [, force] = useState(0);
+
+  // A ratio change re-fits the frame; re-centre the image so it can never be
+  // left showing a gap inside the new frame. The picture itself is untouched.
+  useEffect(() => {
+    scaleRef.current = 1;
+    txRef.current = 0;
+    tyRef.current = 0;
+    force((n) => n + 1);
+  }, [activeKey]);
 
   const gestureStart = useRef({ scale: 1, tx: 0, ty: 0, dist: 0, panDx: 0, panDy: 0, touches: 0 });
 
@@ -245,37 +292,60 @@ export function ImageCropper({
       </View>
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 24 }]}>
-        {onRedo ? (
+        {showPicker ? (
+          <View style={styles.pickerRow}>
+            {aspectOptions!.map((opt) => {
+              const on = opt.key === activeKey;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.chip, on && styles.chipOn]}
+                  onPress={() => setActiveKey(opt.key)}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`Frame as ${opt.label}`}
+                >
+                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
+
+        <View style={styles.actionRow}>
+          {onRedo ? (
+            <TouchableOpacity
+              style={styles.redoBtn}
+              onPress={onRedo}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={redoLabel ?? 'Choose another'}
+            >
+              <Ionicons name="images-outline" size={20} color={mediaColors.onDark} />
+              <Text style={styles.redoLabel}>{redoLabel ?? 'Choose Another'}</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ flex: 0 }} />
+          )}
           <TouchableOpacity
-            style={styles.redoBtn}
-            onPress={onRedo}
+            style={[styles.useBtn, busy && styles.useBtnBusy]}
+            onPress={handleUse}
             disabled={busy}
             accessibilityRole="button"
-            accessibilityLabel={redoLabel ?? 'Choose another'}
+            accessibilityLabel="Use photo"
+            accessibilityState={{ busy }}
           >
-            <Ionicons name="images-outline" size={20} color={mediaColors.onDark} />
-            <Text style={styles.redoLabel}>{redoLabel ?? 'Choose Another'}</Text>
+            {busy ? (
+              <ActivityIndicator color={mediaColors.onDark} />
+            ) : (
+              <>
+                <Ionicons name="checkmark" size={20} color={mediaColors.onDark} />
+                <Text style={styles.useLabel}>Use Photo</Text>
+              </>
+            )}
           </TouchableOpacity>
-        ) : (
-          <View style={{ flex: 0 }} />
-        )}
-        <TouchableOpacity
-          style={[styles.useBtn, busy && styles.useBtnBusy]}
-          onPress={handleUse}
-          disabled={busy}
-          accessibilityRole="button"
-          accessibilityLabel="Use photo"
-          accessibilityState={{ busy }}
-        >
-          {busy ? (
-            <ActivityIndicator color={mediaColors.onDark} />
-          ) : (
-            <>
-              <Ionicons name="checkmark" size={20} color={mediaColors.onDark} />
-              <Text style={styles.useLabel}>Use Photo</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -316,13 +386,37 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    backgroundColor: mediaColors.scrim,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    gap: 8,
+  },
+  chip: {
+    minWidth: 74,
+    minHeight: 38,
+    paddingHorizontal: 16,
+    borderRadius: 19,
+    borderWidth: 1.5,
+    borderColor: mediaColors.onDarkMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipOn: {
+    backgroundColor: mediaColors.onDark,
+    borderColor: mediaColors.onDark,
+  },
+  chipLabel: { fontFamily: mediaFonts.semiBold, fontSize: 14, color: mediaColors.onDark },
+  chipLabelOn: { color: mediaColors.dark },
+  actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    backgroundColor: mediaColors.scrim,
   },
   redoBtn: {
     flexDirection: 'row',

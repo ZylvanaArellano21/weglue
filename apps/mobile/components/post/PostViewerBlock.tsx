@@ -148,7 +148,8 @@ export function PostViewerBlock({
       </View>
 
       {/* Media. A single image keeps its natural aspect; a carousel of up to 5
-          uses one shared ratio so its height never jumps while swiping. */}
+          uses the first image's ratio, shared, so its height never jumps while
+          swiping. */}
       {images.length > 0 ? (
         <PhotoCarousel
           images={images.map((img) => ({
@@ -158,7 +159,7 @@ export function PostViewerBlock({
           }))}
           width={SCREEN_WIDTH}
           aspectRatio={4 / 5}
-          naturalSingle
+          naturalRatio
         />
       ) : null}
 

@@ -354,24 +354,38 @@ export default function NewEventScreen() {
             onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
             activeOpacity={0.7}
             hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={{ width: 40, height: 40, justifyContent: 'center', zIndex: 1 }}
           >
             <Ionicons name="chevron-back" size={26} color="#111827" />
           </TouchableOpacity>
-          <Text
+          {/* pointerEvents:none VIEW inset clear of the buttons — on Android
+              `pointerEvents` is unreliable on <Text> and a full-width absolute
+              title there can swallow the back tap. */}
+          <View
             pointerEvents="none"
             style={{
               position: 'absolute',
-              left: 0,
-              right: 0,
-              textAlign: 'center',
-              fontSize: 18,
-              fontWeight: '700',
-              color: '#111827',
-              fontFamily: 'Zain_700Bold',
+              left: 56,
+              right: 56,
+              top: 0,
+              bottom: 0,
+              justifyContent: 'center',
             }}
           >
-            {isEditMode ? 'Edit Event' : 'New Event'}
-          </Text>
+            <Text
+              style={{
+                textAlign: 'center',
+                fontSize: 18,
+                fontWeight: '700',
+                color: '#111827',
+                fontFamily: 'Zain_700Bold',
+              }}
+            >
+              {isEditMode ? 'Edit Event' : 'New Event'}
+            </Text>
+          </View>
         </View>
 
         <ScrollView

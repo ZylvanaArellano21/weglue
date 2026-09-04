@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CropResult } from '../components/media/ImageCropper';
+import type { CropAspectOption, CropResult } from '../components/media/ImageCropper';
 
 // One app-wide crop request at a time, resolved by the single ImageCropHost
 // mounted in the root layout. Same shape as leaveClubStore / mediaPickerStore.
@@ -13,6 +13,8 @@ export interface CropRequestInput {
   sourceWidth: number;
   sourceHeight: number;
   aspect: [number, number];
+  /** Post compose only: show the Original / 1:1 / 4:5 ratio picker. */
+  aspectOptions?: CropAspectOption[];
 }
 
 interface PendingCropRequest extends CropRequestInput {

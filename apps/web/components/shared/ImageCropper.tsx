@@ -8,11 +8,25 @@ export interface CropOutput {
   height: number;
 }
 
+/** One selectable framing in the ratio picker (posts only). */
+export interface CropAspectOption {
+  key: string;
+  label: string;
+  ratio: [number, number];
+}
+
 interface Props {
   /** Object URL or data URL of the image to crop. */
   src: string;
-  /** Target frame ratio as [w, h] (avatar [1,1], banner [16,9], event [4,5]). */
+  /** Target frame ratio as [w, h] (avatar [1,1], banner [16,9], event [4,5]).
+   *  Also the initial selection when `aspectOptions` is provided. */
   aspect: [number, number];
+  /**
+   * Post compose only: when given (2+ entries), a ratio picker is shown —
+   * "Original", "1:1", "4:5". Omit for the ratio-locked flows (avatar, club
+   * banner, club icon, event).
+   */
+  aspectOptions?: CropAspectOption[];
   title?: string;
   onCancel: () => void;
   onConfirm: (output: CropOutput) => void;
@@ -29,10 +43,33 @@ const FRAME_W = 320;
  * kept. Drag to reposition, scroll or use the slider to zoom. The image can
  * never be moved so far that a gap shows inside the frame. Nothing is produced
  * until "Use photo"; Cancel returns without changing the caller's image.
+ *
+ * With `aspectOptions` a ratio picker appears (Instagram-style): "Original"
+ * (the image's own ratio — landscape stays landscape), "1:1" or "4:5".
  */
-export function ImageCropper({ src, aspect, title, onCancel, onConfirm, busy }: Props): JSX.Element {
+export function ImageCropper({
+  src,
+  aspect,
+  aspectOptions,
+  title,
+  onCancel,
+  onConfirm,
+  busy,
+}: Props): JSX.Element {
+  const showPicker = !!aspectOptions && aspectOptions.length > 1;
+  const [activeKey, setActiveKey] = useState<string | null>(() => {
+    if (!showPicker) return null;
+    const match = aspectOptions!.find(
+      (o) => o.ratio[0] / o.ratio[1] === aspect[0] / aspect[1],
+    );
+    return (match ?? aspectOptions![0]!).key;
+  });
+  const activeAspect: [number, number] = showPicker
+    ? (aspectOptions!.find((o) => o.key === activeKey) ?? aspectOptions![0]!).ratio
+    : aspect;
+
   const frameW = FRAME_W;
-  const frameH = Math.round((frameW * aspect[1]) / aspect[0]);
+  const frameH = Math.round((frameW * activeAspect[1]) / activeAspect[0]);
 
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -62,6 +99,12 @@ export function ImageCropper({ src, aspect, title, onCancel, onConfirm, busy }: 
     img.onload = () => setNat({ w: img.naturalWidth, h: img.naturalHeight });
     img.src = src;
   }, [src]);
+
+  // A ratio change re-fits the frame; re-centre so no gap can show inside it.
+  useEffect(() => {
+    setScale(1);
+    setPos({ x: 0, y: 0 });
+  }, [activeKey]);
 
   useEffect(() => {
     setPos((p) => clampPos(p.x, p.y, scale));
@@ -130,6 +173,29 @@ export function ImageCropper({ src, aspect, title, onCancel, onConfirm, busy }: 
         <h3 className="mb-3 text-center text-[15px] font-bold text-gray-900">
           {title ?? "Position your photo"}
         </h3>
+
+        {showPicker && (
+          <div className="mb-3 flex justify-center gap-2">
+            {aspectOptions!.map((opt) => {
+              const on = opt.key === activeKey;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setActiveKey(opt.key)}
+                  aria-pressed={on}
+                  className={`rounded-full border px-4 py-1.5 text-[13px] font-semibold ${
+                    on
+                      ? "border-teal bg-teal text-white"
+                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div
           className="relative mx-auto touch-none select-none overflow-hidden rounded-xl bg-black"
