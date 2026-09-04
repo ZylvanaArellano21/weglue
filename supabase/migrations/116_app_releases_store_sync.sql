@@ -36,21 +36,16 @@ END $$;
 ALTER TABLE public.app_releases
   ADD COLUMN IF NOT EXISTS store_url text;
 
--- A previous draft used a bespoke shared secret name. Preserve the secret
--- value without reading or logging it, while making the cron contract explicit:
--- this is the project's real service-role credential, held in Vault only.
-DO $$
-BEGIN
-  IF to_regclass('vault.secrets') IS NOT NULL THEN
-    UPDATE vault.secrets
-       SET name = 'store_version_sync_service_key'
-     WHERE name = 'store_version_sync_secret'
-       AND NOT EXISTS (
-         SELECT 1 FROM vault.secrets
-          WHERE name = 'store_version_sync_service_key'
-       );
-  END IF;
-END $$;
+-- Cron → Edge Function auth (see the pg_cron block at the end of this file):
+-- the cron job sends a DEDICATED Supabase Secret API key in the `apikey`
+-- header. That key is NOT the project's legacy service_role JWT — it is a
+-- purpose-scoped secret the founder provisions in the dashboard and stores
+-- in exactly two backend places:
+--   * Supabase Vault, as `store_version_sync_api_key`  (this cron job)
+--   * the sync-store-versions function's secrets, as STORE_SYNC_API_KEY
+-- It is never given to the mobile app, the web client, or the browser. The
+-- Edge Function runs with verify_jwt = false and authenticates the caller
+-- solely by constant-time comparing that header to STORE_SYNC_API_KEY.
 
 -- One append-only row per completed attempt. The dashboard reads the latest
 -- row per platform; clients never receive this operational table.
@@ -211,10 +206,12 @@ $$;
 REVOKE ALL ON FUNCTION public.sync_store_app_release(text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.sync_store_app_release(text, text, text) TO service_role;
 
--- The function keeps the default platform JWT verification. The Vault value is
--- the project's service-role credential, selected at execution time so no
--- credential is stored in cron.job.command or cron.job_run_details. It is used
--- only server-to-server and is never returned or logged.
+-- The Edge Function runs with verify_jwt = false (supabase/config.toml) and
+-- gates itself on the `apikey` header. The dedicated Secret API key is
+-- resolved from Vault at execution time, so no credential is ever written to
+-- cron.job.command or cron.job_run_details. The job is only scheduled once
+-- that Vault secret exists, so a partially-provisioned project stays inert
+-- rather than logging a failing HTTP call every 45 minutes.
 DO $$
 BEGIN
   BEGIN
@@ -234,9 +231,9 @@ BEGIN
       $job$SELECT net.http_post(
         url := 'https://yoozrnosmqtaiksgcixc.supabase.co/functions/v1/sync-store-versions',
         headers := jsonb_build_object(
-          'Authorization', 'Bearer ' || (SELECT decrypted_secret
+          'apikey', (SELECT decrypted_secret
             FROM vault.decrypted_secrets
-           WHERE name = 'store_version_sync_service_key'),
+           WHERE name = 'store_version_sync_api_key'),
           'Content-Type', 'application/json'
         ),
         body := '{}'::jsonb,
@@ -244,7 +241,7 @@ BEGIN
       )
       WHERE EXISTS (
         SELECT 1 FROM vault.decrypted_secrets
-         WHERE name = 'store_version_sync_service_key'
+         WHERE name = 'store_version_sync_api_key'
       );$job$
     );
   EXCEPTION WHEN OTHERS THEN

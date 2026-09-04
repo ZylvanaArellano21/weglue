@@ -2,8 +2,23 @@
 // public releases into app_releases. Google Play is read through the official
 // Android Publisher API: the function creates an edit, reads production, and
 // always abandons the edit without committing it.
+//
+// Auth (verify_jwt = false in supabase/config.toml — this check is the sole
+// gate): the caller must present the dedicated store-sync Secret API key in
+// the `apikey` header. pg_cron reads it from Vault (store_version_sync_api_key);
+// the Admin Dashboard's server action reads it from a server-only env var
+// (STORE_SYNC_API_KEY). It is never a client credential and never the legacy
+// service_role JWT. This endpoint is never called by a browser or a device.
+//
+// Env (Supabase function secrets):
+//   STORE_SYNC_API_KEY        — the shared Secret API key checked above (required)
+//   PLAY_ANDROID_PUBLISHER_KEY — Google service-account JSON (optional; Android
+//                                detection is skipped, not failed, without it)
+//   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY — auto-injected; the function's own
+//                                DB identity for the app_releases writes
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { authorizedServiceCaller } from "./auth.ts";
 
 const IOS_BUNDLE_LOOKUP = "https://itunes.apple.com/lookup?bundleId=com.weglue.app";
 const IOS_ID_LOOKUP = "https://itunes.apple.com/lookup?id=6786491344";
@@ -115,20 +130,6 @@ function compareSemver(left: string, right: string): number {
     return av > bv ? 1 : -1;
   }
   return 0;
-}
-
-function serviceRoleFromAuthorization(req: Request): boolean {
-  const authorization = req.headers.get("Authorization") ?? "";
-  if (!authorization.startsWith("Bearer ")) return false;
-  const token = authorization.slice(7);
-  const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  try {
-    const claims = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1]))) as { role?: unknown };
-    return claims.role === "service_role";
-  } catch {
-    return false;
-  }
 }
 
 async function fetchJson(url: string): Promise<{ results?: ItunesResult[] }> {
@@ -378,7 +379,9 @@ async function checkAndroid(admin: SupabaseClient): Promise<StoreCheckResult> {
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!serviceRoleFromAuthorization(req)) return json({ error: "Unauthorized" }, 401);
+  if (!authorizedServiceCaller(req.headers, Deno.env.get("STORE_SYNC_API_KEY"))) {
+    return json({ error: "Unauthorized" }, 401);
+  }
 
   const url = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
