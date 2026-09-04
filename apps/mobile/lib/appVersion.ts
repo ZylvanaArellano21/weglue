@@ -1,5 +1,64 @@
-// Pure marketing-version comparison for the native "Update" check.
+// Pure version logic for the native "Update" check.
 // No react-native / expo imports here on purpose, so it stays unit-testable.
+
+export interface StoreReleaseRow {
+  version: string | null;
+  build_number: number | null;
+}
+
+export interface InstalledInfo {
+  platform: 'ios' | 'android';
+  /** marketing version, e.g. "1.0.6" (Application.nativeApplicationVersion) */
+  version: string;
+  /** Android versionCode as reported by Application.nativeBuildVersion */
+  build: string | null | undefined;
+}
+
+export interface UpdateDecision {
+  updateAvailable: boolean;
+  checkFailed: boolean;
+  latestVersion: string | null;
+}
+
+/**
+ * Decide whether a newer public store release exists, given the latest public
+ * `app_releases` row and what is installed.
+ *
+ *  - Android + the row carries a Google Play versionCode → compare integers
+ *    (Play releases do not always have a dotted marketing name). An installed
+ *    versionCode we cannot parse is a FAILED check, never "up to date".
+ *  - Everything else (iOS, or a manually-published Android row) → compare the
+ *    marketing version.
+ *  - A row with neither a version nor a build number → nothing to update to.
+ */
+export function resolveUpdateDecision(
+  row: StoreReleaseRow | null,
+  installed: InstalledInfo,
+): UpdateDecision {
+  const buildNumber = typeof row?.build_number === 'number' ? row.build_number : null;
+
+  if (!row || (!row.version && buildNumber === null)) {
+    return { updateAvailable: false, checkFailed: false, latestVersion: null };
+  }
+
+  if (installed.platform === 'android' && buildNumber !== null) {
+    const installedBuild = Number.parseInt(installed.build ?? '', 10);
+    if (!Number.isFinite(installedBuild)) {
+      return { updateAvailable: false, checkFailed: true, latestVersion: row.version ?? null };
+    }
+    return {
+      updateAvailable: installedBuild < buildNumber,
+      checkFailed: false,
+      latestVersion: row.version ?? null,
+    };
+  }
+
+  return {
+    updateAvailable: row.version ? isVersionNewer(row.version, installed.version) : false,
+    checkFailed: false,
+    latestVersion: row.version ?? null,
+  };
+}
 
 /**
  * True when `latest` is a strictly higher marketing version than `installed`.

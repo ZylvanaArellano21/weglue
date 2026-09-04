@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isVersionNewer } from '../appVersion';
+import { isVersionNewer, resolveUpdateDecision } from '../appVersion';
 
 describe('isVersionNewer', () => {
   it('detects a higher patch / minor / major', () => {
@@ -32,5 +32,45 @@ describe('isVersionNewer', () => {
     expect(isVersionNewer('abc', '1.0.5')).toBe(false);
     expect(isVersionNewer('1.0.6', 'not-a-version')).toBe(false);
     expect(isVersionNewer('1.x.0', '1.0.0')).toBe(false);
+  });
+});
+
+describe('resolveUpdateDecision', () => {
+  const ios = { platform: 'ios' as const, version: '1.0.5', build: '40' };
+  const android = { platform: 'android' as const, version: '1.0.5', build: '40' };
+
+  it('no row / empty row → nothing to update to, not a failure', () => {
+    expect(resolveUpdateDecision(null, ios)).toEqual({
+      updateAvailable: false, checkFailed: false, latestVersion: null,
+    });
+    expect(resolveUpdateDecision({ version: null, build_number: null }, android)).toEqual({
+      updateAvailable: false, checkFailed: false, latestVersion: null,
+    });
+  });
+
+  it('iOS compares the marketing version', () => {
+    expect(resolveUpdateDecision({ version: '1.0.6', build_number: null }, ios).updateAvailable).toBe(true);
+    expect(resolveUpdateDecision({ version: '1.0.5', build_number: null }, ios).updateAvailable).toBe(false);
+    expect(resolveUpdateDecision({ version: '1.0.6', build_number: null }, ios).latestVersion).toBe('1.0.6');
+  });
+
+  it('Android compares the Play versionCode when the row carries one', () => {
+    expect(resolveUpdateDecision({ version: null, build_number: 41 }, android).updateAvailable).toBe(true);
+    expect(resolveUpdateDecision({ version: null, build_number: 40 }, android).updateAvailable).toBe(false);
+    expect(resolveUpdateDecision({ version: null, build_number: 39 }, android).updateAvailable).toBe(false);
+    // a bare versionCode is not surfaced to the user
+    expect(resolveUpdateDecision({ version: null, build_number: 41 }, android).latestVersion).toBeNull();
+  });
+
+  it('Android with an unreadable installed versionCode is a FAILED check, never "up to date"', () => {
+    const d = resolveUpdateDecision({ version: null, build_number: 41 }, { ...android, build: null });
+    expect(d).toEqual({ updateAvailable: false, checkFailed: true, latestVersion: null });
+    const d2 = resolveUpdateDecision({ version: null, build_number: 41 }, { ...android, build: 'x' });
+    expect(d2.checkFailed).toBe(true);
+  });
+
+  it('a manually-published Android row (no build_number) falls back to marketing version', () => {
+    expect(resolveUpdateDecision({ version: '1.0.6', build_number: null }, android).updateAvailable).toBe(true);
+    expect(resolveUpdateDecision({ version: '1.0.4', build_number: null }, android).updateAvailable).toBe(false);
   });
 });

@@ -8,12 +8,17 @@
  * Update can never move them, unlike `Constants.expoConfig` (baked into the JS
  * bundle). So an OTA can never fake or clear this state.
  *
- * Backend truth is the `app_releases` table: one row per platform+version, and
- * a row only counts once `is_public` is true. That flag is set either by a
- * deliberate manual publish (`publish_app_release()`), or by the automated
- * store-version sync (source = 'store'), which reads ONLY the live public
- * store listing — never a TestFlight / internal-testing / in-review build, and
- * never a staged rollout still in progress.
+ * Backend truth is the `app_releases` table. A row only counts once `is_public`
+ * is true — set either by a deliberate manual publish (`publish_app_release()`),
+ * or by the automated store-version sync (source = 'store'), which reads ONLY
+ * the live public store listing (Apple's iTunes lookup / the Google Play
+ * Android Publisher production track) — never a TestFlight / internal-testing /
+ * in-review build, and never a staged rollout still in progress.
+ *
+ * iOS compares the marketing version ("1.0.6"). Android compares the Google
+ * Play versionCode (an integer, `Application.nativeBuildVersion`) when the row
+ * carries one, because a Play release does not always have a dotted name; a
+ * manually-published Android row still compares the marketing version.
  *
  * A failed check (network error, RLS error) resolves to `checkFailed: true`
  * and `updateAvailable: false` — it must NEVER read as "you're up to date",
@@ -31,7 +36,7 @@ import { AppState, Platform } from 'react-native';
 import * as Application from 'expo-application';
 import { isTransientError } from '@weglue/shared';
 import { supabase } from '../lib/supabase';
-import { isVersionNewer } from '../lib/appVersion';
+import { isVersionNewer, resolveUpdateDecision } from '../lib/appVersion';
 
 export { isVersionNewer };
 
@@ -84,7 +89,7 @@ async function fetchAppUpdateStatus(): Promise<AppUpdateStatus> {
 
   const { data, error } = await supabase
     .from('app_releases')
-    .select('version, released_at, store_url')
+    .select('version, released_at, store_url, build_number')
     .eq('platform', platform)
     .eq('is_public', true)
     .order('released_at', { ascending: false })
@@ -95,27 +100,25 @@ async function fetchAppUpdateStatus(): Promise<AppUpdateStatus> {
   // Query can retry transient cases, and so the hook reports checkFailed.
   if (error) throw error;
 
-  // No public release row yet is a valid answer, not a failure: nothing to
-  // update to.
-  if (!data?.version) {
-    return {
-      updateAvailable: false,
-      checkFailed: false,
-      latestVersion: null,
-      installedVersion,
-      storeUrl: null,
-    };
-  }
+  const row = data as {
+    version?: string | null;
+    store_url?: string | null;
+    build_number?: number | null;
+  } | null;
+
+  const decision = resolveUpdateDecision(
+    row ? { version: row.version ?? null, build_number: row.build_number ?? null } : null,
+    { platform, version: installedVersion, build: Application.nativeBuildVersion },
+  );
 
   return {
-    updateAvailable: isVersionNewer(data.version, installedVersion),
-    checkFailed: false,
-    latestVersion: data.version,
+    ...decision,
     installedVersion,
     // `store_url` is the exact listing URL the backend recorded (Apple's
-    // trackViewUrl for a store-detected iOS release); null on manually
-    // published rows, where the caller falls back to the hard-coded link.
-    storeUrl: (data as { store_url?: string | null }).store_url ?? null,
+    // trackViewUrl for a store-detected iOS release, the Play listing for
+    // Android); null on manually published rows, where the caller falls back
+    // to the hard-coded link.
+    storeUrl: row?.store_url ?? null,
   };
 }
 
