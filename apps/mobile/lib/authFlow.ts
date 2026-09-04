@@ -246,17 +246,24 @@ export function friendlyEmailSendError(error: {
     return "Too many sign-ups from your network right now. Wait a moment, then try again — your details are saved.";
   }
 
+  // Per-EMAIL-ADDRESS cooldown (GoTrue's smtp_max_frequency, ~60s). This comes
+  // back as a bare HTTP 429 with this exact message and often no machine-
+  // readable `code` at all, so it MUST be checked before the generic
+  // 429/hourly-quota branch below — otherwise a normal short cooldown gets
+  // reported as if the project-wide hourly email limit was hit.
+  if (msg.includes("you can only request this after")) {
+    return `Please wait ${RESEND_COOLDOWN_SECONDS} seconds before requesting another email.`;
+  }
+
   // Per-project hourly email quota (`over_email_send_rate_limit`). A bare 429
-  // with no specific code in an email-send call is treated the same way.
+  // with no specific code and no per-address cooldown message is treated the
+  // same way.
   if (
     code === "over_email_send_rate_limit" ||
     error.status === 429 ||
     msg.includes("rate limit")
   ) {
     return "Email limit reached. Rate limited by the server. Try again in about an hour.";
-  }
-  if (msg.includes("you can only request this after")) {
-    return `Please wait ${RESEND_COOLDOWN_SECONDS} seconds before requesting another email.`;
   }
   return "Something went wrong. Please try again.";
 }

@@ -104,6 +104,24 @@ describe("friendlyEmailSendError — never blames the address", () => {
     expect(msg).toMatch(/network|wait a moment/i);
     expect(msg).not.toMatch(/hour/i);
   });
+  // Regression: Supabase's per-EMAIL-ADDRESS resend cooldown (a normal ~60s
+  // wait right after a signup or a previous resend) also arrives as a bare
+  // HTTP 429, distinguished only by this message. It was previously caught by
+  // the generic 429 check above and told the user to wait an HOUR — a real
+  // production incident (a user's genuine short cooldown was reported as the
+  // project-wide hourly quota).
+  it("maps the per-address resend cooldown to a short wait, never the hourly message", () => {
+    const msg = friendlyEmailSendError({
+      status: 429,
+      message: "For security purposes, you can only request this after 43 seconds.",
+    });
+    expect(msg).toMatch(/seconds/i);
+    expect(msg).not.toMatch(/hour/i);
+  });
+  it("still reports the real hourly quota when the explicit code is present", () => {
+    const msg = friendlyEmailSendError({ code: "over_email_send_rate_limit" });
+    expect(msg).toMatch(/hour/i);
+  });
   it("falls back to a generic retry message, never 'check the address'", () => {
     const msg = friendlyEmailSendError({ message: "boom", code: "unexpected_failure" });
     expect(msg).toMatch(/try again/i);

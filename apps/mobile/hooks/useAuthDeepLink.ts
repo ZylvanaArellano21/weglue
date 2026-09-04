@@ -31,6 +31,14 @@ import { shouldHandleDeepLinkNavigation } from "../lib/platformAdmin";
  *     way an old email link logs a user out) is never correct. An EMAIL-CHANGE
  *     confirmation is the opposite: it is meant to be applied while signed in,
  *     so it still runs `setSession` / `exchangeCodeForSession` as before.
+ *   - The same credential (token_hash/code/access_token) is never submitted to
+ *     Supabase twice within a few seconds, even if this hook's effect below
+ *     fires handleUrl() more than once for the same cold-start URL (a known
+ *     Expo Linking quirk — see RECENT_CREDENTIAL_COOLDOWN_MS). Resubmitting an
+ *     already-consumed one-time token produces an "already used" error whose
+ *     navigation can race the successful first call and override it, showing
+ *     the user a false "link expired" screen for a confirmation that actually
+ *     succeeded.
  */
 
 /** Send the user to the resend screen without touching the current session. */
@@ -61,6 +69,26 @@ export function authLinkRecentlyConsumed(withinMs = 20_000): boolean {
 /** Test-only: clears the consumed marker so suites don't leak state. */
 export function __resetAuthLinkConsumed(): void {
   authLinkConsumedAt = 0;
+}
+
+// Expo Linking can deliver the SAME cold-start URL twice — both
+// getInitialURL() and the first 'url' event can fire for one launch. This is
+// the identical quirk useInviteDeepLink.ts / inviteController.ts already hit
+// and fixed with a module-level cooldown guard; it was never applied here. A
+// one-time verification credential is NOT safe to resubmit like an invite
+// token is: the second attempt hits an already-consumed token_hash/code, and
+// whichever handleUrl() call resolves LAST wins the on-screen navigation — so
+// a confirmation that actually succeeded can still end up showing "link
+// expired" to the user. Keyed by the credential itself (not the full URL) so
+// a genuinely different link is never blocked.
+const RECENT_CREDENTIAL_COOLDOWN_MS = 4000;
+let recentCredential: string | null = null;
+let recentCredentialAt = 0;
+
+/** Test-only: clears the credential-dedup marker so suites don't leak state. */
+export function __resetRecentCredential(): void {
+  recentCredential = null;
+  recentCredentialAt = 0;
 }
 
 /** Exported for unit tests. Called by the hook for every incoming auth link. */
@@ -105,6 +133,21 @@ export async function handleUrl(url: string): Promise<void> {
     (access_token && refresh_token) || code || (token_hash && type)
   );
   if (!hasCredential) return;
+
+  // Idempotent re-delivery guard (see RECENT_CREDENTIAL_COOLDOWN_MS above):
+  // a second delivery of the SAME credential within the cooldown window,
+  // whether truly concurrent or merely close in time, is a no-op.
+  const credentialKey = access_token
+    ? `token:${access_token}`
+    : code
+      ? `code:${code}`
+      : `otp:${token_hash}:${type}`;
+  const now = Date.now();
+  if (credentialKey === recentCredential && now - recentCredentialAt < RECENT_CREDENTIAL_COOLDOWN_MS) {
+    return;
+  }
+  recentCredential = credentialKey;
+  recentCredentialAt = now;
 
   // A SIGNUP confirmation while a real session is already active: the account
   // is confirmed and the user is signed in. Do not let a (possibly stale)
