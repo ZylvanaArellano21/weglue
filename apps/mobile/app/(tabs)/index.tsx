@@ -156,16 +156,24 @@ export default function HomeScreen() {
                 {/* Positioned INSIDE the button bounds: Android clips children
                     that overhang their parent (same rule as the notifications
                     badge below). The dot alone is easy to miss against the
-                    avatar, so "New update!" (below) is the primary signal. */}
+                    avatar, so "New update!" (beside it) is the primary signal. */}
                 <CountBadge
                   count={updateAvailable ? 1 : 0}
                   style={{ position: 'absolute', top: -1, right: -1 }}
                 />
               </View>
-              {updateAvailable && (
+            </TouchableOpacity>
+            {updateAvailable && (
+              <TouchableOpacity
+                onPress={() => router.push('/account-center/update')}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="A new version is available — open the update screen"
+                style={{ marginLeft: 8 }}
+              >
                 <Text
                   style={{
-                    marginLeft: 8,
                     fontSize: 13,
                     fontWeight: '700',
                     color: '#EF4444',
@@ -174,8 +182,8 @@ export default function HomeScreen() {
                 >
                   New update!
                 </Text>
-              )}
-            </TouchableOpacity>
+              </TouchableOpacity>
+            )}
 
             {/* "Personalize your Picture!" — new accounts only, and only until
                 they act on it. Tapping it opens the side menu (NOT the photo

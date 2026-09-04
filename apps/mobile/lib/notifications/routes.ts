@@ -8,7 +8,6 @@
  * external targets.
  */
 import type { Router } from 'expo-router';
-import { useSidebarStore } from '../../store/sidebarStore';
 
 export type NotificationRoute = {
   screen: string;
@@ -56,9 +55,9 @@ const ROUTE_SPECS: Record<string, RouteSpec> = {
   // A new public app version is available. Unlike every other type, this is
   // not a notification-content item, so it deliberately does NOT get the
   // Notifications-inbox underlay in navigateToNotificationTarget below — it
-  // opens Home and the profile/sidebar menu directly, on the Update row.
+  // opens the Update screen directly, where "Update now" opens the store.
   update: {
-    build: () => ({ pathname: '/(tabs)' }),
+    build: () => ({ pathname: '/account-center/update' }),
   },
 };
 
@@ -103,11 +102,11 @@ export function validateNotificationRoute(raw: unknown): ValidatedRoute | null {
  */
 export function navigateToNotificationTarget(router: Router, route: ValidatedRoute): void {
   if (route.screen === 'update') {
-    // Do not send the user directly to the store from the push — open We
-    // Glue on Home and show the sidebar's Update row (with its badge) so the
-    // user makes the actual update decision in-app.
-    router.push('/(tabs)');
-    useSidebarStore.getState().open();
+    // Land on the Update screen itself (not the store): it shows what's
+    // available and its "Update now" button opens the correct App Store /
+    // Play Store listing. No Notifications-inbox underlay — this is not an
+    // inbox item (notification_types.in_app = false, migration 090).
+    router.push('/account-center/update');
     return;
   }
   if (route.pathname === '/home/notifications') {

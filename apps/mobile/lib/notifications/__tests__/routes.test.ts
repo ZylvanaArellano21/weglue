@@ -2,8 +2,8 @@
  * The route allowlist is the security boundary between push payloads
  * (untrusted) and navigation — these tests pin its rejection behavior.
  */
-import { describe, expect, it } from 'vitest';
-import { validateNotificationRoute } from '../routes';
+import { describe, expect, it, vi } from 'vitest';
+import { navigateToNotificationTarget, validateNotificationRoute } from '../routes';
 
 const UUID = '123e4567-e89b-42d3-a456-426614174000';
 
@@ -36,6 +36,19 @@ describe('validateNotificationRoute', () => {
       pathname: '/home/notification-actors',
       params: { notificationId: UUID },
     });
+    // A store-update push (no param) opens the Update screen itself, where
+    // "Update now" opens the correct App Store / Play Store listing.
+    expect(validateNotificationRoute({ screen: 'update' })?.pathname).toBe(
+      '/account-center/update',
+    );
+  });
+
+  it('a tapped store-update push lands on the Update screen (no inbox underlay)', () => {
+    const push = vi.fn();
+    const router = { push } as unknown as Parameters<typeof navigateToNotificationTarget>[0];
+    navigateToNotificationTarget(router, validateNotificationRoute({ screen: 'update' })!);
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledWith('/account-center/update');
   });
 
   it('rejects a grouped-actor route without a valid notificationId', () => {
