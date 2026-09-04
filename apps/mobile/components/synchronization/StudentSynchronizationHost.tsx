@@ -64,8 +64,18 @@ export function StudentSynchronizationHost({ userId }: { userId?: string }) {
       removeContentSync = subscribeBroadcast(
         `sync:university:${universityId}`,
         'invalidate',
+        // A RECEIVED broadcast is the one signal that permissions may have
+        // genuinely changed — keep the clearing form.
         recover,
-        recover,
+        // (Re)subscribing is NOT that signal: it fires on the initial mount and
+        // again on every socket reconnect (a token-refresh re-auth, a network
+        // blip, a return to the foreground). Recover a possibly-missed broadcast
+        // with a BACKGROUND invalidation instead — same convergence, but cached
+        // screens and the image cache stay put. Using `recover` here is what
+        // made every reconnect wipe every open screen back to a loader (Bug 6),
+        // for the same reason navigation and foregrounding already stopped
+        // doing it above.
+        refresh,
       );
     };
 
@@ -74,7 +84,7 @@ export function StudentSynchronizationHost({ userId }: { userId?: string }) {
       cancelled = true;
       removeContentSync?.();
     };
-  }, [recover, userId]);
+  }, [recover, refresh, userId]);
 
   useEffect(() => {
     // An inactive persisted query can otherwise become visible before its next

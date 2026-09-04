@@ -209,8 +209,19 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
       removeContentSync = subscribeBroadcast(
         `sync:university:${universityId}`,
         "invalidate",
+        // A RECEIVED campus broadcast is the one signal that permissions may
+        // have genuinely changed, so it keeps the clearing form (a narrowed
+        // audience / a removal must not stay visible).
         () => refreshPermissionSensitiveStudentContent(queryClient),
-        () => refreshPermissionSensitiveStudentContent(queryClient),
+        // (Re)subscribing is NOT that signal — it is just the socket
+        // connecting (initial mount, a token refresh re-auth, a network blip,
+        // a tab refocus). Recover any broadcast missed while disconnected with
+        // a BACKGROUND invalidation: every active query refetches under current
+        // RLS and anything the database no longer returns disappears when that
+        // lands, while cached content and images stay on screen. Using the
+        // clearing form here is what made every reconnect blank every open
+        // screen back to a skeleton.
+        () => invalidateStudentContentQueries(queryClient),
       );
     };
 
