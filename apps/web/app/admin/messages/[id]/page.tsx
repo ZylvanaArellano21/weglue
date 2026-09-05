@@ -78,6 +78,23 @@ export default async function AdminMessageDetailPage({ params }: { params: { id:
           <Field label="Edited">{msg.edited ? <Badge tone="amber">Edited</Badge> : <span className="text-gray-400">No</span>}</Field>
           {msg.edited ? <Field label="Last updated">{fmtDateTime(msg.updated_at)}</Field> : null}
           <Field label="Reports">{msg.reportCount > 0 ? <Badge tone="red">{msg.reportCount}</Badge> : "0"}</Field>
+          <Field label="Reply to">
+            {msg.reply_to ? (
+              <div className="min-w-0 space-y-1">
+                <Link href={`/admin/messages/${msg.reply_to.id}`} className="break-all text-teal-700 hover:underline">
+                  Message {msg.reply_to.id}
+                </Link>
+                <p className="text-xs text-gray-500">
+                  {msg.reply_to.sender_username ? `@${msg.reply_to.sender_username}` : msg.reply_to.sender_name || "Deleted user"}
+                </p>
+                <p className="text-xs text-gray-600">
+                  {msg.reply_to.deleted ? "Deleted message" : msg.reply_to.preview || "No text preview"}
+                </p>
+              </div>
+            ) : (
+              <span className="text-gray-400">Not a reply</span>
+            )}
+          </Field>
         </dl>
       </SectionCard>
     </div>
