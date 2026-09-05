@@ -11,6 +11,7 @@
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
+    "image-size": "^2.0.2",
     "turbo": "^2.0.0",
     "typescript": "^5.4.5"
   },

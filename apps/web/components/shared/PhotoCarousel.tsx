@@ -36,23 +36,36 @@ interface PhotoCarouselProps {
 const PEEK = "13%";
 const GAP = 8;
 
+// Legacy posts (created before dimensions were stored on post_images) have no
+// known width/height, so their ratio can only be learned by probing the
+// image — an async load. Caching the measured ratio per URL means that only
+// ever happens once per image per page session, not on every remount (e.g.
+// leaving and reopening the feed) — mirrors the identical cache in the mobile
+// PhotoCarousel, which exists to stop a real, reproduced layout-shift bug on
+// the equivalent native list. Unbounded is fine at this scale.
+const measuredRatioCache = new Map<string, number>();
+
 /** Resolves the display ratio (w/h) from an image's dimensions: known, else
- *  measured, else the stable fallback — all clamped. For a carousel this is the
- *  first image and the result is the shared slide ratio. */
+ *  cached-measured, else freshly measured, else the stable fallback — all
+ *  clamped. For a carousel this is the first image and the result is the
+ *  shared slide ratio. */
 function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number | null {
   const known =
     image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
-  const [measured, setMeasured] = useState<number | null>(null);
+  const cachedFor = (uri: string | undefined) => (uri ? measuredRatioCache.get(uri) ?? null : null);
+  const [measured, setMeasured] = useState<number | null>(() => cachedFor(image?.uri));
 
   useEffect(() => {
-    setMeasured(null);
+    setMeasured(cachedFor(image?.uri));
     if (!enabled || known || !image?.uri || typeof window === "undefined") return;
+    if (measuredRatioCache.has(image.uri)) return;
     let alive = true;
     const probe = new window.Image();
     probe.onload = () => {
-      if (alive && probe.naturalWidth > 0 && probe.naturalHeight > 0) {
-        setMeasured(probe.naturalWidth / probe.naturalHeight);
-      }
+      if (probe.naturalWidth <= 0 || probe.naturalHeight <= 0) return;
+      const ratio = probe.naturalWidth / probe.naturalHeight;
+      measuredRatioCache.set(image.uri, ratio);
+      if (alive) setMeasured(ratio);
     };
     probe.src = image.uri;
     return () => {
