@@ -20,6 +20,7 @@ import { followUser, unfollowUser } from '../../../../services/followService';
 import { PostViewerBlock } from '../../../../components/post/PostViewerBlock';
 import { ProfileConfirmationModal } from '../../../../components/profile/ProfileConfirmationModal';
 import { Avatar } from '../../../../components/shared/Avatar';
+import { LinkifiedText } from '../../../../components/shared/LinkifiedText';
 import { useToast } from '../../../../components/Toast';
 import { timeAgo } from '../../../../components/home/PostCard';
 import { profileColors, profileFonts } from '../../../../components/profile/profileTheme';
@@ -212,7 +213,7 @@ function OfficerUploadBlock({ item, clubName }: { item: ClubPhotoFeedItem; clubN
         resizeMode="cover"
         fadeDuration={0}
       />
-      {item.photo.caption ? <Text style={styles.uploadCaption}>{item.photo.caption}</Text> : null}
+      {item.photo.caption ? <LinkifiedText text={item.photo.caption} style={styles.uploadCaption} /> : null}
       <Text style={styles.uploadTimestamp}>{timeAgo(item.photo.created_at)}</Text>
     </View>
   );

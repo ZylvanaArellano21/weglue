@@ -14,6 +14,7 @@ import { usePostInteractionsRealtime } from "../../lib/hooks/useClubRealtime";
 import { ReportModal } from "../shared/ReportModal";
 import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { ClubPhotoRemovalDialog } from "./ClubPhotoRemoval";
+import { LinkifiedText } from "../shared/LinkifiedText";
 import type { ClubPhoto } from "../../lib/clubs/clubProfileService";
 
 // Dedicated Club Media overlay (spec §19) matching officer club media big post:
@@ -146,7 +147,7 @@ function UploadPanel({
   return (
     <div className="flex flex-1 flex-col p-5">
       <p id="club-media-title" className="text-[15px] font-semibold text-gray-900">Club photo</p>
-      {caption && <p className="mt-2 text-[15px] text-gray-800">{caption}</p>}
+      {caption && <p className="mt-2 text-[15px] text-gray-800"><LinkifiedText text={caption} /></p>}
       <div className="flex-1" />
       {isOfficer && (
         <div className="flex justify-end border-t pt-3" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
@@ -384,7 +385,8 @@ function PostPanel({
         ) : (
           post.caption && (
             <p className="mb-3 text-[15px] font-bold text-gray-900">
-              <span className="font-bold">{post.author.username}</span> <span className="font-normal">{post.caption}</span>
+              <span className="font-bold">{post.author.username}</span>{" "}
+              <span className="font-normal"><LinkifiedText text={post.caption} /></span>
             </p>
           )
         )}

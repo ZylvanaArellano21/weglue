@@ -21,6 +21,7 @@ import { clampChatImageAspect, fileSubtitle } from "@weglue/shared";
 import { Avatar } from "../shared/Avatar";
 import { ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { CalendarIcon, ImageIcon, PeopleIcon } from "../shared/icons";
+import { LinkifiedText } from "../shared/LinkifiedText";
 import {
   attachmentObjectUrl,
   getSharedEventPreview,
@@ -230,7 +231,7 @@ export function PostShareCard({
           <ImageIcon size={26} />
         </span>
       )}
-      {post.caption && <span className="block text-xs leading-[17px] text-gray-500 line-clamp-2">{post.caption}</span>}
+      {post.caption && <span className="block text-xs leading-[17px] text-gray-500 line-clamp-2"><LinkifiedText text={post.caption} /></span>}
     </div>
   );
 }

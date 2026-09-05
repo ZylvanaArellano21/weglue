@@ -10,6 +10,7 @@ import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
 import { ReportModal } from "../shared/ReportModal";
 import { useToast } from "../shared/Toast";
+import { LinkifiedText } from "../shared/LinkifiedText";
 
 // Minimal post overlay (?post=), the destination for like/comment notifications
 // and the profile posts grid. Real shared post data; like toggles the shared
@@ -117,7 +118,8 @@ export function PostModal({
             </div>
             {post.caption && (
               <p className="mt-2 text-sm text-gray-800">
-                <span className="font-semibold">{post.author.username}</span> {post.caption}
+                <span className="font-semibold">{post.author.username}</span>{" "}
+                <LinkifiedText text={post.caption} />
               </p>
             )}
             {officerActions && (

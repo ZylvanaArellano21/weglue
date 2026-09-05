@@ -6,6 +6,7 @@ import { Pill } from '../shared/Pill';
 import { PhotoCarousel } from '../shared/PhotoCarousel';
 import { timeAgo } from '../home/PostCard';
 import { openReportFlow } from '../shared/ReportButton';
+import { LinkifiedText } from '../shared/LinkifiedText';
 import { openProfile } from '../../lib/profileNavigation';
 import { profileColors, profileFonts } from '../profile/profileTheme';
 import type { FeedPost } from '../../services/postService';
@@ -201,7 +202,7 @@ export function PostViewerBlock({
       {post.caption ? (
         <Text style={styles.caption}>
           <Text style={styles.captionUsername}>@{post.author.username} </Text>
-          {post.caption}
+          <LinkifiedText text={post.caption} />
         </Text>
       ) : null}
 

@@ -12,6 +12,7 @@ import {
   senderNameColor,
 } from './chatTheme';
 import { ATTACHMENT_UNAVAILABLE_TEXT } from '../../lib/blockPrompts';
+import { LinkifiedText } from '../shared/LinkifiedText';
 import type { MessageAttachment, MessageReactionSummary } from '../../services/messagingService';
 
 interface Props {
@@ -345,7 +346,7 @@ export function MessageBubble({
               onLongPress={longPress}
             />
             {content ? (
-              <Text style={[styles.mediaCaption, isOwn ? styles.timeOwn : styles.timeOther]}>{content}</Text>
+              <LinkifiedText text={content} style={[styles.mediaCaption, isOwn ? styles.timeOwn : styles.timeOther]} />
             ) : null}
           </View>
         ) : isMedia ? (
@@ -357,7 +358,7 @@ export function MessageBubble({
               onLongPress={longPress}
             />
             {content ? (
-              <Text style={[styles.mediaCaption, isOwn ? styles.timeOwn : styles.timeOther]}>{content}</Text>
+              <LinkifiedText text={content} style={[styles.mediaCaption, isOwn ? styles.timeOwn : styles.timeOther]} />
             ) : null}
             {pendingState === 'uploading' && (
               <View style={styles.uploadOverlay} pointerEvents="none">
@@ -410,7 +411,7 @@ export function MessageBubble({
               </Text>
             ) : null}
             {content ? (
-              <Text style={isOwn ? chatTypography.bubbleSent : chatTypography.bubbleReceived}>{content}</Text>
+              <LinkifiedText text={content} style={isOwn ? chatTypography.bubbleSent : chatTypography.bubbleReceived} />
             ) : null}
             <Text style={styles.bubbleTime}>
               {pendingState ? 'Sending…' : formatTime(createdAt)}

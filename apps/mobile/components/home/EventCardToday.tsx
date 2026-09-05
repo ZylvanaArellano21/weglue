@@ -6,6 +6,7 @@ import { Avatar } from '../shared/Avatar';
 import { AvatarStack } from '../shared/AvatarStack';
 import { Pill } from '../shared/Pill';
 import { EventAudienceBadge } from '../events/EventAudienceBadge';
+import { LinkifiedText } from '../shared/LinkifiedText';
 import type { HomeFeedEvent } from '../../services/eventService';
 import type { DesiredRsvp } from '../../hooks/useEventRsvp';
 import { getResizedImageUrl } from '../../lib/imageResize';
@@ -186,7 +187,8 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
 
         {/* Description */}
         {event.description ? (
-          <Text
+          <LinkifiedText
+            text={event.description}
             style={{
               fontSize: 12,
               color: '#5F5D5D',
@@ -194,9 +196,7 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
               marginBottom: 8,
             }}
             numberOfLines={1}
-          >
-            {event.description}
-          </Text>
+          />
         ) : null}
 
         {/* "Today!" date row — in red */}

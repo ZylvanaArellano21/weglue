@@ -12,6 +12,7 @@ import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { EmptyState } from "./EmptyState";
 import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
 import { useToast } from "../shared/Toast";
+import { LinkifiedText } from "../shared/LinkifiedText";
 
 // Desktop Home → Posts feed. Same university-scoped, newest-first picture posts
 // as mobile. Full comment threads + post detail overlay land in a later phase;
@@ -227,7 +228,8 @@ function PostCard({
         </div>
         {post.caption && (
           <p className="mt-2 text-sm text-gray-800">
-            <span className="font-semibold">{post.author.username}</span> {post.caption}
+            <span className="font-semibold">{post.author.username}</span>{" "}
+            <LinkifiedText text={post.caption} />
           </p>
         )}
       </div>
