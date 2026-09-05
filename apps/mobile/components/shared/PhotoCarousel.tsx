@@ -76,22 +76,39 @@ const GAP = 8;
 const PEEK_RATIO = 0.13;
 const RADIUS = 16;
 
+// Legacy posts (created before dimensions were stored on post_images) have no
+// known width/height, so their ratio can only be learned by measuring the
+// image — an async round trip. Without this cache, every mount (including
+// just leaving and reopening the Home feed) re-measures and re-triggers the
+// same late height change that causes a real, reproduced bug: on a very short
+// feed the list's scroll extent goes briefly stale right as that height
+// changes, so the very first scroll-down attempt gets clamped against the old
+// (too-small) bound and springs back to the top. Caching the measured ratio
+// per URI means that only ever happens once per image per app session, not
+// on every remount. Unbounded is fine at this scale — a URI string + a float
+// per entry, cleared on app restart.
+const measuredRatioCache = new Map<string, number>();
+
 /** Resolves the display ratio (w/h) from an image's dimensions: known, else
- *  measured, else the stable fallback box — all clamped. For a carousel this is
- *  the first image and the result is the shared slide ratio. */
+ *  cached-measured, else freshly measured, else the stable fallback box — all
+ *  clamped. For a carousel this is the first image and the result is the
+ *  shared slide ratio. */
 function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number {
   const known =
     image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
-  const [measured, setMeasured] = useState<number | null>(null);
+  const cachedFor = (uri: string | undefined) => (uri ? measuredRatioCache.get(uri) ?? null : null);
+  const [measured, setMeasured] = useState<number | null>(() => cachedFor(image?.uri));
 
   useEffect(() => {
-    setMeasured(null);
-    if (!enabled || known || !image?.uri) return;
+    setMeasured(cachedFor(image?.uri));
+    if (!enabled || known || !image?.uri || measuredRatioCache.has(image.uri)) return;
     let alive = true;
     Image.getSize(
       image.uri,
       (w, h) => {
-        if (alive && w > 0 && h > 0) setMeasured(w / h);
+        if (w <= 0 || h <= 0) return;
+        measuredRatioCache.set(image.uri!, w / h);
+        if (alive) setMeasured(w / h);
       },
       () => {},
     );

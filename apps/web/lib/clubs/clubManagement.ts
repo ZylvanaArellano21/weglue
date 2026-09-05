@@ -229,17 +229,29 @@ export interface ClubPostCreateResult {
   images: { path: string; position: number; width?: number | null; height?: number | null }[];
 }
 
-/** Creates a club-authored post. The database verifies club_members.role. */
+/** Creates a club-authored post. The database verifies club_members.role.
+ *
+ * `imageDimensions` (optional, one entry per `imagePaths` in the same order)
+ * lets a single image render at its natural aspect with no layout shift —
+ * the same contract `create_post` already relies on (migration 118).
+ * Omitting it leaves those rows' width/height NULL, which is exactly the
+ * condition that produced a real scroll-rejection bug on the Home feed when
+ * the image's aspect had to be measured asynchronously after layout instead
+ * of being known up front — so any future caller of this function should
+ * pass it whenever the images were just uploaded and their dimensions are
+ * already in hand. */
 export async function createClubPost(
   clubId: string,
   imagePaths: string[],
   caption?: string,
+  imageDimensions?: Array<{ width: number; height: number }>,
 ): Promise<ClubPostCreateResult> {
   const supabase = getSupabaseBrowser();
   const { data, error } = await supabase.rpc("create_club_post", {
     p_club_id: clubId,
     p_image_paths: imagePaths,
     p_caption: caption?.trim() || null,
+    p_image_dimensions: imageDimensions ?? null,
   });
   if (error) throw error;
   return data as ClubPostCreateResult;
