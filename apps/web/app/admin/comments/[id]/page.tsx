@@ -38,6 +38,17 @@ export default async function AdminCommentDetailPage({ params }: { params: { id:
           <div className="space-y-4 p-4">
             {lifecycle.available && lifecycle.record ? <LifecycleBadge status={lifecycle.record.displayStatus} /> : <Badge tone="amber">Lifecycle unavailable</Badge>}
             <p className="whitespace-pre-wrap text-sm text-gray-900">{comment.content}</p>
+            {comment.parent_comment_id ? (
+              <div className="rounded-lg border border-teal-100 bg-teal-50/50 px-3 py-2 text-sm text-teal-900">
+                <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Reply to</p>
+                <Link href={`/admin/comments/${comment.parent_comment_id}`} className="font-medium hover:underline">
+                  {comment.parent_author_name || "another comment"}
+                </Link>
+                {comment.parent_content ? (
+                  <p className="mt-1 truncate text-xs text-teal-800">“{comment.parent_content}”</p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex items-center gap-3 border-t border-gray-100 pt-3">
               <Link href={`/admin/users/${comment.user_id}`}>
                 <Avatar uri={comment.avatar_url} name={comment.author_name} size={36} />

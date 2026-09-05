@@ -444,6 +444,19 @@ MANIFEST = [
               "reapplied rotate_chat_invitation body is read-only (no UPDATE / no "
               "token creation), keeps its auth guard and signature, and is "
               "EXECUTE-granted to authenticated only. Wrapped in BEGIN/ROLLBACK."),
+
+    # ---- comment threading + reply notification contract (128, renumbered from
+    # 122 after the interest-matching family 122-127 landed on main). The runner
+    # clones the full migrated local stack into a disposable database, then the
+    # shell harness applies 128 and exercises the real final RLS/triggers.
+    dict(file="test_128_comment_replies.sh", type="shell", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres (throwaway full-schema clone)",
+         assert_role="authenticated RLS + postgres fixture reads",
+         criterion="shell",
+         note="Applies migration 128 inside the disposable clone; covers reply "
+              "linkage, parent-only notification, self-reply, block rejection, "
+              "SET NULL parent deletion, route payload, and unchanged top-level "
+              "comment notification."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the
@@ -460,6 +473,7 @@ PG17_COMPAT = [
     # which is already PostgreSQL 17.6, so it needs no separate 17 rerun.
     "test_062_private_account_posts.sql",
     "test_057_concurrency.sh",
+    "test_122_comment_replies.sh",
 ]
 
 # Minimal synthetic seed required by test_038_039's documented contract.

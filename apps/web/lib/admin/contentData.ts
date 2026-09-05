@@ -15,8 +15,9 @@
 //                       column — posts have no soft-delete lifecycle. Removal
 //                       from a club is the canonical "unglue" behavior
 //                       (remove_post_from_club): club_id→NULL + tag/photo cleanup.
-//   • post_comments  — id, post_id, user_id, content, created_at (no status/
-//                       hidden/updated_at; content is the only editable field).
+//   • post_comments  — id, post_id, user_id, content, created_at,
+//                       parent_comment_id (no status/hidden/updated_at; content
+//                       is the only editable field).
 //   • post_likes     — engagement (reaction) count per post.
 //   • post_club_tags — extra club tags beyond the primary posts.club_id.
 //   • reports        — entity_type IN (club,event,post,user,message,chat).
@@ -287,6 +288,31 @@ async function profileMap(
   return map;
 }
 
+async function parentCommentMap(
+  admin: ReturnType<typeof createAdminClient>,
+  ids: string[]
+): Promise<Map<string, { author_id: string; author_name: string; content: string }>> {
+  const map = new Map<string, { author_id: string; author_name: string; content: string }>();
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (unique.length === 0) return map;
+
+  const { data } = await admin
+    .from("post_comments")
+    .select("id, content, user_id")
+    .in("id", unique);
+  const parents = (data ?? []) as any[];
+  const authors = await profileMap(admin, parents.map((parent) => parent.user_id));
+  for (const parent of parents) {
+    const author = authors.get(parent.user_id);
+    map.set(parent.id, {
+      author_id: parent.user_id,
+      author_name: author?.full_name || author?.username || "",
+      content: parent.content,
+    });
+  }
+  return map;
+}
+
 async function clubMap_(
   admin: ReturnType<typeof createAdminClient>,
   ids: string[]
@@ -516,6 +542,10 @@ export interface AdminCommentRow {
   author_email: string | null;
   avatar_url: string | null;
   post_id: string;
+  parent_comment_id: string | null;
+  parent_author_id: string | null;
+  parent_author_name: string | null;
+  parent_content: string | null;
   post_caption: string | null;
   club_id: string | null;
   club_name: string | null;
@@ -547,7 +577,7 @@ export async function listComments(params: ListCommentsParams = {}): Promise<Pag
 
   let q = admin
     .from("post_comments")
-    .select("id, content, user_id, post_id, created_at", { count: "exact" });
+    .select("id, content, user_id, post_id, parent_comment_id, created_at", { count: "exact" });
 
   if (params.postId) q = q.eq("post_id", params.postId);
   if (params.dateFrom) q = q.gte("created_at", params.dateFrom);
@@ -588,6 +618,7 @@ export async function listComments(params: ListCommentsParams = {}): Promise<Pag
   const comments = (data ?? []) as any[];
   const userIds = comments.map((c) => c.user_id);
   const postIds = Array.from(new Set(comments.map((c) => c.post_id)));
+  const parentIds = comments.map((c) => c.parent_comment_id);
 
   const [emails, authorMap, posts] = await Promise.all([
     emailMap(userIds),
@@ -596,12 +627,14 @@ export async function listComments(params: ListCommentsParams = {}): Promise<Pag
   ]);
   const clubIds = Array.from(new Set([...posts.values()].map((p) => p.club_id).filter(Boolean))) as string[];
   const clubMap = await clubMap_(admin, clubIds);
+  const parentMap = await parentCommentMap(admin, parentIds);
   const uniIds = [...clubMap.values()].map((c) => c.university_id).filter(Boolean) as string[];
   const uniMap = await universityNameMap(admin, uniIds);
 
   const rows: AdminCommentRow[] = comments.map((c) => {
     const author = authorMap.get(c.user_id);
     const post = posts.get(c.post_id);
+    const parent = c.parent_comment_id ? parentMap.get(c.parent_comment_id) : null;
     const club = post?.club_id ? clubMap.get(post.club_id) : null;
     const uniId = club?.university_id ?? null;
     return {
@@ -613,6 +646,10 @@ export async function listComments(params: ListCommentsParams = {}): Promise<Pag
       author_email: emails.get(c.user_id) ?? null,
       avatar_url: author?.avatar_url ?? null,
       post_id: c.post_id,
+      parent_comment_id: c.parent_comment_id ?? null,
+      parent_author_id: parent?.author_id ?? null,
+      parent_author_name: parent?.author_name ?? null,
+      parent_content: parent ? captionPreview(parent.content, 120) : null,
       post_caption: captionPreview(post?.caption ?? null, 80),
       club_id: post?.club_id ?? null,
       club_name: club?.name ?? null,
@@ -648,6 +685,10 @@ export interface CommentDetail {
   avatar_url: string | null;
   created_at: string;
   post_id: string;
+  parent_comment_id: string | null;
+  parent_author_id: string | null;
+  parent_author_name: string | null;
+  parent_content: string | null;
   post_caption: string | null;
   post_type: string | null;
   club_id: string | null;
@@ -662,22 +703,24 @@ export async function getCommentDetail(id: string): Promise<CommentDetail | null
 
   const { data: comment } = await admin
     .from("post_comments")
-    .select("id, content, user_id, post_id, created_at")
+    .select("id, content, user_id, post_id, parent_comment_id, created_at")
     .eq("id", id)
     .maybeSingle();
   if (!comment) return null;
   const c = comment as any;
 
-  const [authorMap, postRes, emails] = await Promise.all([
+  const [authorMap, postRes, emails, parentMap] = await Promise.all([
     profileMap(admin, [c.user_id]),
     admin.from("posts").select("id, caption, club_id, post_type").eq("id", c.post_id).maybeSingle(),
     emailMap([c.user_id]),
+    parentCommentMap(admin, c.parent_comment_id ? [c.parent_comment_id] : []),
   ]);
   const author = authorMap.get(c.user_id);
   const post = postRes.data as any;
   const club = post?.club_id ? (await clubMap_(admin, [post.club_id])).get(post.club_id) : null;
   const uniId = club?.university_id ?? null;
   const uniName = uniId ? (await universityNameMap(admin, [uniId])).get(uniId) ?? null : null;
+  const parent = c.parent_comment_id ? parentMap.get(c.parent_comment_id) : null;
 
   return {
     id: c.id,
@@ -689,6 +732,10 @@ export async function getCommentDetail(id: string): Promise<CommentDetail | null
     avatar_url: author?.avatar_url ?? null,
     created_at: c.created_at,
     post_id: c.post_id,
+    parent_comment_id: c.parent_comment_id ?? null,
+    parent_author_id: parent?.author_id ?? null,
+    parent_author_name: parent?.author_name ?? null,
+    parent_content: parent ? captionPreview(parent.content, 160) : null,
     post_caption: captionPreview(post?.caption ?? null, 120),
     post_type: post?.post_type ?? null,
     club_id: post?.club_id ?? null,
