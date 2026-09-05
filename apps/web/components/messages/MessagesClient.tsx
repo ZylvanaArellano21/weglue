@@ -335,7 +335,7 @@ function MessagesBody({ userId }: { userId: string }): JSX.Element {
   const phoneShowInfo = infoOpen && !!conversationId && !!details;
 
   return (
-    <main className="mx-auto w-full max-w-[1400px] px-0 py-0 sm:px-4 sm:py-6 md:flex md:min-h-0 md:flex-1 md:flex-col">
+    <main className="mx-auto w-full max-w-app px-0 py-0 sm:px-6 sm:py-6 md:flex md:min-h-0 md:flex-1 md:flex-col">
       {/* The shell owns the viewport height and clips: nothing inside it may
           grow the document. `min-h-0` on every descendant in this chain is what
           lets the list below actually reach `overflow-y-auto` instead of
