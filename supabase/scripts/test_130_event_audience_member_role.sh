@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run against a disposable migrated database after migration 124.
-# The runner invokes this as: test_124_event_audience_member_role.sh CONTAINER DB
+# Run against a disposable migrated database after migration 130.
+# The runner invokes this as: test_130_event_audience_member_role.sh CONTAINER DB
 
 CONTAINER="${1:-supabase_db_weglue}"
 DB="${2:-postgres}"
+
+MIGRATION="$(cd "$(dirname "$0")" && pwd)/../migrations/130_event_audience_member_club_role.sql"
+echo "Applying migration 130 to disposable clone ${DB}…"
+docker exec -i "$CONTAINER" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q < "$MIGRATION"
 
 docker exec -i "$CONTAINER" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q <<'SQL'
 BEGIN;

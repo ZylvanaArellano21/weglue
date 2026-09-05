@@ -1,4 +1,14 @@
+-- ============================================================================
+-- 130 — event audience member club roles (search_event_audience_members returns
+--       club_role + is_officer for the hosting club only)
+--
+-- (Renumbered from 124 after the interest-matching family 122-127 merged to
+-- main / production. No behavioral change from the reviewed-and-accepted 124.)
+-- ============================================================================
+
 BEGIN;
+
+DROP FUNCTION IF EXISTS public.search_event_audience_members(uuid, text, integer);
 
 -- This picker is club-scoped by construction. The officer identity and each
 -- result's active membership are checked inside the database, so browser cache
@@ -65,7 +75,7 @@ BEGIN
     INTO v_result;
   IF position('club_role text' IN v_result) = 0
      OR position('is_officer boolean' IN v_result) = 0 THEN
-    RAISE EXCEPTION '124: search_event_audience_members return shape is missing club_role/is_officer: %', v_result;
+    RAISE EXCEPTION '130: search_event_audience_members return shape is missing club_role/is_officer: %', v_result;
   END IF;
 END;
 $$;
