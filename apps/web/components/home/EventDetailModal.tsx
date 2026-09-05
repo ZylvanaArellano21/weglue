@@ -10,6 +10,7 @@ import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { CalendarIcon, LocationIcon, BookmarkIcon, ImageIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
 import { ReportModal } from "../shared/ReportModal";
+import { LinkifiedText } from "../shared/LinkifiedText";
 import { useState } from "react";
 import {
   useEventDetail,
@@ -190,7 +191,7 @@ export function EventDetailModal({
           {event.description && (
             <div className="mt-4">
               <h3 className="mb-1.5 text-base font-bold text-gray-900 font-zain">About this event</h3>
-              <p className="text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">{event.description}</p>
+              <p className="text-sm leading-relaxed text-gray-700 whitespace-pre-wrap"><LinkifiedText text={event.description} /></p>
             </div>
           )}
 

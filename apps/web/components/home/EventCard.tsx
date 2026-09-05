@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { AttendanceTrigger } from "./AttendanceTrigger";
+import { LinkifiedText } from "../shared/LinkifiedText";
 import {
   BookmarkIcon,
   CalendarIcon,
@@ -166,7 +167,7 @@ export function EventCard({
 
         {event.description ? (
           <p className="mt-1 truncate text-xs" style={{ color: "#5F5D5D" }}>
-            {event.description}
+            <LinkifiedText text={event.description} />
           </p>
         ) : null}
 

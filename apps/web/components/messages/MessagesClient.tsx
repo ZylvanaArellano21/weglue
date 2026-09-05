@@ -19,6 +19,7 @@ import qrcodegen from "qrcode-generator";
 import type { ReportEntityType } from "../../lib/hooks/useReport";
 import { ReportModal } from "../shared/ReportModal";
 import { ToastProvider, useToast } from "../shared/Toast";
+import { LinkifiedText } from "../shared/LinkifiedText";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { messagesHref, isMessageUuid, type MessagesDestination } from "../../lib/messages/routes";
 import { useMyClubs } from "../../lib/hooks/useClubTab";
@@ -1226,7 +1227,7 @@ function MessageBubble({ message, isOwn, showSender, isLastInGroup = true, isGro
 
         {isText ? (
           <div className={`rounded-2xl ${cornerClass} px-3 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.12)] ${isOwn ? "bg-[#D7EFEE]" : "bg-white"} ${failed ? "ring-1 ring-red-400" : ""}`}>
-            {message.content && <p className="whitespace-pre-wrap break-words text-sm text-gray-900">{message.content}</p>}
+            {message.content && <p className="whitespace-pre-wrap break-words text-sm text-gray-900"><LinkifiedText text={message.content} /></p>}
             {/* Timestamp sits quiet at the lower edge of the bubble. */}
             <span className="mt-0.5 block text-right text-[10px] leading-none text-gray-400">{pending ? "Sending…" : failed ? "Not sent" : shortTime(message.created_at)}</span>
           </div>
@@ -1236,7 +1237,7 @@ function MessageBubble({ message, isOwn, showSender, isLastInGroup = true, isGro
             {/* A caption travels with its media rather than becoming a second
                 message, matching mobile's mediaCaption. */}
             {message.content && message.message_type !== "file" && (
-              <p className="mt-1 max-w-[300px] whitespace-pre-wrap break-words text-sm text-gray-700">{message.content}</p>
+              <p className="mt-1 max-w-[300px] whitespace-pre-wrap break-words text-sm text-gray-700"><LinkifiedText text={message.content} /></p>
             )}
             <span className={`mt-0.5 block text-[10px] leading-none text-gray-400 ${isOwn ? "text-right" : "text-left"}`}>{pending ? "Sending…" : failed ? "Not sent" : shortTime(message.created_at)}</span>
           </>

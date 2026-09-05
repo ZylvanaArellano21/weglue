@@ -1,4 +1,5 @@
 export * from "./validateEducationEmail";
+export * from "./linkify";
 
 // ─── String utilities ─────────────────────────────────────────────────────────
 

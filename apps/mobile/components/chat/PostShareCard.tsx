@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getPostById } from '../../services/postService';
 import { Avatar } from '../shared/Avatar';
+import { LinkifiedText } from '../shared/LinkifiedText';
 import { chatColors, chatFonts, chatShadow } from './chatTheme';
 
 interface Props {
@@ -69,9 +70,7 @@ export function PostShareCard({ postId, viewerUserId }: Props) {
           </View>
         )}
         {post.caption ? (
-          <Text style={styles.caption} numberOfLines={2}>
-            {post.caption}
-          </Text>
+          <LinkifiedText text={post.caption} style={styles.caption} numberOfLines={2} />
         ) : null}
       </View>
     </TouchableOpacity>

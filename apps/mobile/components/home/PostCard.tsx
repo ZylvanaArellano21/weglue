@@ -12,6 +12,7 @@ import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
 import { cardSurface, cardClip, cardDepth } from '../shared/cardStyles';
 import { PhotoCarousel } from '../shared/PhotoCarousel';
+import { LinkifiedText } from '../shared/LinkifiedText';
 import { openProfile } from '../../lib/profileNavigation';
 import type { FeedPost } from '../../services/postService';
 
@@ -228,7 +229,7 @@ export const PostCard = memo(function PostCard({
             <Text style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
               @{post.author.username}{' '}
             </Text>
-            {post.caption}
+            <LinkifiedText text={post.caption} />
           </Text>
         ) : null}
         <Text

@@ -20,6 +20,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../../../components/shared/Avatar';
 import { AvatarStack } from '../../../../components/shared/AvatarStack';
 import { Skeleton } from '../../../../components/shared/SkeletonLoader';
+import { LinkifiedText } from '../../../../components/shared/LinkifiedText';
 import { useToast } from '../../../../components/Toast';
 import { requestLeaveClub } from '../../../../store/leaveClubStore';
 import { openReportFlow } from '../../../../components/shared/ReportButton';
@@ -406,7 +407,8 @@ export default function ClubEventDetailScreen() {
                 >
                   About this event
                 </Text>
-                <Text
+                <LinkifiedText
+                  text={event.description}
                   style={{
                     fontSize: 14,
                     color: '#374151',
@@ -414,9 +416,7 @@ export default function ClubEventDetailScreen() {
                     fontFamily: 'Inter_400Regular',
                     marginBottom: 20,
                   }}
-                >
-                  {event.description}
-                </Text>
+                />
               </>
             ) : null}
 

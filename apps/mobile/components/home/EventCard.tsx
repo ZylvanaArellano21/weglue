@@ -7,6 +7,7 @@ import { AvatarStack } from '../shared/AvatarStack';
 import { Pill } from '../shared/Pill';
 import { EventAudienceBadge } from '../events/EventAudienceBadge';
 import { CARD_RADIUS, cardClip, cardDepth } from '../shared/cardStyles';
+import { LinkifiedText } from '../shared/LinkifiedText';
 import type { HomeFeedEvent } from '../../services/eventService';
 import type { DesiredRsvp } from '../../hooks/useEventRsvp';
 import { getResizedImageUrl } from '../../lib/imageResize';
@@ -165,7 +166,8 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
 
         {/* Description */}
         {event.description ? (
-          <Text
+          <LinkifiedText
+            text={event.description}
             style={{
               fontSize: 12,
               color: '#5F5D5D',
@@ -173,9 +175,7 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
               marginBottom: 8,
             }}
             numberOfLines={1}
-          >
-            {event.description}
-          </Text>
+          />
         ) : null}
 
         {/* Date & Time — combined under one icon */}
