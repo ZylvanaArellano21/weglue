@@ -1,5 +1,8 @@
 -- ============================================================================
--- 123 — message replies and reply notifications
+-- 129 — message replies and reply notifications
+--
+-- (Renumbered from 123 after the interest-matching family 122-127 merged to
+-- main / production. No behavioral change from the reviewed-and-accepted 123.)
 -- ============================================================================
 
 BEGIN;
@@ -178,7 +181,7 @@ BEGIN
        AND column_name = 'reply_to_id'
        AND udt_name = 'uuid'
   ) THEN
-    RAISE EXCEPTION '123 self-check: messages.reply_to_id missing or wrong type';
+    RAISE EXCEPTION '129 self-check: messages.reply_to_id missing or wrong type';
   END IF;
 
   SELECT c.confdeltype
@@ -191,7 +194,7 @@ BEGIN
      AND c.contype = 'f'
      AND c.conname = 'messages_reply_to_id_fkey';
   IF v_on_delete IS DISTINCT FROM 'n' THEN
-    RAISE EXCEPTION '123 self-check: reply_to FK is not ON DELETE SET NULL';
+    RAISE EXCEPTION '129 self-check: reply_to FK is not ON DELETE SET NULL';
   END IF;
 
   IF NOT EXISTS (
@@ -202,7 +205,7 @@ BEGIN
        AND i.relname = 'idx_messages_reply_to_id'
        AND i.relkind = 'i'
   ) THEN
-    RAISE EXCEPTION '123 self-check: reply_to index missing';
+    RAISE EXCEPTION '129 self-check: reply_to index missing';
   END IF;
 
   IF NOT EXISTS (
@@ -211,7 +214,7 @@ BEGIN
        AND tgrelid = 'public.messages'::regclass
        AND NOT tgisinternal
   ) THEN
-    RAISE EXCEPTION '123 self-check: same-conversation trigger missing';
+    RAISE EXCEPTION '129 self-check: same-conversation trigger missing';
   END IF;
 
   IF NOT EXISTS (
@@ -220,7 +223,7 @@ BEGIN
        AND tgrelid = 'public.messages'::regclass
        AND NOT tgisinternal
   ) THEN
-    RAISE EXCEPTION '123 self-check: notification trigger missing';
+    RAISE EXCEPTION '129 self-check: notification trigger missing';
   END IF;
 
   IF NOT EXISTS (
@@ -233,7 +236,7 @@ BEGIN
        AND push
        AND blockable
   ) THEN
-    RAISE EXCEPTION '123 self-check: message_reply notification type missing';
+    RAISE EXCEPTION '129 self-check: message_reply notification type missing';
   END IF;
 END
 $$;

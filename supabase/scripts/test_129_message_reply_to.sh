@@ -1,9 +1,9 @@
 #!/bin/bash
 # ===========================================================================
-# Verification harness for migration 123 (message reply_to_id + notifications).
+# Verification harness for migration 129 (message reply_to_id + notifications).
 #
 # Run against a throwaway PostgreSQL/Supabase database after the migration
-# ledger, including 123, has been applied. The manifest passes CONTAINER and
+# ledger, including 129, has been applied. The manifest passes CONTAINER and
 # DATABASE as the first two arguments. Every assertion runs in one transaction
 # and is rolled back.
 # ===========================================================================
@@ -12,10 +12,14 @@ set -euo pipefail
 CONTAINER="${1:-weglue-harness-pg17}"
 DATABASE="${2:-postgres}"
 
+MIGRATION="$(cd "$(dirname "$0")" && pwd)/../migrations/129_message_reply_to.sql"
+echo "Applying migration 129 to disposable clone ${DATABASE}…"
+docker exec -i "$CONTAINER" psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -q < "$MIGRATION"
+
 docker exec -i "$CONTAINER" psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -q <<'SQL'
 BEGIN;
 
-\echo '=== 123 MESSAGE REPLY_TO HARNESS ========================================='
+\echo '=== 129 MESSAGE REPLY_TO HARNESS ========================================='
 
 INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
