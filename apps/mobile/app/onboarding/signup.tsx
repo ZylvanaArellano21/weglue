@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -31,6 +31,7 @@ export default function OnboardingSignupScreen() {
     selectedInterests,
     selectedActivities,
     avatarChoice,
+    setMatchCount,
     setPendingUsername,
     setPendingEmail,
     setPendingPassword,
@@ -40,10 +41,31 @@ export default function OnboardingSignupScreen() {
   } = useOnboardingStore();
   const { show, ToastComponent } = useToast();
 
-  // The heading may never claim fewer than two matches; the server tops the
-  // real batch up to at least two whenever eligible clubs exist (mirrors
-  // apps/web/app/onboarding/signup/page.tsx's identical floor).
-  const displayMatchCount = Math.max(matchCount, 2);
+  // preview_club_match_count already enforces the min-2 + popular-fill rule
+  // server-side, so the heading shows the real count with no client fudge; if
+  // it's < 2 (can't be trusted) the heading drops the number instead of lying.
+  const displayMatchCount = matchCount;
+
+  // Refresh the preview on mount — the Activities-step value goes stale if the
+  // user edited interests via Back — so "+N clubs" equals what the account gets.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.rpc("preview_club_match_count", {
+          p_interests: selectedInterests,
+        });
+        if (!cancelled && typeof data === "number" && data >= 2) {
+          setMatchCount(data);
+        }
+      } catch {
+        /* keep the seeded value */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedInterests, setMatchCount]);
 
   // Restore username/email from store so back navigation preserves the form
   const [username, setUsername] = useState(pendingUsername);
@@ -232,10 +254,14 @@ export default function OnboardingSignupScreen() {
           <View style={styles.header}>
             <View style={styles.partyRow}>
               <Text style={styles.partyEmoji}>🎉</Text>
-              <Text style={styles.matchedText}>You matched with</Text>
+              <Text style={styles.matchedText}>
+                {displayMatchCount >= 2 ? 'You matched with' : "We found clubs you'll love"}
+              </Text>
               <Text style={styles.partyEmoji}>🎉</Text>
             </View>
-            <Text style={styles.matchCount}>+{displayMatchCount} clubs</Text>
+            {displayMatchCount >= 2 && (
+              <Text style={styles.matchCount}>+{displayMatchCount} clubs</Text>
+            )}
             <Text style={styles.createText}>
               Create an account so that you can see your matches!!!
             </Text>

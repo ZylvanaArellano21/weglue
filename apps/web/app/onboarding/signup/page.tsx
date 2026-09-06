@@ -56,13 +56,32 @@ export default function SignupPage(): JSX.Element | null {
     setEmail(state.pendingEmail);
     // In-memory only — never survives a full reload.
     setPassword(getTransientPassword());
-    // The heading may never claim fewer than two matches; the server tops the
-    // real batch up to at least two whenever eligible clubs exist.
-    setMatchCount(Math.max(state.matchCount, 2));
+    // Seed from the Activities-step preview; refreshed just below.
+    setMatchCount(state.matchCount);
     if (state.pendingEmail && state.pendingEmail.includes("@")) {
       const result = validateEducationEmail(state.pendingEmail);
       setEmailFeedback({ valid: result.valid, reason: result.reason });
     }
+
+    // Re-run the same server preview the signup batch will use, so the "+N
+    // clubs" heading is the exact count the account gets after verifying (the
+    // Activities-step value goes stale if the user edited interests via Back).
+    // preview_club_match_count already enforces the min-2 + popular-fill rule
+    // server-side, so no client Math.max fudge — if it can't be trusted the
+    // heading falls back to no number rather than a wrong one.
+    (async () => {
+      try {
+        const { data } = await createClient().rpc("preview_club_match_count", {
+          p_interests: state.selectedInterests,
+        });
+        if (typeof data === "number" && data >= 2) {
+          setMatchCount(data);
+          writeOnboardingState({ matchCount: data });
+        }
+      } catch {
+        /* keep the seeded value */
+      }
+    })();
   }, []);
 
   function validate(): boolean {
@@ -271,7 +290,13 @@ export default function SignupPage(): JSX.Element | null {
             🎉
           </span>
           <span>
-            You matched with <span className="underline">+{matchCount}</span> clubs
+            {matchCount >= 2 ? (
+              <>
+                You matched with <span className="underline">+{matchCount}</span> clubs
+              </>
+            ) : (
+              <>We found clubs you&apos;ll love</>
+            )}
           </span>
           <span aria-hidden className="text-[18px] sm:text-[28px]">
             🎉

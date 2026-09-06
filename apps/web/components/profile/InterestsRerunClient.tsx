@@ -6,16 +6,10 @@ import { AppHeader } from "../home/AppHeader";
 import { ToastProvider, useToast } from "../shared/Toast";
 import { useOwnProfile } from "../../lib/hooks/useOwnProfile";
 import { useInterestsRerun, type ClubRecommendationOutcome } from "../../lib/hooks/useInterestsRerun";
+import { useInterestCatalog } from "../../lib/hooks/useInterestCatalog";
+import { interestSlugsForLabels } from "@weglue/shared";
 
-// Canonical taxonomy — MUST match onboarding exactly or the DB CHECK
-// constraints reject the values (see the onboarding interests/activities pages).
-const INTERESTS = [
-  "Finance & Business", "Social Events", "Music", "Fashion", "Art & Culture",
-  "Social Justice & Activism", "Numbers & Economics", "Gaming", "Health & Wellness",
-  "Environment", "Sports & Athletics", "Community Service", "Crafts", "Religion",
-  "Technology and Computer", "Film & Media", "Photography", "Strategy and Critical Thinking",
-  "Writing", "Theater", "Travel & Languages", "Debate & Politics",
-];
+// Activities list stays local (out of scope for the interest-catalog work).
 const ACTIVITIES = [
   "Projects", "Volunteering", "Workshops", "Campus Fairs", "Trips",
   "Study Groups", "Networking", "Tournaments", "Social Events", "Campus Tours",
@@ -49,6 +43,7 @@ function Body({ userId }: { userId: string }): JSX.Element {
   // where the survey was launched from (Home, Clubs, Interests, anywhere).
   const seeMatchesHref = "/home?tab=events";
   const { data: profile } = useOwnProfile(userId);
+  const { labels: INTERESTS, options: catalogOptions } = useInterestCatalog();
   const rerun = useInterestsRerun(userId);
 
   const [step, setStep] = useState<Step>("interests");
@@ -74,8 +69,12 @@ function Body({ userId }: { userId: string }): JSX.Element {
       show("Pick at least one activity.", "error");
       return;
     }
+    const interestKeys =
+      catalogOptions.length > 0
+        ? interestSlugsForLabels(catalogOptions, interests)
+        : interests;
     rerun.mutate(
-      { interests, activities },
+      { interestKeys, activities },
       {
         onSuccess: (result) => {
           setOutcome(result);
@@ -150,6 +149,9 @@ function Body({ userId }: { userId: string }): JSX.Element {
       </p>
 
       <div className="mb-10 flex flex-wrap gap-2.5">
+        {isInterests && list.length === 0 ? (
+          <p className="text-sm" style={{ color: "#0FA6A6" }}>Loading interests…</p>
+        ) : null}
         {list.map((item) => {
           const on = selected.includes(item);
           return (

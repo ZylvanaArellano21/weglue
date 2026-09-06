@@ -8,35 +8,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useOnboardingStore } from "@weglue/shared";
-
-const INTERESTS = [
-  "Finance & Business",
-  "Social Events",
-  "Music",
-  "Art & Culture",
-  "Social Justice & Activism",
-  "Numbers & Economics",
-  "Sports & Athletics",
-  "Gaming",
-  "Health & Wellness",
-  "Environment",
-  "Community Service",
-  "Crafts",
-  "Religion",
-  "Technology and Computer",
-  "Film & Media",
-  "Photography",
-  "Strategy and Critical Thinking",
-  "Writing",
-  "Fashion",
-  "Debate & Politics",
-  "Theater",
-  "Travel & Languages",
-] as const;
+import { useInterestCatalog } from "../../hooks/useInterestCatalog";
 
 export default function InterestsScreen() {
   const router = useRouter();
   const { selectedInterests, toggleInterest } = useOnboardingStore();
+  const { labels: INTERESTS, loading: catalogLoading } = useInterestCatalog();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -73,6 +50,9 @@ export default function InterestsScreen() {
 
         {/* Chip grid */}
         <View style={styles.chips}>
+          {catalogLoading && INTERESTS.length === 0 ? (
+            <Text style={styles.subheading}>Loading interests…</Text>
+          ) : null}
           {INTERESTS.map((item) => {
             const selected = selectedInterests.includes(item);
             return (

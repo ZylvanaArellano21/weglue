@@ -476,6 +476,8 @@ export async function getUserDetail(id: string): Promise<UserDetail | null> {
 export interface ListClubsParams {
   search?: string;
   universityId?: string;
+  /** Filter to clubs that have this interest assigned (either tier). */
+  interestId?: string;
   status?: "all" | "active" | "inactive";
   sort?: "created_at" | "name" | "handle";
   dir?: "asc" | "desc";
@@ -499,6 +501,16 @@ export async function listClubs(params: ListClubsParams = {}): Promise<Paginated
       count: "exact",
     });
 
+  if (params.interestId) {
+    const { data: tagged, error: tagErr } = await admin
+      .from("club_interests")
+      .select("club_id")
+      .eq("interest_id", params.interestId);
+    if (tagErr) throw tagErr;
+    const ids = Array.from(new Set((tagged ?? []).map((r: any) => r.club_id)));
+    // No club has this interest → return an empty page rather than every club.
+    q = q.in("id", ids.length > 0 ? ids : ["00000000-0000-0000-0000-000000000000"]);
+  }
   if (params.universityId) q = q.eq("university_id", params.universityId);
   if (params.status === "active") q = q.eq("is_active", true);
   if (params.status === "inactive") q = q.eq("is_active", false);

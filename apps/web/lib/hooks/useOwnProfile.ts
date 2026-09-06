@@ -64,7 +64,9 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
       .select("id, username, full_name, avatar_url, avatar_type, bio, major, year, university")
       .eq("id", userId)
       .single(),
-    supabase.from("user_interests").select("interest").eq("user_id", userId),
+    // Join the catalog so a renamed interest shows its current label; fall back
+    // to the legacy text column for a row whose interest was deactivated.
+    supabase.from("user_interests").select("interest, interests(label)").eq("user_id", userId),
     supabase.from("user_activities").select("activity").eq("user_id", userId),
     supabase.from("club_members").select("club_id").eq("user_id", userId),
     supabase
@@ -90,7 +92,7 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
     university: (profile as any).university,
     clubs_count: clubIds.length,
     gluemates_count: gluematesCount,
-    interests: (interests ?? []).map((i: any) => i.interest),
+    interests: (interests ?? []).map((i: any) => i.interests?.label ?? i.interest),
     activities: (activities ?? []).map((a: any) => a.activity),
     club_roles: (clubRoles ?? []).map((r: any) => ({
       club_id: r.clubs.id,

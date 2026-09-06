@@ -6,6 +6,7 @@ export * from "./stores/onboardingStore";
 export { supabase, getSupabaseClient } from "./lib/supabase";
 export * from "./legal/termsAndConditions";
 export * from "./avatarCatalog";
+export * from "./interests/catalog";
 export * from "./notificationVisuals";
 export * from "./messaging/threadVisibility";
 export * from "./messaging/attachmentPresentation";

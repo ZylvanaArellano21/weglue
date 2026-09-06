@@ -52,6 +52,82 @@ export async function getDistinctCategories(): Promise<string[]> {
   return result;
 }
 
+export interface DiscoveryCategory {
+  /** Stable interest slug — what the phone Discovery filter passes to the RPC. */
+  value: string;
+  /** Display label. */
+  label: string;
+}
+
+// ── Native-phone Discovery (iPhone + Android phone only) ────────────────────
+// Reads the club_interests source of truth (both Primary + Secondary tiers) via
+// dedicated RPCs, so an Admin Dashboard interest/tier change updates phone
+// Discovery with no app release. iPad-native and web keep using
+// getDistinctCategories / getDiscoveryClubs above — Option B, unchanged.
+//
+// The get_phone_discovery_* RPCs ship in migration 126. Until that migration is
+// deployed, PostgREST answers with "function not found" (PGRST202 / SQLSTATE
+// 42883). That is NOT a client error to surface — we fall back to the legacy
+// discovery functions so the tab keeps working. This does NOT restore the
+// interest categories before the migration (club_categories is already empty in
+// production); it only stops the branch from crashing/rejecting the query. The
+// real category data comes from migrations 122 + 123 + 126.
+
+function isMissingFunction(error: any): boolean {
+  const code = error?.code ?? error?.details?.code;
+  if (code === 'PGRST202' || code === '42883') return true;
+  const msg = String(error?.message ?? '').toLowerCase();
+  return (
+    msg.includes('could not find the function') ||
+    (msg.includes('does not exist') && msg.includes('function'))
+  );
+}
+
+export async function getPhoneDiscoveryCategories(): Promise<DiscoveryCategory[]> {
+  const { data, error } = await supabase.rpc('get_phone_discovery_categories');
+  if (error) {
+    if (isMissingFunction(error)) {
+      return (await getDistinctCategories()).map((c) => ({ value: c, label: c }));
+    }
+    throw error;
+  }
+  return ((data ?? []) as any[]).map((row) => ({ value: row.slug, label: row.label }));
+}
+
+export async function getPhoneDiscoveryClubs(
+  userId: string,
+  interestSlug: string | null,
+  page: number,
+  pageSize = 20,
+): Promise<DiscoveryClub[]> {
+  const { data, error } = await supabase.rpc('get_phone_discovery_clubs', {
+    p_user_id: userId,
+    p_interest_slug: interestSlug ?? null,
+    p_limit: pageSize,
+    p_offset: page * pageSize,
+  });
+  if (error) {
+    if (isMissingFunction(error)) {
+      return getDiscoveryClubs(userId, interestSlug, page, pageSize);
+    }
+    throw error;
+  }
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    name: row.name,
+    avatar_url: row.avatar_url ?? null,
+    cover_image_url: row.cover_image_url ?? null,
+    member_count: row.member_count ?? 0,
+    is_member: row.is_member ?? false,
+    categories: row.categories ?? [],
+    meeting_day: row.meeting_day ?? null,
+    meeting_time_start: row.meeting_time_start ?? null,
+    meeting_time_end: row.meeting_time_end ?? null,
+    meeting_building: row.meeting_building ?? null,
+    meeting_room: row.meeting_room ?? null,
+  }));
+}
+
 export async function getDiscoveryClubs(
   userId: string,
   category: string | null,

@@ -11,36 +11,11 @@ import {
   readOnboardingState,
   writeOnboardingState,
 } from "../../../lib/onboardingState";
-
-// Same list, order, and spelling as the mobile survey (the DB CHECK
-// constraints on user_interests accept exactly these values).
-const INTERESTS = [
-  "Finance & Business",
-  "Social Events",
-  "Music",
-  "Art & Culture",
-  "Social Justice & Activism",
-  "Numbers & Economics",
-  "Sports & Athletics",
-  "Gaming",
-  "Health & Wellness",
-  "Environment",
-  "Community Service",
-  "Crafts",
-  "Religion",
-  "Technology and Computer",
-  "Film & Media",
-  "Photography",
-  "Strategy and Critical Thinking",
-  "Writing",
-  "Fashion",
-  "Debate & Politics",
-  "Theater",
-  "Travel & Languages",
-] as const;
+import { useInterestCatalog } from "../../../lib/hooks/useInterestCatalog";
 
 export default function InterestsPage(): JSX.Element | null {
   const router = useRouter();
+  const { labels: INTERESTS, loading: catalogLoading } = useInterestCatalog();
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -87,16 +62,20 @@ export default function InterestsPage(): JSX.Element | null {
         <div
           role="group"
           aria-label="Interests"
-          className="flex flex-wrap gap-x-2.5 gap-y-3 sm:gap-x-[22px] sm:gap-y-[26px] mb-8 sm:mb-10"
+          className="flex flex-wrap gap-x-2.5 gap-y-3 sm:gap-x-[22px] sm:gap-y-[26px] mb-8 sm:mb-10 min-h-[52px]"
         >
-          {INTERESTS.map((item) => (
-            <SurveyChip
-              key={item}
-              label={item}
-              selected={hydrated && selected.includes(item)}
-              onToggle={() => toggle(item)}
-            />
-          ))}
+          {catalogLoading && INTERESTS.length === 0 ? (
+            <p className="text-[14px] text-[#0FA6A6]">Loading interests…</p>
+          ) : (
+            INTERESTS.map((item) => (
+              <SurveyChip
+                key={item}
+                label={item}
+                selected={hydrated && selected.includes(item)}
+                onToggle={() => toggle(item)}
+              />
+            ))
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-3 sm:gap-5 pb-8">

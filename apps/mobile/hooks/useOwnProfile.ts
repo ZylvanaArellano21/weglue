@@ -109,7 +109,8 @@ export function useUpdateDisplayName(userId: string | undefined) {
 export function useUpdateInterests(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (interests: string[]) => updateUserInterests(userId!, interests),
+    // `interestKeys` are catalog slugs (or active labels) — resolved by the RPC.
+    mutationFn: (interestKeys: string[]) => updateUserInterests(userId!, interestKeys),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ownProfile', userId] });
       // Interests drive club recommendations + own profile display

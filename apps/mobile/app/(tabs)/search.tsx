@@ -6,6 +6,7 @@ import {
   ScrollView,
   ActivityIndicator,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -33,10 +34,16 @@ import { consumeSearchReset } from '../../lib/discoverNavigation';
 import { useTabBarBottomPadding } from '../../lib/tabBar';
 import type { DiscoveryPerson, SearchResult } from '../../services/searchService';
 
+// Same breakpoint the Home tab uses to tell phone from tablet. Native phone
+// Discovery reads the club_interests source of truth; iPad-native keeps the
+// legacy club_categories path (Option B).
+const TABLET_BREAKPOINT = 768;
+
 export default function SearchTab() {
   const { session } = useAuthStore();
   const userId = session?.user.id ?? '';
   const bottomPad = useTabBarBottomPadding();
+  const isPhone = useWindowDimensions().width < TABLET_BREAKPOINT;
 
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -53,14 +60,19 @@ export default function SearchTab() {
     }, []),
   );
 
-  const { data: categories = [] } = useDistinctCategories();
+  const { data: categories = [] } = useDistinctCategories(isPhone);
+  const categoryLabels = useMemo(() => categories.map((c) => c.label), [categories]);
+  const selectedCategoryValue = useMemo(() => {
+    if (!selectedCategory) return null;
+    return categories.find((c) => c.label === selectedCategory)?.value ?? null;
+  }, [categories, selectedCategory]);
   const {
     data: clubPages,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isLoading: clubsLoading,
-  } = useDiscoveryClubs(userId, selectedCategory);
+  } = useDiscoveryClubs(userId, selectedCategoryValue, isPhone);
   const { data: people = [], isLoading: peopleLoading } = useDiscoveryPeople(userId);
   const { data: searchResults = [], isLoading: searchLoading } = useDiscoverySearch(userId, query);
   const { mutate: joinMutate } = useJoinFromSearch(userId);
@@ -135,7 +147,7 @@ export default function SearchTab() {
   const browseHeader = (
     <View style={styles.pillsSection}>
       <CategoryPillRow
-        categories={categories}
+        categories={categoryLabels}
         selected={selectedCategory}
         onSelect={setSelectedCategory}
       />
