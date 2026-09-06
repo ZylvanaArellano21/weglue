@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, FlatList, RefreshControl } from 'react-native';
+import { View, Text, FlatList, RefreshControl, Platform } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useHomePostsFeed, useLikePost } from '../../hooks/useHomePostsFeed';
@@ -245,11 +245,22 @@ export function PostsFeed() {
         }}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
+        // Post cards have variable, unpredictable heights (image ratio, caption
+        // length, single vs carousel) so the list has no getItemLayout. Removing
+        // the async image measurement (`stableHeightOnly` on the card's
+        // PhotoCarousel) is what keeps the content height stable; anchoring the
+        // scroll position on top of that (maintainVisibleContentPosition) stops
+        // the user being snapped off the true bottom by any residual estimate
+        // shift. iOS only — on Android the prop also holds the scroll far
+        // enough from the end that onEndReached never fires.
+        maintainVisibleContentPosition={
+          Platform.OS === 'ios' ? { minIndexForVisible: 0 } : undefined
+        }
         onEndReached={() => {
           if (hasNextPage && !isFetchingNextPage) fetchNextPage();
         }}
         onEndReachedThreshold={0.5}
-        windowSize={7}
+        windowSize={9}
         maxToRenderPerBatch={6}
         initialNumToRender={6}
         refreshControl={

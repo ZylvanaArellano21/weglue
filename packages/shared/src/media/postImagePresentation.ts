@@ -59,11 +59,32 @@ export function clampPostImageRatio(ratio: number | null | undefined): number {
 export function postMediaDisplayRatio(
   dimensions: Array<{ width: number | null; height: number | null } | null | undefined>,
 ): number {
+  return postMediaDisplayRatioDetail(dimensions).ratio;
+}
+
+/**
+ * `postMediaDisplayRatio` plus whether that ratio came from the image's own
+ * stored width/height (`fromStoredDimensions`) or is only the fallback box.
+ *
+ * The FEED renders each card at this ratio *synchronously at first mount and
+ * never changes it* — measuring the image after layout resizes the card, which
+ * shifts a FlatList's total content height and makes its true bottom
+ * unreachable (Change 18). This function is pure: identical `dimensions` always
+ * yield an identical result, with no `Image.getSize` round trip. When
+ * `fromStoredDimensions` is false the caller cover-crops into the fallback box
+ * so there is no letterboxing.
+ */
+export function postMediaDisplayRatioDetail(
+  dimensions: Array<{ width: number | null; height: number | null } | null | undefined>,
+): { ratio: number; fromStoredDimensions: boolean } {
   const first = dimensions[0];
   if (first?.width && first?.height && first.height > 0) {
-    return clampPostImageRatio(first.width / first.height);
+    return { ratio: clampPostImageRatio(first.width / first.height), fromStoredDimensions: true };
   }
-  return dimensions.length > 1 ? POST_CAROUSEL_RATIO : POST_IMAGE_FALLBACK_RATIO;
+  return {
+    ratio: dimensions.length > 1 ? POST_CAROUSEL_RATIO : POST_IMAGE_FALLBACK_RATIO,
+    fromStoredDimensions: false,
+  };
 }
 
 /**

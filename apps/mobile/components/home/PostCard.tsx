@@ -159,6 +159,7 @@ export const PostCard = memo(function PostCard({
           width={SCREEN_WIDTH - 32}
           aspectRatio={4 / 5}
           naturalRatio
+          stableHeightOnly
         />
       ) : null}
 
