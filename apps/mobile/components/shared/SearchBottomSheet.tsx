@@ -73,14 +73,24 @@ export function SearchBottomSheet<T>({
 }: SearchBottomSheetProps<T>) {
   const [query, setQuery] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
+  // iOS: whether the software keyboard is up, and its height (from
+  // keyboardWillShow). Inside a <Modal> a content-sized sheet doesn't get
+  // bounded by the keyboard, so the results list collapses and the sheet floats
+  // clear of the keys. When it's up we cap the sheet at the space above the
+  // keyboard and let the list shrink+scroll into that cap — the same shape the
+  // Android path already produces via `androidSheetHeight`.
+  const [keyboardShown, setKeyboardShown] = useState(false);
+  const [iosKbHeight, setIosKbHeight] = useState(0);
   const keyboardOffset = useRef(new Animated.Value(0)).current;
   // Android-only: expand the sheet to fill the space above the keyboard so the
-  // results list has room (matches the Instagram search behavior). iOS keeps
-  // the content-sized sheet driven purely by the Animated marginBottom below.
+  // results list has room (matches the Instagram search behavior).
   const { height: androidKbHeight, visible: androidKbVisible } = useAndroidKeyboardHeight();
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const androidSheetHeight = windowHeight - androidKbHeight - insets.top - 12;
+  const iosKbShown = Platform.OS === 'ios' && keyboardShown;
+  const iosSheetMaxHeight = windowHeight - iosKbHeight - insets.top - 12;
+  const kbEdgeless = androidKbVisible || iosKbShown;
 
   // Reset search query each time sheet opens
   useEffect(() => {
@@ -96,6 +106,8 @@ export function SearchBottomSheet<T>({
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const onShow = (e: any) => {
+      setKeyboardShown(true);
+      if (Platform.OS === 'ios') setIosKbHeight(e.endCoordinates?.height ?? 0);
       Animated.timing(keyboardOffset, {
         toValue: e.endCoordinates.height,
         duration: Platform.OS === 'ios' ? (e.duration ?? 250) : 0,
@@ -103,6 +115,7 @@ export function SearchBottomSheet<T>({
       }).start();
     };
     const onHide = (e: any) => {
+      setKeyboardShown(false);
       Animated.timing(keyboardOffset, {
         toValue: 0,
         duration: Platform.OS === 'ios' ? (e.duration ?? 250) : 0,
@@ -165,7 +178,8 @@ export function SearchBottomSheet<T>({
           }}
         />
 
-        {/* Sheet rises above keyboard */}
+        {/* Sheet rises above the keyboard — marginBottom lifts it by the exact
+            keyboard height (unchanged on both platforms). */}
         <Animated.View
           style={{
             marginBottom: keyboardOffset,
@@ -176,6 +190,25 @@ export function SearchBottomSheet<T>({
             elevation: 24,
           }}
         >
+          {/* iOS: cream run far below the sheet edge so any sub-pixel slack
+              between it and the keyboard shows cream, never the screen behind
+              the modal — the reported "gap between the cream sheet and the
+              keyboard". The keyboard is drawn on top, so it adds no visible
+              space above the keys. */}
+          {Platform.OS === 'ios' && (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: -1200,
+                backgroundColor: '#FEFCF0',
+                zIndex: -1,
+              }}
+            />
+          )}
           <SafeAreaView
             style={[
               {
@@ -186,9 +219,13 @@ export function SearchBottomSheet<T>({
               },
               // Android: fill the space above the keyboard so results are visible.
               androidKbVisible ? { height: androidSheetHeight, maxHeight: androidSheetHeight } : null,
+              // iOS: cap at the space above the keyboard. The list (flexShrink
+              // below) keeps the sheet content-sized for a few results and
+              // scrolls once it would grow past this cap, so Done stays put.
+              iosKbShown ? { maxHeight: iosSheetMaxHeight } : null,
             ]}
-            // Drop the bottom inset while lifted above the Android keyboard.
-            edges={androidKbVisible ? [] : ['bottom']}
+            // Drop the bottom inset while the sheet is lifted above the keyboard.
+            edges={kbEdgeless ? [] : ['bottom']}
           >
             {/* Drag handle */}
             <View style={{ alignItems: 'center', paddingTop: 8, marginBottom: 2 }}>
@@ -316,7 +353,11 @@ export function SearchBottomSheet<T>({
                 keyExtractor={keyExtractor}
                 renderItem={listRender}
                 keyboardShouldPersistTaps="handled"
-                style={androidKbVisible ? { flex: 1 } : undefined}
+                // Android fills; iOS grows with results then shrinks + scrolls
+                // once the sheet hits its keyboard-capped maxHeight.
+                style={
+                  androidKbVisible ? { flex: 1 } : iosKbShown ? { flexShrink: 1 } : undefined
+                }
                 contentContainerStyle={{ paddingBottom: 12 }}
                 ItemSeparatorComponent={() => (
                   <View style={{ height: 1, backgroundColor: '#F3F4F6', marginHorizontal: 16 }} />
