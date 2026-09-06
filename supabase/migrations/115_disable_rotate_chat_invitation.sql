@@ -12,11 +12,12 @@
 -- │                                                                                  │
 -- │ The version-115 number cannot be reused for the Math Society seed without         │
 -- │ renaming this historical file, which the reconciliation deliberately does NOT do. │
--- │ Re-applying this no-op behaviour to production (making rotate_chat_invitation a    │
--- │ genuine no-op) is a separate, deferred decision — it is a behaviour change, not   │
--- │ ledger cleanup, so it is intentionally NOT bundled into the reconciliation PR.    │
--- │ Prod's rotating function is currently harmless dead code (the client feature was  │
--- │ removed in PR #94, so nothing calls it).                                          │
+-- │ This file therefore stays as-is (history) and is NOT re-numbered or deleted.      │
+-- │                                                                                  │
+-- │ The lost behaviour IS reapplied — as a forward migration `127_disable_rotate_     │
+-- │ chat_invitation.sql` in the backend-interest PR, so production ends up matching   │
+-- │ the approved read-only / no-rotation contract. Production migration 115 and its   │
+-- │ ledger row are left untouched.                                                    │
 -- └──────────────────────────────────────────────────────────────────────────────────┘
 
 CREATE OR REPLACE FUNCTION public.rotate_chat_invitation(p_conversation_id uuid)
