@@ -259,6 +259,7 @@ export function notificationDescription(item: AppNotification): string {
     case "new_follower": return "started following you";
     case "like": return grouped("liked your photo");
     case "comment": return grouped("commented on your photo");
+    case "comment_reply": return "replied to your comment";
     case "event_rsvp": return "is going to an event you posted";
     case "new_event": return "posted a new event";
     case "new_message": return "sent you a message";
@@ -274,7 +275,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export type NotificationTarget =
   | { kind: "event"; id: string }
   | { kind: "user"; id: string }
-  | { kind: "post"; id: string }
+  | { kind: "post"; id: string; commentId?: string }
   | { kind: "club"; id: string }
   | { kind: "chat"; id: string; channelId?: string }
   | { kind: "notification-actors"; id: string }
@@ -291,7 +292,10 @@ export function resolveNotificationTarget(item: AppNotification): NotificationTa
     };
     if (screen === "event" && idFor("eventId")) return { kind: "event", id: idFor("eventId")! };
     if (screen === "profile" && idFor("userId")) return { kind: "user", id: idFor("userId")! };
-    if (screen === "post" && idFor("postId")) return { kind: "post", id: idFor("postId")! };
+    if (screen === "post" && idFor("postId")) {
+      const commentId = idFor("commentId");
+      return commentId ? { kind: "post", id: idFor("postId")!, commentId } : { kind: "post", id: idFor("postId")! };
+    }
     if (screen === "club" && idFor("clubId")) return { kind: "club", id: idFor("clubId")! };
     if (screen === "chat" && idFor("chatId")) {
       const channelId = idFor("channelId");

@@ -171,8 +171,19 @@ export function usePostComments(postId: string | undefined) {
 export function useAddComment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ postId, userId, content, clientTag }: { postId: string; userId: string; content: string; clientTag: string }) =>
-      addComment(postId, userId, content, clientTag),
+    mutationFn: ({
+      postId,
+      userId,
+      content,
+      clientTag,
+      parentCommentId,
+    }: {
+      postId: string;
+      userId: string;
+      content: string;
+      clientTag: string;
+      parentCommentId?: string | null;
+    }) => addComment(postId, userId, content, clientTag, parentCommentId ?? null),
     onSuccess: (_data, { postId }) => {
       // Bump the visible count immediately, then refetch for the real numbers.
       patchPostInCaches(queryClient, postId, (p) => ({

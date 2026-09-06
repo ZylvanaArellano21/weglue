@@ -14,3 +14,4 @@ export * from "./messaging/reactions";
 export * from "./messaging/senderColor";
 export * from "./messaging/messageBanner";
 export * from "./media/postImagePresentation";
+export * from "./comments/threads";
