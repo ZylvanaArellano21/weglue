@@ -23,6 +23,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { label: "Gluemates", href: "/admin/gluemates", icon: "🔗", day: 2, ready: true, group: "People" },
 
   { label: "Clubs", href: "/admin/clubs", icon: "🏛️", day: 1, ready: true, group: "Community" },
+  { label: "Interests", href: "/admin/interests", icon: "🎯", day: 11, ready: true, group: "Community" },
   { label: "Memberships", href: "/admin/memberships", icon: "🎟️", day: 2, ready: true, group: "Community" },
   { label: "Universities", href: "/admin/universities", icon: "🎓", day: 2, ready: true, group: "Community" },
 

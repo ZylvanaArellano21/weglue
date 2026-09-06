@@ -1,4 +1,5 @@
 import { listClubs, listUniversities, type ListClubsParams } from "../../../lib/admin/data";
+import { listActiveInterestOptions } from "../../../lib/admin/interestsData";
 import { SectionCard, Badge, IdentityCell, EmptyState } from "../../../components/admin/primitives";
 import { ListControls } from "../../../components/admin/ListControls";
 import { Pagination } from "../../../components/admin/Pagination";
@@ -20,13 +21,18 @@ export default async function AdminClubsPage({
   const params: ListClubsParams = {
     search: get("q"),
     universityId: get("university"),
+    interestId: get("interest"),
     status: (get("status") as ListClubsParams["status"]) ?? "all",
     sort: (get("sort") as ListClubsParams["sort"]) ?? "created_at",
     dir: (get("dir") as "asc" | "desc") ?? "desc",
     page: get("page") ? parseInt(get("page")!, 10) : 1,
   };
 
-  const [result, universities] = await Promise.all([listClubs(params), listUniversities()]);
+  const [result, universities, interestOptions] = await Promise.all([
+    listClubs(params),
+    listUniversities(),
+    listActiveInterestOptions(),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -52,6 +58,11 @@ export default async function AdminClubsPage({
               { value: "active", label: "Active" },
               { value: "inactive", label: "Inactive" },
             ],
+          },
+          {
+            key: "interest",
+            label: "Interest",
+            options: interestOptions,
           },
         ]}
         sorts={[

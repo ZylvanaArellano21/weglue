@@ -157,45 +157,58 @@ export default function ExploreClubsPage(): JSX.Element | null {
         .select(
           "id, name, description, meeting_day, meeting_time_start, meeting_time_end, meeting_building, meeting_room, cover_image_url, member_count"
         )
+        .eq("is_active", true)
         .order("name"),
-      supabase.from("club_interests").select("club_id, interest"),
+      supabase.from("club_interests").select("club_id, interest_id, tier"),
       supabase.from("club_members").select("club_id").eq("user_id", user.id),
       supabase
         .from("user_interests")
-        .select("interest")
+        .select("interest_id")
         .eq("user_id", user.id),
     ]);
 
-    const userInterestSet = new Set(
-      (userInterests ?? []).map((r: { interest: string }) => r.interest)
+    // Same weighted overlap the server matching engine uses: a Primary club
+    // interest the student picked is worth 3, a Secondary one is worth 1. One
+    // scoring definition, no second implementation.
+    const userInterestIds = new Set(
+      (userInterests ?? [])
+        .map((r: { interest_id: string | null }) => r.interest_id)
+        .filter((id): id is string => !!id)
     );
     const joinedSet = new Set(
       (memberData ?? []).map((m: { club_id: string }) => m.club_id)
     );
 
-    const interestsByClub: Record<string, string[]> = {};
+    const scoreByClub: Record<string, number> = {};
     (ciData ?? []).forEach(
-      ({ club_id, interest }: { club_id: string; interest: string }) => {
-        if (!interestsByClub[club_id]) interestsByClub[club_id] = [];
-        interestsByClub[club_id].push(interest);
+      ({
+        club_id,
+        interest_id,
+        tier,
+      }: {
+        club_id: string;
+        interest_id: string | null;
+        tier: string;
+      }) => {
+        if (!interest_id || !userInterestIds.has(interest_id)) return;
+        scoreByClub[club_id] =
+          (scoreByClub[club_id] ?? 0) + (tier === "primary" ? 3 : 1);
       }
     );
 
     const enriched: Club[] = (clubsData ?? []).map(
-      (c: Omit<Club, "matchScore" | "joined">) => {
-        const ci = interestsByClub[c.id] ?? [];
-        const matches = ci.filter((i) => userInterestSet.has(i)).length;
-        return {
-          ...c,
-          matchScore: ci.length > 0 ? matches / ci.length : 0,
-          joined: joinedSet.has(c.id),
-        };
-      }
+      (c: Omit<Club, "matchScore" | "joined">) => ({
+        ...c,
+        matchScore: scoreByClub[c.id] ?? 0,
+        joined: joinedSet.has(c.id),
+      })
     );
 
-    // Sort: matched first, then alphabetical
+    // Genuine matches first (highest weighted overlap), then most popular, then
+    // alphabetical — mirrors rank_eligible_clubs.
     enriched.sort((a, b) => {
       if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+      if (b.member_count !== a.member_count) return b.member_count - a.member_count;
       return a.name.localeCompare(b.name);
     });
 

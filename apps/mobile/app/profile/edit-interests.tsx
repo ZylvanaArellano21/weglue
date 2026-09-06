@@ -9,39 +9,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useAuthStore } from '@weglue/shared';
+import { useAuthStore, interestSlugsForLabels } from '@weglue/shared';
 import { useOwnProfile, useUpdateInterests } from '../../hooks/useOwnProfile';
 import { useRegenerateClubRecommendations } from '../../hooks/useClubRecommendations';
+import { useInterestCatalog } from '../../hooks/useInterestCatalog';
 import { ProfileScreenHeader } from '../../components/profile/ProfileScreenHeader';
 import { SelectionChipGrid } from '../../components/profile/SelectionChipGrid';
 import { profileColors, profileFonts, profileShadow } from '../../components/profile/profileTheme';
-
-// Must stay in sync with the onboarding survey (app/onboarding/interests.tsx)
-// and the user_interests CHECK constraint — other values are rejected by the DB.
-const ALL_INTERESTS = [
-  'Finance & Business',
-  'Social Events',
-  'Music',
-  'Art & Culture',
-  'Social Justice & Activism',
-  'Numbers & Economics',
-  'Sports & Athletics',
-  'Gaming',
-  'Health & Wellness',
-  'Environment',
-  'Community Service',
-  'Crafts',
-  'Religion',
-  'Technology and Computer',
-  'Film & Media',
-  'Photography',
-  'Strategy and Critical Thinking',
-  'Writing',
-  'Fashion',
-  'Debate & Politics',
-  'Theater',
-  'Travel & Languages',
-] as const;
 
 export default function EditInterestsScreen() {
   const { session } = useAuthStore();
@@ -49,6 +23,7 @@ export default function EditInterestsScreen() {
   const router = useRouter();
   const { continueTo } = useLocalSearchParams<{ continueTo?: string }>();
 
+  const { labels: ALL_INTERESTS, options: catalogOptions } = useInterestCatalog();
   const { data: profile } = useOwnProfile(userId);
   const [selected, setSelected] = useState<string[]>(profile?.interests ?? []);
   // Once the user has toggled anything, background profile refetches must not
@@ -71,7 +46,14 @@ export default function EditInterestsScreen() {
   };
 
   const onSave = async () => {
-    await updateInterests.mutateAsync(selected);
+    // Selections are held as labels; the RPC (set_my_interests) resolves a key
+    // as either a catalog slug or an active label, so sending slugs when the
+    // catalog loaded and labels otherwise both work.
+    const keys =
+      catalogOptions.length > 0
+        ? interestSlugsForLabels(catalogOptions, selected)
+        : selected;
+    await updateInterests.mutateAsync(keys);
 
     // Mid-survey: Activities is the next step and owns the final Save.
     if (continueTo === 'activities') {

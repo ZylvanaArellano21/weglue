@@ -93,6 +93,19 @@ export const AUDIT_ACTIONS = {
   "message.purge": { targetType: "message", targetIdKey: "messageId", sensitivity: "sensitive", requiresReason: false, metadataKeys: ["messageId"] },
   "deletedContent.reactivateClub": { targetType: "club", targetIdKey: "clubId",        sensitivity: "sensitive",   requiresReason: true,  metadataKeys: ["clubId"] },
 
+  // ── Interest catalog + club-interest matching (migration 125) ────────────
+  // Interest CRUD is catalog-wide, so target_type "system" / target_id NULL
+  // (like portal.lock). Club-interest assignment targets the club. Deactivating
+  // an interest or removing an assignment changes who matches — reason required,
+  // mirroring university.setActive. Interests are never hard-deleted.
+  "interest.create":     { targetType: "system", targetIdKey: null,     sensitivity: "ordinary",  requiresReason: false, metadataKeys: ["interestId", "slug", "label"] },
+  "interest.rename":     { targetType: "system", targetIdKey: null,     sensitivity: "ordinary",  requiresReason: false, metadataKeys: ["interestId", "label"] },
+  "interest.deactivate": { targetType: "system", targetIdKey: null,     sensitivity: "sensitive", requiresReason: true,  metadataKeys: ["interestId", "slug"] },
+  "interest.reactivate": { targetType: "system", targetIdKey: null,     sensitivity: "sensitive", requiresReason: true,  metadataKeys: ["interestId", "slug"] },
+  "club.interestAssign": { targetType: "club",   targetIdKey: "clubId", sensitivity: "ordinary",  requiresReason: false, metadataKeys: ["clubId", "interestId", "tier"] },
+  "club.interestRetier": { targetType: "club",   targetIdKey: "clubId", sensitivity: "ordinary",  requiresReason: false, metadataKeys: ["clubId", "interestId", "tier"] },
+  "club.interestRemove": { targetType: "club",   targetIdKey: "clubId", sensitivity: "sensitive", requiresReason: true,  metadataKeys: ["clubId", "interestId"] },
+
   // ── Day 10B2: administrator account restrictions (migration 058) ──────────
   // NOTE what is absent from every metadataKeys list below: there is no key
   // through which the INTERNAL REASON could travel. The reason belongs in

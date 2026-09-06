@@ -4,28 +4,40 @@ import {
   getDiscoveryClubs,
   getDiscoveryEvents,
   getDiscoveryPeople,
+  getPhoneDiscoveryCategories,
+  getPhoneDiscoveryClubs,
   searchDiscovery,
   joinClubAndRefetch,
+  type DiscoveryCategory,
 } from '../services/searchService';
 import { timedQuery } from '../lib/timedQuery';
 
 const PAGE_SIZE = 20;
 
-export function useDistinctCategories() {
-  return useQuery({
-    queryKey: ['searchCategories'],
-    queryFn: getDistinctCategories,
+// `isPhone` = native iPhone / Android phone. On phone, Discovery reads the
+// club_interests source of truth via get_phone_discovery_* and the category
+// `value` is an interest slug. On iPad-native + web the legacy club_categories
+// path is used unchanged and `value` equals the category label (Option B).
+export function useDistinctCategories(isPhone: boolean) {
+  return useQuery<DiscoveryCategory[]>({
+    queryKey: ['searchCategories', isPhone ? 'phone' : 'legacy'],
+    queryFn: async () =>
+      isPhone
+        ? getPhoneDiscoveryCategories()
+        : (await getDistinctCategories()).map((c) => ({ value: c, label: c })),
     staleTime: 5 * 60 * 1000,
   });
 }
 
-export function useDiscoveryClubs(userId: string, category: string | null) {
+export function useDiscoveryClubs(userId: string, category: string | null, isPhone: boolean) {
   return useInfiniteQuery({
-    queryKey: ['discoveryClubs', userId, category],
+    queryKey: ['discoveryClubs', userId, isPhone ? 'phone' : 'legacy', category],
     queryFn: ({ pageParam = 0 }) =>
       timedQuery(
         'discoveryClubs',
-        getDiscoveryClubs(userId, category, pageParam as number, PAGE_SIZE),
+        isPhone
+          ? getPhoneDiscoveryClubs(userId, category, pageParam as number, PAGE_SIZE)
+          : getDiscoveryClubs(userId, category, pageParam as number, PAGE_SIZE),
       ),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) =>

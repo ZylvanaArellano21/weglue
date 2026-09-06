@@ -106,8 +106,8 @@ const STATUS_MESSAGE: Record<string, string> = {
   channel_not_empty:
     "This channel still holds messages. Removing a non-empty channel is disabled until the approved deleted-message lifecycle is deployed.",
   invalid_permission: "Invalid posting permission.",
-  // reports
-  no_change: "The report is already in that state.",
+  // reports + interest catalog
+  no_change: "No change — the record is already in that state.",
   terminal_decision_required: "This report already has a terminal decision or requires the resolution panel.",
   terminal_decision: "This report already has a terminal decision and cannot be silently reopened.",
   invalid_outcome: "Choose a valid report outcome.",
@@ -137,6 +137,15 @@ const STATUS_MESSAGE: Record<string, string> = {
   parent_unavailable: "Restore the parent post before restoring this comment.",
   purge_in_progress: "This content is pending permanent purge and can no longer be restored.",
   already_purged: "This content was permanently purged and cannot be changed.",
+  // interest catalog + club-interest matching (migration 125)
+  invalid_label: "Interest name must be 2–40 characters.",
+  label_taken: "Another active interest already uses that name.",
+  slug_taken: "An interest with that slug already exists.",
+  interest_not_found: "That interest no longer exists.",
+  interest_inactive: "That interest is deactivated. Reactivate it before assigning it to a club.",
+  invalid_tier: "Choose Primary or Secondary.",
+  already_assigned: "That interest is already assigned to this club.",
+  not_assigned: "That interest is not assigned to this club.",
 };
 
 function messageFor(status: string): string {

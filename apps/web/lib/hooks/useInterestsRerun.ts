@@ -14,6 +14,7 @@ export type ClubRecommendationOutcome =
 // server-side logic + minimum-two fallback mobile uses. Returns the fresh batch
 // so the Congratulations screen can show the real matched-club count.
 
+// Activities stay a raw table write (out of scope for the catalog work).
 async function replaceRows(table: string, column: string, userId: string, values: string[]) {
   const supabase = getSupabaseBrowser();
   const { error: delErr } = await supabase.from(table).delete().eq("user_id", userId);
@@ -31,16 +32,21 @@ export function useInterestsRerun(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
-      interests,
+      interestKeys,
       activities,
     }: {
-      interests: string[];
+      /** Catalog slugs (or active labels) — resolved server-side by set_my_interests. */
+      interestKeys: string[];
       activities: string[];
     }): Promise<ClubRecommendationOutcome> => {
-      await replaceRows("user_interests", "interest", userId!, interests);
+      const supabase = getSupabaseBrowser();
+      // Interests: one validated RPC that swaps the ID-backed rows atomically.
+      const { error: setErr } = await supabase.rpc("set_my_interests", {
+        p_slugs: interestKeys,
+      });
+      if (setErr) throw setErr;
       await replaceRows("user_activities", "activity", userId!, activities);
 
-      const supabase = getSupabaseBrowser();
       const { error } = await supabase.rpc("regenerate_my_club_recommendations");
       if (error) throw error;
       const { data, error: outcomeError } = await supabase.rpc("get_my_club_recommendation_outcome");

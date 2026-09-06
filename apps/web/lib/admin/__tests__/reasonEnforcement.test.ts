@@ -209,9 +209,13 @@ describe("the reason-required actions are declared as such", () => {
         "report.review",
         "report.supersede",
         "report.viewEvidence",
+        // Day 11 — interest catalog + club-interest matching
+        "interest.deactivate",
+        "interest.reactivate",
+        "club.interestRemove",
       ].sort()
     );
-    expect(required).toHaveLength(29);
+    expect(required).toHaveLength(32);
   });
 
   it("requires a reason for every restriction action, including the lifts", () => {

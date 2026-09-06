@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getClubDetail } from "../../../../lib/admin/data";
+import { getClubInterests } from "../../../../lib/admin/interestsData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { Table, Th, Td, RowLink } from "../../../../components/admin/Table";
 import { DisabledAction } from "../../../../components/admin/DisabledAction";
 import { AddMemberDialog, AddOfficerDialog, MemberRowActions } from "../../../../components/admin/MembershipControls";
+import { ClubInterestControls } from "../../../../components/admin/ClubInterestControls";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +49,8 @@ function locationSummary(c: Awaited<ReturnType<typeof getClubDetail>>): string |
 export default async function AdminClubDetailPage({ params }: { params: { id: string } }) {
   const club = await getClubDetail(params.id);
   if (!club) notFound();
+
+  const clubInterests = await getClubInterests(params.id);
 
   const meeting = meetingSummary(club);
   const location = locationSummary(club);
@@ -284,6 +288,21 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
           { key: "overview", label: "Overview", content: overviewTab },
           { key: "members", label: "Members", count: club.memberCount, content: membersTab },
           { key: "officers", label: "Officers", count: club.officers.length, content: officersTab },
+          {
+            key: "interests",
+            label: "Interests",
+            count: clubInterests.assigned.length,
+            content: (
+              <SectionCard title="Interest matching">
+                <ClubInterestControls
+                  clubId={club.id}
+                  clubName={club.name}
+                  assigned={clubInterests.assigned}
+                  assignable={clubInterests.assignable}
+                />
+              </SectionCard>
+            ),
+          },
           { key: "related", label: "Content", content: relatedTab },
           { key: "actions", label: "Actions", content: actionsTab },
         ]}

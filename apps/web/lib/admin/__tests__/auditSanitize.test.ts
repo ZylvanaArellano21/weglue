@@ -22,6 +22,7 @@ const MIGRATION = [
   "063_content_lifecycle_dashboard.sql",
   "064_report_resolution_enforcement.sql",
   "067_deleted_message_privacy.sql",
+  "125_admin_interest_tx.sql",
 ]
   .map((f) => readFileSync(join(__dirname, "../../../../../supabase/migrations/", f), "utf8"))
   .join("\n");
@@ -44,8 +45,8 @@ describe("registry ↔ audit-catalog migration parity", () => {
 
   const catalog = parseCatalog();
 
-  it("parses all catalog rows from migrations 055, 058, 063, 064 + 067", () => {
-    expect(Object.keys(catalog)).toHaveLength(51);
+  it("parses all catalog rows from migrations 055, 058, 063, 064, 067 + 125", () => {
+    expect(Object.keys(catalog)).toHaveLength(58);
   });
 
   it("registers exactly the same action names as the migration", () => {

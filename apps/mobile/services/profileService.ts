@@ -53,7 +53,13 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
       .select('id, username, full_name, avatar_url, avatar_type, bio, major, year, university')
       .eq('id', userId)
       .single(),
-    supabase.from('user_interests').select('interest').eq('user_id', userId),
+    // Join the catalog so a renamed interest shows its CURRENT label, not the
+    // label stored when the row was written. Fall back to the legacy text
+    // column for any row whose catalog interest was deactivated.
+    supabase
+      .from('user_interests')
+      .select('interest, interests(label)')
+      .eq('user_id', userId),
     supabase.from('user_activities').select('activity').eq('user_id', userId),
     supabase.from('club_members').select('club_id').eq('user_id', userId),
     supabase
@@ -79,7 +85,7 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
     university: (profile as any).university,
     clubs_count: clubIds.length,
     gluemates_count: gluematesCount,
-    interests: (interests ?? []).map((i: any) => i.interest),
+    interests: (interests ?? []).map((i: any) => i.interests?.label ?? i.interest),
     activities: (activities ?? []).map((a: any) => a.activity),
     club_roles: (clubRoles ?? []).map((r: any) => ({
       club_id: r.clubs.id,
@@ -312,28 +318,21 @@ export async function updateDisplayName(
 
 // ─── Edit Profile — replace interests & activities ───────────────────────────
 //
-// UPDATE-not-insert: deletes all existing rows then re-inserts the new set.
-// Calling code must invalidate ['homeEventsFeed'] and ['discoveryClubs']
-// cache keys after this resolves.
+// Replaces the caller's whole interest set in one validated server call.
+// `interestSlugs` are catalog slugs (see @weglue/shared fetchActiveInterests /
+// interestSlugsForLabels). The RPC validates each slug against the active
+// catalog, swaps the rows atomically, and keeps the legacy label column in
+// sync — an unknown/inactive slug is surfaced as an error, never a silent wipe.
+// Calling code must invalidate ['homeEventsFeed'] and ['discoveryClubs'].
 //
 export async function updateUserInterests(
-  userId: string,
-  interests: string[],
+  _userId: string,
+  interestSlugs: string[],
 ): Promise<void> {
-  const { error: deleteError } = await supabase
-    .from('user_interests')
-    .delete()
-    .eq('user_id', userId);
-  if (deleteError) throw deleteError;
-
-  if (interests.length > 0) {
-    const { error: insertError } = await supabase
-      .from('user_interests')
-      .insert(interests.map((interest) => ({ user_id: userId, interest })));
-    // Surface failures (e.g. a value outside the CHECK constraint) — swallowing
-    // them here left the delete applied and silently wiped the user's data.
-    if (insertError) throw insertError;
-  }
+  const { error } = await supabase.rpc('set_my_interests', {
+    p_slugs: interestSlugs,
+  });
+  if (error) throw error;
 }
 
 export async function updateUserActivities(
