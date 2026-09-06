@@ -425,6 +425,25 @@ MANIFEST = [
               "target never pads beyond the real eligible count — exactly 1 "
               "eligible club stays 1 (E); preview_club_match_count() gets "
               "the same fix (F)."),
+    # ---- interest-matching release family (122-126). This is intentionally
+    # a full local Supabase ledger, not one of the minimal plain-Postgres
+    # fixtures: auth.users, account restrictions, launch-campus data, and the
+    # twelve production-shaped club handles are all part of the contract.
+    dict(file="test_122_126_interest_matching.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres (disposable local stack owner)",
+         assert_role="anon / authenticated / service_role via SET ROLE + request.jwt.claims",
+         criterion="raise",
+         note="Run only after a disposable full migration reset plus migrations "
+              "122-126. Uses synthetic auth identities and the local demo JWT "
+              "claims path; never Production. Every failed assertion RAISEs."),
+    dict(file="test_127_rotate_chat_invitation_readonly.sql", type="sql", env="stack17",
+         chain=None, pg="17.6", setup_role="postgres (disposable local stack owner)",
+         assert_role="n/a (static introspection of pg_get_functiondef + grants)",
+         criterion="raise",
+         note="Run after migration 127. Static checks only, no fixtures: the "
+              "reapplied rotate_chat_invitation body is read-only (no UPDATE / no "
+              "token creation), keeps its auth guard and signature, and is "
+              "EXECUTE-granted to authenticated only. Wrapped in BEGIN/ROLLBACK."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the

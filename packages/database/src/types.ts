@@ -73,17 +73,23 @@ export type Database = {
         Row: {
           club_id: string
           id: string
-          interest: string
+          interest: string | null
+          interest_id: string
+          tier: string
         }
         Insert: {
           club_id: string
           id?: string
-          interest: string
+          interest?: string | null
+          interest_id: string
+          tier: string
         }
         Update: {
           club_id?: string
           id?: string
-          interest?: string
+          interest?: string | null
+          interest_id?: string
+          tier?: string
         }
         Relationships: [
           {
@@ -91,6 +97,13 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_interests_interest_id_fkey"
+            columns: ["interest_id"]
+            isOneToOne: false
+            referencedRelation: "interests"
             referencedColumns: ["id"]
           },
         ]
@@ -639,6 +652,39 @@ export type Database = {
           },
         ]
       }
+      interests: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string
+          slug: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label: string
+          slug: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string
+          slug?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           attachment_url: string | null
@@ -1140,20 +1186,30 @@ export type Database = {
       user_interests: {
         Row: {
           id: string
-          interest: string
+          interest: string | null
+          interest_id: string | null
           user_id: string
         }
         Insert: {
           id?: string
-          interest: string
+          interest?: string | null
+          interest_id?: string | null
           user_id: string
         }
         Update: {
           id?: string
-          interest?: string
+          interest?: string | null
+          interest_id?: string | null
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "user_interests_interest_id_fkey"
+            columns: ["interest_id"]
+            isOneToOne: false
+            referencedRelation: "interests"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "user_interests_user_id_fkey"
             columns: ["user_id"]
@@ -1206,6 +1262,37 @@ export type Database = {
         Returns: undefined
       }
       check_club_inactivity: { Args: never; Returns: undefined }
+      get_phone_discovery_categories: {
+        Args: never
+        Returns: {
+          label: string
+          slug: string
+          sort_order: number
+        }[]
+      }
+      get_phone_discovery_clubs: {
+        Args: {
+          p_interest_slug?: string
+          p_limit?: number
+          p_offset?: number
+          p_user_id: string
+        }
+        Returns: {
+          avatar_url: string
+          categories: string[]
+          cover_image_url: string
+          id: string
+          is_member: boolean
+          meeting_building: string
+          meeting_day: string
+          meeting_room: string
+          meeting_time_end: string
+          meeting_time_start: string
+          member_count: number
+          name: string
+        }[]
+      }
+      set_my_interests: { Args: { p_slugs: string[] }; Returns: undefined }
       get_discovery_clubs: {
         Args: {
           p_category?: string
