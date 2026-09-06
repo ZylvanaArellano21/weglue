@@ -17,6 +17,24 @@ import type { TagClub } from "./useCreatePost";
 
 export type Visibility = "everyone" | "members" | "specific";
 
+/** A candidate / selected recipient for a "Selected members" event. `club_role`
+ *  is the person's officer title in *this hosting club only* (never leaks a role
+ *  held in another club); `is_officer` is club_members.role === 'officer'. */
+export interface EventAudienceMember {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+  club_role: string | null;
+  is_officer: boolean;
+}
+
+/** Label beside an event-audience member: hosting-club title, else "Officer" for
+ *  an untitled officer, else nothing for a regular member. */
+export function eventAudienceRoleLabel(m: { club_role: string | null; is_officer: boolean }): string | null {
+  return m.club_role?.trim() || (m.is_officer ? "Officer" : null);
+}
+
 /** Clubs where the signed-in user is an officer (the only valid event hosts). */
 export function useOfficerClubs(userId: string | undefined) {
   return useQuery({
@@ -51,7 +69,7 @@ export function useMemberSearch(userId: string | undefined, clubId: string | und
         p_limit: 50,
       });
       if (error) throw error;
-      return (data ?? []) as { id: string; username: string; full_name: string; avatar_url: string | null }[];
+      return (data ?? []) as EventAudienceMember[];
     },
     // Mobile has no minimum query length; the canonical RPC remains club-scoped
     // and filters blocked, inactive, former, and duplicate candidates.
@@ -165,7 +183,7 @@ export interface EventForEdit {
   room: string | null;
   visibility: Visibility;
   specific_user_ids: string[];
-  specific_members: { id: string; username: string; full_name: string; avatar_url: string | null }[];
+  specific_members: EventAudienceMember[];
 }
 
 export function useEventForEdit(eventId: string | undefined) {
@@ -187,12 +205,32 @@ export function useEventForEdit(eventId: string | undefined) {
       const ids: string[] = e.specific_user_ids ?? [];
       let specific_members: EventForEdit["specific_members"] = [];
       if (ids.length > 0) {
-        const { data: profs } = await supabase
-          .from("profiles")
-          .select("id, username, full_name, avatar_url")
-          .in("id", ids);
+        const [{ data: profs }, { data: officerRows }, { data: memberRows }] = await Promise.all([
+          supabase.from("profiles").select("id, username, full_name, avatar_url").in("id", ids),
+          // Both reads scoped to this club's id, so a role in another club can
+          // never surface on this event.
+          supabase.from("club_officers").select("user_id, role_title").eq("club_id", e.club_id).in("user_id", ids),
+          supabase.from("club_members").select("user_id, role").eq("club_id", e.club_id).in("user_id", ids),
+        ]);
+        const roleById = new Map(
+          ((officerRows ?? []) as { user_id: string; role_title: string | null }[]).map((r) => [r.user_id, r.role_title])
+        );
+        const officerIds = new Set(
+          ((memberRows ?? []) as { user_id: string; role: string }[])
+            .filter((r) => r.role === "officer")
+            .map((r) => r.user_id)
+        );
         const byId = new Map(
-          ((profs ?? []) as EventForEdit["specific_members"]).map((profile) => [profile.id, profile])
+          ((profs ?? []) as { id: string; username: string; full_name: string; avatar_url: string | null }[]).map(
+            (profile) => [
+              profile.id,
+              {
+                ...profile,
+                club_role: roleById.get(profile.id) ?? null,
+                is_officer: officerIds.has(profile.id),
+              } satisfies EventAudienceMember,
+            ]
+          )
         );
         // Keep an unchanged historical recipient in the edit payload even if a
         // later block/restriction hides their profile row. The database still
@@ -202,6 +240,8 @@ export function useEventForEdit(eventId: string | undefined) {
           username: "selected-member",
           full_name: "Selected member",
           avatar_url: null,
+          club_role: null,
+          is_officer: false,
         });
       }
       return {

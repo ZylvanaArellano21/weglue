@@ -402,6 +402,27 @@ export interface EventAudienceMember {
   username: string;
   full_name: string;
   avatar_url: string | null;
+  /**
+   * The person's officer title in *this hosting club only* (President, Treasurer,
+   * Public Relations, …). `null` for a member with no title. Never reflects a
+   * role they hold in any other club — the RPC joins club_officers scoped to the
+   * hosting club id.
+   */
+  club_role: string | null;
+  /** True when the person is an officer of the hosting club (club_members.role). */
+  is_officer: boolean;
+}
+
+/**
+ * The label to show beside an event-audience member: their hosting-club title
+ * if they have one, else "Officer" if they are an officer without a title, else
+ * nothing for a regular member.
+ */
+export function eventAudienceRoleLabel(m: {
+  club_role: string | null;
+  is_officer: boolean;
+}): string | null {
+  return m.club_role?.trim() || (m.is_officer ? 'Officer' : null);
 }
 
 /**
@@ -441,12 +462,44 @@ export async function getEventForEdit(eventId: string): Promise<EventForEdit | n
     // Existing selected recipients are restored by ID so an officer can make
     // an unrelated edit after a recipient has left the club. New candidates
     // still come only from searchEventAudienceMembers above.
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, username, full_name, avatar_url')
-      .in('id', ids);
+    const [{ data: profiles }, { data: officerRows }, { data: memberRows }] = await Promise.all([
+      supabase.from('profiles').select('id, username, full_name, avatar_url').in('id', ids),
+      // Restore each still-current recipient's hosting-club title so an edit
+      // shows the same role labels as the picker. Both reads are scoped to this
+      // club's id, so a role held in another club can never appear here.
+      supabase
+        .from('club_officers')
+        .select('user_id, role_title')
+        .eq('club_id', e.club_id)
+        .in('user_id', ids),
+      supabase
+        .from('club_members')
+        .select('user_id, role')
+        .eq('club_id', e.club_id)
+        .in('user_id', ids),
+    ]);
+    const roleById = new Map(
+      ((officerRows ?? []) as { user_id: string; role_title: string | null }[]).map((r) => [
+        r.user_id,
+        r.role_title,
+      ]),
+    );
+    const officerIds = new Set(
+      ((memberRows ?? []) as { user_id: string; role: string }[])
+        .filter((r) => r.role === 'officer')
+        .map((r) => r.user_id),
+    );
     const byId = new Map(
-      ((profiles ?? []) as EventAudienceMember[]).map((profile) => [profile.id, profile]),
+      ((profiles ?? []) as { id: string; username: string; full_name: string; avatar_url: string | null }[]).map(
+        (profile) => [
+          profile.id,
+          {
+            ...profile,
+            club_role: roleById.get(profile.id) ?? null,
+            is_officer: officerIds.has(profile.id),
+          } satisfies EventAudienceMember,
+        ],
+      ),
     );
     // A historically selected account can be hidden by a later block or
     // restriction. Preserve its ID as an unchanged recipient rather than
@@ -456,6 +509,8 @@ export async function getEventForEdit(eventId: string): Promise<EventForEdit | n
       username: 'selected-member',
       full_name: 'Selected member',
       avatar_url: null,
+      club_role: null,
+      is_officer: false,
     });
   }
 
