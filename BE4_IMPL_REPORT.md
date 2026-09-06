@@ -1,5 +1,11 @@
 # BE-4 implementation report
 
+> **Renumbered 2026-09-06:** the migration and harness shipped here as `125` were
+> renumbered to **`131`** after the interest-matching family (migrations 122-127)
+> merged to `main`/production. The files are now `131_public_club_twin.sql` and
+> `test_131_public_club_twin.sql`. The number is the only change — every "125"
+> below refers to the same reviewed-and-accepted content.
+
 ## Progress
 
 Contract and source audit read in full. Schema, neighboring migrations, and harness/manifest conventions inspected. No concrete blocker found. Migration 125 and the rollback harness are written; static checks pass. Disposable execution is pending because Docker is inaccessible in this Codex sandbox.
@@ -68,3 +74,86 @@ Admin Dashboard Impact: VERIFIED - NO UPDATE REQUIRED
 ## Deviations and open verification
 
 No deviation from `BE4_CONTRACT.md` was identified. The only unverifiable item is disposable PostgreSQL execution; Claude must run the registered `stack17_clone` harness after the clone source contains migration 125. No unrelated bugs were changed.
+
+---
+
+## Claude review + fixes (2026-09-06)
+
+Reviewed migration 125 line-by-line against BE4_CONTRACT.md and the live schema,
+then ran the harness for real (manual `pg_dump | psql` clone of the local
+migrated stack + `run_harnesses_manifest.py --pg pg17 --only
+test_125_public_club_twin.sql`).
+
+### Schema verification (all correct as written)
+`event_activities.activity`, `event_interests.interest`,
+`post_images.storage_path/position/width/height`, `club_officers.display_order`,
+`club_goals.goal_text/display_order`, `club_photos.url/source/caption/created_at/
+is_visible`, `events.emoji/cover_image_url/event_end_at(NOT NULL)/visibility`,
+`posts.author_kind/image_url/caption`,
+`content_is_student_visible(text,uuid) -> boolean STABLE SECURITY DEFINER` — all
+match the migration's references.
+
+### Founder verification items — PASS
+- **Public storage loads anonymously:** buckets `club-avatars`, `club-covers`,
+  `club-photos`, `posts` are all `public = true`. Anonymous `GET
+  /storage/v1/object/public/club-avatars/...` returns HTTP 200 with no auth
+  header; a private bucket returns 400.
+- **Revoking the legacy anon `clubs` SELECT does not break signup/pre-auth/
+  onboarding:** no anonymous flow does a direct `SELECT FROM public.clubs`. The
+  pre-signup club-match survey (`onboarding/activities`) calls the
+  `SECURITY DEFINER` RPC `preview_club_match_count` (which has no `anon` EXECUTE
+  grant and already degrades to `matchCount: 0` via try/catch). The post-signup
+  `onboarding/explore-clubs` page guards on an authenticated user and reads
+  `clubs` as `authenticated`. `universities` / `app_config` (the actual live
+  pre-auth reads) are untouched.
+- **Anon can call the RPCs over PostgREST:** `POST /rest/v1/rpc/
+  get_public_club_profile` with only the anon apikey returns the exact 20-key
+  envelope.
+
+### Bugs found and fixed
+
+Migration `125_public_club_twin.sql`:
+1. **Cursor base64 newline (functional bug).** Postgres `encode(bytea,'base64')`
+   wraps output at 76 chars with `\n`. The generated cursor therefore contained
+   a literal newline and was rejected by the decoder's `^[A-Za-z0-9_-]+$`
+   guard — every "next page" call raised `invalid_cursor`. Fixed all 8 cursor
+   encoders to `replace(..., E'\n', '')` before the base64url substitutions.
+2. **Anon RLS policy not dropped.** Migration 003's `clubs: anon can read`
+   `TO anon` policy survived (only the grant was revoked). Added
+   `DROP POLICY IF EXISTS "clubs: anon can read" ON public.clubs;` and extended
+   the self-check DO block to assert no `TO anon` policy remains on any of the
+   15 public-twin base tables. `club_interests` / `universities` / `app_config`
+   deliberately keep their anon policies (live pre-auth surface, outside BE-4).
+
+Harness `test_125_public_club_twin.sql`:
+3. `t125_safe_json` recursive CTE had two recursive terms (Postgres allows one) —
+   merged into a single lateral `jsonb_each UNION ALL jsonb_array_elements`.
+4. `t125_ok('authenticated receives same anon-safe RPC subset', ...)` referenced
+   `a`/`b` with no FROM clause — added the `t125_calls a JOIN t125_calls b`.
+5. `'specific'` event fixture violated `validate_event_specific_audience` —
+   added `specific_user_ids => ARRAY[:MEMBER]`.
+6. anon/authenticated lacked `SELECT` on the `t125_*` scratch tables (only
+   `INSERT`) — the second-page cursor read-back failed. Added `SELECT`.
+7. `:CLUB` psql var used inside a `DO $$ ... $$` body (not substituted) — derive
+   the club id from `t125_calls.core->>'id'` instead.
+8. "no anon policy" assertion was schema-wide (would fail on the legitimate
+   `universities`/`app_config`/`deletion_requests` anon policies) — scoped to
+   the 15 contract tables.
+9. `SET search_path = ''` source-substring check never matched
+   (`pg_get_functiondef` renders `SET search_path TO ''`) — assert on
+   `'search_path=""' = ANY(p.proconfig)` instead.
+10. Unbalanced paren on the "five RPCs execute-able only through explicit client
+    grants" assertion (`);` should have been `));`).
+11. `harness_manifest.py`: registered `test_125_public_club_twin.sql` in
+    `PG17_COMPAT` so `--pg pg17` selects it.
+
+### Harness result (real run)
+`run_harnesses_manifest.py --pg pg17 --only test_125_public_club_twin.sql`
+→ `1 PASS / 0 not-pass`. All **20** in-harness assertions PASS; the trailing
+failure-check `RAISE` did not fire. Local stack was reverted to its pre-125
+state afterward (grant restored, policy restored, functions dropped, clone DB
+dropped).
+
+**BE-4 accepted at the implementation + harness level.** Not applied to any
+remote. `packages/database/src/types.ts` regen is deferred to the Change 6
+frontend integration.

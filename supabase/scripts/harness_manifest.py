@@ -181,7 +181,7 @@ MANIFEST = [
          assert_role="postgres (owner-level trigger/constraint backstop suite)",
          criterion="raise",
          note="Header: production-faithful shadow DB via pg_dump --schema-only."),
-    dict(file="test_125_public_club_twin.sql", type="sql", env="stack17_clone",
+    dict(file="test_131_public_club_twin.sql", type="sql", env="stack17_clone",
          chain=None, pg="17.6", setup_role="postgres (owner of the clone)",
          assert_role="anon / authenticated RPC callers plus catalog checks",
          criterion="raise",
@@ -466,6 +466,9 @@ PG17_COMPAT = [
     # which is already PostgreSQL 17.6, so it needs no separate 17 rerun.
     "test_062_private_account_posts.sql",
     "test_057_concurrency.sh",
+    # stack17_clone family: the shared local stack is already PostgreSQL 17.6,
+    # so the clone the runner takes is a faithful 17 target.
+    "test_131_public_club_twin.sql",
 ]
 
 # Minimal synthetic seed required by test_038_039's documented contract.

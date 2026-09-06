@@ -1,5 +1,9 @@
 -- ============================================================================
--- 125 — anonymous public club twin
+-- 131 — anonymous public club twin
+--
+-- (Renumbered from 125 after the interest-matching family 122-127 merged to
+-- main / production. No behavioral change from the reviewed-and-accepted 125.
+-- Historical review notes in BE4_IMPL_REPORT.md refer to the old number.)
 --
 -- The five RPCs below are the complete public-data boundary for the logged-out
 -- club QR route.  They deliberately do not add base-table policies or grants.
@@ -8,9 +12,17 @@
 
 BEGIN;
 
--- Migration 075 left this legacy pre-authentication grant in place.  The
--- public twin is RPC-only, so remove it before installing the RPC surface.
+-- Migration 075 left this legacy pre-authentication grant in place, and
+-- migration 003 added a matching "clubs: anon can read" SELECT policy, both for
+-- a pre-signup club-match survey that now runs entirely through the
+-- SECURITY DEFINER preview_club_match_count() RPC (which anon cannot even
+-- execute).  The public twin is RPC-only, so this anonymous base-table surface
+-- on clubs is dead weight — remove both the grant and the policy before
+-- installing the RPC surface.  universities / app_config / deletion_requests
+-- keep their own anon policies: those are the live pre-auth surface and are
+-- outside this contract.
 REVOKE SELECT ON public.clubs FROM anon;
+DROP POLICY IF EXISTS "clubs: anon can read" ON public.clubs;
 REVOKE ALL ON TABLE
   public.clubs, public.club_goals, public.club_members, public.club_officers, public.club_photos,
   public.events, public.posts, public.post_images, public.event_rsvps,
@@ -167,13 +179,13 @@ BEGIN
   END LOOP;
 
   IF v_upcoming_has_more THEN
-    v_upcoming_cursor := rtrim(replace(replace(
+    v_upcoming_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'upcoming_events',
         'event_date', v_last_event_date,
         'start_time', v_last_start_time,
         'id', v_last_event_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   FOR v_event IN
@@ -231,13 +243,13 @@ BEGIN
   END LOOP;
 
   IF v_past_has_more THEN
-    v_past_cursor := rtrim(replace(replace(
+    v_past_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'past_events',
         'event_date', v_last_event_date,
         'start_time', v_last_start_time,
         'id', v_last_event_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   FOR v_photo IN
@@ -288,12 +300,12 @@ BEGIN
   END LOOP;
 
   IF v_media_has_more THEN
-    v_media_cursor := rtrim(replace(replace(
+    v_media_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'media',
         'created_at', v_last_created_at,
         'id', v_last_item_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   FOR v_post IN
@@ -339,12 +351,12 @@ BEGIN
   END LOOP;
 
   IF v_posts_has_more THEN
-    v_posts_cursor := rtrim(replace(replace(
+    v_posts_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'posts',
         'created_at', v_last_created_at,
         'id', v_last_item_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   RETURN jsonb_build_object(
@@ -509,13 +521,13 @@ BEGIN
   END LOOP;
 
   IF v_has_more THEN
-    v_next_cursor := rtrim(replace(replace(
+    v_next_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'upcoming_events',
         'event_date', v_last_date,
         'start_time', v_last_start_time,
         'id', v_last_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   RETURN jsonb_build_object('items', v_items, 'next_cursor', v_next_cursor, 'has_more', v_has_more);
@@ -643,13 +655,13 @@ BEGIN
   END LOOP;
 
   IF v_has_more THEN
-    v_next_cursor := rtrim(replace(replace(
+    v_next_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'past_events',
         'event_date', v_last_date,
         'start_time', v_last_start_time,
         'id', v_last_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   RETURN jsonb_build_object('items', v_items, 'next_cursor', v_next_cursor, 'has_more', v_has_more);
@@ -764,12 +776,12 @@ BEGIN
   END LOOP;
 
   IF v_has_more THEN
-    v_next_cursor := rtrim(replace(replace(
+    v_next_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'media',
         'created_at', v_last_created_at,
         'id', v_last_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   RETURN jsonb_build_object('items', v_items, 'next_cursor', v_next_cursor, 'has_more', v_has_more);
@@ -881,12 +893,12 @@ BEGIN
   END LOOP;
 
   IF v_has_more THEN
-    v_next_cursor := rtrim(replace(replace(
+    v_next_cursor := rtrim(replace(replace(replace(
       encode(convert_to(jsonb_build_object(
         'collection', 'posts',
         'created_at', v_last_created_at,
         'id', v_last_id
-      )::text, 'UTF8'), 'base64'), '+', '-'), '/', '_'), '=');
+      )::text, 'UTF8'), 'base64'), E'\n', ''), '+', '-'), '/', '_'), '=');
   END IF;
 
   RETURN jsonb_build_object('items', v_items, 'next_cursor', v_next_cursor, 'has_more', v_has_more);
@@ -937,6 +949,18 @@ BEGIN
   END LOOP;
   IF has_table_privilege('anon', 'public.clubs', 'SELECT') THEN
     RAISE EXCEPTION '125 self-check failed: anon retains SELECT on public.clubs';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'public'
+       AND tablename IN (
+         'clubs', 'club_goals', 'club_members', 'club_officers', 'club_photos',
+         'events', 'posts', 'post_images', 'event_rsvps', 'saved_events',
+         'profiles', 'user_privacy', 'post_comments', 'post_likes', 'content_lifecycle'
+       )
+       AND 'anon' = ANY(roles)
+  ) THEN
+    RAISE EXCEPTION '125 self-check failed: a public-twin base table still has a TO anon policy';
   END IF;
 END;
 $$;

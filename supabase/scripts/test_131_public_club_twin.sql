@@ -35,20 +35,25 @@ LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $$
+  -- One recursive term only (Postgres allows a single UNION ALL between the
+  -- non-recursive and recursive parts); the lateral subquery yields both the
+  -- object values and the array elements of the current node.
   WITH RECURSIVE nodes(value) AS (
     SELECT p_payload
     UNION ALL
     SELECT child.value
       FROM nodes AS n
-      CROSS JOIN LATERAL jsonb_each(
-        CASE WHEN jsonb_typeof(n.value) = 'object' THEN n.value ELSE '{}'::jsonb END
-      ) AS child
-    UNION ALL
-    SELECT child.value
-      FROM nodes AS n
-      CROSS JOIN LATERAL jsonb_array_elements(
-        CASE WHEN jsonb_typeof(n.value) = 'array' THEN n.value ELSE '[]'::jsonb END
-      ) AS child
+      CROSS JOIN LATERAL (
+        SELECT value
+          FROM jsonb_each(
+            CASE WHEN jsonb_typeof(n.value) = 'object' THEN n.value ELSE '{}'::jsonb END
+          )
+        UNION ALL
+        SELECT value
+          FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(n.value) = 'array' THEN n.value ELSE '[]'::jsonb END
+          )
+      ) AS child(value)
   )
   SELECT NOT EXISTS (
     SELECT 1
@@ -92,7 +97,7 @@ CREATE TABLE public.t125_second_pages (
   upcoming jsonb,
   past jsonb
 );
-GRANT INSERT ON public.t125_calls, public.t125_pages, public.t125_second_pages
+GRANT INSERT, SELECT ON public.t125_calls, public.t125_pages, public.t125_second_pages
   TO anon, authenticated;
 
 -- ── Fixtures ──────────────────────────────────────────────────────────────
@@ -194,8 +199,13 @@ VALUES (:BOUNDARY_EVENT, :CLUB, :CREATOR, 'Exact boundary event', CURRENT_DATE, 
 INSERT INTO public.events (id, club_id, created_by, title, event_date, start_time, end_time, visibility)
 VALUES
   (:MEMBERS_EVENT, :CLUB, :CREATOR, 'Members only event', CURRENT_DATE + 2, '10:00', '11:00', 'members'),
-  (:SPECIFIC_EVENT, :CLUB, :CREATOR, 'Specific audience event', CURRENT_DATE + 2, '11:00', '12:00', 'specific'),
   (:REMOVED_EVENT, :CLUB, :CREATOR, 'Removed event', CURRENT_DATE - 2, '10:00', '11:00', 'everyone');
+
+-- 'specific' events require a non-empty club-member audience (enforced by
+-- private.validate_event_specific_audience); MEMBER belongs to CLUB.
+INSERT INTO public.events (id, club_id, created_by, title, event_date, start_time, end_time, visibility, specific_user_ids)
+VALUES
+  (:SPECIFIC_EVENT, :CLUB, :CREATOR, 'Specific audience event', CURRENT_DATE + 2, '11:00', '12:00', 'specific', ARRAY[:MEMBER]::uuid[]);
 
 INSERT INTO public.event_activities (event_id, activity)
 VALUES ('12500000-0000-4000-8000-000000000001', 'Networking');
@@ -285,7 +295,9 @@ RESET ROLE;
 SELECT public.t125_ok('authenticated receives same anon-safe RPC subset',
   a.core = b.core AND a.upcoming = b.upcoming AND a.past = b.past
   AND a.media = b.media AND a.posts = b.posts,
-  'anon and authenticated payloads must be byte-for-byte equal JSON');
+  'anon and authenticated payloads must be byte-for-byte equal JSON')
+FROM public.t125_calls AS a
+JOIN public.t125_calls AS b ON a.role_name = 'anon' AND b.role_name = 'authenticated';
 
 SELECT public.t125_ok('active core has exact top-level contract keys',
   (SELECT count(*) = 20
@@ -396,8 +408,10 @@ SELECT public.t125_ok('posts filter to active official club posts',
   ) FROM public.t125_calls WHERE role_name = 'anon'));
 
 SELECT public.t125_ok('post images and officer shape are explicit safe subsets',
-  (SELECT (officers->0) = '{"display_order": 1, "role_title": "President"}'::jsonb
-     AND NOT (officers::text LIKE '%display_name%' OR officers::text LIKE '%user_id%' OR officers::text LIKE '%avatar_url%')
+  (SELECT (core->'officers'->0) = '{"display_order": 1, "role_title": "President"}'::jsonb
+     AND NOT ((core->'officers')::text LIKE '%display_name%'
+              OR (core->'officers')::text LIKE '%user_id%'
+              OR (core->'officers')::text LIKE '%avatar_url%')
      AND (posts->'items'->0 ? 'images')
      AND ((posts->'items'->0->'images'->0) ? 'path')
      AND ((posts->'items'->0->'images'->0) ? 'position')
@@ -440,31 +454,36 @@ JOIN (
 -- Wrong collection markers and malformed cursors must raise SQLSTATE 22023.
 DO $$
 DECLARE
+  v_club uuid;
   v_past_cursor text;
   v_upcoming_cursor text;
   v_raised boolean;
 BEGIN
+  -- psql does not substitute set vars inside a dollar-quoted body; take the
+  -- club id from the payload the fixture already produced.
+  SELECT (core->>'id')::uuid INTO v_club
+    FROM public.t125_calls WHERE role_name = 'anon';
   SELECT past->>'next_cursor', upcoming->>'next_cursor'
     INTO v_past_cursor, v_upcoming_cursor
     FROM public.t125_pages WHERE role_name = 'anon';
 
   v_raised := false;
   BEGIN
-    PERFORM public.get_public_club_upcoming_events(:CLUB, v_past_cursor, 1);
+    PERFORM public.get_public_club_upcoming_events(v_club, v_past_cursor, 1);
   EXCEPTION WHEN SQLSTATE '22023' THEN v_raised := true;
   END;
   PERFORM public.t125_ok('past cursor rejected by upcoming RPC', v_raised, 'expected invalid_cursor / 22023');
 
   v_raised := false;
   BEGIN
-    PERFORM public.get_public_club_past_events(:CLUB, v_upcoming_cursor, 1);
+    PERFORM public.get_public_club_past_events(v_club, v_upcoming_cursor, 1);
   EXCEPTION WHEN SQLSTATE '22023' THEN v_raised := true;
   END;
   PERFORM public.t125_ok('upcoming cursor rejected by past RPC', v_raised, 'expected invalid_cursor / 22023');
 
   v_raised := false;
   BEGIN
-    PERFORM public.get_public_club_media(:CLUB, 'not-valid', 1);
+    PERFORM public.get_public_club_media(v_club, 'not-valid', 1);
   EXCEPTION WHEN SQLSTATE '22023' THEN v_raised := true;
   END;
   PERFORM public.t125_ok('malformed cursor rejected with invalid_cursor', v_raised, 'expected SQLSTATE 22023');
@@ -482,9 +501,18 @@ SELECT public.t125_ok('anon has no SELECT on public-twin base tables', NOT EXIST
    WHERE has_table_privilege('anon', 'public.' || table_name, 'SELECT')
 ));
 
-SELECT public.t125_ok('no base-table policy targets anon', NOT EXISTS (
+-- Scope: the contract's public-twin base tables only. universities, app_config
+-- and deletion_requests keep their own anon policies — the live pre-auth surface,
+-- outside BE-4.
+SELECT public.t125_ok('no public-twin base-table policy targets anon', NOT EXISTS (
   SELECT 1 FROM pg_policies
-   WHERE schemaname = 'public' AND 'anon' = ANY(roles)
+   WHERE schemaname = 'public'
+     AND tablename IN (
+       'clubs','club_goals','club_members','club_officers','club_photos','events',
+       'posts','post_images','event_rsvps','saved_events','profiles','user_privacy',
+       'post_comments','post_likes','content_lifecycle'
+     )
+     AND 'anon' = ANY(roles)
 ));
 
 WITH expected(signature) AS (
@@ -505,7 +533,7 @@ SELECT public.t125_ok('five RPCs are execute-able only through explicit client g
       JOIN pg_proc AS p ON p.oid = to_regprocedure(e.signature)
       CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) AS a
      WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'
-  );
+  ));
 
 -- ── SECURITY DEFINER catalog classification ───────────────────────────────
 CREATE TABLE public.t125_secdef_classification (
@@ -530,7 +558,9 @@ SELECT public.t125_ok('five new signatures are classified public-read with writt
       p.prosecdef
       AND p.provolatile = 's'
       AND p.prolang = (SELECT oid FROM pg_language WHERE lanname = 'plpgsql')
-      AND position($needle$SET search_path = ''$needle$ IN pg_get_functiondef(p.oid)) > 0
+      -- pg_get_functiondef renders the clause as `SET search_path TO ''`, so
+      -- assert on the stored proconfig entry instead of a source substring.
+      AND 'search_path=""' = ANY(p.proconfig)
     )
     FROM expected AS e
     JOIN pg_proc AS p ON p.oid = to_regprocedure(e.signature)));
