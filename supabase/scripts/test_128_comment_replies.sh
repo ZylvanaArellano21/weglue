@@ -161,10 +161,11 @@ BEGIN
    WHERE user_id = 'a1220000-0000-4000-8000-000000000002'
      AND type = 'comment_reply' AND entity_id = v_reply;
   IF v_route ->> 'screen' <> 'post'
-     OR v_route ->> 'postId' <> 'a1220000-0000-4000-8000-000000000011' THEN
+     OR v_route ->> 'postId' <> 'a1220000-0000-4000-8000-000000000011'
+     OR v_route ->> 'commentId' <> v_reply::text THEN
     RAISE EXCEPTION 'FAIL: reply route payload is incomplete: %', v_route;
   END IF;
-  RAISE NOTICE 'PASS: reply keeps parent link and notifies parent author only';
+  RAISE NOTICE 'PASS: reply keeps parent link, routes to the exact thread, notifies parent author only';
 END
 $$;
 

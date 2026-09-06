@@ -55,8 +55,12 @@ SET search_path = public
 AS $$
   SELECT CASE
     WHEN p_type = 'comment_reply' AND p_entity_id IS NOT NULL
+      -- entity_id is the reply comment itself: land on its post and carry the
+      -- comment id so the client opens the exact thread. `commentId` is a pure
+      -- addition — `screen`/`postId` are unchanged, so every existing consumer
+      -- keeps working.
       THEN COALESCE(
-        (SELECT jsonb_build_object('screen','post','postId',c.post_id)
+        (SELECT jsonb_build_object('screen','post','postId',c.post_id,'commentId',c.id)
            FROM post_comments c
           WHERE c.id = p_entity_id),
         jsonb_build_object('screen','notifications'))
