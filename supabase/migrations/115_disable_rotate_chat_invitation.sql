@@ -1,5 +1,24 @@
 -- 115 — Disable invitation-link rotation while preserving the legacy RPC
 -- contract for older mobile builds that still call it.
+--
+-- ┌─ LEDGER RECONCILIATION NOTE (see docs/audits/migration-ledger-reconciliation.md) ─┐
+-- │ Production's migration ledger records version 115 as `seed_math_society_club`     │
+-- │ (an off-repo club seed run directly against production ~2026-09-02; the Math      │
+-- │ Society club is live). This file — from PR #94 — was authored as version 115 in   │
+-- │ the repo independently, and its content NEVER reached production: prod's          │
+-- │ `public.rotate_chat_invitation(uuid)` is still the original ROTATING version.     │
+-- │ `supabase db push` matches by version number only, so it treats 115 as applied    │
+-- │ and skips this file forever — its SQL will not run via push.                      │
+-- │                                                                                  │
+-- │ The version-115 number cannot be reused for the Math Society seed without         │
+-- │ renaming this historical file, which the reconciliation deliberately does NOT do. │
+-- │ This file therefore stays as-is (history) and is NOT re-numbered or deleted.      │
+-- │                                                                                  │
+-- │ The lost behaviour IS reapplied — as a forward migration `127_disable_rotate_     │
+-- │ chat_invitation.sql` in the backend-interest PR, so production ends up matching   │
+-- │ the approved read-only / no-rotation contract. Production migration 115 and its   │
+-- │ ledger row are left untouched.                                                    │
+-- └──────────────────────────────────────────────────────────────────────────────────┘
 
 CREATE OR REPLACE FUNCTION public.rotate_chat_invitation(p_conversation_id uuid)
 RETURNS TEXT
