@@ -1,0 +1,87 @@
+-- 120 — seed_philosophy_club (HISTORICAL — neutralized).
+--
+-- WHAT THIS IS
+-- Production's migration ledger records version 120 as `seed_philosophy_club`,
+-- run directly against production from an out-of-sync worktree (this file was
+-- never committed to any branch — it existed only as an untracked working-tree
+-- file). It created a "Philosophy Club" at Lone Star College with zylvana21 as
+-- President.
+--
+-- CURRENT STATE
+-- The Philosophy Club was subsequently removed from production. Its officers
+-- recreated it as "The Academy" (handle `TheAcademy`), which is a live,
+-- student-claimed club that keeps the same philosophy focus. Interest matching
+-- treats The Academy as the successor: migration 123 assigns the approved
+-- Strategy/Critical Thinking + Debate & Politics (primary) / Writing + Religion
+-- (secondary) mappings to `TheAcademy`, not to a recreated Philosophy Club.
+--
+-- WHY THIS FILE IS A NO-OP
+-- Version 120 is already in the production ledger, so `supabase db push` skips
+-- this file on production regardless. On a fresh/local rebuild it must NOT
+-- recreate the Philosophy Club (see decision above), so the body below is a
+-- deliberate no-op. The original SQL that production actually ran is preserved
+-- verbatim in the comment block for the historical record.
+--
+-- See docs/audits/migration-ledger-reconciliation.md.
+
+DO $$
+BEGIN
+  RAISE NOTICE '120 seed_philosophy_club is historical and neutralized: the Philosophy Club was removed from production and superseded by "The Academy" (handle TheAcademy). Not seeding.';
+END $$;
+
+-- ===========================================================================
+-- ORIGINAL SQL APPLIED TO PRODUCTION AS VERSION 120 (verbatim, for the record):
+-- ===========================================================================
+--
+-- -- Create the Philosophy Club at Lone Star College with zylvana21 as President.
+-- -- Same seed-club pattern as 095/096/106/107: plain INSERTs so the standard triggers
+-- -- fire (handle_club_created builds the club_group + officer_chat conversations,
+-- -- handle_club_join adds the officer to both chats, update_club_member_count keeps
+-- -- member_count in sync, private.derive_club_handle derives the handle,
+-- -- sync_university_name fills the denormalised university text column).
+--
+-- DO $$
+-- DECLARE
+--   v_university_id UUID;
+--   v_zylvana       UUID;
+--   v_zylvana_name  TEXT;
+--   v_philosophy    UUID;
+-- BEGIN
+--   SELECT id INTO v_university_id FROM universities WHERE name = 'Lone Star College';
+--   IF v_university_id IS NULL THEN
+--     RAISE EXCEPTION 'Lone Star College university not found';
+--   END IF;
+--
+--   SELECT id, COALESCE(NULLIF(btrim(full_name), ''), username)
+--     INTO v_zylvana, v_zylvana_name
+--     FROM profiles WHERE username = 'zylvana21';
+--   IF v_zylvana IS NULL THEN
+--     RAISE EXCEPTION 'zylvana21 profile not found';
+--   END IF;
+--
+--   IF EXISTS (
+--     SELECT 1 FROM clubs
+--     WHERE lower(name) = 'philosophy club' AND university_id = v_university_id
+--   ) THEN
+--     RAISE EXCEPTION 'Philosophy Club already exists at Lone Star College';
+--   END IF;
+--
+--   -- member_count starts at 0; the club_members INSERT trigger (update_club_member_count)
+--   -- increments it to 1 when zylvana21 is added below.
+--   INSERT INTO clubs (name, description, university_id, is_seed, claimed, is_active, member_count)
+--   VALUES (
+--     'Philosophy Club',
+--     'A community for students who love big questions -- ethics, logic, metaphysics, and more. '
+--     || 'Members hold discussions, debates, and reading groups exploring philosophical ideas together.',
+--     v_university_id, false, false, true, 0
+--   )
+--   RETURNING id INTO v_philosophy;
+--
+--   INSERT INTO club_members (club_id, user_id, role)
+--   VALUES (v_philosophy, v_zylvana, 'officer');
+--
+--   INSERT INTO club_officers (club_id, user_id, display_name, role_title, display_order)
+--   VALUES (v_philosophy, v_zylvana, v_zylvana_name, 'President', 0);
+--
+--   RAISE NOTICE 'Philosophy Club id=%', v_philosophy;
+-- END $$;
