@@ -181,6 +181,12 @@ MANIFEST = [
          assert_role="postgres (owner-level trigger/constraint backstop suite)",
          criterion="raise",
          note="Header: production-faithful shadow DB via pg_dump --schema-only."),
+    dict(file="test_125_public_club_twin.sql", type="sql", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres (owner of the clone)",
+         assert_role="anon / authenticated RPC callers plus catalog checks",
+         criterion="raise",
+         note="Rollback fixture; clone source must already include migration 125. "
+              "Never run against the live stack17 database."),
 
     # ---- disposable fixture family: each header documents docker run
     #      postgres:15 + pgowner + a fixture schema + an ordered migration set.
