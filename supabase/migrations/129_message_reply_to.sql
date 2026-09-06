@@ -88,6 +88,14 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- Fires on INSERT and on the NULL -> value UPDATE that a grouped-photo reply
+  -- makes (send_message_with_attachments stores the row, then sets the link).
+  -- Any other UPDATE OF reply_to_id is a no-op here; the dedupe check is the
+  -- final backstop.
+  IF TG_OP = 'UPDATE' AND OLD.reply_to_id IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+
   BEGIN
     SELECT m.sender_id
       INTO v_target_sender_id
@@ -163,9 +171,14 @@ BEGIN
 END;
 $$;
 
+-- INSERT covers the common path (text / single-attachment replies carry
+-- reply_to_id on the insert). A grouped-photo reply is stored by
+-- send_message_with_attachments() first and gets its reply_to_id in a
+-- follow-up UPDATE, so fire on that transition too — only NULL -> value, and
+-- the dedupe check below still prevents a second row.
 DROP TRIGGER IF EXISTS trg_message_reply_notification ON public.messages;
 CREATE TRIGGER trg_message_reply_notification
-  AFTER INSERT ON public.messages
+  AFTER INSERT OR UPDATE OF reply_to_id ON public.messages
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_message_reply_notification();
 

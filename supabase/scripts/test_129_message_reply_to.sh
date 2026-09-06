@@ -169,7 +169,34 @@ BEGIN
     RAISE EXCEPTION 'reply row did not survive target deletion';
   END IF;
 
-  RAISE NOTICE 'PASS: reply link, same-conversation guard, direct/group fan-out, self/block/mute suppression, and target deletion';
+  -- Grouped-photo reply path: the row is stored first (no reply_to_id), then a
+  -- follow-up UPDATE sets the link. The notification must fire on that
+  -- transition, exactly once, only for the target sender.
+  DECLARE
+    v_grouped_reply uuid;
+  BEGIN
+    INSERT INTO public.messages (conversation_id, sender_id, content, message_type)
+    VALUES (v_direct, v_b, 'grouped photo reply', 'image')
+    RETURNING id INTO v_grouped_reply;
+    -- link it to A's original direct target (NULL -> value UPDATE)
+    UPDATE public.messages SET reply_to_id = v_direct_target WHERE id = v_grouped_reply;
+    SELECT count(*) INTO v_count
+      FROM public.notifications
+     WHERE type = 'message_reply' AND entity_id = v_grouped_reply AND user_id = v_a;
+    IF v_count <> 1 THEN
+      RAISE EXCEPTION 'grouped-photo reply UPDATE fired % notifications, expected 1', v_count;
+    END IF;
+    -- A no-op re-UPDATE of the same value must NOT create a second row.
+    UPDATE public.messages SET reply_to_id = reply_to_id WHERE id = v_grouped_reply;
+    SELECT count(*) INTO v_count
+      FROM public.notifications
+     WHERE type = 'message_reply' AND entity_id = v_grouped_reply;
+    IF v_count <> 1 THEN
+      RAISE EXCEPTION 'grouped-photo reply re-UPDATE duplicated the notification (got %)', v_count;
+    END IF;
+  END;
+
+  RAISE NOTICE 'PASS: reply link, same-conversation guard, direct/group fan-out, self/block/mute suppression, grouped-photo UPDATE path, and target deletion';
 END
 $$;
 
