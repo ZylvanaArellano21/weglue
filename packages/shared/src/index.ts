@@ -13,4 +13,5 @@ export * from "./messaging/attachmentPresentation";
 export * from "./messaging/reactions";
 export * from "./messaging/senderColor";
 export * from "./messaging/messageBanner";
+export * from "./messaging/replyPreview";
 export * from "./media/postImagePresentation";
