@@ -220,7 +220,10 @@ export default function CommentsScreen() {
         pointerEvents="box-none"
         style={[
           { flex: 1, justifyContent: 'flex-end' },
-          Platform.OS === 'android' ? { marginBottom: androidKeyboardHeight } : null,
+          // Lift the sheet above the Android IME (matches every other composer
+          // surface — paddingBottom, not marginBottom). The composer's own
+          // bottom inset (useComposerBottomInset) adds the strip buffer.
+          Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
         ]}
       >
         <View
