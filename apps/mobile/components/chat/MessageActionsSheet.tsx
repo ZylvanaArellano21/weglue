@@ -171,7 +171,7 @@ export function MessageActionsSheet({
                 />
                 {(isOwn || canModerate) && (
                   <ActionRow
-                    icon="arrow-undo-outline"
+                    icon="trash-outline"
                     label={isOwn ? 'Unsend for everyone' : 'Delete for everyone'}
                     destructive
                     onPress={() => {
