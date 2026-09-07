@@ -169,6 +169,12 @@ MANIFEST = [
               "users/conversations/channels and ROLLBACKs. `ok` is nullable and "
               "NULL fails, so a pre-076 database reports named failures rather "
               "than passing vacuously."),
+    dict(file="test_129_message_reply_to.sh", type="shell", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres", assert_role="postgres (rolled-back fixture transaction)",
+         criterion="shell",
+         note="Requires the full migration ledger through 123; exercises direct "
+              "and group reply links, same-conversation rejection, recipient-only "
+              "notifications, suppression, and ON DELETE SET NULL."),
 
     # ---- shadow-clone family: needs auth.users + the signup trigger, and
     #      performs destructive DELETE FROM auth.users, so it gets its own
@@ -462,6 +468,7 @@ MANIFEST = [
 # Day 10A / Day 10B security harnesses that must also be proven on the
 # Production PostgreSQL major (17) once they pass on their documented 15.
 PG17_COMPAT = [
+    "test_129_message_reply_to.sh",
     "test_055_durable_admin_audit.sql",
     "test_056_fixture_schema.sql",
     "test_056_atomic_admin_mutations.sql",
