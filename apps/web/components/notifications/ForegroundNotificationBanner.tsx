@@ -34,7 +34,7 @@ function targetHref(target: NotificationTarget): string | null {
       : `/post/${target.id}`;
     case "user": return `/u/${target.id}`;
     case "club": return `/club/${target.id}`;
-    case "chat": return messagesHref({ conversationId: target.id, channelId: target.channelId });
+    case "chat": return messagesHref({ conversationId: target.id, channelId: target.channelId, messageId: target.messageId });
     case "notification-actors": return `/home?notifications=1&notifActors=${target.id}`;
     case "notifications": return "/home?notifications=1";
     default: return null;

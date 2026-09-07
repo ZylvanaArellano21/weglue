@@ -100,6 +100,12 @@ export function validateNotificationRoute(raw: unknown): ValidatedRoute | null {
     validated.pathname = '/chat/[chatId]/[channelId]';
     validated.params = { ...validated.params, channelId: route.channelId };
   }
+
+  // Exact-message targeting for a message reply (migration 129): the chat
+  // screen scrolls to and pulses jumpToMessageId.
+  if (route.screen === 'chat' && typeof route.messageId === 'string' && UUID_RE.test(route.messageId)) {
+    validated.params = { ...validated.params, jumpToMessageId: route.messageId };
+  }
   return validated;
 }
 

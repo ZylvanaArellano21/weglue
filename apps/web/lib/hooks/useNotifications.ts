@@ -104,6 +104,13 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   const postIds = [...new Set(rows.filter((n) => n.entity_type === "post" || n.type === "club_post").map((n) => n.entity_id).filter(Boolean) as string[])];
   const conversationIds = [...new Set(rows.filter((n) => n.entity_type === "message" || ["group_chat_added", "chat_invite_joined"].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
   const clubIds = [...new Set(rows.filter((n) => n.entity_type === "club" || ["club_joined", "member_joined", "club_chat_added", "officer_chat_added", "officer_role", "officer_removed", "club_removed", "club_inactive"].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
+  // message_reply's entity_id is the reply MESSAGE (migration 129); resolve it
+  // to its conversation so a tap opens that thread scrolled to the message.
+  const replyMessageIds = [...new Set(rows.filter((n) => n.type === "message_reply").map((n) => n.entity_id).filter(Boolean) as string[])];
+  const { data: replyMsgRows } = replyMessageIds.length
+    ? await supabase.from("messages").select("id, conversation_id").in("id", replyMessageIds)
+    : { data: [] as any[] };
+  const replyMsgConversation = new Map<string, string>((replyMsgRows ?? []).map((m: any) => [m.id, m.conversation_id]));
   const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }] = await Promise.all([
     allActorIds.length ? supabase.from("profiles").select("id, username, avatar_url").in("id", allActorIds) : Promise.resolve({ data: [] as any[] }),
     eventIds.length ? supabase.from("events").select("id, clubs!inner(id, name, avatar_url)").in("id", eventIds) : Promise.resolve({ data: [] as any[] }),
@@ -171,7 +178,9 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
       entity,
       route: actorCount > 1
         ? { screen: "notificationActors", notificationId: n.id }
-        : n.route ?? null,
+        : n.type === "message_reply" && n.entity_id && replyMsgConversation.has(n.entity_id)
+          ? { screen: "chat", chatId: replyMsgConversation.get(n.entity_id), messageId: n.entity_id }
+          : n.route ?? null,
       visual: resolveNotificationVisual({ type: n.type, group_count: n.group_count, actor: sender, actors, entity }),
     };
     if (daysAgo <= 0) groups["New"].push(notification);
@@ -263,6 +272,7 @@ export function notificationDescription(item: AppNotification): string {
     case "event_rsvp": return "is going to an event you posted";
     case "new_event": return "posted a new event";
     case "new_message": return "sent you a message";
+    case "message_reply": return "replied to your message";
     case "gluemate": return "is now your Gluemate! 🎉";
     default: return "interacted with you";
   }
@@ -277,7 +287,7 @@ export type NotificationTarget =
   | { kind: "user"; id: string }
   | { kind: "post"; id: string; commentId?: string }
   | { kind: "club"; id: string }
-  | { kind: "chat"; id: string; channelId?: string }
+  | { kind: "chat"; id: string; channelId?: string; messageId?: string }
   | { kind: "notification-actors"; id: string }
   | { kind: "notifications" };
 
@@ -299,7 +309,13 @@ export function resolveNotificationTarget(item: AppNotification): NotificationTa
     if (screen === "club" && idFor("clubId")) return { kind: "club", id: idFor("clubId")! };
     if (screen === "chat" && idFor("chatId")) {
       const channelId = idFor("channelId");
-      return channelId ? { kind: "chat", id: idFor("chatId")!, channelId } : { kind: "chat", id: idFor("chatId")! };
+      const messageId = idFor("messageId");
+      return {
+        kind: "chat",
+        id: idFor("chatId")!,
+        ...(channelId ? { channelId } : {}),
+        ...(messageId ? { messageId } : {}),
+      };
     }
     if (screen === "notificationActors" && idFor("notificationId")) {
       return { kind: "notification-actors", id: idFor("notificationId")! };

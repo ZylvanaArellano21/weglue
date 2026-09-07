@@ -127,7 +127,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
         case "post": return target.commentId ? openPostThread(target.id, target.commentId) : openPost(target.id);
         case "user": return router.push(`/u/${target.id}`);
         case "club": return router.push(`/club/${target.id}`);
-        case "chat": return router.push(messagesHref({ conversationId: target.id, channelId: target.channelId }));
+        case "chat": return router.push(messagesHref({ conversationId: target.id, channelId: target.channelId, messageId: target.messageId }));
         case "notification-actors": return set("notifActors", target.id);
         case "notifications": return; // already here
       }

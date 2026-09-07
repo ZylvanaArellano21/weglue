@@ -1,5 +1,14 @@
-import { useEffect, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  Image,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Animated,
+  PanResponder,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { resolveAttachmentUrl, formatFileSize, fileTypeLabel } from '../../lib/chatAttachments';
@@ -60,6 +69,12 @@ interface Props {
   onPressAvatar?: () => void;
   pollSlot?: React.ReactNode;
   cardSlot?: React.ReactNode;
+  /** Quoted reference to the message this one replies to (migration 129). */
+  replyPreview?: { senderName: string; label: string } | null;
+  /** Tap the quoted block → scroll to the original. */
+  onPressReplyPreview?: () => void;
+  /** Swipe the bubble toward the thread centre → start a reply to it. */
+  onSwipeReply?: () => void;
 }
 
 function formatTime(isoString: string): string {
@@ -278,6 +293,9 @@ export function MessageBubble({
   onPressAvatar,
   pollSlot,
   cardSlot,
+  replyPreview,
+  onPressReplyPreview,
+  onSwipeReply,
 }: Props) {
   const groupImages = (attachments ?? []).filter((a) => a.kind === 'image');
   const isGroupedMedia = groupImages.length > 1;
@@ -291,6 +309,45 @@ export function MessageBubble({
   const longPress = () => onLongPress?.(id);
   const showName = !!isGroup && !isOwn && showSenderInfo;
 
+  // Swipe-to-reply: a short horizontal drag toward the thread centre
+  // (right for incoming, left for own) past the threshold starts a reply.
+  // The row always springs back; nothing is committed by the drag itself.
+  const dragX = useRef(new Animated.Value(0)).current;
+  const triggered = useRef(false);
+  const SWIPE_DIR = isOwn ? -1 : 1;
+  const SWIPE_TRIGGER = 56;
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) =>
+        !!onSwipeReply &&
+        Math.abs(g.dx) > 12 &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 1.5 &&
+        g.dx * SWIPE_DIR > 0,
+      onPanResponderGrant: () => {
+        triggered.current = false;
+      },
+      onPanResponderMove: (_e, g) => {
+        const clamped = Math.max(0, Math.min(g.dx * SWIPE_DIR, 88)) * SWIPE_DIR;
+        dragX.setValue(clamped);
+        if (!triggered.current && Math.abs(clamped) >= SWIPE_TRIGGER) {
+          triggered.current = true;
+        }
+      },
+      onPanResponderRelease: () => {
+        if (triggered.current) onSwipeReply?.();
+        Animated.spring(dragX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(dragX, { toValue: 0, useNativeDriver: true }).start();
+      },
+    }),
+  ).current;
+  const replyIconOpacity = dragX.interpolate({
+    inputRange: isOwn ? [-SWIPE_TRIGGER, 0] : [0, SWIPE_TRIGGER],
+    outputRange: isOwn ? [1, 0] : [0, 1],
+    extrapolate: 'clamp',
+  });
+
   // Consecutive bubbles from the same sender tuck their inner corner in.
   const R = chatSizes.bubbleRadius;
   const r = chatSizes.bubbleRadiusGrouped;
@@ -299,13 +356,27 @@ export function MessageBubble({
     : { borderTopLeftRadius: showSenderInfo ? R : r, borderBottomLeftRadius: isLastInGroup ? R : r };
 
   return (
-    <View
+    <Animated.View
+      {...(onSwipeReply ? panResponder.panHandlers : {})}
       style={[
         styles.row,
         isOwn && styles.rowOwn,
         { marginTop: showSenderInfo ? 6 : 2, marginBottom: isLastInGroup ? 6 : 2 },
+        { transform: [{ translateX: dragX }] },
       ]}
     >
+      {onSwipeReply ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.swipeReplyIcon,
+            isOwn ? { right: -34 } : { left: -34 },
+            { opacity: replyIconOpacity },
+          ]}
+        >
+          <Ionicons name="arrow-undo" size={16} color={chatColors.teal} />
+        </Animated.View>
+      ) : null}
       {!isOwn && (
         <View style={styles.avatarCol}>
           {isLastInGroup ? (
@@ -319,6 +390,24 @@ export function MessageBubble({
       )}
 
       <View style={[styles.col, isOwn && styles.colOwn]}>
+        {replyPreview ? (
+          <TouchableOpacity
+            onPress={onPressReplyPreview}
+            disabled={!onPressReplyPreview}
+            activeOpacity={0.7}
+            style={[styles.replyQuote, isOwn ? styles.replyQuoteOwn : styles.replyQuoteOther]}
+          >
+            <View style={styles.replyQuoteBar} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.replyQuoteName} numberOfLines={1}>
+                {replyPreview.senderName}
+              </Text>
+              <Text style={styles.replyQuoteLabel} numberOfLines={1}>
+                {replyPreview.label}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
         {isPoll ? (
           <TouchableOpacity onLongPress={longPress} activeOpacity={0.9}>
             {pollSlot}
@@ -438,7 +527,7 @@ export function MessageBubble({
           </Text>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -450,6 +539,50 @@ const styles = StyleSheet.create({
   },
   rowOwn: {
     flexDirection: 'row-reverse',
+  },
+  swipeReplyIcon: {
+    position: 'absolute',
+    bottom: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15,166,166,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  replyQuote: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 6,
+    maxWidth: '100%',
+    borderRadius: 10,
+    paddingVertical: 4,
+    paddingRight: 10,
+    paddingLeft: 4,
+    marginBottom: 3,
+  },
+  replyQuoteOwn: {
+    backgroundColor: 'rgba(255,255,255,0.5)',
+    alignSelf: 'flex-end',
+  },
+  replyQuoteOther: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    alignSelf: 'flex-start',
+  },
+  replyQuoteBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: chatColors.teal,
+  },
+  replyQuoteName: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 11,
+    color: chatColors.teal,
+  },
+  replyQuoteLabel: {
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
+    color: chatColors.textMuted,
   },
   avatarCol: {
     marginRight: 8,

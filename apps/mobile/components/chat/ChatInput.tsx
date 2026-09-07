@@ -33,6 +33,10 @@ interface Props {
   onSendPhotos: (photos: { uri: string }[], caption?: string) => { ok: boolean; error?: string };
   onAttachmentError?: (message: string) => void;
   onOpenPoll?: () => void;
+  /** Reply target (migration 129). When set, a quoted banner sits above the
+   *  composer and the parent injects the reply link into the send. */
+  replyingTo?: { senderName: string; label: string } | null;
+  onCancelReply?: () => void;
 }
 
 /**
@@ -55,6 +59,8 @@ export function ChatInput({
   onSendPhotos,
   onAttachmentError,
   onOpenPoll,
+  replyingTo,
+  onCancelReply,
 }: Props) {
   const [text, setText] = useState('');
   const [attachOpen, setAttachOpen] = useState(false);
@@ -122,6 +128,27 @@ export function ChatInput({
 
   return (
     <>
+      {replyingTo ? (
+        <View style={styles.replyBanner}>
+          <Ionicons name="arrow-undo" size={15} color={chatColors.teal} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.replyBannerName} numberOfLines={1}>
+              Replying to {replyingTo.senderName}
+            </Text>
+            <Text style={styles.replyBannerLabel} numberOfLines={1}>
+              {replyingTo.label}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={onCancelReply}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel reply"
+          >
+            <Ionicons name="close" size={18} color={chatColors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <View style={[styles.bar, { paddingBottom: 10 + bottomInset }]}>
         <TouchableOpacity
           style={styles.plusBtn}
@@ -246,6 +273,28 @@ const styles = StyleSheet.create({
   restrictedText: {
     fontFamily: chatFonts.regular,
     fontSize: 14,
+    color: chatColors.textMuted,
+  },
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: chatColors.bg,
+    borderTopWidth: 1,
+    borderLeftWidth: 3,
+    borderTopColor: chatColors.border,
+    borderLeftColor: chatColors.teal,
+  },
+  replyBannerName: {
+    fontFamily: chatFonts.semiBold,
+    fontSize: 12,
+    color: chatColors.teal,
+  },
+  replyBannerLabel: {
+    fontFamily: chatFonts.regular,
+    fontSize: 12,
     color: chatColors.textMuted,
   },
 });

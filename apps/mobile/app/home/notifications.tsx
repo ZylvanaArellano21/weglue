@@ -42,6 +42,7 @@ function notificationDescription(item: AppNotification): string {
     case 'event_rsvp':      return 'is going to an event you posted';
     case 'new_event':       return 'posted a new event';
     case 'new_message':     return 'sent you a message';
+    case 'message_reply':   return 'replied to your message';
     case 'gluemate':        return 'is now your Gluemate! 🎉';
     default:                return 'interacted with you';
   }

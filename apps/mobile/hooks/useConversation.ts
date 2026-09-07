@@ -6,6 +6,7 @@ import {
   sendMessage,
   newClientTag,
   type ThreadMessage,
+  type MessageReplyTarget,
 } from '../services/messagingService';
 import {
   uploadChatAttachment,
@@ -36,6 +37,9 @@ export interface PendingMessage {
   progress: number;
   errorText?: string;
   createdAt: string;
+  /** Reply target (migration 129) — carried to the server and rendered as a
+   *  quoted block on the pending bubble too. */
+  replyTo?: MessageReplyTarget | null;
 }
 
 export interface AttachmentDraft {
@@ -226,6 +230,7 @@ export function useSendPipeline(opts: {
             content: msg.content,
             messageType: 'image',
             clientTag: msg.clientTag,
+            replyToId: msg.replyTo?.id ?? null,
             attachments: uploaded.map((u) => ({
               path: u.path,
               kind: 'image' as const,
@@ -272,6 +277,7 @@ export function useSendPipeline(opts: {
           attachmentSize: size,
           attachmentMime: mime,
           clientTag: msg.clientTag,
+          replyToId: msg.replyTo?.id ?? null,
         });
 
         // The send succeeded, but do NOT drop the local bubble yet: the server
@@ -298,7 +304,7 @@ export function useSendPipeline(opts: {
 
   /** Immediate-return text send: the message appears locally before any I/O. */
   const sendText = useCallback(
-    (content: string) => {
+    (content: string, replyTo?: MessageReplyTarget | null) => {
       const trimmed = content.trim();
       if (!trimmed) return;
       const msg: PendingMessage = {
@@ -310,6 +316,7 @@ export function useSendPipeline(opts: {
         status: 'sending',
         progress: 0,
         createdAt: new Date().toISOString(),
+        replyTo: replyTo ?? null,
       };
       setPending((prev) => [...prev, msg]);
       void sendOne(msg);
@@ -319,7 +326,7 @@ export function useSendPipeline(opts: {
 
   /** Attachment send: pending bubble with progress appears immediately. */
   const sendAttachment = useCallback(
-    (draft: AttachmentDraft, caption?: string) => {
+    (draft: AttachmentDraft, caption?: string, replyTo?: MessageReplyTarget | null) => {
       if (draft.kind === 'file' && draft.size && draft.size > MAX_FILE_BYTES) {
         return {
           ok: false as const,
@@ -339,6 +346,7 @@ export function useSendPipeline(opts: {
         status: 'uploading',
         progress: 0,
         createdAt: new Date().toISOString(),
+        replyTo: replyTo ?? null,
       };
       setPending((prev) => [...prev, msg]);
       void sendOne(msg);
@@ -349,7 +357,7 @@ export function useSendPipeline(opts: {
 
   /** Grouped photo send (1..5): one pending bubble, one grouped media message. */
   const sendPhotos = useCallback(
-    (photos: { uri: string }[], caption?: string) => {
+    (photos: { uri: string }[], caption?: string, replyTo?: MessageReplyTarget | null) => {
       if (photos.length < 1 || photos.length > 5) {
         return { ok: false as const, error: 'Choose 1 to 5 photos.' };
       }
@@ -363,6 +371,7 @@ export function useSendPipeline(opts: {
         status: 'uploading',
         progress: 0,
         createdAt: new Date().toISOString(),
+        replyTo: replyTo ?? null,
       };
       setPending((prev) => [...prev, msg]);
       void sendOne(msg);
