@@ -511,21 +511,31 @@ export default function ClubProfileScreen() {
   // product's "browse clubs" home — never a dead end or an app exit, and never
   // affecting a club profile reached normally from inside the app.
   const isExternalEntry = source === 'qr';
+  // External QR / link entry has no in-app back history: "Back" enters the app
+  // at Discovery as the new root. dismissAll() first drops the cold-start
+  // deep-link stack frame (and the blank root anchor sitting under it) so the
+  // tab shell mounts clean instead of briefly showing that blank anchor — the
+  // "white screen" some iOS users saw on Back. Android already landed on
+  // Discovery; this keeps that and removes the blank frame.
+  const exitToDiscovery = useCallback(() => {
+    if (router.canDismiss()) router.dismissAll();
+    router.replace('/(tabs)/search');
+  }, [router]);
   const goBack = useCallback(() => {
     if (isExternalEntry) {
-      router.replace('/(tabs)/search');
+      exitToDiscovery();
     } else {
       router.back();
     }
-  }, [isExternalEntry, router]);
+  }, [isExternalEntry, exitToDiscovery, router]);
   useEffect(() => {
     if (!isExternalEntry) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      router.replace('/(tabs)/search');
+      exitToDiscovery();
       return true;
     });
     return () => sub.remove();
-  }, [isExternalEntry, router]);
+  }, [isExternalEntry, exitToDiscovery]);
   const { show, ToastComponent } = useToast();
   const { officerClubIds } = useOfficerStore();
 

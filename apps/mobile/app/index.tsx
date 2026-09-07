@@ -9,10 +9,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import * as Linking from "expo-linking";
 import { useAuthStore } from "@weglue/shared";
 import { getPendingSignupEmail } from "../lib/authFlow";
 import { resumePendingInvite } from "../lib/inviteController";
 import { checkAndroidInstallReferrerOnce } from "../lib/androidInstallReferrer";
+import { isContentDeepLinkUrl } from "../lib/coldStartRouting";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function WelcomeScreen() {
@@ -21,8 +23,19 @@ export default function WelcomeScreen() {
   // null = still checking AsyncStorage; "" = no pending signup
   const [pendingSignupEmail, setPendingSignupEmail] = useState<string | null>(null);
   const [deletedNotice, setDeletedNotice] = useState(false);
+  // null = still checking the cold-start URL; true = the app was launched by a
+  // Universal / App Link that targets an in-app content screen (/club, /post),
+  // which expo-router routes to on its own. WelcomeScreen is the root-stack
+  // anchor and stays mounted underneath that screen, so it must NOT run its
+  // redirect-to-Home effect in that case — doing so clobbers the deep-link
+  // destination (the club profile flashes, then bounces to Home). This is an
+  // iOS-only cold-start timing race; Android's App Link handling never hits it.
+  const [contentDeepLink, setContentDeepLink] = useState<boolean | null>(null);
 
   useEffect(() => {
+    Linking.getInitialURL().then((url) => {
+      setContentDeepLink(isContentDeepLinkUrl(url));
+    });
     getPendingSignupEmail().then((stored) => setPendingSignupEmail(stored ?? ""));
     AsyncStorage.getItem("weglue-account-deletion-success").then((value) => {
       if (value === "1") {
@@ -42,7 +55,7 @@ export default function WelcomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || contentDeepLink === null) return;
 
     if (!session) {
       // No session, but a signup is mid-flight (signed up, never verified,
@@ -80,6 +93,10 @@ export default function WelcomeScreen() {
     // club selection, no "Done" step. Accounts stranded mid-way through the
     // old flow therefore land on Home like everyone else — migration 042 also
     // backfilled that flag.
+    // Launched by a Universal / App Link to a content screen (/club, /post):
+    // expo-router is already routing there. Don't override it with Home.
+    if (contentDeepLink) return;
+
     // A deferred chat invite is consumed exactly here so the invited chat is
     // the first destination shown — then normal app entry.
     resumePendingInvite().then((hadPendingInvite) => {
@@ -87,9 +104,9 @@ export default function WelcomeScreen() {
         router.replace("/(tabs)");
       }
     });
-  }, [isLoading, session, profile, pendingSignupEmail]);
+  }, [isLoading, session, profile, pendingSignupEmail, contentDeepLink]);
 
-  if (isLoading || pendingSignupEmail === null) {
+  if (isLoading || pendingSignupEmail === null || contentDeepLink === null) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#0FA6A6" />
