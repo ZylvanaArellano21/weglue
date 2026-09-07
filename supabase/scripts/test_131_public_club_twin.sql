@@ -191,10 +191,19 @@ SELECT
   'everyone', 'cover-past-' || gs, 'Main Hall', 'Building A', '20' || gs
 FROM generate_series(1, 10) AS gs;
 
--- Exact boundary: event_end_at is today's Chicago midnight and is therefore
--- in the past partition by the contract's <= now() rule.
+-- Exact boundary: event_end_at lands ~1 minute before now(), so it is in the
+-- past partition by the contract's <= now() rule REGARDLESS of the wall-clock
+-- time the harness runs at. (The earlier `CURRENT_DATE` + '00:00' fixture
+-- assumed "today's Chicago midnight is already past", which is false for the
+-- ~5h UTC window each day where Chicago is still the previous evening — it made
+-- this assertion flap. event_end_at is a generated column, so the boundary is
+-- steered through event_date/end_time in America/Chicago, the tz it is computed
+-- in.)
 INSERT INTO public.events (id, club_id, created_by, title, event_date, start_time, end_time, visibility)
-VALUES (:BOUNDARY_EVENT, :CLUB, :CREATOR, 'Exact boundary event', CURRENT_DATE, '00:00', '00:00', 'everyone');
+SELECT
+  :BOUNDARY_EVENT, :CLUB, :CREATOR, 'Exact boundary event',
+  b::date, b::time, b::time, 'everyone'
+FROM (SELECT (now() AT TIME ZONE 'America/Chicago') - interval '1 minute' AS b) s;
 
 INSERT INTO public.events (id, club_id, created_by, title, event_date, start_time, end_time, visibility)
 VALUES
