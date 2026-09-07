@@ -13,7 +13,9 @@ import {
   useCreateEvent,
   useEventForEdit,
   useUpdateEvent,
+  eventAudienceRoleLabel,
   type Visibility,
+  type EventAudienceMember,
 } from "../../lib/hooks/useCreateEvent";
 
 const VIS: { value: Visibility; label: string; desc: string }[] = [
@@ -61,7 +63,7 @@ export function ComposeEventModal({
   const [room, setRoom] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("everyone");
   const [memberQuery, setMemberQuery] = useState("");
-  const [members, setMembers] = useState<{ id: string; username: string; full_name: string; avatar_url: string | null }[]>([]);
+  const [members, setMembers] = useState<EventAudienceMember[]>([]);
   const [seeded, setSeeded] = useState(false);
 
   const { data: results, isLoading: isSearchingMembers, isError: memberSearchError } = useMemberSearch(userId, clubId || undefined, memberQuery);
@@ -334,6 +336,11 @@ export function ComposeEventModal({
                 {members.map((m) => (
                   <span key={m.id} className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: "#0FA6A6" }}>
                     @{m.username}
+                    {eventAudienceRoleLabel(m) && (
+                      <span className="rounded-full bg-white/25 px-1.5 text-[10px] font-semibold">
+                        {eventAudienceRoleLabel(m)}
+                      </span>
+                    )}
                     <button type="button" onClick={() => setMembers((prev) => prev.filter((x) => x.id !== m.id))} aria-label={`Remove ${m.username}`}>
                       <CloseIcon size={12} />
                     </button>
@@ -375,7 +382,14 @@ export function ComposeEventModal({
                   >
                     <Avatar uri={r.avatar_url} size={28} name={r.username} />
                     <span className="min-w-0 text-left">
-                      <span className="block truncate text-sm text-gray-900">{r.full_name || r.username}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="truncate text-sm text-gray-900">{r.full_name || r.username}</span>
+                        {eventAudienceRoleLabel(r) && (
+                          <span className="shrink-0 rounded-full bg-[#0FA6A6]/10 px-1.5 py-0.5 text-[11px] font-semibold text-[#0B7C7C]">
+                            {eventAudienceRoleLabel(r)}
+                          </span>
+                        )}
+                      </span>
                       <span className="block truncate text-xs text-gray-500">@{r.username}</span>
                     </span>
                   </button>
