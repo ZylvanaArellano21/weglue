@@ -1,12 +1,8 @@
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import Image from "next/image";
 import { createClient } from "../../../lib/supabase/server";
 import { ClubProfileClient } from "../../../components/clubs/ClubProfileClient";
-import {
-  storeTargetFromUserAgent,
-  storeUrlFor,
-} from "../../../lib/deviceRouting";
+import { PublicClubTwin } from "../../../components/clubs/PublicClubTwin";
+import { getPublicClubTwin } from "../../../lib/publicClub";
 
 export const metadata = { title: "Club" };
 export const dynamic = "force-dynamic";
@@ -18,10 +14,12 @@ export const dynamic = "force-dynamic";
 //
 // The one exception middleware lets through unauthenticated is a scanned club
 // QR (`?source=qr`). The installed app intercepts the universal / app link
-// before the browser, so a browser that reaches this page has no app — route
-// it to the store exactly like /download does. It renders NOTHING about the
-// club and reads NO club data, so it cannot leak protected content. A signed-in
-// phone-web user falls through to the normal profile below.
+// before the browser, so a browser that reaches this page has NO app. Instead
+// of a bare store bounce it now renders the read-only public club "twin" —
+// migration 131's get_public_club_profile envelope only (identity, meeting
+// info, officer titles, member count, bounded public events / media / posts),
+// with "Get We Glue" as the single participation affordance. A signed-in
+// phone-web user still falls through to the full native-parity profile below.
 export default async function ClubProfilePage({
   params,
   searchParams,
@@ -44,38 +42,12 @@ export default async function ClubProfilePage({
     redirect(`/login?next=${encodeURIComponent(`/club/${params.clubId}`)}`);
   }
 
-  const store = storeTargetFromUserAgent(headers().get("user-agent"));
-  if (!store) {
-    // Desktop / crawler / modern-iPadOS Safari — no app to install; let them
-    // sign in and view the club on the web.
+  const twin = await getPublicClubTwin(params.clubId);
+  if (!twin) {
+    // Unknown / inactive / non-public club, or a malformed id — nothing public
+    // to show, and no session to place. Send them to sign in.
     redirect(`/login?next=${encodeURIComponent(`/club/${params.clubId}`)}`);
   }
 
-  const storeUrl = storeUrlFor(store);
-  const storeLabel =
-    store === "app-store" ? "Continue to App Store" : "Continue to Google Play";
-
-  return (
-    <main className="min-h-screen bg-[#FEFCF0] flex flex-col items-center justify-center px-6 py-12 text-center">
-      {/* Fires as soon as this streams in — no client bundle to wait on. */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `window.location.replace(${JSON.stringify(storeUrl)});`,
-        }}
-      />
-      <Image src="/logo.png" alt="We Glue" width={64} height={64} priority />
-      <h1 className="text-2xl font-bold text-black mt-6 mb-2 max-w-sm">
-        Get We Glue to open this club
-      </h1>
-      <p className="text-sm text-[#5F5D5D] mb-8">
-        {store === "app-store" ? "Opening the App Store…" : "Opening Google Play…"}
-      </p>
-      <a
-        href={storeUrl}
-        className="block w-full max-w-xs h-12 rounded-full bg-[#0FA6A6] text-[#FEFCF0] font-semibold flex items-center justify-center"
-      >
-        {storeLabel}
-      </a>
-    </main>
-  );
+  return <PublicClubTwin club={twin} />;
 }
