@@ -247,6 +247,13 @@ MANIFEST = [
          note="Runs after test_057_student_blocking on the same `wg` database, "
               "exactly as its header documents."),
 
+    dict(file="test_130_event_audience_member_role.sh", type="shell", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated (SET ROLE + request.jwt.claim.sub)",
+         criterion="shell",
+         note="Transactional role-enrichment and permission-boundary checks "
+              "for search_event_audience_members after migration 124."),
+
     # ---- PR #29 permission-parity family (069, 070, 072, 073, 074, 075).
     #      These were written AFTER the fixture families and deliberately need
     #      no fixture and no grants bridge: migration 075 gives the client roles
@@ -480,7 +487,8 @@ PG17_COMPAT = [
     # which is already PostgreSQL 17.6, so it needs no separate 17 rerun.
     "test_062_private_account_posts.sql",
     "test_057_concurrency.sh",
-    "test_122_comment_replies.sh",
+    "test_128_comment_replies.sh",
+    "test_130_event_audience_member_role.sh",
 ]
 
 # Minimal synthetic seed required by test_038_039's documented contract.
