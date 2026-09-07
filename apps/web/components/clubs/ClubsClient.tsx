@@ -82,7 +82,7 @@ function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested
         <div className="shrink-0">
           <AppHeader userId={userId} />
         </div>
-        <main className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:pb-0">
+        <main className="mx-auto w-full max-w-app px-4 py-6 sm:px-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:pb-0">
           {/* Phone: "Officer Club" / "Member Club" ONLY — checked directly
               against apps/mobile/app/(tabs)/clubs/index.tsx, which is
               exclusively "my clubs"; the discovery catalog (Suggested/
@@ -127,7 +127,7 @@ function Body({ userId, scrollToSuggested }: { userId: string; scrollToSuggested
             </div>
           )}
 
-          <div className="hidden md:grid md:grid-cols-1 md:gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
+          <div className="hidden md:grid md:grid-cols-1 md:gap-5 lg:min-h-0 lg:flex-1 lg:grid-cols-[240px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
             <div className="hidden lg:block lg:min-h-0 lg:overflow-y-auto lg:pb-6">
               <ClubSidebar
                 officerClubs={officerClubs}

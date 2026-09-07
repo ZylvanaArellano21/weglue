@@ -117,7 +117,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   );
 
   return (
-    <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+    <main className="mx-auto max-w-app px-4 py-6 sm:px-6">
       {/* The third (Upcoming Events/Calendar) column used to only appear at
           xl (1280px+) while the left sidebar appeared at lg (1024px+) — no
           iPad, portrait or landscape, ever reaches 1280px, so the right
@@ -126,7 +126,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
           narrower fixed side tracks keep all three columns fitting down to
           1024px (the narrowest common tablet-landscape width) with no
           horizontal overflow. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)_minmax(240px,280px)] lg:justify-center">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[208px_minmax(0,1fr)_minmax(232px,264px)] lg:justify-center">
         <div className="hidden lg:block">
           <ProfileSidebar userId={userId} />
         </div>

@@ -12,6 +12,13 @@ const config: Config = {
         teal: "#0FA6A6",
         cream: "#FEFCF0",
       },
+      maxWidth: {
+        // Single desktop content width shared by the header, Home, Clubs and
+        // Messages so their outer frame stays aligned and tab-switching never
+        // jumps (Change 1). Narrower than the old 1400px so the feed and post
+        // images stay contained on large monitors.
+        app: "1180px",
+      },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
         zain: ["var(--font-zain)", "serif"],

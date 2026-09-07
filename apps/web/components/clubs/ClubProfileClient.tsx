@@ -167,14 +167,14 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
 
   if (isLoading) {
     return (
-      <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-app px-4 py-6 sm:px-6">
         <div className="h-64 animate-pulse rounded-2xl bg-black/5" />
       </main>
     );
   }
   if (!club) {
     return (
-      <main className="mx-auto max-w-[1400px] px-4 py-16 text-center sm:px-6">
+      <main className="mx-auto max-w-app px-4 py-16 text-center sm:px-6">
         <p className="text-gray-500">This club is no longer available.</p>
         <button type="button" onClick={() => router.push("/clubs")} className="mt-4 text-sm font-semibold text-teal hover:underline">
           Back to Clubs
@@ -186,8 +186,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const eventOverlay = overlay?.kind === "event" ? overlay.list[overlay.index] : null;
 
   return (
-    <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <main className="mx-auto max-w-app px-4 py-6 sm:px-6">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         {/* Left: header + tab content */}
         <div className="min-w-0">
           <ClubProfileHeader
