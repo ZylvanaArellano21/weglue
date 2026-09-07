@@ -694,6 +694,7 @@ export type Database = {
           created_at: string
           id: string
           message_type: string
+          reply_to_id: string | null
           sender_id: string
           updated_at: string
         }
@@ -705,6 +706,7 @@ export type Database = {
           created_at?: string
           id?: string
           message_type?: string
+          reply_to_id?: string | null
           sender_id: string
           updated_at?: string
         }
@@ -716,6 +718,7 @@ export type Database = {
           created_at?: string
           id?: string
           message_type?: string
+          reply_to_id?: string | null
           sender_id?: string
           updated_at?: string
         }
@@ -732,6 +735,13 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_reply_to_id_fkey"
+            columns: ["reply_to_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
           {
@@ -939,6 +949,7 @@ export type Database = {
           content: string
           created_at: string
           id: string
+          parent_comment_id: string | null
           post_id: string
           user_id: string
         }
@@ -946,6 +957,7 @@ export type Database = {
           content: string
           created_at?: string
           id?: string
+          parent_comment_id?: string | null
           post_id: string
           user_id: string
         }
@@ -953,10 +965,18 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          parent_comment_id?: string | null
           post_id?: string
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "post_comments_parent_comment_id_fkey"
+            columns: ["parent_comment_id"]
+            isOneToOne: false
+            referencedRelation: "post_comments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "post_comments_post_id_fkey"
             columns: ["post_id"]
@@ -1330,6 +1350,23 @@ export type Database = {
         Args: { other_user_id: string }
         Returns: string
       }
+      get_public_club_media: {
+        Args: { p_after?: string; p_club_id: string; p_limit?: number }
+        Returns: Json
+      }
+      get_public_club_past_events: {
+        Args: { p_after?: string; p_club_id: string; p_limit?: number }
+        Returns: Json
+      }
+      get_public_club_posts: {
+        Args: { p_after?: string; p_club_id: string; p_limit?: number }
+        Returns: Json
+      }
+      get_public_club_profile: { Args: { p_club_id: string }; Returns: Json }
+      get_public_club_upcoming_events: {
+        Args: { p_after?: string; p_club_id: string; p_limit?: number }
+        Returns: Json
+      }
       is_channel_club_officer: {
         Args: { p_channel_id: string }
         Returns: boolean
@@ -1354,6 +1391,17 @@ export type Database = {
           name: string
           result_type: string
           sub: string
+        }[]
+      }
+      search_event_audience_members: {
+        Args: { p_club_id: string; p_limit?: number; p_query?: string }
+        Returns: {
+          avatar_url: string
+          club_role: string
+          full_name: string
+          id: string
+          is_officer: boolean
+          username: string
         }[]
       }
     }

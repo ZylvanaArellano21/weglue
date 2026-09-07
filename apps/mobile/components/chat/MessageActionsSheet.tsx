@@ -37,6 +37,9 @@ interface Props {
   isOwn: boolean;
   canModerate: boolean;
   onClose: () => void;
+  /** Reply to this message (migration 129) — the keyboard-free path to the
+   *  swipe gesture. */
+  onReply?: (message: ThreadMessage) => void;
   onUnsend: (messageId: string) => void;
   onDeleteForMe: (messageId: string) => void;
   /** Resolves true when the report is durably saved; false keeps the sheet
@@ -54,6 +57,7 @@ export function MessageActionsSheet({
   isOwn,
   canModerate,
   onClose,
+  onReply,
   onUnsend,
   onDeleteForMe,
   onReport,
@@ -135,6 +139,15 @@ export function MessageActionsSheet({
 
             {!reporting ? (
               <>
+                {onReply && message && (
+                  <ActionRow
+                    icon="arrow-undo-outline"
+                    label="Reply"
+                    onPress={() => {
+                      onReply(message);
+                    }}
+                  />
+                )}
                 {isText && !!message?.content && (
                   <ActionRow icon="copy-outline" label="Copy" onPress={handleCopy} />
                 )}
@@ -158,7 +171,7 @@ export function MessageActionsSheet({
                 />
                 {(isOwn || canModerate) && (
                   <ActionRow
-                    icon="arrow-undo-outline"
+                    icon="trash-outline"
                     label={isOwn ? 'Unsend for everyone' : 'Delete for everyone'}
                     destructive
                     onPress={() => {

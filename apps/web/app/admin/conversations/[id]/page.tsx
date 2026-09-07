@@ -220,6 +220,11 @@ export default async function AdminConversationDetailPage({ params }: { params: 
                       @{m.sender_username}
                       {m.channel_name ? ` · #${m.channel_name}` : ""}
                     </p>
+                    {m.reply_to ? (
+                      <p className="truncate text-xs text-teal-700">
+                        ↩ Reply to {m.reply_to.sender_username ? `@${m.reply_to.sender_username}` : m.reply_to.sender_name || "Deleted user"} · {m.reply_to.deleted ? "Deleted message" : m.reply_to.preview || "No text preview"} · {m.reply_to.id}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 text-xs text-gray-400">

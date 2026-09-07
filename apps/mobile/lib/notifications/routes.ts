@@ -27,6 +27,8 @@ type RouteSpec = {
 const ROUTE_SPECS: Record<string, RouteSpec> = {
   post: {
     param: 'postId',
+    // `commentId` (comment_reply notifications, migration 128) is optional and
+    // validated separately below — it lets /post open the exact thread.
     build: (p) => ({ pathname: '/post/[postId]', params: { postId: p.postId } }),
   },
   event: {
@@ -86,11 +88,23 @@ export function validateNotificationRoute(raw: unknown): ValidatedRoute | null {
   const built = spec.build(params);
   const validated: ValidatedRoute = { screen: String(route.screen), ...built };
 
+  // Exact-thread targeting for a comment reply: /post carries focusCommentId
+  // so it can open the comments sheet scrolled to the reply.
+  if (route.screen === 'post' && typeof route.commentId === 'string' && UUID_RE.test(route.commentId)) {
+    validated.params = { ...validated.params, focusCommentId: route.commentId };
+  }
+
   // Exact-channel targeting for club chats: open the channel screen itself.
   if (route.screen === 'chat' && typeof route.channelId === 'string' && UUID_RE.test(route.channelId)) {
     validated.channelId = route.channelId;
     validated.pathname = '/chat/[chatId]/[channelId]';
     validated.params = { ...validated.params, channelId: route.channelId };
+  }
+
+  // Exact-message targeting for a message reply (migration 129): the chat
+  // screen scrolls to and pulses jumpToMessageId.
+  if (route.screen === 'chat' && typeof route.messageId === 'string' && UUID_RE.test(route.messageId)) {
+    validated.params = { ...validated.params, jumpToMessageId: route.messageId };
   }
   return validated;
 }

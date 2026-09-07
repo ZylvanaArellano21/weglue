@@ -138,8 +138,19 @@ def clone_stack_db(db, log):
     log.append(f"[setup] create clone rc={rc}\n{out}")
     if rc != 0:
         return False
+    # Exclude the operational schemas whose contents a non-superuser restore
+    # cannot recreate anyway (cron, _realtime, supabase_functions). `cron.job`
+    # in particular stores multi-line SQL bodies (e.g. the migration-117
+    # sync-store-versions `net.http_post(...)` block); when its CREATE SCHEMA
+    # fails for `postgres`, the following COPY data desyncs psql and every
+    # later statement — FK constraints, indexes, RLS policies — is dropped on
+    # the floor, silently gutting the clone. None of these schemas are under
+    # test here; the migration being applied to the clone is.
     rc, out = sh(["docker", "exec", STACK_CONTAINER, "bash", "-lc",
-                  f"pg_dump -U postgres -d postgres | psql -U postgres -d {db} 2>&1 "
+                  f"pg_dump -U postgres -d postgres "
+                  f"--exclude-schema=cron --exclude-schema=_realtime "
+                  f"--exclude-schema=supabase_functions "
+                  f"| psql -U postgres -d {db} 2>&1 "
                   f"| grep -cE '^ERROR' || true"])
     log.append(f"[setup] clone into {db}: {out.strip()} expected ownership/SET ROLE "
                f"errors (they leave `postgres` as owner, which the harness needs)")

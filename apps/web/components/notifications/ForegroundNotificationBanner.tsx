@@ -29,10 +29,12 @@ const SHOWN_IDS_CAP = 200;
 function targetHref(target: NotificationTarget): string | null {
   switch (target.kind) {
     case "event": return `/event/${target.id}`;
-    case "post": return `/post/${target.id}`;
+    case "post": return target.commentId
+      ? `/home?comments=${target.id}&commentFocus=${target.commentId}`
+      : `/post/${target.id}`;
     case "user": return `/u/${target.id}`;
     case "club": return `/club/${target.id}`;
-    case "chat": return messagesHref({ conversationId: target.id, channelId: target.channelId });
+    case "chat": return messagesHref({ conversationId: target.id, channelId: target.channelId, messageId: target.messageId });
     case "notification-actors": return `/home?notifications=1&notifActors=${target.id}`;
     case "notifications": return "/home?notifications=1";
     default: return null;

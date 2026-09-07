@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { pickImageForFeature } from '../../lib/media/pickMedia';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
-import { createEvent, updateEvent, getEventForEdit, searchEventAudienceMembers, type EventAudienceMember } from '../../services/eventService';
+import { createEvent, updateEvent, getEventForEdit, searchEventAudienceMembers, eventAudienceRoleLabel, type EventAudienceMember } from '../../services/eventService';
 import { getUserOfficerClubs, UserClub } from '../../services/clubService';
 import { invalidateClubDataEverywhere } from '../../lib/clubCache';
 import { clientUuid } from '../../lib/chatAttachments';
@@ -745,6 +745,25 @@ export default function NewEventScreen() {
                               >
                                 @{user.username}
                               </Text>
+                              {eventAudienceRoleLabel(user) && (
+                                <View
+                                  style={{
+                                    backgroundColor: 'rgba(255,255,255,0.25)',
+                                    borderRadius: 9999,
+                                    paddingHorizontal: 5,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      fontSize: 10,
+                                      color: '#fff',
+                                      fontFamily: 'Inter_600SemiBold',
+                                    }}
+                                  >
+                                    {eventAudienceRoleLabel(user)}
+                                  </Text>
+                                </View>
+                              )}
                               <TouchableOpacity
                                 onPress={() =>
                                   setSpecificUsers((prev) =>
@@ -982,32 +1001,53 @@ export default function NewEventScreen() {
         emptyText="No eligible current club members found."
         multiSelect
         selectedItems={specificUsers}
-        renderItem={(user, isSelected) => (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingVertical: 12,
-              paddingHorizontal: 12,
-              borderRadius: 12,
-              backgroundColor: isSelected ? 'rgba(15,166,166,0.08)' : '#fff',
-              marginBottom: 8,
-              borderWidth: 1,
-              borderColor: isSelected ? '#0FA6A6' : '#E5E7EB',
-              gap: 10,
-            }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_600SemiBold' }}>
-                {user.full_name}
-              </Text>
-              <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
-                @{user.username}
-              </Text>
+        renderItem={(user, isSelected) => {
+          const roleLabel = eventAudienceRoleLabel(user);
+          return (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: 12,
+                paddingHorizontal: 12,
+                borderRadius: 12,
+                backgroundColor: isSelected ? 'rgba(15,166,166,0.08)' : '#fff',
+                marginBottom: 8,
+                borderWidth: 1,
+                borderColor: isSelected ? '#0FA6A6' : '#E5E7EB',
+                gap: 10,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_600SemiBold' }}>
+                    {user.full_name}
+                  </Text>
+                  {roleLabel && (
+                    <View
+                      style={{
+                        backgroundColor: 'rgba(15,166,166,0.12)',
+                        borderRadius: 9999,
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                      }}
+                    >
+                      <Text
+                        style={{ fontSize: 11, color: '#0B7C7C', fontFamily: 'Inter_600SemiBold' }}
+                      >
+                        {roleLabel}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
+                  @{user.username}
+                </Text>
+              </View>
+              {isSelected && <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />}
             </View>
-            {isSelected && <Ionicons name="checkmark-circle" size={20} color="#0FA6A6" />}
-          </View>
-        )}
+          );
+        }}
       />
     </SafeAreaView>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Dimensions,
   RefreshControl,
   StyleSheet,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -500,10 +501,31 @@ function OfficerRow({ officer, currentUserId }: { officer: ClubOfficer; currentU
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ClubProfileScreen() {
-  const { clubId } = useLocalSearchParams<{ clubId: string }>();
+  const { clubId, source } = useLocalSearchParams<{ clubId: string; source?: string }>();
   const { session, isLoading: authLoading } = useAuthStore();
   const userId = session?.user.id;
   const router = useRouter();
+
+  // A club QR / shared link opened from OUTSIDE the app (source=qr) has no
+  // in-app history to return to. Back from this entry goes to Discovery, the
+  // product's "browse clubs" home — never a dead end or an app exit, and never
+  // affecting a club profile reached normally from inside the app.
+  const isExternalEntry = source === 'qr';
+  const goBack = useCallback(() => {
+    if (isExternalEntry) {
+      router.replace('/(tabs)/search');
+    } else {
+      router.back();
+    }
+  }, [isExternalEntry, router]);
+  useEffect(() => {
+    if (!isExternalEntry) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      router.replace('/(tabs)/search');
+      return true;
+    });
+    return () => sub.remove();
+  }, [isExternalEntry, router]);
   const { show, ToastComponent } = useToast();
   const { officerClubIds } = useOfficerStore();
 
@@ -556,7 +578,7 @@ export default function ClubProfileScreen() {
     }
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
+        <TouchableOpacity onPress={goBack} style={{ padding: 16 }} activeOpacity={0.7}>
           <Ionicons name="chevron-back" size={26} color={INK} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
@@ -584,7 +606,7 @@ export default function ClubProfileScreen() {
   if (isLoading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
+        <TouchableOpacity onPress={goBack} style={{ padding: 16 }} activeOpacity={0.7}>
           <Ionicons name="chevron-back" size={26} color={INK} />
         </TouchableOpacity>
         <View style={{ padding: 16, gap: 16 }}>
@@ -602,7 +624,7 @@ export default function ClubProfileScreen() {
   if (!club) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: CREAM }} edges={['top']}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 16 }} activeOpacity={0.7}>
+        <TouchableOpacity onPress={goBack} style={{ padding: 16 }} activeOpacity={0.7}>
           <Ionicons name="chevron-back" size={26} color={INK} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
@@ -676,7 +698,7 @@ export default function ClubProfileScreen() {
 
           {/* Back arrow */}
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={goBack}
             activeOpacity={0.7}
             style={{
               position: 'absolute',

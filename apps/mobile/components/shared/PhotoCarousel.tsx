@@ -11,7 +11,11 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { clampPostImageRatio, POST_IMAGE_FALLBACK_RATIO } from '@weglue/shared';
+import {
+  clampPostImageRatio,
+  POST_IMAGE_FALLBACK_RATIO,
+  postMediaDisplayRatioDetail,
+} from '@weglue/shared';
 import { getResizedImageUrl } from '../../lib/imageResize';
 
 /**
@@ -61,6 +65,17 @@ interface PhotoCarouselProps {
    * height never jumps while swiping.
    */
   naturalRatio?: boolean;
+  /**
+   * Feed contexts pass this. When set, the display ratio is resolved *purely
+   * synchronously* from the stored dimensions (or the clamped fallback) and the
+   * async `Image.getSize` measurement is never run — so the card commits to a
+   * height at first render and can never resize afterwards. A resize after the
+   * card is already laid out inside a FlatList shifts the list's total content
+   * height, which repeatedly re-clamps the scroll offset and makes the true
+   * bottom of the feed unreachable (see Change 18). The full-screen viewer,
+   * where a late ratio change is harmless, leaves this off.
+   */
+  stableHeightOnly?: boolean;
   /** Open the full-screen viewer on this index. */
   onImagePress?: (index: number) => void;
   /** Fires with the slide index as the user swipes the carousel. */
@@ -92,14 +107,23 @@ const measuredRatioCache = new Map<string, number>();
 /** Resolves the display ratio (w/h) from an image's dimensions: known, else
  *  cached-measured, else freshly measured, else the stable fallback box — all
  *  clamped. For a carousel this is the first image and the result is the
- *  shared slide ratio. */
-function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number {
+ *  shared slide ratio. `isReal` is false when the ratio is only the fallback
+ *  (no stored dimensions and not measured) — the caller then cover-crops
+ *  instead of contain-fitting so there is no letterboxing. */
+function useSingleImageRatio(
+  image: CarouselImage | undefined,
+  enabled: boolean,
+  stableHeightOnly: boolean,
+): { ratio: number; isReal: boolean } {
   const known =
     image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
   const cachedFor = (uri: string | undefined) => (uri ? measuredRatioCache.get(uri) ?? null : null);
-  const [measured, setMeasured] = useState<number | null>(() => cachedFor(image?.uri));
+  const [measured, setMeasured] = useState<number | null>(() =>
+    stableHeightOnly ? null : cachedFor(image?.uri),
+  );
 
   useEffect(() => {
+    if (stableHeightOnly) return; // never measure: height must not change post-layout
     setMeasured(cachedFor(image?.uri));
     if (!enabled || known || !image?.uri || measuredRatioCache.has(image.uri)) return;
     let alive = true;
@@ -115,10 +139,19 @@ function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean)
     return () => {
       alive = false;
     };
-  }, [enabled, known, image?.uri]);
+  }, [enabled, known, image?.uri, stableHeightOnly]);
 
-  if (!enabled) return NaN; // caller falls back to the fixed aspectRatio
-  return clampPostImageRatio(known ?? measured ?? POST_IMAGE_FALLBACK_RATIO);
+  if (!enabled) return { ratio: NaN, isReal: false }; // caller falls back to the fixed aspectRatio
+  if (stableHeightOnly) {
+    // Feed: pure, synchronous, never re-measured. Shared with web via
+    // postMediaDisplayRatioDetail so both platforms frame identically.
+    const detail = postMediaDisplayRatioDetail([
+      image ? { width: image.width ?? null, height: image.height ?? null } : null,
+    ]);
+    return { ratio: detail.ratio, isReal: detail.fromStoredDimensions };
+  }
+  const real = known ?? measured;
+  return { ratio: clampPostImageRatio(real ?? POST_IMAGE_FALLBACK_RATIO), isReal: real != null };
 }
 
 /**
@@ -136,6 +169,7 @@ export const PhotoCarousel = memo(function PhotoCarousel({
   width,
   aspectRatio = 4 / 5,
   naturalRatio = false,
+  stableHeightOnly = false,
   onImagePress,
   onIndexChange,
   rounded = true,
@@ -149,7 +183,11 @@ export const PhotoCarousel = memo(function PhotoCarousel({
 
   // For posts the ratio comes from the first image (single: that image; multi:
   // the one shared slide ratio). Events keep the fixed `aspectRatio`.
-  const sharedRatio = useSingleImageRatio(images[0], naturalRatio && count >= 1);
+  const { ratio: sharedRatio, isReal: sharedRatioIsReal } = useSingleImageRatio(
+    images[0],
+    naturalRatio && count >= 1,
+    stableHeightOnly,
+  );
   const effectiveRatio = Number.isFinite(sharedRatio) ? sharedRatio : aspectRatio;
   const height = Math.round(width / effectiveRatio);
 
@@ -168,10 +206,13 @@ export const PhotoCarousel = memo(function PhotoCarousel({
   };
 
   const renderPhoto = (img: CarouselImage, i: number) => {
-    // A lone natural-aspect image is shown whole (contain-fit): the box already
-    // IS its ratio, so there is nothing to crop. A carousel slide keeps the
-    // cover crop into the shared box.
-    const wholeImage = !multi && naturalRatio && Number.isFinite(sharedRatio);
+    // A lone image whose real ratio is known is shown whole (contain-fit): the
+    // box already IS its ratio, so there is nothing to crop. When the ratio is
+    // only the fallback (no stored dimensions, measurement skipped for feed
+    // stability) we cover-crop into the fallback box instead so there is no
+    // letterboxing. A carousel slide always cover-crops into the shared box.
+    const wholeImage =
+      !multi && naturalRatio && Number.isFinite(sharedRatio) && sharedRatioIsReal;
     const resized =
       getResizedImageUrl(
         img.uri,

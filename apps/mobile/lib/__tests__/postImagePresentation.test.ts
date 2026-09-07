@@ -3,6 +3,7 @@ import {
   clampPostImageRatio,
   naturalCropAspect,
   postMediaDisplayRatio,
+  postMediaDisplayRatioDetail,
   POST_IMAGE_MIN_RATIO,
   POST_IMAGE_MAX_RATIO,
   POST_IMAGE_FALLBACK_RATIO,
@@ -62,6 +63,54 @@ describe('postMediaDisplayRatio', () => {
       POST_IMAGE_FALLBACK_RATIO,
     );
     expect(postMediaDisplayRatio([null])).toBe(POST_IMAGE_FALLBACK_RATIO);
+  });
+});
+
+// ── Change 18 regression guard ───────────────────────────────────────────────
+// The Home feed renders each post card at postMediaDisplayRatioDetail() and
+// must NEVER change that height afterwards: a resize-after-layout shifts the
+// FlatList's content height, re-clamps the scroll offset and makes the true
+// bottom of the feed unreachable. This function is the whole contract for the
+// feed's image height, so lock it down: it must be pure (no async, no
+// Image.getSize), deterministic for identical input, and it must report
+// whether the ratio is real (→ contain-fit) or the fallback box (→ cover-crop,
+// no letterbox).
+describe('postMediaDisplayRatioDetail — feed height must be stable & synchronous', () => {
+  it('is a pure function: identical dimensions always give an identical result', () => {
+    const dims = [{ width: 1600, height: 900 }];
+    const a = postMediaDisplayRatioDetail(dims);
+    const b = postMediaDisplayRatioDetail([{ width: 1600, height: 900 }]);
+    expect(a).toEqual(b);
+    expect(a.ratio).toBeCloseTo(16 / 9, 2);
+    expect(a.fromStoredDimensions).toBe(true);
+  });
+
+  it('reports fromStoredDimensions=false for a legacy/dimensionless image (caller cover-crops)', () => {
+    expect(postMediaDisplayRatioDetail([null])).toEqual({
+      ratio: POST_IMAGE_FALLBACK_RATIO,
+      fromStoredDimensions: false,
+    });
+    expect(postMediaDisplayRatioDetail([{ width: null, height: null }])).toEqual({
+      ratio: POST_IMAGE_FALLBACK_RATIO,
+      fromStoredDimensions: false,
+    });
+  });
+
+  it('never returns a zero/NaN height ratio, even for garbage input', () => {
+    for (const d of [[], [null], [{ width: 0, height: 0 }], [{ width: -5, height: 10 }]] as const) {
+      const { ratio } = postMediaDisplayRatioDetail(d as never);
+      expect(Number.isFinite(ratio)).toBe(true);
+      expect(ratio).toBeGreaterThan(0);
+    }
+  });
+
+  it('returns synchronously — the feed never awaits an image height', () => {
+    const result = postMediaDisplayRatioDetail([{ width: 1200, height: 800 }]);
+    // A thenable here would mean the feed height is resolved asynchronously,
+    // which is the exact shape of the Change 18 regression.
+    expect(typeof (result as { then?: unknown }).then).toBe('undefined');
+    expect(result).toHaveProperty('ratio');
+    expect(result).toHaveProperty('fromStoredDimensions');
   });
 });
 

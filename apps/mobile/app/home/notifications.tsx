@@ -38,9 +38,11 @@ function notificationDescription(item: AppNotification): string {
     case 'new_follower':    return 'started following you';
     case 'like':            return grouped('liked your photo');
     case 'comment':         return grouped('commented on your photo');
+    case 'comment_reply':   return 'replied to your comment';
     case 'event_rsvp':      return 'is going to an event you posted';
     case 'new_event':       return 'posted a new event';
     case 'new_message':     return 'sent you a message';
+    case 'message_reply':   return 'replied to your message';
     case 'gluemate':        return 'is now your Gluemate! 🎉';
     default:                return 'interacted with you';
   }

@@ -169,6 +169,12 @@ MANIFEST = [
               "users/conversations/channels and ROLLBACKs. `ok` is nullable and "
               "NULL fails, so a pre-076 database reports named failures rather "
               "than passing vacuously."),
+    dict(file="test_129_message_reply_to.sh", type="shell", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres", assert_role="postgres (rolled-back fixture transaction)",
+         criterion="shell",
+         note="Requires the full migration ledger through 123; exercises direct "
+              "and group reply links, same-conversation rejection, recipient-only "
+              "notifications, suppression, and ON DELETE SET NULL."),
 
     # ---- shadow-clone family: needs auth.users + the signup trigger, and
     #      performs destructive DELETE FROM auth.users, so it gets its own
@@ -181,6 +187,12 @@ MANIFEST = [
          assert_role="postgres (owner-level trigger/constraint backstop suite)",
          criterion="raise",
          note="Header: production-faithful shadow DB via pg_dump --schema-only."),
+    dict(file="test_131_public_club_twin.sql", type="sql", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres (owner of the clone)",
+         assert_role="anon / authenticated RPC callers plus catalog checks",
+         criterion="raise",
+         note="Rollback fixture; clone source must already include migration 125. "
+              "Never run against the live stack17 database."),
 
     # ---- disposable fixture family: each header documents docker run
     #      postgres:15 + pgowner + a fixture schema + an ordered migration set.
@@ -240,6 +252,13 @@ MANIFEST = [
          criterion="shell",
          note="Runs after test_057_student_blocking on the same `wg` database, "
               "exactly as its header documents."),
+
+    dict(file="test_130_event_audience_member_role.sh", type="shell", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres",
+         assert_role="authenticated (SET ROLE + request.jwt.claim.sub)",
+         criterion="shell",
+         note="Transactional role-enrichment and permission-boundary checks "
+              "for search_event_audience_members after migration 124."),
 
     # ---- PR #29 permission-parity family (069, 070, 072, 073, 074, 075).
     #      These were written AFTER the fixture families and deliberately need
@@ -444,11 +463,25 @@ MANIFEST = [
               "reapplied rotate_chat_invitation body is read-only (no UPDATE / no "
               "token creation), keeps its auth guard and signature, and is "
               "EXECUTE-granted to authenticated only. Wrapped in BEGIN/ROLLBACK."),
+
+    # ---- comment threading + reply notification contract (128, renumbered from
+    # 122 after the interest-matching family 122-127 landed on main). The runner
+    # clones the full migrated local stack into a disposable database, then the
+    # shell harness applies 128 and exercises the real final RLS/triggers.
+    dict(file="test_128_comment_replies.sh", type="shell", env="stack17_clone",
+         chain=None, pg="17.6", setup_role="postgres (throwaway full-schema clone)",
+         assert_role="authenticated RLS + postgres fixture reads",
+         criterion="shell",
+         note="Applies migration 128 inside the disposable clone; covers reply "
+              "linkage, parent-only notification, self-reply, block rejection, "
+              "SET NULL parent deletion, route payload, and unchanged top-level "
+              "comment notification."),
 ]
 
 # Day 10A / Day 10B security harnesses that must also be proven on the
 # Production PostgreSQL major (17) once they pass on their documented 15.
 PG17_COMPAT = [
+    "test_129_message_reply_to.sh",
     "test_055_durable_admin_audit.sql",
     "test_056_fixture_schema.sql",
     "test_056_atomic_admin_mutations.sql",
@@ -460,6 +493,11 @@ PG17_COMPAT = [
     # which is already PostgreSQL 17.6, so it needs no separate 17 rerun.
     "test_062_private_account_posts.sql",
     "test_057_concurrency.sh",
+    "test_128_comment_replies.sh",
+    "test_130_event_audience_member_role.sh",
+    # stack17_clone family: the shared local stack is already PostgreSQL 17.6,
+    # so the clone the runner takes is a faithful 17 target.
+    "test_131_public_club_twin.sql",
 ]
 
 # Minimal synthetic seed required by test_038_039's documented contract.

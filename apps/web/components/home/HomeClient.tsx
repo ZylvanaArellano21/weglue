@@ -50,6 +50,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const eventId = params.get("event");
   const postId = params.get("post");
   const commentsPostId = params.get("comments");
+  const commentFocusId = params.get("commentFocus");
   const attendanceEventId = params.get("attendees");
   const savedOpen = params.get("saved") === "1";
   const notifOpen = params.get("notifications") === "1";
@@ -84,6 +85,24 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
   const openEvent = useCallback((id: string) => set("event", id), [set]);
   const openPost = useCallback((id: string) => set("post", id), [set]);
   const openClub = useCallback((clubId: string) => router.push(`/club/${clubId}`), [router]);
+  // Comment-reply notification: open the comments overlay straight onto the
+  // replied-to thread.
+  const openPostThread = useCallback(
+    (id: string, commentId: string) =>
+      router.push(
+        buildUrl((sp) => {
+          sp.delete("post");
+          sp.set("comments", id);
+          sp.set("commentFocus", commentId);
+        }),
+        { scroll: false }
+      ),
+    [router, buildUrl]
+  );
+  const closeComments = useCallback(
+    () => router.push(buildUrl((sp) => { sp.delete("comments"); sp.delete("commentFocus"); }), { scroll: false }),
+    [router, buildUrl]
+  );
 
   // After creating a post/event: switch to the matching tab and close compose,
   // so the user lands on the feed where their new item appears.
@@ -105,19 +124,19 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
     (target: NotificationTarget) => {
       switch (target.kind) {
         case "event": return openEvent(target.id);
-        case "post": return openPost(target.id);
+        case "post": return target.commentId ? openPostThread(target.id, target.commentId) : openPost(target.id);
         case "user": return router.push(`/u/${target.id}`);
         case "club": return router.push(`/club/${target.id}`);
-        case "chat": return router.push(messagesHref({ conversationId: target.id, channelId: target.channelId }));
+        case "chat": return router.push(messagesHref({ conversationId: target.id, channelId: target.channelId, messageId: target.messageId }));
         case "notification-actors": return set("notifActors", target.id);
         case "notifications": return; // already here
       }
     },
-    [openEvent, openPost, router, set]
+    [openEvent, openPost, openPostThread, router, set]
   );
 
   return (
-    <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+    <main className="mx-auto max-w-app px-4 py-6 sm:px-6">
       {/* The third (Upcoming Events/Calendar) column used to only appear at
           xl (1280px+) while the left sidebar appeared at lg (1024px+) — no
           iPad, portrait or landscape, ever reaches 1280px, so the right
@@ -126,7 +145,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
           narrower fixed side tracks keep all three columns fitting down to
           1024px (the narrowest common tablet-landscape width) with no
           horizontal overflow. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)_minmax(240px,280px)] lg:justify-center">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[208px_minmax(0,1fr)_minmax(232px,264px)] lg:justify-center">
         <div className="hidden lg:block">
           <ProfileSidebar userId={userId} />
         </div>
@@ -200,7 +219,7 @@ function HomeMain({ userId }: { userId: string }): JSX.Element {
           onOpenAttendees={(id) => set("attendees", id)}
         />
       )}
-      {commentsPostId && <PostCommentsModal postId={commentsPostId} userId={userId} onClose={() => clear("comments")} />}
+      {commentsPostId && <PostCommentsModal postId={commentsPostId} userId={userId} focusCommentId={commentFocusId ?? undefined} onClose={closeComments} />}
       {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} userId={userId} onClose={() => clear("attendees")} />}
     </main>
   );

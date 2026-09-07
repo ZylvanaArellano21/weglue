@@ -134,7 +134,15 @@ export function ShareInviteSheet({
 
   return (
     <>
-      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      {/* iOS will not present a second <Modal> over a visible one, so while the
+          phone QrShareScreen (also a <Modal>) is up this sheet's own modal must
+          step aside. Closing the QR screen brings it straight back. */}
+      <Modal
+        visible={visible && !showQrScreen}
+        transparent
+        animationType="slide"
+        onRequestClose={onClose}
+      >
         <Pressable style={styles.overlay} onPress={onClose}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.handle} />

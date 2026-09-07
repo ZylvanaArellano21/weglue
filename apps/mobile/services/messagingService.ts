@@ -28,12 +28,24 @@ export interface ThreadMessage {
   created_at: string;
   attachments?: MessageAttachment[];
   reactions?: MessageReactionSummary[];
+  /** The message this one replies to (migration 129). A compact snapshot — the
+   *  quoted block and the composer banner render from this, and tapping it
+   *  scrolls to `reply_to.id`. null once the target is unsent/deleted. */
+  reply_to?: MessageReplyTarget | null;
   sender: {
     id: string;
     username: string;
     full_name: string | null;
     avatar_url: string | null;
   };
+}
+
+export interface MessageReplyTarget {
+  id: string;
+  content: string | null;
+  message_type: string;
+  attachment_count: number;
+  sender_name: string;
 }
 
 export interface MessageAttachment {
@@ -68,7 +80,7 @@ export interface ThreadPage {
 }
 
 const MESSAGE_SELECT =
-  'id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))';
+  'id, conversation_id, channel_id, sender_id, content, attachment_url, attachment_name, attachment_size, attachment_mime, message_type, shared_event_id, shared_post_id, client_tag, created_at, reply_to_id, reply_to:reply_to_id(id, content, message_type, sender_id, profiles!sender_id(username, full_name), message_attachments(id)), polls(id), profiles!sender_id(id, username, full_name, avatar_url), message_attachments(id, storage_path, kind, position, mime, width, height, byte_size, file_name), message_reactions(id, user_id, emoji, created_at, profiles!user_id(id, username, full_name, avatar_url))';
 
 export interface SharedIdentity {
   id: string;
@@ -174,6 +186,25 @@ function mapReactions(m: any, viewerId?: string): MessageReactionSummary[] {
     .map(({ firstCreatedAt: _firstCreatedAt, ...reaction }) => reaction);
 }
 
+function mapReplyTarget(m: any, identities?: Map<string, SharedIdentity>): ThreadMessage['reply_to'] {
+  const r = m.reply_to;
+  if (!r || !r.id) return null;
+  const shared = r.sender_id ? identities?.get(r.sender_id) : undefined;
+  const name =
+    r.profiles?.full_name?.trim() ||
+    r.profiles?.username ||
+    shared?.full_name?.trim() ||
+    shared?.username ||
+    'Someone';
+  return {
+    id: r.id,
+    content: r.content ?? null,
+    message_type: r.message_type ?? 'text',
+    attachment_count: Array.isArray(r.message_attachments) ? r.message_attachments.length : 0,
+    sender_name: name,
+  };
+}
+
 function mapMessage(m: any, identities?: Map<string, SharedIdentity>, viewerId?: string): ThreadMessage {
   const shared = m.sender_id ? identities?.get(m.sender_id) : undefined;
   return {
@@ -194,6 +225,7 @@ function mapMessage(m: any, identities?: Map<string, SharedIdentity>, viewerId?:
     created_at: m.created_at,
     attachments: mapAttachments(m),
     reactions: mapReactions(m, viewerId),
+    reply_to: mapReplyTarget(m, identities),
     sender: {
       id: m.profiles?.id ?? m.sender_id ?? '',
       username: m.profiles?.username ?? shared?.username ?? '',
@@ -272,6 +304,10 @@ export interface SendMessageInput {
   }>;
   /** Stable per-logical-message tag; retries with the same tag never duplicate. */
   clientTag: string;
+  /** Reply target (migration 129). Same-conversation is enforced by a DB
+   *  trigger; the direct-insert path carries it inline, the grouped RPC path
+   *  gets it via a follow-up UPDATE. */
+  replyToId?: string | null;
 }
 
 export async function sendMessage(input: SendMessageInput): Promise<ThreadMessage> {
@@ -305,6 +341,16 @@ export async function sendMessage(input: SendMessageInput): Promise<ThreadMessag
       if (existing) return mapMessage(existing, undefined, senderId);
     }
     if (rpcError) throw rpcError;
+    // Grouped media is stored by the RPC without a reply link; attach it now.
+    // The BEFORE UPDATE OF reply_to_id trigger validates same-conversation and
+    // the AFTER UPDATE trigger fires the reply notification (NULL -> value).
+    if (input.replyToId) {
+      const { error: linkError } = await supabase
+        .from('messages')
+        .update({ reply_to_id: input.replyToId })
+        .eq('id', messageId);
+      if (linkError) throw linkError;
+    }
     const { data: stored, error: selectError } = await supabase.from('messages').select(MESSAGE_SELECT).eq('id', messageId).single();
     if (selectError) throw selectError;
     return mapMessage(stored, undefined, senderId);
@@ -323,6 +369,7 @@ export async function sendMessage(input: SendMessageInput): Promise<ThreadMessag
       attachment_size: input.attachmentSize ?? null,
       attachment_mime: input.attachmentMime ?? null,
       client_tag: input.clientTag,
+      reply_to_id: input.replyToId ?? null,
     })
     .select(MESSAGE_SELECT)
     .single();

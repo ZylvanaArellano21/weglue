@@ -26,6 +26,7 @@
 //                                'poll','file','shared_event','shared_post'),
 //                                attachment_url/name/size/mime (010/040),
 //                                deleted_at/deleted_by (040), client_tag (040),
+//                                reply_to_id (123),
 //                                created_at, updated_at.
 //   • message_attachments       — ordered position 0..4 attachment metadata;
 //                                attachment_* remains the position-0 legacy
@@ -75,6 +76,42 @@ function textPreview(text: string | null, len = 120): string | null {
   const t = text.trim();
   if (!t) return null;
   return t.length > len ? `${t.slice(0, len)}…` : t;
+}
+
+export interface MessageReplyMeta {
+  id: string;
+  conversation_id: string;
+  sender_id: string | null;
+  sender_name: string | null;
+  sender_username: string | null;
+  preview: string | null;
+  deleted: boolean;
+}
+
+async function messageReplyMap(admin: Admin, ids: (string | null)[]): Promise<Map<string, MessageReplyMeta>> {
+  const map = new Map<string, MessageReplyMeta>();
+  const unique = Array.from(new Set(ids.filter(Boolean))) as string[];
+  if (unique.length === 0) return map;
+  const { data, error } = await admin
+    .from("messages")
+    .select("id, conversation_id, sender_id, message_type, content, deleted_at")
+    .in("id", unique);
+  if (error) throw error;
+  const senders = await profileMap(admin, (data ?? []).map((row: any) => row.sender_id));
+  for (const row of (data ?? []) as any[]) {
+    const deleted = !!row.deleted_at;
+    const sender = row.sender_id ? senders.get(row.sender_id) : null;
+    map.set(row.id, {
+      id: row.id,
+      conversation_id: row.conversation_id,
+      sender_id: row.sender_id ?? null,
+      sender_name: sender?.full_name ?? null,
+      sender_username: sender?.username ?? null,
+      preview: deleted || row.message_type !== "text" ? null : textPreview(row.content, 100),
+      deleted,
+    });
+  }
+  return map;
 }
 
 // ── Conversation-type presentation ───────────────────────────────────────────
@@ -413,6 +450,7 @@ export interface ConversationMessageMeta {
   deleted: boolean;
   report_count: number;
   created_at: string;
+  reply_to: MessageReplyMeta | null;
 }
 
 export interface ConversationReportSummary {
@@ -477,7 +515,7 @@ export async function getConversationDetail(id: string): Promise<ConversationDet
       .limit(200),
     admin
       .from("messages")
-      .select("id, channel_id, sender_id, message_type, content, attachment_url, deleted_at, created_at, profiles!inner(username)")
+      .select("id, channel_id, sender_id, reply_to_id, message_type, content, attachment_url, deleted_at, created_at, profiles!inner(username)")
       .eq("conversation_id", id)
       .order("created_at", { ascending: false })
       .limit(30),
@@ -518,6 +556,7 @@ export async function getConversationDetail(id: string): Promise<ConversationDet
   // Per-recent-message report counts.
   const msgIds = (messagesRaw.data ?? []).map((m: any) => m.id);
   const msgReportCounts = await messageReportCountsMap(admin, msgIds);
+  const replyTargets = await messageReplyMap(admin, (messagesRaw.data ?? []).map((m: any) => m.reply_to_id));
 
   const clubRow = c.club_id ? club.get(c.club_id) : null;
   const creator = c.created_by ? creatorMap.get(c.created_by) : null;
@@ -564,7 +603,9 @@ export async function getConversationDetail(id: string): Promise<ConversationDet
     created_at: ch.created_at ?? null,
   }));
 
-  const recentMessages: ConversationMessageMeta[] = ((messagesRaw.data ?? []) as any[]).map((m) => shapeMessageMeta(m, channelNameById.get(m.channel_id ?? "") ?? null, msgReportCounts.get(m.id) ?? 0));
+  const recentMessages: ConversationMessageMeta[] = ((messagesRaw.data ?? []) as any[]).map((m) =>
+    shapeMessageMeta(m, channelNameById.get(m.channel_id ?? "") ?? null, msgReportCounts.get(m.id) ?? 0, replyTargets.get(m.reply_to_id ?? "") ?? null)
+  );
 
   const reports = ((reportsRes.data ?? []) as any[]).map((r) => ({
     id: r.id,
@@ -615,7 +656,12 @@ function participantRole(conv: { type: string; created_by: string | null }, user
 }
 
 /** Force a metadata-only, privacy-safe shape for one message row. */
-function shapeMessageMeta(m: any, channelName: string | null, reportCount: number): ConversationMessageMeta {
+function shapeMessageMeta(
+  m: any,
+  channelName: string | null,
+  reportCount: number,
+  replyTo: MessageReplyMeta | null = null
+): ConversationMessageMeta {
   const deleted = !!m.deleted_at;
   return {
     id: m.id,
@@ -632,6 +678,7 @@ function shapeMessageMeta(m: any, channelName: string | null, reportCount: numbe
     deleted,
     report_count: reportCount,
     created_at: m.created_at,
+    reply_to: replyTo,
   };
 }
 
@@ -1145,6 +1192,7 @@ export interface MessageDetail {
   poll: MessagePollDetail | null;
   reportCount: number;
   reports: MessageReportDetail[];
+  reply_to: MessageReplyMeta | null;
 }
 
 export async function getMessageDetail(id: string): Promise<MessageDetail | null> {
@@ -1154,7 +1202,7 @@ export async function getMessageDetail(id: string): Promise<MessageDetail | null
   const { data: msg } = await admin
     .from("messages")
     .select(
-      "id, conversation_id, channel_id, sender_id, content, message_type, attachment_url, attachment_name, attachment_size, attachment_mime, deleted_at, created_at, updated_at"
+      "id, conversation_id, channel_id, sender_id, reply_to_id, content, message_type, attachment_url, attachment_name, attachment_size, attachment_mime, deleted_at, created_at, updated_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -1176,9 +1224,10 @@ export async function getMessageDetail(id: string): Promise<MessageDetail | null
       .limit(200),
   ]);
 
-  const [attachments, reactions] = await Promise.all([
+  const [attachments, reactions, replyTargets] = await Promise.all([
     loadMessageAttachments(admin, id, m, deleted),
     loadMessageReactions(admin, id, deleted),
+    messageReplyMap(admin, [m.reply_to_id]),
   ]);
 
   const sender = senderMap.get(m.sender_id);
@@ -1223,6 +1272,7 @@ export async function getMessageDetail(id: string): Promise<MessageDetail | null
       reporter_username: r.reporter_username ?? null,
       created_at: r.created_at,
     })),
+    reply_to: replyTargets.get(m.reply_to_id ?? "") ?? null,
   };
 }
 

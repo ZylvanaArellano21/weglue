@@ -64,5 +64,12 @@ export function useKeyboardVisible(): boolean {
 export function useComposerBottomInset(): number {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
-  return keyboardVisible ? COMPOSER_KEYBOARD_GAP : insets.bottom + COMPOSER_EDGE_GAP;
+  if (!keyboardVisible) return insets.bottom + COMPOSER_EDGE_GAP;
+  // Android edge-to-edge: the IME height reported by `keyboardDidShow`
+  // (useAndroidKeyboardHeight) omits Gboard's persistent toolbar / suggestion
+  // strip, so a composer lifted by that height alone sits ~a strip-height
+  // behind it. Fall back to the system bottom inset (the gesture / nav-bar
+  // area, comparable to that strip) as the compensating buffer. iOS keeps the
+  // tight WhatsApp-style gap unchanged.
+  return Platform.OS === 'android' ? insets.bottom + COMPOSER_KEYBOARD_GAP : COMPOSER_KEYBOARD_GAP;
 }

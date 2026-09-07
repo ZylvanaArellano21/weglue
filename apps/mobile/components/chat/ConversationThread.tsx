@@ -35,7 +35,9 @@ import {
   setMessageReaction,
   removeMessageReaction,
   type ThreadMessage,
+  type MessageReplyTarget,
 } from '../../services/messagingService';
+import { messageReplyPreviewLabel } from '@weglue/shared';
 import { resolveAttachmentUrl, openAttachmentExternally } from '../../lib/chatAttachments';
 import { getConversationRestrictedSenders } from '../../services/messagingService';
 import { displayNameOrFallback } from '../../lib/displayName';
@@ -198,6 +200,41 @@ export function ConversationThread({
       setTimeout(() => setHighlightedId(null), 2500);
     }
   }, [jumpToMessageId, serverMessages.length]);
+
+  // Tap a quoted reply reference → scroll to and pulse the original message.
+  const scrollToMessage = useCallback(
+    (messageId: string) => {
+      const idx = rows.findIndex((r) => r.kind === 'server' && r.msg.id === messageId);
+      if (idx === -1) return;
+      setHighlightedId(messageId);
+      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+      setTimeout(() => setHighlightedId((id) => (id === messageId ? null : id)), 2200);
+    },
+    [rows],
+  );
+
+  // ── Reply target (migration 129) ──
+  const [replyTarget, setReplyTarget] = useState<ThreadMessage | null>(null);
+  useEffect(() => setReplyTarget(null), [conversationId, channelId]);
+  const beginReply = useCallback((m: ThreadMessage) => {
+    setReplyTarget(m);
+  }, []);
+  const replySnapshot = useMemo<MessageReplyTarget | null>(() => {
+    if (!replyTarget) return null;
+    return {
+      id: replyTarget.id,
+      content: replyTarget.content,
+      message_type: replyTarget.message_type,
+      attachment_count: (replyTarget.attachments ?? []).filter((a) => a.kind === 'image').length,
+      sender_name: displayNameOrFallback(replyTarget.sender),
+    };
+  }, [replyTarget]);
+  const replyingToBanner = replySnapshot
+    ? {
+        senderName: replySnapshot.sender_name,
+        label: messageReplyPreviewLabel(replySnapshot),
+      }
+    : null;
 
   // ── Media viewer ──
   // Grouped-media messages contribute one viewer entry per photo so a tap opens
@@ -398,6 +435,11 @@ export function ConversationThread({
           uploadProgress={p.progress}
           onRetry={() => pipeline.retry(p.clientTag)}
           onDiscardFailed={() => pipeline.discardFailed(p.clientTag)}
+          replyPreview={
+            p.replyTo
+              ? { senderName: p.replyTo.sender_name, label: messageReplyPreviewLabel(p.replyTo) }
+              : null
+          }
         />
       );
     }
@@ -443,6 +485,13 @@ export function ConversationThread({
             showSenderInfo={showSenderInfo}
             isLastInGroup={isLastInGroup}
             onLongPress={() => setActionTarget(m)}
+            onSwipeReply={m.message_type === 'poll' ? undefined : () => beginReply(m)}
+            replyPreview={
+              m.reply_to
+                ? { senderName: m.reply_to.sender_name, label: messageReplyPreviewLabel(m.reply_to) }
+                : null
+            }
+            onPressReplyPreview={m.reply_to ? () => scrollToMessage(m.reply_to!.id) : undefined}
             onPressMedia={openMedia}
             onPressFile={openFile}
             onPressAvatar={
@@ -502,9 +551,22 @@ export function ConversationThread({
         isOfficer={isOfficer}
         canPost={canPost}
         blockedReason={blockedReason}
-        onSendText={pipeline.sendText}
-        onSendAttachment={(draft) => pipeline.sendAttachment(draft)}
-        onSendPhotos={(photos, caption) => pipeline.sendPhotos(photos, caption)}
+        replyingTo={replyingToBanner}
+        onCancelReply={() => setReplyTarget(null)}
+        onSendText={(content) => {
+          pipeline.sendText(content, replySnapshot);
+          setReplyTarget(null);
+        }}
+        onSendAttachment={(draft) => {
+          const res = pipeline.sendAttachment(draft, undefined, replySnapshot);
+          setReplyTarget(null);
+          return res;
+        }}
+        onSendPhotos={(photos, caption) => {
+          const res = pipeline.sendPhotos(photos, caption, replySnapshot);
+          setReplyTarget(null);
+          return res;
+        }}
         onAttachmentError={(message) => Alert.alert('Attachment', message)}
         onOpenPoll={allowPolls ? () => setPollOpen(true) : undefined}
       />
@@ -522,6 +584,7 @@ export function ConversationThread({
         isOwn={actionTarget?.sender_id === currentUserId}
         canModerate={canModerate}
         onClose={() => setActionTarget(null)}
+        onReply={(m) => { setActionTarget(null); beginReply(m); }}
         onUnsend={handleUnsend}
         onDeleteForMe={handleDeleteForMe}
         onReport={handleReport}

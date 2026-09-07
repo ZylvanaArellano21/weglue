@@ -144,7 +144,7 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
       className={`${isHome ? "" : "hidden md:block"} sticky top-0 z-40 border-b bg-cream/95 backdrop-blur`}
       style={{ borderColor: "rgba(0,0,0,0.06)" }}
     >
-      <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4 sm:px-6">
+      <div className="mx-auto flex h-16 max-w-app items-center gap-4 px-4 sm:px-6">
         {/* Phone width has no logo/search-bar chrome at all (matches the
             native app's header, which is just the avatar + a couple of
             icons) — the avatar sits first in DOM/left on phone via `order-1`,
