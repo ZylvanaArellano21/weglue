@@ -40,8 +40,16 @@ export interface PostComment {
   id: string;
   content: string;
   created_at: string;
+  /** Immediate parent (migration 128). null for a top-level comment. The DB
+   *  only stores the immediate link — one level of visual nesting is derived
+   *  on the client (see threadComments). */
+  parent_comment_id: string | null;
   author: { id: string; username: string; avatar_url: string | null };
 }
+
+// One-level comment threading is shared with web so both group identically.
+export { threadComments } from '@weglue/shared';
+export type { CommentThread } from '@weglue/shared';
 
 function buildTaggedClubsMap(
   extraTagRows: { post_id: string; club_id: string; clubs: { id: string; name: string } }[] | null,
@@ -573,7 +581,7 @@ export async function updatePostCaption(
 export async function getPostComments(postId: string): Promise<PostComment[]> {
   const { data, error } = await supabase
     .from('post_comments')
-    .select('id, content, created_at, profiles!inner(id, username, avatar_url)')
+    .select('id, content, created_at, parent_comment_id, profiles!inner(id, username, avatar_url)')
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
 
@@ -583,6 +591,7 @@ export async function getPostComments(postId: string): Promise<PostComment[]> {
     id: c.id,
     content: c.content,
     created_at: c.created_at,
+    parent_comment_id: c.parent_comment_id ?? null,
     author: {
       id: c.profiles.id,
       username: c.profiles.username,
@@ -598,10 +607,19 @@ export async function addComment(
   // Stable per-submit tag so a double-tap / lost-response retry does not post
   // the same comment twice (migration 100).
   clientTag: string,
+  // Immediate parent for a reply (migration 128). The DB validates it belongs
+  // to the same post and notifies only that parent's author.
+  parentCommentId: string | null = null,
 ): Promise<void> {
   const { error } = await supabase
     .from('post_comments')
-    .insert({ post_id: postId, user_id: userId, content, client_tag: clientTag });
+    .insert({
+      post_id: postId,
+      user_id: userId,
+      content,
+      client_tag: clientTag,
+      parent_comment_id: parentCommentId,
+    });
 
   if (!error) return;
   // Retry of a comment that already landed under this tag — confirm and succeed.

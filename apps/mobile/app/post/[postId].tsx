@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -15,7 +15,7 @@ import type { FeedPost } from '../../services/postService';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
 export default function PostDetailScreen() {
-  const { postId } = useLocalSearchParams<{ postId: string }>();
+  const { postId, focusCommentId } = useLocalSearchParams<{ postId: string; focusCommentId?: string }>();
   const { session } = useAuthStore();
   const userId = session?.user.id;
   const router = useRouter();
@@ -29,6 +29,17 @@ export default function PostDetailScreen() {
     setActiveDestination('post', postId);
     return () => clearActiveDestination('post', postId);
   }, [postId]);
+
+  // Arrived from a comment_reply notification: open the exact comment thread.
+  const didOpenThreadRef = useRef(false);
+  useEffect(() => {
+    if (didOpenThreadRef.current || !postId || !focusCommentId) return;
+    didOpenThreadRef.current = true;
+    router.push({
+      pathname: '/comments/[postId]',
+      params: { postId, focusCommentId },
+    });
+  }, [postId, focusCommentId, router]);
 
   const { data: post, isLoading } = usePostDetail(postId, userId);
   const { mutate: likePost } = useLikePost();

@@ -18,11 +18,12 @@ export function PageOverlays({ userId }: { userId: string }): JSX.Element | null
   const postId = params.get("post");
   const attendanceEventId = params.get("attendees");
   const commentsPostId = params.get("comments");
+  const commentFocusId = params.get("commentFocus");
 
   const remove = useCallback(
-    (key: string) => {
+    (...keys: string[]) => {
       const sp = new URLSearchParams(params.toString());
-      sp.delete(key);
+      for (const key of keys) sp.delete(key);
       const qs = sp.toString();
       router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -63,7 +64,7 @@ export function PageOverlays({ userId }: { userId: string }): JSX.Element | null
         />
       )}
       {attendanceEventId && <AttendanceListModal eventId={attendanceEventId} userId={userId} onClose={() => remove("attendees")} />}
-      {commentsPostId && <PostCommentsModal postId={commentsPostId} userId={userId} onClose={() => remove("comments")} />}
+      {commentsPostId && <PostCommentsModal postId={commentsPostId} userId={userId} focusCommentId={commentFocusId ?? undefined} onClose={() => remove("comments", "commentFocus")} />}
     </>
   );
 }

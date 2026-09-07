@@ -14,6 +14,8 @@ export interface PostComment {
   id: string;
   content: string;
   created_at: string;
+  /** Immediate parent (migration 128); null for a top-level comment. */
+  parent_comment_id: string | null;
   author: { id: string; username: string; avatar_url: string | null };
 }
 
@@ -21,7 +23,7 @@ async function getPostComments(postId: string): Promise<PostComment[]> {
   const supabase = getSupabaseBrowser();
   const { data, error } = await supabase
     .from("post_comments")
-    .select("id, content, created_at, user_id, profiles!inner(id, username, avatar_url)")
+    .select("id, content, created_at, user_id, parent_comment_id, profiles!inner(id, username, avatar_url)")
     .eq("post_id", postId)
     .order("created_at", { ascending: true });
   if (error) throw error;
@@ -29,6 +31,7 @@ async function getPostComments(postId: string): Promise<PostComment[]> {
     id: c.id,
     content: c.content,
     created_at: c.created_at,
+    parent_comment_id: c.parent_comment_id ?? null,
     author: { id: c.profiles.id, username: c.profiles.username, avatar_url: c.profiles.avatar_url },
   }));
 }
@@ -70,11 +73,25 @@ export function useAddComment() {
   // comment lands (migration 100).
   const tagRef = useRef(clientTag());
   return useMutation({
-    mutationFn: async ({ postId, userId, content }: { postId: string; userId: string; content: string }) => {
+    mutationFn: async ({
+      postId,
+      userId,
+      content,
+      parentCommentId,
+    }: {
+      postId: string;
+      userId: string;
+      content: string;
+      parentCommentId?: string | null;
+    }) => {
       const supabase = getSupabaseBrowser();
-      const { error } = await supabase
-        .from("post_comments")
-        .insert({ post_id: postId, user_id: userId, content: content.trim(), client_tag: tagRef.current });
+      const { error } = await supabase.from("post_comments").insert({
+        post_id: postId,
+        user_id: userId,
+        content: content.trim(),
+        client_tag: tagRef.current,
+        parent_comment_id: parentCommentId ?? null,
+      });
       if (!error) return;
       // Retry of a comment that already posted under this tag — succeed quietly.
       if (isClientTagConflict(error, "uq_post_comments_user_client_tag")) {
@@ -88,7 +105,7 @@ export function useAddComment() {
       }
       throw error;
     },
-    onMutate: async ({ postId, userId, content }) => {
+    onMutate: async ({ postId, userId, content, parentCommentId }) => {
       await qc.cancelQueries({ queryKey: ["postComments", postId] });
       const own = qc.getQueryData<any>(["ownProfile", userId]);
       const previousComments = qc.getQueryData<PostComment[]>(["postComments", postId]);
@@ -97,6 +114,7 @@ export function useAddComment() {
         id: optimisticId,
         content: content.trim(),
         created_at: new Date().toISOString(),
+        parent_comment_id: parentCommentId ?? null,
         author: { id: userId, username: own?.username ?? "you", avatar_url: own?.avatar_url ?? null },
       };
       qc.setQueryData<PostComment[]>(["postComments", postId], (current) => [...(current ?? []), optimistic]);

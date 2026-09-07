@@ -9,8 +9,14 @@
  *
  * Journey: Post → Comments → Commenter Profile → Message
  *   Back: Message → Profile → (same) Comments → close → (same) Post.
+ *
+ * Replies (migration 128): one immediate-parent link per comment, rendered as
+ * a single visual level. A reply-to-a-reply stays at that one level and shows
+ * "↩ @who" so the thread is still readable. The DB notifies only the immediate
+ * parent's author. `focusCommentId` (from a comment_reply notification route)
+ * scrolls to and briefly highlights the reply.
  */
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -31,14 +37,20 @@ import { useAndroidKeyboardHeight } from '../../lib/useAndroidKeyboardHeight';
 import { useComposerBottomInset } from '../../lib/useComposerBottomInset';
 import { usePostComments, useAddComment, usePostDetail } from '../../hooks/useHomePostsFeed';
 import { timeAgo } from '../../components/home/PostCard';
-import type { PostComment } from '../../services/postService';
+import { threadComments, type PostComment } from '../../services/postService';
 import { openReportFlow } from '../../components/shared/ReportButton';
 import { openProfile } from '../../lib/profileNavigation';
 import { clientUuid } from '../../lib/chatAttachments';
 
+type Row =
+  | { kind: 'root'; comment: PostComment }
+  | { kind: 'reply'; comment: PostComment; replyingTo: string | null };
+
+type ReplyTarget = { id: string; username: string };
+
 export default function CommentsScreen() {
   const router = useRouter();
-  const { postId } = useLocalSearchParams<{ postId: string }>();
+  const { postId, focusCommentId } = useLocalSearchParams<{ postId: string; focusCommentId?: string }>();
   const { session } = useAuthStore();
   const viewerUserId = session?.user.id ?? '';
 
@@ -47,12 +59,45 @@ export default function CommentsScreen() {
   // Bottom breathing room, painted INSIDE the opaque sheet in both states.
   const composerBottomInset = useComposerBottomInset();
   const [draft, setDraft] = useState('');
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const inputRef = useRef<TextInput>(null);
+  const listRef = useRef<FlatList<Row>>(null);
   // One idempotency tag per comment; reused if a send has to be retried,
   // regenerated after a comment is posted (migration 100).
   const commentTagRef = useRef(clientUuid());
   const { data: post, isLoading: isPostLoading } = usePostDetail(postId, viewerUserId);
   const { data: comments = [], isLoading } = usePostComments(postId);
   const { mutate: submitComment, isPending } = useAddComment();
+
+  // Flatten one-level threads into FlatList rows so virtualization and
+  // scroll-to-index still work.
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = [];
+    for (const thread of threadComments(comments)) {
+      out.push({ kind: 'root', comment: thread.root });
+      for (const reply of thread.replies) {
+        out.push({ kind: 'reply', comment: reply, replyingTo: reply.replyingTo });
+      }
+    }
+    return out;
+  }, [comments]);
+
+  // From a comment_reply notification: scroll to the reply once it's in the
+  // list, then pulse a highlight so the user can spot it.
+  const didFocusRef = useRef(false);
+  useEffect(() => {
+    if (didFocusRef.current || !focusCommentId || rows.length === 0) return;
+    const index = rows.findIndex((r) => r.comment.id === focusCommentId);
+    if (index < 0) return;
+    didFocusRef.current = true;
+    setHighlightId(focusCommentId);
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+    });
+    const t = setTimeout(() => setHighlightId(null), 2400);
+    return () => clearTimeout(t);
+  }, [focusCommentId, rows]);
 
   // Push the commenter's profile ABOVE this route — no dismiss. Back restores
   // this exact Comments instance (draft + scroll intact).
@@ -65,14 +110,26 @@ export default function CommentsScreen() {
     router.back();
   };
 
+  const startReply = (comment: PostComment) => {
+    setReplyTarget({ id: comment.id, username: comment.author.username });
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   const handleSend = () => {
     const content = draft.trim();
     if (!content || isPending) return;
     submitComment(
-      { postId, userId: viewerUserId, content, clientTag: commentTagRef.current },
+      {
+        postId,
+        userId: viewerUserId,
+        content,
+        clientTag: commentTagRef.current,
+        parentCommentId: replyTarget?.id ?? null,
+      },
       {
         onSuccess: () => {
           setDraft('');
+          setReplyTarget(null);
           commentTagRef.current = clientUuid();
         },
       },
@@ -90,6 +147,65 @@ export default function CommentsScreen() {
   // above so hook order is never conditional.
   if (!postId) return <Redirect href="/(tabs)" />;
 
+  const renderRow = ({ item }: { item: Row }) => {
+    const c = item.comment;
+    const isReply = item.kind === 'reply';
+    const highlighted = highlightId === c.id;
+    return (
+      <View
+        style={[
+          { flexDirection: 'row', gap: 10 },
+          isReply ? { marginLeft: 42 } : null,
+          highlighted
+            ? { backgroundColor: 'rgba(15,166,166,0.12)', borderRadius: 12, paddingVertical: 6, marginVertical: -6, paddingHorizontal: 6, marginHorizontal: -6 }
+            : null,
+        ]}
+      >
+        <TouchableOpacity onPress={() => handlePressCommenter(c.author.id)} activeOpacity={0.7}>
+          <Avatar uri={c.author.avatar_url} size={isReply ? 26 : 32} username={c.author.username} />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 13, color: '#111827', fontFamily: 'Inter_400Regular' }}>
+            <Text
+              onPress={() => handlePressCommenter(c.author.id)}
+              style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}
+            >
+              @{c.author.username}{' '}
+            </Text>
+            {isReply && item.replyingTo && item.replyingTo !== c.author.username ? (
+              <Text style={{ color: '#0B7C7C', fontFamily: 'Inter_400Regular' }}>↩ @{item.replyingTo} </Text>
+            ) : null}
+            {c.content}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 3 }}>
+            <Text style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Inter_400Regular' }}>
+              {timeAgo(c.created_at)}
+            </Text>
+            {post ? (
+              <TouchableOpacity onPress={() => startReply(c)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                <Text style={{ fontSize: 11, color: '#6B7280', fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
+                  Reply
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+        {c.author.id !== viewerUserId && (
+          <TouchableOpacity
+            onPress={() => openReportFlow({ entityType: 'comment', entityId: c.id, entityName: c.content })}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Report this comment"
+            style={{ paddingTop: 2 }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
       <Pressable style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} onPress={close} />
@@ -104,7 +220,10 @@ export default function CommentsScreen() {
         pointerEvents="box-none"
         style={[
           { flex: 1, justifyContent: 'flex-end' },
-          Platform.OS === 'android' ? { marginBottom: androidKeyboardHeight } : null,
+          // Lift the sheet above the Android IME (matches every other composer
+          // surface — paddingBottom, not marginBottom). The composer's own
+          // bottom inset (useComposerBottomInset) adds the strip buffer.
+          Platform.OS === 'android' ? { paddingBottom: androidKeyboardHeight } : null,
         ]}
       >
         <View
@@ -152,15 +271,21 @@ export default function CommentsScreen() {
               <ActivityIndicator color="#0FA6A6" />
             </View>
           ) : (
-            <FlatList<PostComment>
-              data={comments}
-              keyExtractor={(c) => c.id}
+            <FlatList<Row>
+              ref={listRef}
+              data={rows}
+              keyExtractor={(r) => r.comment.id}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}
               // flexShrink lets the list yield height to the composer instead
               // of pushing it off the sheet on long comment lists.
               style={{ minHeight: 120, flexGrow: 0, flexShrink: 1 }}
               ItemSeparatorComponent={() => <View style={{ height: 14 }} />}
+              onScrollToIndexFailed={({ index }) => {
+                setTimeout(() => {
+                  listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+                }, 200);
+              }}
               ListEmptyComponent={
                 <Text
                   style={{
@@ -173,97 +298,95 @@ export default function CommentsScreen() {
                   No comments yet. Be the first!
                 </Text>
               }
-              renderItem={({ item }) => (
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity onPress={() => handlePressCommenter(item.author.id)} activeOpacity={0.7}>
-                    <Avatar uri={item.author.avatar_url} size={32} username={item.author.username} />
-                  </TouchableOpacity>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, color: '#111827', fontFamily: 'Inter_400Regular' }}>
-                      <Text
-                        onPress={() => handlePressCommenter(item.author.id)}
-                        style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}
-                      >
-                        @{item.author.username}{' '}
-                      </Text>
-                      {item.content}
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Inter_400Regular', marginTop: 2 }}>
-                      {timeAgo(item.created_at)}
-                    </Text>
-                  </View>
-                  {item.author.id !== viewerUserId && (
-                    <TouchableOpacity
-                      onPress={() =>
-                        openReportFlow({ entityType: 'comment', entityId: item.id, entityName: item.content })
-                      }
-                      activeOpacity={0.7}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Report this comment"
-                      style={{ paddingTop: 2 }}
-                    >
-                      <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
+              renderItem={renderRow}
             />
           )}
 
-          {post ? <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              paddingHorizontal: 16,
-              paddingTop: 8,
-              paddingBottom: composerBottomInset,
-              borderTopWidth: 1,
-              borderTopColor: '#E5E7EB',
-            }}
-          >
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Add a comment..."
-              placeholderTextColor="#9CA3AF"
+          {post ? (
+            <View
               style={{
-                flex: 1,
-                backgroundColor: '#fff',
-                borderRadius: 20,
-                borderWidth: 1,
-                borderColor: '#E5E7EB',
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                fontSize: 14,
-                color: '#111827',
-                fontFamily: 'Inter_400Regular',
-                maxHeight: 80,
-              }}
-              multiline
-              maxLength={500}
-            />
-            <TouchableOpacity
-              onPress={handleSend}
-              disabled={!draft.trim() || isPending}
-              activeOpacity={0.8}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: draft.trim() && !isPending ? '#0FA6A6' : '#9CA3AF',
+                borderTopWidth: 1,
+                borderTopColor: '#E5E7EB',
+                paddingBottom: composerBottomInset,
               }}
             >
-              {isPending ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="send" size={16} color="#fff" />
-              )}
-            </TouchableOpacity>
-          </View> : null}
+              {replyTarget ? (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingHorizontal: 16,
+                    paddingTop: 8,
+                    paddingBottom: 2,
+                  }}
+                >
+                  <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_400Regular' }}>
+                    Replying to <Text style={{ fontWeight: '700', color: '#0B7C7C', fontFamily: 'Inter_700Bold' }}>@{replyTarget.username}</Text>
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setReplyTarget(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel reply"
+                  >
+                    <Ionicons name="close" size={16} color="#9CA3AF" />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingHorizontal: 16,
+                  paddingTop: replyTarget ? 4 : 8,
+                }}
+              >
+                <TextInput
+                  ref={inputRef}
+                  value={draft}
+                  onChangeText={setDraft}
+                  placeholder={replyTarget ? `Reply to @${replyTarget.username}…` : 'Add a comment...'}
+                  placeholderTextColor="#9CA3AF"
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#fff',
+                    borderRadius: 20,
+                    borderWidth: 1,
+                    borderColor: '#E5E7EB',
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    color: '#111827',
+                    fontFamily: 'Inter_400Regular',
+                    maxHeight: 80,
+                  }}
+                  multiline
+                  maxLength={500}
+                />
+                <TouchableOpacity
+                  onPress={handleSend}
+                  disabled={!draft.trim() || isPending}
+                  activeOpacity={0.8}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 20,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: draft.trim() && !isPending ? '#0FA6A6' : '#9CA3AF',
+                  }}
+                >
+                  {isPending ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="send" size={16} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </View>
