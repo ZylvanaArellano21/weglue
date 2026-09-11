@@ -39,6 +39,7 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -56,6 +57,9 @@ import { DotNavigator } from '../../components/calendar/DotNavigator';
 import { useToast } from '../../components/Toast';
 import { formatEventLocation, isEventPastAt } from '../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../components/events/EventAudienceBadge';
+import { PhotoCarousel } from '../../components/shared/PhotoCarousel';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -258,11 +262,12 @@ export default function CalendarEventDetailScreen() {
           <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
             <EventAudienceBadge visibility={event.visibility} />
           </View>
-          {event.cover_image_url ? (
-            <Image
-              source={{ uri: event.cover_image_url }}
-              style={{ width: '100%', height: 220 }}
-              resizeMode="cover"
+          {event.images.length > 0 ? (
+            <PhotoCarousel
+              images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
+              width={SCREEN_WIDTH}
+              aspectRatio={3 / 2}
+              rounded={false}
             />
           ) : (
             <View

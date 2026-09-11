@@ -93,8 +93,13 @@ export default function FragmentConfirm(): JSX.Element {
     // out a pre-existing session, and never for an email-change (meant to
     // apply to the signed-in user).
     if (consumed && !hadSessionBefore && !isEmailChange) {
+      // Local scope only (task 7): this is a throwaway verification session in
+      // THIS browser. The default (no scope = 'global') signOut revokes the
+      // refresh token for every OTHER signed-in device/browser on this
+      // account too — a plain signup-confirmation click would silently log
+      // the user out of a session they already had open elsewhere.
       try {
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: "local" });
       } catch {}
     }
     setState("confirmed");

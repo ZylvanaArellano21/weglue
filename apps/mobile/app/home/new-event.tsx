@@ -15,9 +15,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { pickImageForFeature } from '../../lib/media/pickMedia';
+import { pickPhotos } from '../../lib/media/pickPhotos';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@weglue/shared';
-import { createEvent, updateEvent, getEventForEdit, searchEventAudienceMembers, eventAudienceRoleLabel, type EventAudienceMember } from '../../services/eventService';
+import { createEvent, updateEvent, getEventForEdit, saveEventImages, searchEventAudienceMembers, eventAudienceRoleLabel, type EventAudienceMember } from '../../services/eventService';
 import { getUserOfficerClubs, UserClub } from '../../services/clubService';
 import { invalidateClubDataEverywhere } from '../../lib/clubCache';
 import { clientUuid } from '../../lib/chatAttachments';
@@ -28,6 +29,16 @@ import { SearchBottomSheet } from '../../components/shared/SearchBottomSheet';
 import { useHomeTabStore } from '../../store/homeTabStore';
 
 type Visibility = 'everyone' | 'members' | 'specific';
+
+// Cover image (required, cropped) + up to this many additional, uncropped
+// photos — task 4. Matches the 5-image cap enforced server-side.
+const MAX_EXTRA_EVENT_PHOTOS = 4;
+
+interface ExtraEventPhoto {
+  uri: string;
+  url: string | null;
+  uploading: boolean;
+}
 
 function formatDate(d: Date): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -80,6 +91,9 @@ export default function NewEventScreen() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [imageCoverMode, setImageCoverMode] = useState<'cover' | 'contain'>('cover');
+  // Additional photos beyond the cover — same upload pipeline, no crop step
+  // (the cover keeps its existing required 4:5 crop unchanged).
+  const [extraPhotos, setExtraPhotos] = useState<ExtraEventPhoto[]>([]);
 
   // Text fields
   const [title, setTitle] = useState('');
@@ -141,6 +155,11 @@ export default function NewEventScreen() {
     setRoom(editEvent.room ?? '');
     setImageUri(editEvent.cover_image_url);
     setImageUrl(editEvent.cover_image_url);
+    setExtraPhotos(
+      editEvent.images
+        .filter((img) => img.position > 0)
+        .map((img) => ({ uri: img.path, url: img.path, uploading: false })),
+    );
     setEventDate(new Date(`${editEvent.event_date}T00:00:00`));
     const [sh, sm] = editEvent.start_time.split(':').map(Number);
     const [eh, em] = editEvent.end_time.split(':').map(Number);
@@ -189,6 +208,33 @@ export default function NewEventScreen() {
     if (picked?.uri) await uploadSelectedEventImage(picked.uri);
   };
 
+  // Additional photos: multi-select up to the remaining slots, upload each,
+  // append in the order picked. A failed upload is dropped rather than left
+  // as a broken placeholder.
+  const handleAddExtraPhotos = async () => {
+    const remaining = MAX_EXTRA_EVENT_PHOTOS - extraPhotos.length;
+    if (remaining <= 0) return;
+    const picked = await pickPhotos(remaining, false);
+    if (picked.length === 0) return;
+    const placeholders: ExtraEventPhoto[] = picked.map((p) => ({ uri: p.uri, url: null, uploading: true }));
+    setExtraPhotos((prev) => [...prev, ...placeholders]);
+    for (const item of placeholders) {
+      try {
+        const uploaded = await uploadEventImage(userId!, item.uri);
+        setExtraPhotos((prev) =>
+          prev.map((p) => (p.uri === item.uri ? { ...p, url: uploaded, uploading: false } : p)),
+        );
+      } catch {
+        show('Failed to upload a photo. It was skipped.', 'error');
+        setExtraPhotos((prev) => prev.filter((p) => p.uri !== item.uri));
+      }
+    }
+  };
+
+  const handleRemoveExtraPhoto = (uri: string) => {
+    setExtraPhotos((prev) => prev.filter((p) => p.uri !== uri));
+  };
+
   const handleUserSearch = useCallback(async (q: string) => {
     setUserSearch(q);
     setSearchingUsers(true);
@@ -222,6 +268,7 @@ export default function NewEventScreen() {
     !!selectedClub &&
     !!imageUri &&
     !!imageUrl &&
+    !extraPhotos.some((p) => p.uploading) &&
     title.trim().length > 0 &&
     about.trim().length > 0 &&
     eventDate !== null &&
@@ -250,6 +297,9 @@ export default function NewEventScreen() {
           specific_user_ids:
             visibility === 'specific' ? specificUsers.map((u) => u.id) : null,
         });
+        // Full ordered replace — cover first, then every additional photo in
+        // the order shown. Safe even when nothing changed: idempotent.
+        await saveEventImages(editEventId, [imageUrl!, ...extraPhotos.map((p) => p.url!)]);
         // The event is embedded in many caches (club profile, Home, Calendar,
         // Weekly Events, saved/RSVP'd lists) — refetch them all so every user
         // surface shows the update immediately.
@@ -277,6 +327,9 @@ export default function NewEventScreen() {
         specific_user_ids:
           visibility === 'specific' ? specificUsers.map((u) => u.id) : undefined,
       }, composeTagRef.current);
+      if (extraPhotos.length > 0) {
+        await saveEventImages(newEventId, [imageUrl!, ...extraPhotos.map((p) => p.url!)]);
+      }
       composeTagRef.current = clientUuid();
       queryClient.invalidateQueries({ queryKey: ['homeEventsFeed', userId] });
       useHomeTabStore.getState().setActiveTab('events');
@@ -497,6 +550,79 @@ export default function NewEventScreen() {
               )}
             </View>
           </TouchableOpacity>
+
+          {/* Additional photos (task 4) — optional, up to MAX_EXTRA_EVENT_PHOTOS
+              more beyond the required cover above. Same upload pipeline, no
+              crop step. Viewers see all of them as a swipeable carousel. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
+            style={{ marginBottom: 16 }}
+          >
+            {extraPhotos.map((photo) => (
+              <View key={photo.uri} style={{ width: 72, height: 72, borderRadius: 10, overflow: 'hidden' }}>
+                <Image source={{ uri: photo.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                {photo.uploading && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      width: '100%',
+                      height: '100%',
+                      backgroundColor: 'rgba(0,0,0,0.4)',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <ActivityIndicator color="#fff" size="small" />
+                  </View>
+                )}
+                <TouchableOpacity
+                  onPress={() => handleRemoveExtraPhoto(photo.uri)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove photo"
+                  style={{
+                    position: 'absolute',
+                    top: 3,
+                    right: 3,
+                    width: 20,
+                    height: 20,
+                    borderRadius: 10,
+                    backgroundColor: 'rgba(0,0,0,0.55)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="close" size={13} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
+            {extraPhotos.length < MAX_EXTRA_EVENT_PHOTOS && (
+              <TouchableOpacity
+                onPress={handleAddExtraPhotos}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Add more photos"
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: '#D1D5DB',
+                  borderStyle: 'dashed',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#fff',
+                }}
+              >
+                <Ionicons name="add" size={22} color="#6B7280" />
+                <Text style={{ fontSize: 10, color: '#6B7280', fontFamily: 'Inter_500Medium', marginTop: 2 }}>
+                  Add photo
+                </Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
 
           {/* Event name */}
           <TextInput

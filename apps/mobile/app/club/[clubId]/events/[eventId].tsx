@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -26,6 +27,9 @@ import { requestLeaveClub } from '../../../../store/leaveClubStore';
 import { openReportFlow } from '../../../../components/shared/ReportButton';
 import { formatEventLocation, isEventPastAt } from '../../../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../../../components/events/EventAudienceBadge';
+import { PhotoCarousel } from '../../../../components/shared/PhotoCarousel';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export type ClubEventDetailParams = {
   clubId: string;
@@ -262,11 +266,12 @@ export default function ClubEventDetailScreen() {
           <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
             <EventAudienceBadge visibility={event.visibility} />
           </View>
-          {event.cover_image_url ? (
-            <Image
-              source={{ uri: event.cover_image_url }}
-              style={{ width: '100%', height: 220 }}
-              resizeMode="cover"
+          {event.images.length > 0 ? (
+            <PhotoCarousel
+              images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
+              width={SCREEN_WIDTH}
+              aspectRatio={3 / 2}
+              rounded={false}
             />
           ) : (
             <View

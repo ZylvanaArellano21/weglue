@@ -34,7 +34,7 @@ export interface AppNotification {
   type: string;
   sender: NotificationSender | null;
   reference_id: string | null;
-  entity_type: 'event' | 'club' | 'message' | 'post' | null;
+  entity_type: 'event' | 'club' | 'message' | 'post' | 'comment' | null;
   /** Pre-rendered copy from the DB trigger (club/chat notifications) —
    * shown verbatim when present. */
   message: string | null;

@@ -376,6 +376,26 @@ function legacyPostImages(imageUrl: string | null): AdminPostImage[] {
   return imageUrl ? [{ path: imageUrl, position: 0, width: null, height: null }] : [];
 }
 
+/** Ordered media for one event (task 4 — mirrors postImagesMap's shape for a
+ * single id, since the admin event detail page only ever needs one event). */
+async function eventImagesFor(
+  admin: ReturnType<typeof createAdminClient>,
+  eventId: string
+): Promise<AdminPostImage[]> {
+  const { data, error } = await admin
+    .from("event_images")
+    .select("storage_path, position, width, height")
+    .eq("event_id", eventId)
+    .order("position", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((image) => ({
+    path: image.storage_path,
+    position: image.position,
+    width: image.width ?? null,
+    height: image.height ?? null,
+  }));
+}
+
 // ── Post detail ────────────────────────────────────────────────────────────────
 
 export interface PostComment {
@@ -976,6 +996,7 @@ export interface EventDetail {
   emoji: string | null;
   description: string | null;
   cover_image_url: string | null;
+  images: AdminPostImage[];
   club_id: string;
   club_name: string | null;
   club_handle: string | null;
@@ -1017,7 +1038,7 @@ export async function getEventDetail(id: string): Promise<EventDetail | null> {
   if (!event) return null;
   const e = event as any;
 
-  const [clubMap, creatorMap, rsvpsRes, relatedRes, reportsRes] = await Promise.all([
+  const [clubMap, creatorMap, rsvpsRes, relatedRes, reportsRes, eventImages] = await Promise.all([
     clubMap_(admin, [e.club_id]),
     profileMap(admin, [e.created_by]),
     admin
@@ -1033,6 +1054,7 @@ export async function getEventDetail(id: string): Promise<EventDetail | null> {
       .eq("entity_type", "event")
       .eq("entity_id", id)
       .order("created_at", { ascending: false }),
+    eventImagesFor(admin, id),
   ]);
 
   const club = clubMap.get(e.club_id);
@@ -1055,6 +1077,7 @@ export async function getEventDetail(id: string): Promise<EventDetail | null> {
     emoji: e.emoji ?? null,
     description: e.description ?? null,
     cover_image_url: e.cover_image_url ?? null,
+    images: eventImages.length > 0 ? eventImages : legacyPostImages(e.cover_image_url ?? null),
     club_id: e.club_id,
     club_name: club?.name ?? null,
     club_handle: club?.handle ?? null,

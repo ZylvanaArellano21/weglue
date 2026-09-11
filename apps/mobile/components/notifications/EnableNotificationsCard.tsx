@@ -110,51 +110,70 @@ export function EnableNotificationsCard({ variant = 'inbox' }: { variant?: Varia
         backgroundColor: '#FFFFFF',
         borderWidth: 1,
         borderColor: '#E5E7EB',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
       }}
     >
-      <View
-        style={{
-          width: 38,
-          height: 38,
-          borderRadius: 10,
-          backgroundColor: 'rgba(15, 166, 166, 0.1)',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Ionicons name="notifications-outline" size={20} color="#0FA6A6" />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
-          {title}
-        </Text>
-        <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_400Regular', marginTop: 2 }}>
-          {subtitle}
-        </Text>
+      {/* Header row: icon + text share the full card width; the dismiss control
+          sits in the top-right corner. The CTA drops to its own row below so
+          the copy never gets squeezed into a narrow column on small phones or
+          split-view tablets. */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+        <View
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            backgroundColor: 'rgba(15, 166, 166, 0.1)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name="notifications-outline" size={20} color="#0FA6A6" />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold' }}>
+            {title}
+          </Text>
+          <Text
+            style={{
+              fontSize: 12,
+              color: '#6B7280',
+              fontFamily: 'Inter_400Regular',
+              marginTop: 2,
+              lineHeight: 17,
+            }}
+          >
+            {subtitle}
+          </Text>
+        </View>
+        <TouchableOpacity
+          onPress={handleDismiss}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss notifications prompt"
+          style={{ marginTop: -2, marginRight: -2, padding: 2 }}
+        >
+          <Ionicons name="close" size={16} color="#9CA3AF" />
+        </TouchableOpacity>
       </View>
       <TouchableOpacity
         onPress={() => (showSettingsPath ? void openNotificationSettings() : void handleEnable())}
         activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={ctaLabel}
         style={{
+          alignSelf: 'flex-end',
+          marginTop: 12,
           backgroundColor: '#0FA6A6',
           borderRadius: 18,
-          paddingHorizontal: 14,
-          paddingVertical: 8,
+          paddingHorizontal: 16,
+          minHeight: 36,
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
         <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', fontFamily: 'Inter_600SemiBold' }}>
           {ctaLabel}
         </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        onPress={handleDismiss}
-        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-        accessibilityLabel="Dismiss notifications prompt"
-      >
-        <Ionicons name="close" size={16} color="#9CA3AF" />
       </TouchableOpacity>
     </View>
   );

@@ -470,6 +470,44 @@ export type Database = {
           },
         ]
       }
+      event_images: {
+        Row: {
+          created_at: string
+          event_id: string
+          height: number | null
+          id: string
+          position: number
+          storage_path: string
+          width: number | null
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          height?: number | null
+          id?: string
+          position: number
+          storage_path: string
+          width?: number | null
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          height?: number | null
+          id?: string
+          position?: number
+          storage_path?: string
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_images_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_interests: {
         Row: {
           event_id: string
@@ -1276,6 +1314,40 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_tx_club_create: {
+        Args: {
+          p_actor_email: string
+          p_actor_id: string
+          p_avatar_url?: string
+          p_banner_url?: string
+          p_correlation_id: string
+          p_cover_image_url?: string
+          p_description?: string
+          p_handle?: string
+          p_meeting_building?: string
+          p_meeting_day?: string
+          p_meeting_location?: string
+          p_meeting_room?: string
+          p_meeting_schedule?: Json
+          p_meeting_time_end?: string
+          p_meeting_time_start?: string
+          p_name: string
+          p_reason?: string
+          p_university_id?: string
+        }
+        Returns: Json
+      }
+      admin_tx_club_update: {
+        Args: {
+          p_actor_email: string
+          p_actor_id: string
+          p_club_id: string
+          p_correlation_id: string
+          p_patch: Json
+          p_reason?: string
+        }
+        Returns: Json
+      }
       before_user_created: { Args: { event: Json }; Returns: Json }
       cast_poll_vote: {
         Args: { p_option_id: string; p_poll_id: string }
@@ -1366,6 +1438,14 @@ export type Database = {
       get_public_club_upcoming_events: {
         Args: { p_after?: string; p_club_id: string; p_limit?: number }
         Returns: Json
+      }
+      insert_event_images_with_dimensions: {
+        Args: {
+          p_event_id: string
+          p_image_dimensions: Json
+          p_image_paths: string[]
+        }
+        Returns: undefined
       }
       is_channel_club_officer: {
         Args: { p_channel_id: string }

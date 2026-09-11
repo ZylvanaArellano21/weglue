@@ -68,6 +68,183 @@ async function fail(action: string, actor: User, error: string, target: Record<s
   return { ok: false, error };
 }
 
+// ── Clubs ───────────────────────────────────────────────────────────────────
+
+export interface ClubMeetingScheduleEntry {
+  day: string;
+  start: string | null;
+  end: string | null;
+}
+
+/** Fields the Admin Dashboard may provide when creating a club. */
+export interface CreateClubInput {
+  name: string;
+  description: string;
+  university_id?: string | null;
+  avatar_url?: string | null;
+  cover_image_url?: string | null;
+  banner_url?: string | null;
+  meeting_day?: string | null;
+  meeting_time_start?: string | null;
+  meeting_time_end?: string | null;
+  meeting_location?: string | null;
+  meeting_building?: string | null;
+  meeting_room?: string | null;
+  meeting_schedule?: ClubMeetingScheduleEntry[] | null;
+}
+
+/** Supported partial fields for editing an existing club. */
+export type ClubPatch = Partial<CreateClubInput> & { is_active?: boolean };
+
+const CLUB_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+
+function cleanNullableText(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return typeof value === "string" ? value.trim() || null : undefined;
+}
+
+function isValidMeetingSchedule(value: unknown): value is ClubMeetingScheduleEntry[] | null {
+  if (value === null) return true;
+  if (!Array.isArray(value) || value.length > 14) return false;
+  return value.every((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const row = entry as Record<string, unknown>;
+    return (
+      typeof row.day === "string" &&
+      row.day.trim().length > 0 &&
+      (row.start === null || typeof row.start === "string") &&
+      (row.end === null || typeof row.end === "string") &&
+      (row.start === null || CLUB_TIME_RE.test(row.start)) &&
+      (row.end === null || CLUB_TIME_RE.test(row.end))
+    );
+  });
+}
+
+function normalizeClubFields(input: unknown): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, error: "Club fields are required." };
+  }
+  const source = input as Record<string, unknown>;
+  const value: Record<string, unknown> = {};
+
+  for (const key of Object.keys(source)) {
+    if (source[key] !== undefined) value[key] = source[key];
+  }
+
+  if ("name" in value) {
+    if (typeof value.name !== "string" || value.name.trim().length < 2 || value.name.trim().length > 120) {
+      return { ok: false, error: "Club name must be 2–120 characters." };
+    }
+    value.name = value.name.trim();
+  }
+  if ("description" in value) {
+    if (typeof value.description !== "string" || value.description.trim().length < 1 || value.description.trim().length > 5000) {
+      return { ok: false, error: "Description must be 1–5000 characters." };
+    }
+    value.description = value.description.trim();
+  }
+  if ("university_id" in value && value.university_id !== null && !isUuid(value.university_id)) {
+    return { ok: false, error: "Invalid university id." };
+  }
+  for (const key of [
+    "avatar_url", "cover_image_url", "banner_url", "meeting_day", "meeting_location",
+    "meeting_building", "meeting_room",
+  ]) {
+    if (key in value) {
+      const clean = cleanNullableText(value[key]);
+      if (value[key] !== null && value[key] !== undefined && clean === undefined) {
+        return { ok: false, error: `Invalid ${key.replace(/_/g, " ")}.` };
+      }
+      value[key] = clean;
+    }
+  }
+  for (const key of ["meeting_time_start", "meeting_time_end"]) {
+    if (key in value) {
+      const clean = cleanNullableText(value[key]);
+      if (clean !== null && clean !== undefined && !CLUB_TIME_RE.test(clean)) {
+        return { ok: false, error: `${key.replace(/_/g, " ")} must be a valid time.` };
+      }
+      value[key] = clean;
+    }
+  }
+  if ("meeting_schedule" in value && !isValidMeetingSchedule(value.meeting_schedule)) {
+    return { ok: false, error: "Meeting schedule is invalid." };
+  }
+  if ("is_active" in value && typeof value.is_active !== "boolean") {
+    return { ok: false, error: "is_active must be a boolean." };
+  }
+
+  return { ok: true, value };
+}
+
+/** Create a club through the server-only atomic admin RPC. */
+export async function createClub(input: CreateClubInput): Promise<ActionResult> {
+  const actor = await requireSecureAdmin({ write: true });
+  const normalized = normalizeClubFields(input);
+  const target = {};
+  if (!normalized.ok) return fail("club.create", actor, normalized.error, target);
+  const createAllowed = new Set([
+    "name", "description", "university_id", "avatar_url", "cover_image_url", "banner_url",
+    "meeting_day", "meeting_time_start", "meeting_time_end", "meeting_location", "meeting_building",
+    "meeting_room", "meeting_schedule",
+  ]);
+  if (Object.keys(normalized.value).some((key) => !createAllowed.has(key))) {
+    return fail("club.create", actor, "The submitted club fields are not supported.", target);
+  }
+  if (!("name" in normalized.value) || !("description" in normalized.value)) {
+    return fail("club.create", actor, "Name and description are required.", target);
+  }
+
+  const v = normalized.value;
+  return runAtomicMutation({
+    action: "club.create",
+    actor,
+    rpc: "admin_tx_club_create",
+    args: {
+      p_name: v.name,
+      p_description: v.description,
+      p_university_id: v.university_id ?? null,
+      p_avatar_url: v.avatar_url ?? null,
+      p_cover_image_url: v.cover_image_url ?? null,
+      p_banner_url: v.banner_url ?? null,
+      p_meeting_day: v.meeting_day ?? null,
+      p_meeting_time_start: v.meeting_time_start ?? null,
+      p_meeting_time_end: v.meeting_time_end ?? null,
+      p_meeting_location: v.meeting_location ?? null,
+      p_meeting_building: v.meeting_building ?? null,
+      p_meeting_room: v.meeting_room ?? null,
+      p_meeting_schedule: v.meeting_schedule ?? null,
+    },
+    target,
+  });
+}
+
+/** Edit the allowlisted club information fields through the atomic admin RPC. */
+export async function updateClub(clubId: string, patch: ClubPatch): Promise<ActionResult> {
+  const actor = await requireSecureAdmin({ write: true });
+  if (!isUuid(clubId)) return fail("club.edit", actor, "Invalid club id.", { clubId });
+  const normalized = normalizeClubFields(patch);
+  if (!normalized.ok) return fail("club.edit", actor, normalized.error, { clubId });
+  const allowed = new Set([
+    "name", "description", "university_id", "avatar_url", "cover_image_url", "banner_url",
+    "meeting_day", "meeting_time_start", "meeting_time_end", "meeting_location", "meeting_building",
+    "meeting_room", "meeting_schedule", "is_active",
+  ]);
+  const keys = Object.keys(normalized.value);
+  if (keys.length === 0 || keys.some((key) => !allowed.has(key))) {
+    return fail("club.edit", actor, keys.length === 0 ? "Choose at least one club field to update." : "The submitted club fields are not supported.", { clubId });
+  }
+
+  return runAtomicMutation({
+    action: "club.edit",
+    actor,
+    rpc: "admin_tx_club_update",
+    args: { p_club_id: clubId, p_patch: normalized.value },
+    target: { clubId },
+  });
+}
+
 // ── Memberships ──────────────────────────────────────────────────────────────
 //
 // DAY 10A HARDENING — every mutation below now runs through a migration-056
@@ -164,6 +341,62 @@ export async function setMembershipRole(
       p_role_title: role === "officer" ? (roleTitle ?? "Officer").trim() : "Officer",
     },
     target: { clubId, userId, role },
+  });
+}
+
+/** Set the authoritative club_members role for an existing club member. */
+export async function setOfficerRole(
+  clubId: string,
+  userId: string,
+  role: "member" | "officer",
+  roleTitle = "Officer",
+  reason?: string
+): Promise<ActionResult> {
+  const actor = await requireSecureAdmin({ write: true });
+  const action = role === "officer" ? "officer.promote" : "officer.demote";
+  if (!isUuid(clubId) || !isUuid(userId)) {
+    return fail(action, actor, "Invalid club or user id.", { clubId, userId, role });
+  }
+  if (role !== "member" && role !== "officer") {
+    return fail(action, actor, "Invalid role.", { clubId, userId, role });
+  }
+  const cleanTitle = (roleTitle ?? "Officer").trim();
+  if (cleanTitle.length < 2 || cleanTitle.length > 40) {
+    return fail(action, actor, "Officer title must be 2–40 characters.", { clubId, userId, role });
+  }
+  return runAtomicMutation({
+    action,
+    actor,
+    reason,
+    rpc: "admin_tx_member_role_set",
+    args: {
+      p_club_id: clubId,
+      p_user_id: userId,
+      p_role: role,
+      p_role_title: role === "officer" ? cleanTitle : "Officer",
+    },
+    target: { clubId, userId, role },
+  });
+}
+
+/** Remove officer authority and roster membership while retaining ordinary membership. */
+export async function removeOfficer(clubId: string, userId: string, reason: string): Promise<ActionResult> {
+  const actor = await requireSecureAdmin({ write: true });
+  if (!isUuid(clubId) || !isUuid(userId)) {
+    return fail("officer.demote", actor, "Invalid club or user id.", { clubId, userId });
+  }
+  return runAtomicMutation({
+    action: "officer.demote",
+    actor,
+    reason,
+    rpc: "admin_tx_member_role_set",
+    args: {
+      p_club_id: clubId,
+      p_user_id: userId,
+      p_role: "member",
+      p_role_title: "Officer",
+    },
+    target: { clubId, userId, role: "member" },
   });
 }
 

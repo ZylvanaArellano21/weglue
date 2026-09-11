@@ -1,19 +1,21 @@
 /**
  * Single source of truth for the bottom tab-bar height, shared by the tab
  * navigator (app/(tabs)/_layout.tsx) and every scrollable tab screen so their
- * content never hides behind the bar.
+ * content has a little breathing room above the bar.
  *
- * The visible bar is TAB_BAR_BASE_HEIGHT plus the device's bottom safe-area
- * inset (home indicator on iPhone, gesture/nav bar on Android). Screens use
- * `useTabBarBottomPadding()` to reserve exactly that much space beneath their
- * last row, with a little extra breathing room.
+ * The tab navigator lays the teal bar out BELOW the screen container (it is not
+ * absolutely positioned), and the bar's own height already includes the bottom
+ * safe-area inset. So screen content already stops exactly at the top of the
+ * bar — it never scrolls underneath it. Screens therefore only need a small
+ * bottom padding for visual spacing, NOT the full bar height. Reserving the
+ * whole bar height here is what produced the cream strip between the last row
+ * and the teal bar.
  */
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const TAB_BAR_BASE_HEIGHT = 54;
 
-/** Bottom content padding that clears the tab bar on the current device. */
+/** Bottom content padding for a tab screen's scroll view: just breathing room
+ *  above the (non-overlapping) tab bar. */
 export function useTabBarBottomPadding(extra = 16): number {
-  const insets = useSafeAreaInsets();
-  return TAB_BAR_BASE_HEIGHT + insets.bottom + extra;
+  return extra;
 }

@@ -603,6 +603,7 @@ export interface ClubDetail {
   avatar_url: string | null;
   cover_image_url: string | null;
   university: string | null;
+  university_id: string | null;
   meeting_day: string | null;
   meeting_time_start: string | null;
   meeting_time_end: string | null;
@@ -723,6 +724,7 @@ export async function getClubDetail(id: string): Promise<ClubDetail | null> {
     avatar_url: c.avatar_url,
     cover_image_url: c.cover_image_url ?? c.banner_url ?? null,
     university: (uniName as any)?.data?.name ?? null,
+    university_id: c.university_id ?? null,
     meeting_day: c.meeting_day,
     meeting_time_start: c.meeting_time_start,
     meeting_time_end: c.meeting_time_end,

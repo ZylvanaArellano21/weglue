@@ -63,6 +63,18 @@ export function removePostFromCaches(queryClient: QueryClient, postId: string): 
   queryClient.invalidateQueries({ queryKey: ['clubProfile'] });
 }
 
+// `posts` is NOT in the `supabase_realtime` publication (verified against the
+// live schema), so a postgres_changes subscription on it would silently never
+// fire — an earlier version of this hook tried that and it was dead code. The
+// "new posts" red dot (task 6) instead relies on this query staying fresh on
+// its own: a short foreground-only refetchInterval (React Query pauses it
+// automatically while backgrounded via the app's focusManager/AppState wiring
+// in app/_layout.tsx) plus the normal refetch-on-focus/staleTime/mutation-
+// invalidation triggers already firing elsewhere in the app. The caller
+// (HomeScreen) registers whatever the newest OTHER-author post is on every
+// data change — see homeTabStore.registerForeignPost — so the dot is always
+// derived from a post that is genuinely present in this exact feed result,
+// never from a differently-scoped realtime event.
 export function useHomePostsFeed(userId: string | undefined) {
   return useInfiniteQuery({
     queryKey: ['homePostsFeed', userId],
@@ -73,6 +85,7 @@ export function useHomePostsFeed(userId: string | undefined) {
     initialPageParam: 0,
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
+    refetchInterval: 45 * 1000,
   });
 }
 

@@ -5,6 +5,7 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -21,7 +22,10 @@ import { requestLeaveClub } from '../../store/leaveClubStore';
 import { openReportFlow } from '../../components/shared/ReportButton';
 import { formatEventLocation, isEventPastAt } from '../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../components/events/EventAudienceBadge';
+import { PhotoCarousel } from '../../components/shared/PhotoCarousel';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00');
@@ -211,11 +215,11 @@ export default function EventDetailScreen() {
           {/* Hero Image */}
           <View style={{ paddingHorizontal: 16 }}>
             <EventAudienceBadge visibility={event.visibility} />
-            {event.cover_image_url ? (
-              <Image
-                source={{ uri: event.cover_image_url }}
-                style={{ width: '100%', height: 220, borderRadius: 14 }}
-                resizeMode="cover"
+            {event.images.length > 0 ? (
+              <PhotoCarousel
+                images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
+                width={SCREEN_WIDTH - 32}
+                aspectRatio={3 / 2}
               />
             ) : (
               <View

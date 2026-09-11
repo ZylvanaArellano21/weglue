@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import type { AttendeePreview } from './eventService';
+import type { AttendeePreview, EventImage } from './eventService';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -16,6 +16,11 @@ export interface CalendarEvent {
   building: string | null;
   room: string | null;
   cover_image_url: string | null;
+  /** Ordered image set (task 4). getCalendarEvents (the tab's own list, kept
+   *  lean like every other feed list) synthesizes this from cover_image_url
+   *  alone with no extra query; getCalendarDayEvents (the detail screen's
+   *  data source) fetches the real ordered set. */
+  images: EventImage[];
   club: { id: string; name: string; avatar_url: string | null };
   attendee_count: number;
   attendee_preview: AttendeePreview[];
@@ -68,6 +73,7 @@ export interface CalendarSection {
 async function enrichWithAttendees(
   rawEvents: any[],
   userId: string,
+  imagesByEvent?: Map<string, EventImage[]>,
 ): Promise<CalendarEvent[]> {
   if (rawEvents.length === 0) return [];
 
@@ -116,6 +122,7 @@ async function enrichWithAttendees(
     building: e.building ?? null,
     room: e.room ?? null,
     cover_image_url: e.cover_image_url ?? null,
+    images: imagesByEvent?.get(e.id) ?? (e.cover_image_url ? [{ path: e.cover_image_url, position: 0, width: null, height: null }] : []),
     club: { id: e.clubs.id, name: e.clubs.name, avatar_url: e.clubs.avatar_url ?? null },
     attendee_count: countMap.get(e.id) ?? 0,
     attendee_preview: previewMap.get(e.id) ?? [],
@@ -224,7 +231,20 @@ export async function getCalendarDayEvents(
 
   if (!rawEvents) return [];
 
-  return enrichWithAttendees(rawEvents as any[], userId);
+  const dayEventIds = (rawEvents as any[]).map((e) => e.id);
+  const { data: imageRows } = await supabase
+    .from('event_images')
+    .select('event_id, storage_path, position, width, height')
+    .in('event_id', dayEventIds)
+    .order('position', { ascending: true });
+  const imagesByEvent = new Map<string, EventImage[]>();
+  for (const row of (imageRows ?? []) as any[]) {
+    const list = imagesByEvent.get(row.event_id) ?? [];
+    list.push({ path: row.storage_path, position: row.position, width: row.width ?? null, height: row.height ?? null });
+    imagesByEvent.set(row.event_id, list);
+  }
+
+  return enrichWithAttendees(rawEvents as any[], userId, imagesByEvent);
 }
 
 // ─── Section bucketing ───────────────────────────────────────────────────────

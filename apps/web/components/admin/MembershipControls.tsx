@@ -11,7 +11,12 @@ import {
   setMembershipRole,
   editOfficerTitle,
   removeMembership,
+  createClub,
+  updateClub,
+  type CreateClubInput,
+  type ClubPatch,
 } from "../../lib/admin/actions";
+import type { UniversityOption } from "../../lib/admin/data";
 
 function useRunner() {
   const router = useRouter();
@@ -284,5 +289,291 @@ export function MemberRowActions({
         </>
       )}
     </div>
+  );
+}
+
+// ── Create / edit club ───────────────────────────────────────────────────────
+//
+// Officer add/promote/demote/remove is handled entirely by the dialogs above
+// (already live). This section is the piece that was actually missing: club
+// creation and editing club information. `handle` is intentionally never a
+// form field — the database derives it from the name (see createClub's own
+// doc comment) and always wins, so showing an editable handle box would be
+// misleading.
+
+interface ClubFormState {
+  name: string;
+  description: string;
+  university_id: string;
+  meeting_day: string;
+  meeting_time_start: string;
+  meeting_time_end: string;
+  meeting_location: string;
+  meeting_building: string;
+  meeting_room: string;
+}
+
+const EMPTY_CLUB_FORM: ClubFormState = {
+  name: "",
+  description: "",
+  university_id: "",
+  meeting_day: "",
+  meeting_time_start: "",
+  meeting_time_end: "",
+  meeting_location: "",
+  meeting_building: "",
+  meeting_room: "",
+};
+
+const MEETING_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const inputClass =
+  "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100";
+const labelClass = "mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500";
+
+function clubDetailToForm(club: {
+  name: string;
+  description: string | null;
+  university_id: string | null;
+  meeting_day: string | null;
+  meeting_time_start: string | null;
+  meeting_time_end: string | null;
+  meeting_location: string | null;
+  meeting_building: string | null;
+  meeting_room: string | null;
+}): ClubFormState {
+  return {
+    name: club.name,
+    description: club.description ?? "",
+    university_id: club.university_id ?? "",
+    meeting_day: club.meeting_day ?? "",
+    // Postgres TIME comes back as "HH:MM:SS"; <input type="time"> wants "HH:MM".
+    meeting_time_start: (club.meeting_time_start ?? "").slice(0, 5),
+    meeting_time_end: (club.meeting_time_end ?? "").slice(0, 5),
+    meeting_location: club.meeting_location ?? "",
+    meeting_building: club.meeting_building ?? "",
+    meeting_room: club.meeting_room ?? "",
+  };
+}
+
+function formToClubInput(form: ClubFormState): CreateClubInput {
+  return {
+    name: form.name.trim(),
+    description: form.description.trim(),
+    university_id: form.university_id || null,
+    meeting_day: form.meeting_day || null,
+    meeting_time_start: form.meeting_time_start || null,
+    meeting_time_end: form.meeting_time_end || null,
+    meeting_location: form.meeting_location.trim() || null,
+    meeting_building: form.meeting_building.trim() || null,
+    meeting_room: form.meeting_room.trim() || null,
+  };
+}
+
+function ClubFormFields({
+  form,
+  onChange,
+  universities,
+}: {
+  form: ClubFormState;
+  onChange: <K extends keyof ClubFormState>(key: K, value: ClubFormState[K]) => void;
+  universities: UniversityOption[];
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className={labelClass}>Name</label>
+        <input value={form.name} onChange={(e) => onChange("name", e.target.value)} maxLength={120} autoFocus className={inputClass} />
+      </div>
+      <div>
+        <label className={labelClass}>Description</label>
+        <textarea
+          value={form.description}
+          onChange={(e) => onChange("description", e.target.value)}
+          maxLength={5000}
+          rows={3}
+          className={inputClass}
+        />
+      </div>
+      <div>
+        <label className={labelClass}>University</label>
+        <select value={form.university_id} onChange={(e) => onChange("university_id", e.target.value)} className={`${inputClass} bg-white`}>
+          <option value="">— None —</option>
+          {universities.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className={labelClass}>Meeting day</label>
+          <select value={form.meeting_day} onChange={(e) => onChange("meeting_day", e.target.value)} className={`${inputClass} bg-white`}>
+            <option value="">—</option>
+            {MEETING_DAYS.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className={labelClass}>Start</label>
+          <input type="time" value={form.meeting_time_start} onChange={(e) => onChange("meeting_time_start", e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>End</label>
+          <input type="time" value={form.meeting_time_end} onChange={(e) => onChange("meeting_time_end", e.target.value)} className={inputClass} />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className={labelClass}>Location</label>
+          <input value={form.meeting_location} onChange={(e) => onChange("meeting_location", e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>Building</label>
+          <input value={form.meeting_building} onChange={(e) => onChange("meeting_building", e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>Room</label>
+          <input value={form.meeting_room} onChange={(e) => onChange("meeting_room", e.target.value)} className={inputClass} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Create a new club. Redirects to the new club's detail page on success. */
+export function CreateClubDialog({ universities }: { universities: UniversityOption[] }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<ClubFormState>(EMPTY_CLUB_FORM);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function reset() {
+    setForm(EMPTY_CLUB_FORM);
+    setError(null);
+  }
+
+  function setField<K extends keyof ClubFormState>(key: K, value: ClubFormState[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function submit() {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await createClub(formToClubInput(form));
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setOpen(false);
+      reset();
+      const created = res.data as { id?: string } | undefined;
+      if (created?.id) router.push(`/admin/clubs/${created.id}`);
+      else router.refresh();
+    } catch {
+      setError("Something went wrong.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const canSubmit = form.name.trim().length >= 2 && form.description.trim().length >= 1;
+
+  return (
+    <>
+      <DialogButton label="＋ Create club" onClick={() => setOpen(true)} primary />
+      {open ? (
+        <Modal onClose={() => (pending ? null : (setOpen(false), reset()))} maxWidth={520}>
+          <div className="space-y-4 p-5">
+            <h3 className="text-base font-semibold text-gray-900">Create club</h3>
+            <ClubFormFields form={form} onChange={setField} universities={universities} />
+            {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+            <div className="flex justify-end gap-2">
+              <DialogButton label="Cancel" onClick={() => (setOpen(false), reset())} />
+              <button
+                disabled={!canSubmit || pending}
+                onClick={submit}
+                className="rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
+              >
+                {pending ? "Creating…" : "Create club"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </>
+  );
+}
+
+/** Edit an existing club's information. */
+export function EditClubDialog({
+  clubId,
+  club,
+  universities,
+}: {
+  clubId: string;
+  club: {
+    name: string;
+    description: string | null;
+    university_id: string | null;
+    meeting_day: string | null;
+    meeting_time_start: string | null;
+    meeting_time_end: string | null;
+    meeting_location: string | null;
+    meeting_building: string | null;
+    meeting_room: string | null;
+  };
+  universities: UniversityOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<ClubFormState>(() => clubDetailToForm(club));
+  const { pending, error, setError, run } = useRunner();
+
+  function openDialog() {
+    setForm(clubDetailToForm(club));
+    setError(null);
+    setOpen(true);
+  }
+
+  function setField<K extends keyof ClubFormState>(key: K, value: ClubFormState[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function submit() {
+    const patch: ClubPatch = formToClubInput(form);
+    run(() => updateClub(clubId, patch), () => setOpen(false));
+  }
+
+  const canSubmit = form.name.trim().length >= 2 && form.description.trim().length >= 1;
+
+  return (
+    <>
+      <DialogButton label="Edit club details" onClick={openDialog} />
+      {open ? (
+        <Modal onClose={() => (pending ? null : setOpen(false))} maxWidth={520}>
+          <div className="space-y-4 p-5">
+            <h3 className="text-base font-semibold text-gray-900">Edit club details</h3>
+            <ClubFormFields form={form} onChange={setField} universities={universities} />
+            {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+            <div className="flex justify-end gap-2">
+              <DialogButton label="Cancel" onClick={() => setOpen(false)} />
+              <button
+                disabled={!canSubmit || pending}
+                onClick={submit}
+                className="rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
+              >
+                {pending ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </>
   );
 }

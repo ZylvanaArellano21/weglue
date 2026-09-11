@@ -11,11 +11,16 @@ import { getSupabaseBrowser } from "./supabase-browser";
 //
 //   1. Realtime channels first, so no subscription callback can rehydrate a
 //      cache we are about to wipe.
-//   2. Sign out — GLOBAL on web (not `local`), because the browser also holds
-//      httpOnly Supabase cookies that the Next.js server reads. A local-only
-//      sign-out would clear localStorage while the server still saw a valid
-//      session cookie, and every server component would keep rendering as
-//      signed in.
+//   2. Sign out — LOCAL scope. `scope` controls how many OTHER
+//      sessions/devices get their refresh token revoked server-side, not
+//      which storage this browser clears: `local`, `global`, and `others` all
+//      clear this browser's own storage/httpOnly Supabase cookies and end
+//      this tab's session. `global` additionally revokes every refresh token
+//      for the account on every OTHER device (phone, other browsers) — this
+//      previously ran as the DEFAULT (no `scope` argument = 'global'), which
+//      is why an ordinary "Log out" here silently ended every session on the
+//      account everywhere else too (task 7). A normal logout must only ever
+//      end THIS session.
 //   3. Wipe the in-memory React Query cache — all of it is account-scoped.
 //   4. Hard navigation to the public landing page (never router.push): a full
 //      document load discards every client cache, unmounts the authenticated
@@ -53,19 +58,13 @@ export async function tearDownAuthenticatedSession(
     // Channels are local objects; failing to remove them cannot block logout.
   }
 
-  // 2. The actual sign-out. Global scope so the server-side cookies go too.
+  // 2. The actual sign-out. `local` scope: end THIS session/browser only —
+  //    never the account's other devices (see the file header).
   let signedOut = true;
   try {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      // A network failure still leaves a stale local session behind. Fall back
-      // to the local clear so this browser is at least not signed in — but
-      // report the failure so the UI can say what happened.
-      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
-      signedOut = false;
-    }
+    const { error } = await supabase.auth.signOut({ scope: "local" });
+    if (error) signedOut = false;
   } catch {
-    await supabase.auth.signOut({ scope: "local" }).catch(() => {});
     signedOut = false;
   }
 
