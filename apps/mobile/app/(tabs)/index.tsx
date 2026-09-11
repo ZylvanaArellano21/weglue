@@ -22,7 +22,8 @@ import { HomeTabletSidePanel } from '../../components/home/HomeTabletSidePanel';
 import { Avatar } from '../../components/shared/Avatar';
 import { useUnreadSummaryValue } from '../../hooks/useUnreadSummary';
 import { useAppUpdateStatus } from '../../hooks/useAppUpdateStatus';
-import { CountBadge } from '../../components/shared/CountBadge';
+import { useHomePostsFeed } from '../../hooks/useHomePostsFeed';
+import { CountBadge, NotificationDot } from '../../components/shared/CountBadge';
 import { EnableNotificationsCard } from '../../components/notifications/EnableNotificationsCard';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
@@ -37,7 +38,8 @@ type ActiveTab = 'posts' | 'events';
 export default function HomeScreen() {
   const { session, profile } = useAuthStore();
   const { isOfficer } = useOfficerStore();
-  const { activeTab, setActiveTab } = useHomeTabStore();
+  const { activeTab, setActiveTab, postsSeenAt, latestForeignPostAt, registerForeignPost, markPostsOpened } =
+    useHomeTabStore();
   const openSidebar = useSidebarStore((s) => s.open);
   const dismissPicturePrompt = useDismissPicturePrompt();
   const router = useRouter();
@@ -68,6 +70,30 @@ export default function HomeScreen() {
       void refreshOfficerStatus(userId);
     }, [userId]),
   );
+
+  // "New posts" red dot beside the Posts tab (task 6): this screen keeps its
+  // own useHomePostsFeed observer alive even while Events is the active tab
+  // (PostsFeed's own instance shares the same cache), so a short foreground
+  // refetchInterval (see useHomePostsFeed) plus every other normal refetch
+  // trigger keeps this data current, and it's registered as the newest
+  // foreign post whenever it changes. `posts` is not wired into Supabase
+  // Realtime, so this deliberately does not use a postgres_changes
+  // subscription — see useHomePostsFeed's comment for why.
+  const { data: postsFeedData } = useHomePostsFeed(userId);
+  useEffect(() => {
+    const newest = postsFeedData?.pages?.[0]?.[0];
+    if (newest && newest.author?.id && newest.author.id !== userId) {
+      registerForeignPost(newest.created_at);
+    }
+  }, [postsFeedData, userId, registerForeignPost]);
+  // If Home ever mounts already on the Posts tab, that counts as opening it.
+  useEffect(() => {
+    if (activeTab === 'posts') markPostsOpened();
+    // Mount-only: switching to Posts afterwards already calls markPostsOpened
+    // via setActiveTab, so this must not re-run on every activeTab change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const showPostsDot = latestForeignPostAt > 0 && latestForeignPostAt > postsSeenAt;
 
   // Correction 3: while Home is the focused tab, it is the "directly
   // relevant active Home surface" — a foreground banner for a notification
@@ -138,7 +164,7 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top', 'left', 'right']}>
       {/* Header */}
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -409,16 +435,21 @@ export default function HomeScreen() {
                     borderBottomColor: activeTab === tab ? '#0FA6A6' : 'transparent',
                   }}
                 >
-                  <Text
-                    style={{
-                      fontSize: 15,
-                      fontWeight: activeTab === tab ? '600' : '400',
-                      color: activeTab === tab ? '#0FA6A6' : '#9CA3AF',
-                      fontFamily: activeTab === tab ? 'Inter_600SemiBold' : 'Inter_400Regular',
-                    }}
-                  >
-                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <Text
+                      style={{
+                        fontSize: 15,
+                        fontWeight: activeTab === tab ? '600' : '400',
+                        color: activeTab === tab ? '#0FA6A6' : '#9CA3AF',
+                        fontFamily: activeTab === tab ? 'Inter_600SemiBold' : 'Inter_400Regular',
+                      }}
+                    >
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    </Text>
+                    {tab === 'posts' && (
+                      <NotificationDot show={showPostsDot} accessibilityLabel="New posts" />
+                    )}
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>

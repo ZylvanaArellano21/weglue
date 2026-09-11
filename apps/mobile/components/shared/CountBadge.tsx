@@ -48,3 +48,39 @@ export function CountBadge({ count, style }: { count: number; style?: ViewStyle 
     </View>
   );
 }
+
+const DOT_SIZE = 8;
+
+/**
+ * A plain unlabeled indicator dot — same solid-red circle language as
+ * CountBadge, but for "there's something new" signals that have no count to
+ * show (e.g. the Posts selector's new-post indicator). Renders nothing when
+ * `show` is false.
+ */
+export function NotificationDot({
+  show,
+  style,
+  accessibilityLabel,
+}: {
+  show: boolean;
+  style?: ViewStyle;
+  accessibilityLabel?: string;
+}) {
+  if (!show) return null;
+  return (
+    <View
+      pointerEvents="none"
+      accessible={!!accessibilityLabel}
+      accessibilityLabel={accessibilityLabel}
+      style={[
+        {
+          width: DOT_SIZE,
+          height: DOT_SIZE,
+          borderRadius: DOT_SIZE / 2,
+          backgroundColor: '#EF4444',
+        },
+        style,
+      ]}
+    />
+  );
+}
