@@ -1,13 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getClubDetail } from "../../../../lib/admin/data";
+import { getClubDetail, listUniversities } from "../../../../lib/admin/data";
 import { getClubInterests } from "../../../../lib/admin/interestsData";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { Table, Th, Td, RowLink } from "../../../../components/admin/Table";
 import { DisabledAction } from "../../../../components/admin/DisabledAction";
-import { AddMemberDialog, AddOfficerDialog, MemberRowActions } from "../../../../components/admin/MembershipControls";
+import {
+  AddMemberDialog,
+  AddOfficerDialog,
+  MemberRowActions,
+  EditClubDialog,
+} from "../../../../components/admin/MembershipControls";
 import { ClubInterestControls } from "../../../../components/admin/ClubInterestControls";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +55,10 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
   const club = await getClubDetail(params.id);
   if (!club) notFound();
 
-  const clubInterests = await getClubInterests(params.id);
+  const [clubInterests, universities] = await Promise.all([
+    getClubInterests(params.id),
+    listUniversities(),
+  ]);
 
   const meeting = meetingSummary(club);
   const location = locationSummary(club);
@@ -226,12 +234,13 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
     <SectionCard title="Club actions">
       <div className="space-y-3 p-4">
         <p className="text-sm text-gray-500">
-          Officer &amp; membership management is <span className="font-medium text-teal-700">live</span> — use the
-          Members tab (add member, add officer, promote, demote, edit title, remove) with founder authorization and
-          audit logging. Club edit/deactivate/delete remain scheduled.
+          Officer &amp; membership management, and club create/edit, are{" "}
+          <span className="font-medium text-teal-700">live</span> — use the Members tab (add member, add officer,
+          promote, demote, edit title, remove) and Edit club details below, with founder authorization and audit
+          logging. Deactivate/delete remain scheduled.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <DisabledAction label="Edit club details" reason="Scheduled (club edit form)" />
+          <EditClubDialog clubId={club.id} club={club} universities={universities} />
           <DisabledAction label="Deactivate club" reason="Scheduled for Day 3 (restrictions)" tone="danger" />
           <DisabledAction label="Delete club" reason="Scheduled for Day 7 (destructive — needs safeguards)" tone="danger" />
         </div>

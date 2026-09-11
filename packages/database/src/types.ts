@@ -470,6 +470,44 @@ export type Database = {
           },
         ]
       }
+      event_images: {
+        Row: {
+          created_at: string
+          event_id: string
+          height: number | null
+          id: string
+          position: number
+          storage_path: string
+          width: number | null
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          height?: number | null
+          id?: string
+          position: number
+          storage_path: string
+          width?: number | null
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          height?: number | null
+          id?: string
+          position?: number
+          storage_path?: string
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_images_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_interests: {
         Row: {
           event_id: string
@@ -1366,6 +1404,14 @@ export type Database = {
       get_public_club_upcoming_events: {
         Args: { p_after?: string; p_club_id: string; p_limit?: number }
         Returns: Json
+      }
+      insert_event_images_with_dimensions: {
+        Args: {
+          p_event_id: string
+          p_image_dimensions: Json
+          p_image_paths: string[]
+        }
+        Returns: undefined
       }
       is_channel_club_officer: {
         Args: { p_channel_id: string }

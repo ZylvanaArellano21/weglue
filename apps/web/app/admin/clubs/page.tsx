@@ -4,6 +4,7 @@ import { SectionCard, Badge, IdentityCell, EmptyState } from "../../../component
 import { ListControls } from "../../../components/admin/ListControls";
 import { Pagination } from "../../../components/admin/Pagination";
 import { Table, Th, Td, RowLink } from "../../../components/admin/Table";
+import { CreateClubDialog } from "../../../components/admin/MembershipControls";
 
 export const dynamic = "force-dynamic";
 
@@ -36,11 +37,14 @@ export default async function AdminClubsPage({
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">Clubs</h1>
-        <p className="mt-0.5 text-sm text-gray-500">
-          {result.total.toLocaleString()} club{result.total === 1 ? "" : "s"} across every university.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Clubs</h1>
+          <p className="mt-0.5 text-sm text-gray-500">
+            {result.total.toLocaleString()} club{result.total === 1 ? "" : "s"} across every university.
+          </p>
+        </div>
+        <CreateClubDialog universities={universities} />
       </div>
 
       <ListControls

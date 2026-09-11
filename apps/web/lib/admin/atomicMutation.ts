@@ -87,6 +87,12 @@ const STATUS_MESSAGE: Record<string, string> = {
   not_gluemates: "These users are not gluemates.",
   // universities
   invalid_name: "Name must be 2–100 characters.",
+  invalid_club_name: "Club name must be 2–120 characters.",
+  invalid_description: "Description must be 1–5000 characters.",
+  name_taken_at_university: "A club with that name already exists at this university.",
+  university_not_found: "University not found.",
+  invalid_patch: "The submitted club fields are not supported.",
+  empty_patch: "Choose at least one club field to update.",
   invalid_slug: "Slug must be lowercase words separated by hyphens.",
   duplicate: "A university with that name or slug already exists.",
   // content
