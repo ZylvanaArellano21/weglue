@@ -50,9 +50,16 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
     <div className="grid gap-6 md:grid-cols-3">
       <SectionCard title="Event" className="md:col-span-2">
         <div className="space-y-4 p-4">
-          {event.cover_image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={event.cover_image_url} alt="" className="max-h-72 w-full rounded-lg object-cover" />
+          {event.images.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {event.images.map((image) => (
+                <figure key={image.position} className="overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={image.path} alt="" className="max-h-72 w-full object-cover" />
+                  <figcaption className="px-2 py-1 text-xs text-gray-400">Image {image.position + 1}</figcaption>
+                </figure>
+              ))}
+            </div>
           ) : null}
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Description</p>
@@ -71,6 +78,9 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
           <Field label="Location">{event.location}</Field>
           <Field label="Building">{event.building}</Field>
           <Field label="Room">{event.room}</Field>
+          <Field label="Media">
+            {event.images.length ? `${event.images.length} image${event.images.length === 1 ? "" : "s"}` : "None"}
+          </Field>
           <Field label="Visibility">
             <Badge tone={VIS_TONE[event.visibility] ?? "gray"}>{event.visibility}</Badge>
             {event.visibility === "specific" ? (

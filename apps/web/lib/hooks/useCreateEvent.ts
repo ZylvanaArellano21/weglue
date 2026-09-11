@@ -17,6 +17,48 @@ import type { TagClub } from "./useCreatePost";
 
 export type Visibility = "everyone" | "members" | "specific";
 
+// ─── Multi-image events (task 4) ─────────────────────────────────────────────
+// Mirrors apps/mobile/services/eventService.ts's EventImage/saveEventImages:
+// events.cover_image_url stays the position-0 URL for old readers; event_images
+// (migration 135) is the ordered set behind it, kept in sync by a server-side
+// trigger for the single-image case, and replaced wholesale by this RPC when
+// there is more than one image or an edit removes some.
+
+export interface EventImage {
+  path: string;
+  position: number;
+  width: number | null;
+  height: number | null;
+}
+
+async function getEventImages(eventId: string): Promise<EventImage[]> {
+  const supabase = getSupabaseBrowser();
+  const { data, error } = await supabase
+    .from("event_images")
+    .select("storage_path, position, width, height")
+    .eq("event_id", eventId)
+    .order("position", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    path: row.storage_path,
+    position: row.position,
+    width: row.width ?? null,
+    height: row.height ?? null,
+  }));
+}
+
+/** Replaces an event's complete ordered image set. Officer-only, enforced
+ *  server-side. `imagePaths` may be empty to clear all images. */
+export async function saveEventImages(eventId: string, imagePaths: string[]): Promise<void> {
+  const supabase = getSupabaseBrowser();
+  const { error } = await supabase.rpc("insert_event_images_with_dimensions", {
+    p_event_id: eventId,
+    p_image_paths: imagePaths,
+    p_image_dimensions: null,
+  });
+  if (error) throw error;
+}
+
 /** A candidate / selected recipient for a "Selected members" event. `club_role`
  *  is the person's officer title in *this hosting club only* (never leaks a role
  *  held in another club); `is_officer` is club_members.role === 'officer'. */
@@ -79,7 +121,9 @@ export function useMemberSearch(userId: string | undefined, clubId: string | und
 }
 
 export interface CreateEventInput {
-  file: File;
+  /** Ordered image files — the first becomes the legacy cover_image_url.
+   *  1 to 5 files. */
+  files: File[];
   club_id: string;
   title: string;
   description: string;
@@ -105,7 +149,11 @@ async function createEvent(userId: string, input: CreateEventInput, tag: string)
     .maybeSingle();
   if (!officer) throw new Error("Only club officers can create events");
 
-  const coverUrl = await uploadToBucket("posts", `${userId}/events/${Date.now()}.jpg`, input.file);
+  // Upload every selected image up front — first one is the legacy cover.
+  const uploadedUrls = await Promise.all(
+    input.files.map((file, i) => uploadToBucket("posts", `${userId}/events/${Date.now()}-${i}.jpg`, file))
+  );
+  const [coverUrl, ...restUrls] = uploadedUrls;
 
   const { data: event, error } = await supabase
     .from("events")
@@ -143,7 +191,9 @@ async function createEvent(userId: string, input: CreateEventInput, tag: string)
     throw error;
   }
   if (!event) throw new Error("Failed to create event");
-  return (event as any).id;
+  const eventId = (event as any).id as string;
+  if (restUrls.length > 0) await saveEventImages(eventId, uploadedUrls);
+  return eventId;
 }
 
 export function useCreateEvent(userId: string | undefined) {
@@ -184,6 +234,7 @@ export interface EventForEdit {
   visibility: Visibility;
   specific_user_ids: string[];
   specific_members: EventAudienceMember[];
+  images: EventImage[];
 }
 
 export function useEventForEdit(eventId: string | undefined) {
@@ -202,6 +253,12 @@ export function useEventForEdit(eventId: string | undefined) {
         .maybeSingle();
       if (error || !data) return null;
       const e = data as any;
+      const fetchedImages = await getEventImages(eventId!);
+      const images = fetchedImages.length > 0
+        ? fetchedImages
+        : e.cover_image_url
+          ? [{ path: e.cover_image_url, position: 0, width: null, height: null }]
+          : [];
       const ids: string[] = e.specific_user_ids ?? [];
       let specific_members: EventForEdit["specific_members"] = [];
       if (ids.length > 0) {
@@ -260,6 +317,7 @@ export function useEventForEdit(eventId: string | undefined) {
         visibility: (e.visibility ?? "everyone") as Visibility,
         specific_user_ids: ids,
         specific_members,
+        images,
       };
     },
     enabled: !!eventId,
@@ -301,8 +359,21 @@ async function updateEvent(userId: string, eventId: string, updates: UpdateEvent
 export function useUpdateEvent(userId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ eventId, updates }: { eventId: string; updates: UpdateEventInput }) =>
-      updateEvent(userId!, eventId, updates),
+    mutationFn: async ({
+      eventId,
+      updates,
+      imagePaths,
+    }: {
+      eventId: string;
+      updates: UpdateEventInput;
+      /** When provided, replaces the event's complete ordered image set —
+       *  pass this whenever the edit form's photos changed (added, removed,
+       *  or reordered), including new files already uploaded to their URLs. */
+      imagePaths?: string[];
+    }) => {
+      await updateEvent(userId!, eventId, updates);
+      if (imagePaths) await saveEventImages(eventId, imagePaths);
+    },
     onSuccess: () => {
       invalidateEventState(queryClient, userId);
       void queryClient.invalidateQueries({ queryKey: ["eventForEdit"] });

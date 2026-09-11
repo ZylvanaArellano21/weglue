@@ -5,6 +5,7 @@ import { getSupabaseBrowser } from "../supabase-browser";
 import { isEventPastAt } from "../datetime";
 import { invalidateEventState, patchCachedEvent } from "./eventSync";
 import type { AttendeePreview } from "./useHomeEventsFeed";
+import type { EventImage } from "./useCreateEvent";
 import { canManageEvent, canRsvpToEvent, canViewEventAttendees } from "../permissions/eventAccess";
 
 // Web port of apps/mobile/services/eventService.ts::getEventDetail +
@@ -40,6 +41,7 @@ export interface EventDetail {
   /** Whether the viewer is the one who created this event — used to hide
    *  the Report affordance on your own content. */
   is_creator: boolean;
+  images: EventImage[];
 }
 
 async function getEventDetail(eventId: string, userId: string): Promise<EventDetail | null> {
@@ -61,14 +63,31 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
   if (!event) return null;
   const e = event as any;
 
-  const [{ data: goingRsvps }, { data: memberCheck }] = await Promise.all([
+  const [{ data: goingRsvps }, { data: memberCheck }, { data: imageRows }] = await Promise.all([
     supabase
       .from("event_rsvps")
       .select("user_id, profiles!inner(id, username, avatar_url)")
       .eq("event_id", eventId)
       .eq("status", "going"),
     supabase.from("club_members").select("role").eq("club_id", e.club_id).eq("user_id", userId).maybeSingle(),
+    supabase
+      .from("event_images")
+      .select("storage_path, position, width, height")
+      .eq("event_id", eventId)
+      .order("position", { ascending: true }),
   ]);
+  const fetchedImages: EventImage[] = ((imageRows ?? []) as any[]).map((row) => ({
+    path: row.storage_path,
+    position: row.position,
+    width: row.width ?? null,
+    height: row.height ?? null,
+  }));
+  const images =
+    fetchedImages.length > 0
+      ? fetchedImages
+      : e.cover_image_url
+        ? [{ path: e.cover_image_url, position: 0, width: null, height: null }]
+        : [];
 
   const viewerRole = (memberCheck as { role?: string } | null)?.role ?? null;
   const isPast = isEventPastAt(e.event_end_at);
@@ -114,6 +133,7 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
     can_view_attendees: canViewEventAttendees(audienceFacts),
     can_manage: canManageEvent(audienceFacts),
     is_creator: audienceFacts.isCreator,
+    images,
   };
 }
 

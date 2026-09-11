@@ -11,6 +11,51 @@ export interface AttendeePreview {
   avatar_url: string | null;
 }
 
+// ─── Multi-image events (task 4) ─────────────────────────────────────────────
+// events.cover_image_url stays the position-0 URL for old clients/screens that
+// only read it. `event_images` (migration 135) is the ordered set behind it;
+// existing single-image events already have exactly one row via the
+// legacy-sync trigger, so nothing here changes behavior for them.
+
+export interface EventImage {
+  path: string;
+  position: number;
+  width: number | null;
+  height: number | null;
+}
+
+async function getEventImages(eventIds: string[]): Promise<Map<string, EventImage[]>> {
+  const map = new Map<string, EventImage[]>();
+  if (eventIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from('event_images')
+    .select('event_id, storage_path, position, width, height')
+    .in('event_id', eventIds)
+    .order('position', { ascending: true });
+  if (error) throw error;
+  for (const row of (data ?? []) as any[]) {
+    const list = map.get(row.event_id) ?? [];
+    list.push({ path: row.storage_path, position: row.position, width: row.width ?? null, height: row.height ?? null });
+    map.set(row.event_id, list);
+  }
+  return map;
+}
+
+/**
+ * Replaces an event's complete ordered image set (position 0..4) and refreshes
+ * cover_image_url to the new position 0 — the same idempotent, full-replace
+ * contract create and edit both use. Officer-only, enforced server-side.
+ * `imagePaths` may be empty to clear all images.
+ */
+export async function saveEventImages(eventId: string, imagePaths: string[]): Promise<void> {
+  const { error } = await supabase.rpc('insert_event_images_with_dimensions', {
+    p_event_id: eventId,
+    p_image_paths: imagePaths,
+    p_image_dimensions: null,
+  });
+  if (error) throw error;
+}
+
 export interface HomeFeedEvent {
   id: string;
   club_id: string;
@@ -395,6 +440,7 @@ export interface EventForEdit {
   visibility: 'everyone' | 'members' | 'specific';
   specific_user_ids: string[];
   specific_members: EventAudienceMember[];
+  images: EventImage[];
 }
 
 export interface EventAudienceMember {
@@ -456,6 +502,8 @@ export async function getEventForEdit(eventId: string): Promise<EventForEdit | n
 
   if (error || !data) return null;
   const e = data as any;
+  const imagesByEvent = await getEventImages([eventId]);
+  const images = imagesByEvent.get(eventId) ?? (e.cover_image_url ? [{ path: e.cover_image_url, position: 0, width: null, height: null }] : []);
   const ids: string[] = e.specific_user_ids ?? [];
   let specificMembers: EventAudienceMember[] = [];
   if (ids.length > 0) {
@@ -531,6 +579,7 @@ export async function getEventForEdit(eventId: string): Promise<EventForEdit | n
     visibility: (e.visibility ?? 'everyone') as 'everyone' | 'members' | 'specific',
     specific_user_ids: ids,
     specific_members: specificMembers,
+    images,
   };
 }
 
@@ -626,6 +675,7 @@ export interface EventDetail {
   /** Whether the viewer is the one who created this event — used to hide
    *  the Report affordance on your own content. */
   is_creator: boolean;
+  images: EventImage[];
 }
 
 export async function getEventDetail(
@@ -659,7 +709,7 @@ export async function getEventDetail(
 
   if (!event) return null;
 
-  const [{ data: goingRsvps }, { data: memberCheck }] = await Promise.all([
+  const [{ data: goingRsvps }, { data: memberCheck }, imagesByEvent] = await Promise.all([
     supabase
       .from('event_rsvps')
       .select('user_id, profiles!inner(id, username, avatar_url)')
@@ -671,7 +721,10 @@ export async function getEventDetail(
       .eq('club_id', (event as any).club_id)
       .eq('user_id', userId)
       .maybeSingle(),
+    getEventImages([eventId]),
   ]);
+  const images = imagesByEvent.get(eventId) ??
+    (event.cover_image_url ? [{ path: event.cover_image_url, position: 0, width: null, height: null }] : []);
 
   const previews: AttendeePreview[] = ((goingRsvps ?? []) as any[])
     .slice(0, 4)
@@ -707,6 +760,7 @@ export async function getEventDetail(
     is_saved: !!savedRow,
     user_has_joined_club: !!memberCheck,
     is_creator: (event as any).created_by === userId,
+    images,
   };
 }
 

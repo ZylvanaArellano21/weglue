@@ -18,6 +18,10 @@ import {
   type EventAudienceMember,
 } from "../../lib/hooks/useCreateEvent";
 
+// Cover (required, cropped) + up to this many additional, uncropped photos —
+// task 4. Matches the 5-image cap enforced server-side.
+const MAX_EXTRA_EVENT_PHOTOS = 4;
+
 const VIS: { value: Visibility; label: string; desc: string }[] = [
   { value: "everyone", label: "Everyone", desc: "Anyone on campus can see it" },
   { value: "members", label: "Members", desc: "Only members of the club" },
@@ -54,6 +58,12 @@ export function ComposeEventModal({
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [existingCover, setExistingCover] = useState<string | null>(null);
+  // Additional photos beyond the cover. `existingExtra` are already-saved URLs
+  // (edit mode, survive until explicitly removed); `extraFiles` are newly
+  // picked, not-yet-uploaded files, each with a local preview URL.
+  const extraFileRef = useRef<HTMLInputElement>(null);
+  const [existingExtra, setExistingExtra] = useState<string[]>([]);
+  const [extraFiles, setExtraFiles] = useState<{ file: File; preview: string }[]>([]);
   const [title, setTitle] = useState("");
   const [about, setAbout] = useState("");
   const [date, setDate] = useState("");
@@ -83,6 +93,7 @@ export function ComposeEventModal({
     setVisibility(editing.visibility);
     setMembers(editing.specific_members);
     setExistingCover(editing.cover_image_url);
+    setExistingExtra(editing.images.filter((img) => img.position > 0).map((img) => img.path));
     setSeeded(true);
   }, [isEdit, seeded, editing]);
 
@@ -101,6 +112,35 @@ export function ComposeEventModal({
     setCropUrl((cur) => {
       if (cur) URL.revokeObjectURL(cur);
       return null;
+    });
+  };
+
+  const extraSlotsUsed = existingExtra.length + extraFiles.length;
+
+  const onExtraFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const remaining = MAX_EXTRA_EVENT_PHOTOS - extraSlotsUsed;
+    const picked = Array.from(files)
+      .filter((f) => {
+        if (!f.type.startsWith("image/")) {
+          show("Only image files can be added.", "error");
+          return false;
+        }
+        return true;
+      })
+      .slice(0, remaining);
+    setExtraFiles((prev) => [...prev, ...picked.map((f) => ({ file: f, preview: URL.createObjectURL(f) }))]);
+  };
+
+  const removeExistingExtra = (path: string) => {
+    setExistingExtra((prev) => prev.filter((p) => p !== path));
+  };
+
+  const removeExtraFile = (preview: string) => {
+    setExtraFiles((prev) => {
+      const found = prev.find((p) => p.preview === preview);
+      if (found) URL.revokeObjectURL(found.preview);
+      return prev.filter((p) => p.preview !== preview);
     });
   };
 
@@ -127,6 +167,13 @@ export function ComposeEventModal({
       try {
         // Only upload a new cover if the officer picked one; otherwise keep it.
         const coverUrl = file ? await uploadToBucket("posts", `${userId}/events/${Date.now()}.jpg`, file) : undefined;
+        // Upload any newly added extra photos, then assemble the complete
+        // ordered set (cover first) — the RPC replaces the whole thing, so a
+        // removed photo simply isn't included here.
+        const newExtraUrls = await Promise.all(
+          extraFiles.map((f, i) => uploadToBucket("posts", `${userId}/events/${Date.now()}-${i}.jpg`, f.file))
+        );
+        const imagePaths = [coverUrl ?? existingCover!, ...existingExtra, ...newExtraUrls];
         update.mutate(
           {
             eventId: editEventId,
@@ -142,6 +189,7 @@ export function ComposeEventModal({
               specific_user_ids: visibility === "specific" && specific.length ? specific : null,
               ...(coverUrl ? { cover_image_url: coverUrl } : {}),
             },
+            imagePaths,
           },
           {
             onSuccess: () => {
@@ -153,7 +201,7 @@ export function ComposeEventModal({
           }
         );
       } catch {
-        show("Could not upload the new cover image.", "error");
+        show("Could not upload the new photos.", "error");
       }
       return;
     }
@@ -161,7 +209,7 @@ export function ComposeEventModal({
     if (!file) return;
     create.mutate(
       {
-        file,
+        files: [file, ...extraFiles.map((f) => f.file)],
         club_id: clubId,
         title: title.trim(),
         description: about.trim(),
@@ -272,6 +320,62 @@ export function ComposeEventModal({
           </button>
         )}
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+
+        {/* Additional photos (task 4) — optional, up to MAX_EXTRA_EVENT_PHOTOS
+            more beyond the required cover above. Viewers see all of them as a
+            swipeable carousel. */}
+        <div className="mb-4 flex flex-wrap gap-2">
+          {existingExtra.map((path) => (
+            <div key={path} className="relative h-16 w-16 overflow-hidden rounded-lg">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={path} alt="" className="h-full w-full object-cover" />
+              <button
+                type="button"
+                onClick={() => removeExistingExtra(path)}
+                aria-label="Remove photo"
+                className="absolute right-1 top-1 rounded-full bg-black/55 p-0.5 text-white"
+              >
+                <CloseIcon size={12} />
+              </button>
+            </div>
+          ))}
+          {extraFiles.map((f) => (
+            <div key={f.preview} className="relative h-16 w-16 overflow-hidden rounded-lg">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={f.preview} alt="" className="h-full w-full object-cover" />
+              <button
+                type="button"
+                onClick={() => removeExtraFile(f.preview)}
+                aria-label="Remove photo"
+                className="absolute right-1 top-1 rounded-full bg-black/55 p-0.5 text-white"
+              >
+                <CloseIcon size={12} />
+              </button>
+            </div>
+          ))}
+          {extraSlotsUsed < MAX_EXTRA_EVENT_PHOTOS && (
+            <button
+              type="button"
+              onClick={() => extraFileRef.current?.click()}
+              className="flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed text-[10px]"
+              style={{ borderColor: "#E5E7EB", color: "#9CA3AF" }}
+            >
+              <ImageIcon size={18} />
+              Add photo
+            </button>
+          )}
+        </div>
+        <input
+          ref={extraFileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            onExtraFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
 
         <label className="mb-1 block text-sm font-semibold text-gray-700">Event name</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={`${inputCls} mb-4`} style={inputStyle} placeholder="Name of the event…" />

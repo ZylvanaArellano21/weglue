@@ -8,6 +8,7 @@ import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
 import { LeaveClubDialog } from "../clubs/LeaveClubDialog";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { CalendarIcon, LocationIcon, BookmarkIcon, ImageIcon } from "../shared/icons";
+import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { useToast } from "../shared/Toast";
 import { ReportModal } from "../shared/ReportModal";
 import { LinkifiedText } from "../shared/LinkifiedText";
@@ -112,7 +113,17 @@ export function EventDetailModal({
       ) : (
         <div className="grid max-h-[86vh] overflow-y-auto md:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
           <div className="flex min-h-[260px] items-center justify-center bg-black md:min-h-[620px]">
-            {event.cover_image_url ? <img src={event.cover_image_url} alt={event.title} className="max-h-[86vh] w-full object-contain" /> : <div className="flex h-full min-h-[260px] w-full items-center justify-center text-gray-400"><ImageIcon size={54} /></div>}
+            {event.images.length > 1 ? (
+              <PhotoCarousel
+                images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
+                aspectRatio={3 / 2}
+                className="w-full"
+              />
+            ) : event.cover_image_url ? (
+              <img src={event.cover_image_url} alt={event.title} className="max-h-[86vh] w-full object-contain" />
+            ) : (
+              <div className="flex h-full min-h-[260px] w-full items-center justify-center text-gray-400"><ImageIcon size={54} /></div>
+            )}
           </div>
           <div className="p-5 sm:p-7">
           {/* Club row */}
