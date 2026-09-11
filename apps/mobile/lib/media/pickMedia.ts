@@ -96,15 +96,22 @@ function normalizeAsset(
 }
 
 /**
- * The ONE entry point for a ratio-constrained image (profile picture, club
- * banner, event image, a carousel frame). Cross-platform:
+ * The ONE entry point for a feature image (profile picture, club banner, event
+ * image, a carousel frame). Cross-platform:
  *   Android → the shared We Glue camera / picker + in-app cropper (MediaPickerHost)
  *   iOS     → the OS picker (never the OS editor) + the same in-app cropper
- * Resolves the cropped image, or null if the user cancelled at any step.
+ * Resolves the picked image, or null if the user cancelled at any step.
+ *
+ * `aspect` is optional: when omitted, the image is returned free-form (no
+ * crop step at all) — the caller keeps the photo's own horizontal / vertical /
+ * square shape, exactly like the post-compose flow, and may still offer an
+ * optional later "Adjust" via `cropExistingImage`. When given, framing is
+ * mandatory before the result resolves (avatar, club banner — ratios that
+ * always need a fixed frame).
  */
 export async function pickImageForFeature(req: {
   source: 'camera' | 'library' | 'choose';
-  aspect: [number, number];
+  aspect?: [number, number];
   quality?: number;
   /** Called if OS permission for this source is denied (iOS path only —
    *  Android's system picker is scoped and needs no runtime grant; the Android
@@ -157,6 +164,7 @@ export async function pickImageForFeature(req: {
     );
   }
   if (!picked || picked.kind !== 'image') return picked;
+  if (!req.aspect) return picked; // free-form: no crop step, keep the photo's own shape
 
   const cropped = await requestCrop({
     uri: picked.uri,

@@ -14,10 +14,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { pickImageForFeature } from '../../lib/media/pickMedia';
+import { pickImageForFeature, cropExistingImage, postCropAspectOptions } from '../../lib/media/pickMedia';
 import { pickPhotos } from '../../lib/media/pickPhotos';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useAuthStore } from '@weglue/shared';
+import { useAuthStore, naturalCropAspect } from '@weglue/shared';
 import { createEvent, updateEvent, getEventForEdit, saveEventImages, searchEventAudienceMembers, eventAudienceRoleLabel, type EventAudienceMember } from '../../services/eventService';
 import { getUserOfficerClubs, UserClub } from '../../services/clubService';
 import { invalidateClubDataEverywhere } from '../../lib/clubCache';
@@ -30,8 +30,8 @@ import { useHomeTabStore } from '../../store/homeTabStore';
 
 type Visibility = 'everyone' | 'members' | 'specific';
 
-// Cover image (required, cropped) + up to this many additional, uncropped
-// photos — task 4. Matches the 5-image cap enforced server-side.
+// Cover image (required, crop optional) + up to this many additional,
+// uncropped photos — task 4. Matches the 5-image cap enforced server-side.
 const MAX_EXTRA_EVENT_PHOTOS = 4;
 
 interface ExtraEventPhoto {
@@ -86,13 +86,17 @@ export default function NewEventScreen() {
   const [clubSelectorVisible, setClubSelectorVisible] = useState(false);
   const [clubSearch, setClubSearch] = useState('');
 
-  // Image
+  // Image. Cropping the cover is optional (task: preserve the photo's own
+  // shape unless the officer chooses to adjust it) — imageWidth/imageHeight
+  // track its CURRENT pixel size (raw pick, or the cropped result) so the
+  // preview box always renders at the photo's real aspect ratio, never a
+  // forced 4:5, and never stretched/distorted.
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageWidth, setImageWidth] = useState<number | null>(null);
+  const [imageHeight, setImageHeight] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [imageCoverMode, setImageCoverMode] = useState<'cover' | 'contain'>('cover');
-  // Additional photos beyond the cover — same upload pipeline, no crop step
-  // (the cover keeps its existing required 4:5 crop unchanged).
+  // Additional photos beyond the cover — same upload pipeline, no crop step.
   const [extraPhotos, setExtraPhotos] = useState<ExtraEventPhoto[]>([]);
 
   // Text fields
@@ -155,6 +159,9 @@ export default function NewEventScreen() {
     setRoom(editEvent.room ?? '');
     setImageUri(editEvent.cover_image_url);
     setImageUrl(editEvent.cover_image_url);
+    const coverImage = editEvent.images.find((img) => img.position === 0);
+    setImageWidth(coverImage?.width ?? null);
+    setImageHeight(coverImage?.height ?? null);
     setExtraPhotos(
       editEvent.images
         .filter((img) => img.position > 0)
@@ -174,14 +181,39 @@ export default function NewEventScreen() {
     setEditLoaded(true);
   }, [editEvent, editLoaded]);
 
+  // Edit mode loads an existing cover whose stored dimensions may predate
+  // migration 135 (older events never had width/height recorded). Measuring
+  // once here — same fallback the feed's PhotoCarousel uses for legacy
+  // posts — is what lets the preview box show the real shape instead of
+  // silently defaulting to a guess.
+  useEffect(() => {
+    if (!imageUri || (imageWidth && imageHeight)) return;
+    let alive = true;
+    Image.getSize(
+      imageUri,
+      (w, h) => {
+        if (alive && w > 0 && h > 0) {
+          setImageWidth(w);
+          setImageHeight(h);
+        }
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [imageUri, imageWidth, imageHeight]);
+
   const filteredClubs = officerClubs.filter((c) =>
     c.name.toLowerCase().includes(clubSearch.toLowerCase()),
   );
 
   // Selection is durably uploaded before it counts as chosen, so a cancel
   // mid-flow never leaves a dangling local URI in the form state.
-  const uploadSelectedEventImage = async (uri: string) => {
+  const uploadSelectedEventImage = async (uri: string, width: number | null, height: number | null) => {
     setImageUri(uri);
+    setImageWidth(width);
+    setImageHeight(height);
     setUploading(true);
     try {
       const uploaded = await uploadEventImage(userId!, uri);
@@ -189,23 +221,42 @@ export default function NewEventScreen() {
     } catch {
       show('Failed to upload image. Try again.', 'error');
       setImageUri(null);
+      setImageWidth(null);
+      setImageHeight(null);
     } finally {
       setUploading(false);
     }
   };
 
   const handlePickImage = async () => {
-    // One "add image" tap → Take Photo / Photo Library, then the in-app 4:5
-    // crop/zoom/reposition step. Same on iOS and Android; the OS editor is
-    // never used.
+    // One "add image" tap → Take Photo / Photo Library. Cropping is optional
+    // (task: keep the photo's own shape — horizontal/vertical/square — unless
+    // the officer explicitly adjusts it): no aspect is forced here, so the
+    // image is used exactly as picked, and "Adjust" below offers the same
+    // Original / 1:1 / 4:5 ratio picker the post composer uses.
     const picked = await pickImageForFeature({
       source: 'choose',
-      aspect: [4, 5],
       quality: 0.8,
       onDenied: () =>
         show('Photo library access is required to add an event image.', 'error'),
     });
-    if (picked?.uri) await uploadSelectedEventImage(picked.uri);
+    if (picked?.uri) await uploadSelectedEventImage(picked.uri, picked.width || null, picked.height || null);
+  };
+
+  // Optional re-frame of the already-picked/uploaded cover. Mirrors the post
+  // composer's "Adjust" — never runs automatically, only on this explicit tap.
+  const handleAdjustImage = async () => {
+    if (!imageUri) return;
+    const w = imageWidth || 1;
+    const h = imageHeight || 1;
+    const adjusted = await cropExistingImage({
+      uri: imageUri,
+      width: w,
+      height: h,
+      aspect: naturalCropAspect(w, h),
+      aspectOptions: postCropAspectOptions(w, h),
+    });
+    if (adjusted?.uri) await uploadSelectedEventImage(adjusted.uri, adjusted.width || null, adjusted.height || null);
   };
 
   // Additional photos: multi-select up to the remaining slots, upload each,
@@ -464,7 +515,12 @@ export default function NewEventScreen() {
             </Text>
           </View>
 
-          {/* Add image */}
+          {/* Add image. The box follows the photo's own aspect ratio (never a
+              forced 4:5) so it renders exactly as picked/cropped — horizontal
+              stays horizontal, vertical stays vertical, square stays square —
+              and is never stretched. Falls back to 4/5 only before any image
+              is chosen (empty placeholder) or while its real size is still
+              being measured. */}
           <Text style={labelStyle}>Add image:</Text>
           <TouchableOpacity
             onPress={handlePickImage}
@@ -475,7 +531,7 @@ export default function NewEventScreen() {
             <View
               style={{
                 width: '100%',
-                aspectRatio: 4 / 5,
+                aspectRatio: imageWidth && imageHeight ? imageWidth / imageHeight : 4 / 5,
                 backgroundColor: '#E5E7EB',
                 borderRadius: 12,
                 overflow: 'hidden',
@@ -487,7 +543,7 @@ export default function NewEventScreen() {
                 <Image
                   source={{ uri: imageUri }}
                   style={{ width: '100%', height: '100%' }}
-                  resizeMode={imageCoverMode}
+                  resizeMode="cover"
                 />
               ) : (
                 <Ionicons name="image-outline" size={56} color="#9CA3AF" />
@@ -522,30 +578,29 @@ export default function NewEventScreen() {
               >
                 <Ionicons name="add" size={18} color="#fff" />
               </View>
-              {/* Resize toggle — bottom left, only when image selected */}
-              {imageUri && (
+              {/* Adjust — optional crop/ratio step. Only appears once a photo
+                  is selected; never runs unless tapped. */}
+              {imageUri && !uploading && (
                 <TouchableOpacity
-                  onPress={() =>
-                    setImageCoverMode((prev) => (prev === 'cover' ? 'contain' : 'cover'))
-                  }
+                  onPress={() => void handleAdjustImage()}
                   activeOpacity={0.8}
                   style={{
                     position: 'absolute',
                     bottom: 10,
                     left: 10,
-                    width: 28,
-                    height: 28,
-                    borderRadius: 14,
-                    backgroundColor: 'rgba(255,255,255,0.92)',
+                    flexDirection: 'row',
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    gap: 6,
+                    height: 30,
+                    paddingHorizontal: 12,
+                    borderRadius: 15,
+                    backgroundColor: 'rgba(0,0,0,0.6)',
                   }}
                 >
-                  <Ionicons
-                    name={imageCoverMode === 'cover' ? 'scan-outline' : 'contract-outline'}
-                    size={16}
-                    color="#6B7280"
-                  />
+                  <Ionicons name="crop" size={14} color="#FFFFFF" />
+                  <Text style={{ fontSize: 12, fontFamily: 'Inter_600SemiBold', color: '#FFFFFF' }}>
+                    Adjust
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>

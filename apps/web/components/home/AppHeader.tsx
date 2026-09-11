@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CountBadge } from "../shared/CountBadge";
-import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon, PersonAddIcon, PlusIcon, ImageIcon } from "../shared/icons";
+import { HomeIcon, PeopleIcon, ChatIcon, SearchIcon, CalendarIcon, BellIcon, PlusIcon, ImageIcon } from "../shared/icons";
 import { ProfileMenu } from "../profile/ProfileMenu";
 import { messageBadgeCounts, useUnreadSummaryValue } from "../../lib/hooks/useUnreadSummary";
 import { useDiscoverySearch } from "../../lib/hooks/useDiscoverySearch";
@@ -360,25 +360,17 @@ export function AppHeader({ userId }: { userId: string }): JSX.Element {
 
           {/* Notifications. Checked directly against
               apps/mobile/app/(tabs)/index.tsx — this second top-right icon
-              (person-add glyph; that's the native icon choice, kept here
-              for an exact visual match even though it reads oddly for
-              notifications) calls handleNotificationsPress, which routes to
-              /home/notifications. An earlier pass wired this to Gluemates
-              instead, going only by the icon's shape rather than checking
-              what it actually does — Gluemates was never the gap that
-              needed filling (it's already reachable from the profile
-              page's stat row, same as native), Notifications was:
-              ProfileSidebar carries the only other entry point and it's
-              `hidden lg:block`, so phone had no way to reach it at all
-              until this icon. Same outlined-teal rounded-square as
-              native's, not the white circle this used to be. */}
+              opens the notifications overlay (?notifications=1). ProfileSidebar
+              carries the only other entry point and it's `hidden lg:block`, so
+              phone had no way to reach it at all until this icon. Same
+              outlined-teal rounded-square as native's. */}
           <Link
             href="/home?notifications=1"
             aria-label="Notifications"
             className="relative flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[10px] border-[1.5px] text-teal"
             style={{ borderColor: "#0FA6A6" }}
           >
-            <PersonAddIcon size={20} />
+            <BellIcon size={20} />
             {notifications > 0 && (
               <CountBadge
                 count={notifications}

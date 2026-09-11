@@ -58,6 +58,7 @@ import { useToast } from '../../components/Toast';
 import { formatEventLocation, isEventPastAt } from '../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../components/events/EventAudienceBadge';
 import { PhotoCarousel } from '../../components/shared/PhotoCarousel';
+import { PhotoViewer } from '../../components/shared/PhotoViewer';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -102,6 +103,10 @@ export default function CalendarEventDetailScreen() {
 
   // Multi-event navigation state
   const [currentIndex, setCurrentIndex] = useState(0);
+  // The hero photo is its own tap target (opens the full-screen viewer, the
+  // right photo for a multi-photo event) — separate from every other tap
+  // target on this screen.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   // Sync currentIndex to initialEventId once dayEvents loads
   useEffect(() => {
@@ -267,7 +272,9 @@ export default function CalendarEventDetailScreen() {
               images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
               width={SCREEN_WIDTH}
               aspectRatio={3 / 2}
+              naturalRatio
               rounded={false}
+              onImagePress={setViewerIndex}
             />
           ) : (
             <View
@@ -472,6 +479,14 @@ export default function CalendarEventDetailScreen() {
         </ScrollView>
       )}
 
+      {event && (
+        <PhotoViewer
+          visible={viewerIndex !== null}
+          images={event.images.map((img) => ({ uri: img.path }))}
+          initialIndex={viewerIndex ?? 0}
+          onClose={() => setViewerIndex(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }

@@ -8,6 +8,7 @@ import { useFollow, useUnfollow } from "../../lib/hooks/useUserProfile";
 import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity, ClickableUserIdentity } from "../shared/ClickableIdentity";
 import { PhotoCarousel } from "../shared/PhotoCarousel";
+import { MediaLightbox } from "../messages/messageInteractions";
 import { HeartIcon, CommentIcon, ImageIcon } from "../shared/icons";
 import { EmptyState } from "./EmptyState";
 import { UnifiedShareSheet } from "../shared/UnifiedShareSheet";
@@ -107,6 +108,15 @@ function PostCard({
   const { mutate: follow, isPending: following } = useFollow(viewerUserId);
   const { mutate: unfollow, isPending: unfollowing } = useUnfollow(viewerUserId);
   const isOwnPost = post.author.id === viewerUserId;
+  // The post photo is its own tap target (opens the full-screen viewer),
+  // independent of the card background (which does nothing) and the
+  // username/club row above (opens that profile).
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const photoUrls = post.images && post.images.length > 0
+    ? post.images.map((im) => im.path)
+    : post.image_url
+      ? [post.image_url]
+      : [];
 
   const onFollowAction = () => {
     if (following || unfollowing) return;
@@ -139,6 +149,7 @@ function PostCard({
   const followLikeStyle = post.author.is_following || post.author.is_requested;
 
   return (
+    <>
     <article
       className="overflow-hidden rounded-2xl shadow-card"
       style={{ background: "#FEFFF8" }}
@@ -195,9 +206,10 @@ function PostCard({
           }))}
           aspectRatio={4 / 5}
           naturalRatio
+          onImageClick={setViewerIndex}
         />
       ) : post.image_url ? (
-        <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalRatio />
+        <PhotoCarousel images={[{ uri: post.image_url }]} aspectRatio={4 / 5} naturalRatio onImageClick={setViewerIndex} />
       ) : (
         <div
           className="flex aspect-square w-full items-center justify-center"
@@ -234,6 +246,15 @@ function PostCard({
         )}
       </div>
     </article>
+    {viewerIndex !== null && photoUrls.length > 0 && (
+      <MediaLightbox
+        items={photoUrls.map((url) => ({ url, kind: "image" as const, senderName: post.author.username }))}
+        index={viewerIndex}
+        onIndex={setViewerIndex}
+        onClose={() => setViewerIndex(null)}
+      />
+    )}
+    </>
   );
 }
 

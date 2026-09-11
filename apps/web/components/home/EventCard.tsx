@@ -5,6 +5,8 @@ import { Avatar } from "../shared/Avatar";
 import { ClickableClubIdentity } from "../shared/ClickableIdentity";
 import { AttendanceTrigger } from "./AttendanceTrigger";
 import { LinkifiedText } from "../shared/LinkifiedText";
+import { PhotoCarousel } from "../shared/PhotoCarousel";
+import { MediaLightbox } from "../messages/messageInteractions";
 import {
   BookmarkIcon,
   CalendarIcon,
@@ -45,7 +47,7 @@ export function EventCard({
   onRestricted,
   isPast = false,
 }: EventCardProps): JSX.Element {
-  const [imageError, setImageError] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const location = formatEventLocation(event.building, event.room, event.location);
   const rsvp = event.user_rsvp_status;
   const openEvent = () => {
@@ -57,6 +59,7 @@ export function EventCard({
   };
 
   return (
+    <>
     <article
       className="overflow-hidden rounded-2xl shadow-card"
       style={{ background: "#FEFFF8" }}
@@ -86,32 +89,27 @@ export function EventCard({
         </button>
       </div>
 
-      {/* Event image */}
+      {/* Event image — its own tap target (opens the full-screen photo
+          viewer), independent of the event-details tap targets (title, club
+          row, body) elsewhere on this card. Natural ratio: horizontal stays
+          horizontal, vertical stays vertical, square stays square — never a
+          forced 3:2 crop. */}
       <div className="relative">
-        <button
-          type="button"
-          onClick={openEvent}
-          className="relative block w-full"
-          style={{ aspectRatio: "3 / 2" }}
-          aria-label={event.can_open ? `Open ${event.title}` : `${event.title} is for club members only`}
-        >
-          {event.cover_image_url && !imageError ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={event.cover_image_url}
-              alt={event.title}
-              onError={() => setImageError(true)}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span
-              className="flex h-full w-full items-center justify-center"
-              style={{ background: "#E5E7EB", color: "#9CA3AF" }}
-            >
-              <ImageIcon size={40} />
-            </span>
-          )}
-        </button>
+        {event.cover_image_url ? (
+          <PhotoCarousel
+            images={[{ uri: event.cover_image_url }]}
+            naturalRatio
+            rounded={false}
+            onImageClick={event.can_open ? () => setViewerOpen(true) : onRestricted}
+          />
+        ) : (
+          <span
+            className="flex w-full items-center justify-center"
+            style={{ aspectRatio: "3 / 2", background: "#E5E7EB", color: "#9CA3AF" }}
+          >
+            <ImageIcon size={40} />
+          </span>
+        )}
 
         {/* Phone: bookmark + audience badge float ON the image, top-right
             and top-left — checked directly against
@@ -217,5 +215,14 @@ export function EventCard({
         </div>
       </div>
     </article>
+    {viewerOpen && event.cover_image_url && (
+      <MediaLightbox
+        items={[{ url: event.cover_image_url, kind: "image", senderName: event.club.name }]}
+        index={0}
+        onIndex={() => {}}
+        onClose={() => setViewerOpen(false)}
+      />
+    )}
+    </>
   );
 }

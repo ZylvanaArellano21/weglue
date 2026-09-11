@@ -280,7 +280,7 @@ export default function HomeScreen() {
                 <Ionicons name="add" size={24} color="#fff" />
               </TouchableOpacity>
 
-              {/* 👤+ notifications icon */}
+              {/* Notifications bell */}
               <TouchableOpacity
                 onPress={handleNotificationsPress}
                 activeOpacity={0.8}
@@ -295,7 +295,7 @@ export default function HomeScreen() {
                   backgroundColor: 'transparent',
                 }}
               >
-                <Ionicons name="person-add-outline" size={20} color="#0FA6A6" />
+                <Ionicons name="notifications-outline" size={20} color="#0FA6A6" />
                 {/* Positioned INSIDE the button bounds: Android clips children
                     that overhang their parent. */}
                 <CountBadge
