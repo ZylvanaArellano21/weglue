@@ -81,9 +81,15 @@ export default function HomeScreen() {
   // subscription — see useHomePostsFeed's comment for why.
   const { data: postsFeedData } = useHomePostsFeed(userId);
   useEffect(() => {
-    const newest = postsFeedData?.pages?.[0]?.[0];
-    if (newest && newest.author?.id && newest.author.id !== userId) {
-      registerForeignPost(newest.created_at);
+    // Bug fixed during QA: this used to check only pages[0][0] (the single
+    // overall-newest post) and no-op whenever that happened to be the
+    // viewer's own post — silently hiding a still-unread post from someone
+    // else sitting right behind it. Posts are newest-first, so the first
+    // foreign post found scanning the first page IS the newest foreign post.
+    const firstPage = postsFeedData?.pages?.[0];
+    const newestForeign = firstPage?.find((post) => post.author?.id && post.author.id !== userId);
+    if (newestForeign) {
+      registerForeignPost(newestForeign.created_at);
     }
   }, [postsFeedData, userId, registerForeignPost]);
   // If Home ever mounts already on the Posts tab, that counts as opening it.
