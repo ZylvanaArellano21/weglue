@@ -6,7 +6,7 @@ import { useAuthStore } from '@weglue/shared';
 import { supabase } from './supabase';
 import { clearCachedProfile } from './profileCache';
 import { deactivateCurrentPushToken } from './notifications/registerPush';
-import { useHomeTabStore } from '../store/homeTabStore';
+import { useHomeTabStore, POSTS_SEEN_AT_STORAGE_KEY } from '../store/homeTabStore';
 import { useLeaveClubStore } from '../store/leaveClubStore';
 import { useOfficerStore } from '../store/officerStore';
 import { useSidebarStore } from '../store/sidebarStore';
@@ -46,6 +46,10 @@ const AUTHED_STORAGE_KEYS = [
   // account deletion the row it points at no longer exists, so keeping it just
   // leaves dead state on the device. Cleared with everything else.
   'weglue-pending-notification-route-v1',
+  // "New posts" dot cadence (task 6) is per-account — the next account on this
+  // device must not inherit a stranger's read-state and see a wrongly-hidden
+  // (or wrongly-shown) dot.
+  POSTS_SEEN_AT_STORAGE_KEY,
 ];
 
 /**
@@ -142,6 +146,8 @@ export async function tearDownAuthenticatedSession(
       activeTab: 'events',
       pendingScrollPostId: null,
       pendingScrollEventId: null,
+      postsSeenAt: 0,
+      latestForeignPostAt: 0,
     });
     useLeaveClubStore.setState({ request: null });
     useOfficerStore.getState().reset();
@@ -150,10 +156,20 @@ export async function tearDownAuthenticatedSession(
     /* non-fatal */
   }
 
-  // 7. Best-effort global token revocation, deliberately NOT awaited. The local
-  //    session is already gone, so the user is logged out regardless; if this
-  //    request never lands the refresh token simply expires on its own. Awaiting
-  //    it here is what used to make logout feel slow.
+  // 7. Best-effort THIS-SESSION token revocation, deliberately NOT awaited. The
+  //    local session is already gone, so the user is logged out regardless; if
+  //    this request never lands the refresh token simply expires on its own.
+  //    Awaiting it here is what used to make logout feel slow.
+  //
+  //    Deliberately LOCAL scope (task 7): this teardown path is shared by the
+  //    ordinary sidebar "Log Out" and account deletion. It used to hardcode
+  //    `scope=global`, which revoked the refresh token on every OTHER device
+  //    too — a plain logout on one phone was silently ending the session on
+  //    every other signed-in device/browser. Account deletion does not depend
+  //    on this call for its own "logged out everywhere" guarantee: deleting
+  //    the auth user row server-side (supabase/functions/delete-account)
+  //    already invalidates every refresh token for that account, since the
+  //    account it would refresh into no longer exists.
   void revokeRefreshTokenInBackground();
 }
 
@@ -195,7 +211,7 @@ async function revokeRefreshTokenInBackground(): Promise<void> {
   if (!supabaseUrl || !anonKey) return;
 
   try {
-    await fetch(`${supabaseUrl}/auth/v1/logout?scope=global`, {
+    await fetch(`${supabaseUrl}/auth/v1/logout?scope=local`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, apikey: anonKey },
     });

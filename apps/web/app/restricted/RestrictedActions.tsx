@@ -29,7 +29,9 @@ export function RestrictedActions() {
     if (busy) return;
     setBusy(true);
     try {
-      await getSupabaseBrowser().auth.signOut();
+      // Local scope (task 7): an ordinary per-device "Sign out" — must not
+      // also end this account's session on any other signed-in device.
+      await getSupabaseBrowser().auth.signOut({ scope: "local" });
     } catch {
       // Even if GoTrue's clear fails, routing away is the useful outcome.
     }
@@ -44,7 +46,10 @@ export function RestrictedActions() {
     try {
       const res = await fetch("/api/account/delete", { method: "POST" });
       if (!res.ok) throw new Error("delete failed");
-      await getSupabaseBrowser().auth.signOut();
+      // Local scope: the account row (and every one of its refresh tokens) is
+      // already gone server-side at this point — this just clears the local
+      // browser session/cookies before redirecting.
+      await getSupabaseBrowser().auth.signOut({ scope: "local" });
       router.replace("/?deleted=1");
       router.refresh();
     } catch {

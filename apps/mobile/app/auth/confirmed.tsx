@@ -97,7 +97,12 @@ export default function AuthConfirmedScreen() {
     clearPendingSignup();
     const email = session.user.email ?? "";
 
-    void supabase.auth.signOut().finally(() => {
+    // Local scope only (task 7): this is a throwaway verification session on
+    // THIS device. The default (no scope = 'global') signOut revokes the
+    // refresh token for every OTHER signed-in device/browser on this account
+    // too — a plain signup-confirmation tap would silently log the user out
+    // of a session they already had open elsewhere.
+    void supabase.auth.signOut({ scope: "local" }).finally(() => {
       router.replace({
         pathname: "/auth/login",
         params: { prefillEmail: email, verified: "1" },
