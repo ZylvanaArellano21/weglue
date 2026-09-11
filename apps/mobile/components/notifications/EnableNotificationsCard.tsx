@@ -161,7 +161,7 @@ export function EnableNotificationsCard({ variant = 'inbox' }: { variant?: Varia
         accessibilityRole="button"
         accessibilityLabel={ctaLabel}
         style={{
-          alignSelf: 'flex-start',
+          alignSelf: 'flex-end',
           marginTop: 12,
           backgroundColor: '#0FA6A6',
           borderRadius: 18,
