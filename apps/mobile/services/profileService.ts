@@ -238,6 +238,9 @@ export async function getOwnThisWeekEvents(userId: string): Promise<CalendarSect
     building: e.building ?? null,
     room: e.room ?? null,
     cover_image_url: e.cover_image_url ?? null,
+    // Weekly-row list view — kept lean like every other feed list (task 4);
+    // synthesized from the cover, no extra query.
+    images: e.cover_image_url ? [{ path: e.cover_image_url, position: 0, width: null, height: null }] : [],
     club: { id: e.clubs.id, name: e.clubs.name, avatar_url: e.clubs.avatar_url ?? null },
     attendee_count: countMap.get(e.id) ?? 0,
     attendee_preview: previewMap.get(e.id) ?? [],
