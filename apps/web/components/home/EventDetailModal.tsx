@@ -116,7 +116,7 @@ export function EventDetailModal({
             {event.images.length > 1 ? (
               <PhotoCarousel
                 images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
-                aspectRatio={3 / 2}
+                naturalRatio
                 className="w-full"
               />
             ) : event.cover_image_url ? (

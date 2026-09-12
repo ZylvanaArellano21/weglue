@@ -12,6 +12,7 @@ import { Avatar } from '../shared/Avatar';
 import { Pill } from '../shared/Pill';
 import { cardSurface, cardClip, cardDepth } from '../shared/cardStyles';
 import { PhotoCarousel } from '../shared/PhotoCarousel';
+import { PhotoViewer } from '../shared/PhotoViewer';
 import { LinkifiedText } from '../shared/LinkifiedText';
 import { openProfile } from '../../lib/profileNavigation';
 import type { FeedPost } from '../../services/postService';
@@ -48,6 +49,10 @@ export const PostCard = memo(function PostCard({
 }: PostCardProps) {
   const router = useRouter();
   const [sharePressed, setSharePressed] = useState(false);
+  // The photo is its own tap target (opens the full-screen viewer),
+  // independent of the card background (no handler — does nothing) and the
+  // author row above (opens the profile).
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const handlePressAuthor = () => {
     if (post.author_kind === 'club') {
@@ -71,6 +76,7 @@ export const PostCard = memo(function PostCard({
   const isOwnPost = post.author.id === viewerUserId;
 
   return (
+    <>
     <View style={{ marginHorizontal: 16, marginBottom: 16, ...cardDepth }}>
     <View style={{ ...cardSurface, ...cardClip }}>
       {/* Author Row */}
@@ -160,6 +166,7 @@ export const PostCard = memo(function PostCard({
           aspectRatio={4 / 5}
           naturalRatio
           stableHeightOnly
+          onImagePress={setViewerIndex}
         />
       ) : null}
 
@@ -246,5 +253,12 @@ export const PostCard = memo(function PostCard({
       </View>
     </View>
     </View>
+    <PhotoViewer
+      visible={viewerIndex !== null}
+      images={images.map((img) => ({ uri: img.path }))}
+      initialIndex={viewerIndex ?? 0}
+      onClose={() => setViewerIndex(null)}
+    />
+    </>
   );
 });

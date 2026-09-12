@@ -1,16 +1,17 @@
 import { memo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, Pressable, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
 import { AvatarStack } from '../shared/AvatarStack';
 import { Pill } from '../shared/Pill';
+import { PhotoCarousel } from '../shared/PhotoCarousel';
+import { PhotoViewer } from '../shared/PhotoViewer';
 import { EventAudienceBadge } from '../events/EventAudienceBadge';
 import { CARD_RADIUS, cardClip, cardDepth } from '../shared/cardStyles';
 import { LinkifiedText } from '../shared/LinkifiedText';
 import type { HomeFeedEvent } from '../../services/eventService';
 import type { DesiredRsvp } from '../../hooks/useEventRsvp';
-import { getResizedImageUrl } from '../../lib/imageResize';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -36,7 +37,10 @@ function formatTime(timeStr: string): string {
 
 export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, onJoinClub, onRequestLeaveClub }: EventCardProps) {
   const router = useRouter();
-  const [imageError, setImageError] = useState(false);
+  // The photo is its own tap target (opens the full-screen viewer); tapping
+  // elsewhere on the card (title, club row, date, location, attendees) still
+  // goes to event details via handlePressEvent below.
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const handlePressEvent = () => {
     router.push({ pathname: '/home/event-detail', params: { eventId: event.id } });
@@ -51,6 +55,7 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
   };
 
   return (
+    <>
     <View style={{ marginHorizontal: 20, marginBottom: 16, borderRadius: CARD_RADIUS, ...cardDepth }}>
     <View style={{ backgroundColor: '#FEFFF8', ...cardClip }}>
       {/* Club Row */}
@@ -90,61 +95,58 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
         />
       </View>
 
-      {/* Event Image */}
-      <Pressable onPress={handlePressEvent}>
-        <View style={{ position: 'relative' }}>
-          {event.cover_image_url && !imageError ? (
-            <Image
-              source={{ uri: getResizedImageUrl(event.cover_image_url, SCREEN_WIDTH * 2, (SCREEN_WIDTH * 2 * 2) / 3) ?? undefined }}
-              style={{ width: '100%', aspectRatio: 3 / 2 }}
-              resizeMode="cover"
-              fadeDuration={0}
-              onError={(e) => {
-                console.warn('[EventCard] Image failed to load:', event.cover_image_url, e.nativeEvent.error);
-                setImageError(true);
-              }}
-            />
-          ) : (
-            <View
-              style={{
-                width: '100%',
-                aspectRatio: 3 / 2,
-                backgroundColor: '#E5E7EB',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name="image-outline" size={40} color="#9CA3AF" />
-            </View>
-          )}
-          {/* Bookmark */}
-          <TouchableOpacity
-            onPress={() => onToggleSave(event.id, !event.is_saved)}
-            activeOpacity={0.8}
+      {/* Event Image — its own tap target (opens the full-screen photo
+          viewer). Natural ratio: horizontal stays horizontal, vertical stays
+          vertical, square stays square — never a forced 3:2 crop. */}
+      <View style={{ position: 'relative' }}>
+        {event.cover_image_url ? (
+          <PhotoCarousel
+            images={[{ uri: event.cover_image_url }]}
+            width={SCREEN_WIDTH - 40}
+            naturalRatio
+            rounded={false}
+            onImagePress={() => setViewerOpen(true)}
+          />
+        ) : (
+          <View
             style={{
-              position: 'absolute',
-              top: 10,
-              right: 10,
-              backgroundColor: 'rgba(254,255,248,0.92)',
-              borderRadius: 999,
-              padding: 4,
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 1 },
-              shadowOpacity: 0.15,
-              shadowRadius: 4,
+              width: '100%',
+              aspectRatio: 3 / 2,
+              backgroundColor: '#E5E7EB',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            <Ionicons
-              name={event.is_saved ? 'bookmark' : 'bookmark-outline'}
-              size={18}
-              color={event.is_saved ? '#0FA6A6' : '#374151'}
-            />
-          </TouchableOpacity>
-          <View style={{ position: 'absolute', top: 10, left: 10 }}>
-            <EventAudienceBadge visibility={event.visibility} />
+            <Ionicons name="image-outline" size={40} color="#9CA3AF" />
           </View>
+        )}
+        {/* Bookmark */}
+        <TouchableOpacity
+          onPress={() => onToggleSave(event.id, !event.is_saved)}
+          activeOpacity={0.8}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            backgroundColor: 'rgba(254,255,248,0.92)',
+            borderRadius: 999,
+            padding: 4,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.15,
+            shadowRadius: 4,
+          }}
+        >
+          <Ionicons
+            name={event.is_saved ? 'bookmark' : 'bookmark-outline'}
+            size={18}
+            color={event.is_saved ? '#0FA6A6' : '#374151'}
+          />
+        </TouchableOpacity>
+        <View style={{ position: 'absolute', top: 10, left: 10 }}>
+          <EventAudienceBadge visibility={event.visibility} />
         </View>
-      </Pressable>
+      </View>
 
       {/* Event Info */}
       <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12 }}>
@@ -278,5 +280,14 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
       </View>
     </View>
     </View>
+    {event.cover_image_url && (
+      <PhotoViewer
+        visible={viewerOpen}
+        images={[{ uri: event.cover_image_url }]}
+        initialIndex={0}
+        onClose={() => setViewerOpen(false)}
+      />
+    )}
+    </>
   );
 });

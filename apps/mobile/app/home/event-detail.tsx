@@ -23,6 +23,7 @@ import { openReportFlow } from '../../components/shared/ReportButton';
 import { formatEventLocation, isEventPastAt } from '../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../components/events/EventAudienceBadge';
 import { PhotoCarousel } from '../../components/shared/PhotoCarousel';
+import { PhotoViewer } from '../../components/shared/PhotoViewer';
 import { setActiveDestination, clearActiveDestination } from '../../lib/notifications/activeDestination';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -111,6 +112,11 @@ export default function EventDetailScreen() {
       router.push({ pathname: '/home/attendees', params: { eventId: event.id } });
     }
   };
+
+  // The hero photo is its own tap target (opens the full-screen viewer, the
+  // right photo for a multi-photo event) — separate from every other tap
+  // target on this screen.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
@@ -220,6 +226,8 @@ export default function EventDetailScreen() {
                 images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
                 width={SCREEN_WIDTH - 32}
                 aspectRatio={3 / 2}
+                naturalRatio
+                onImagePress={setViewerIndex}
               />
             ) : (
               <View
@@ -507,6 +515,14 @@ export default function EventDetailScreen() {
             )}
           </View>
         </ScrollView>
+      )}
+      {event && (
+        <PhotoViewer
+          visible={viewerIndex !== null}
+          images={event.images.map((img) => ({ uri: img.path }))}
+          initialIndex={viewerIndex ?? 0}
+          onClose={() => setViewerIndex(null)}
+        />
       )}
     </SafeAreaView>
   );

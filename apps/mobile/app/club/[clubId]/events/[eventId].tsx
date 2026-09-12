@@ -28,6 +28,7 @@ import { openReportFlow } from '../../../../components/shared/ReportButton';
 import { formatEventLocation, isEventPastAt } from '../../../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../../../components/events/EventAudienceBadge';
 import { PhotoCarousel } from '../../../../components/shared/PhotoCarousel';
+import { PhotoViewer } from '../../../../components/shared/PhotoViewer';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -62,6 +63,11 @@ export default function ClubEventDetailScreen() {
   // Spring animation that fires once when RSVP buttons transition from locked → enabled
   const rsvpEnableAnim = useRef(new Animated.Value(1)).current;
   const prevJoinedRef = useRef<boolean | undefined>(undefined);
+
+  // The hero photo is its own tap target (opens the full-screen viewer, the
+  // right photo for a multi-photo event) — separate from every other tap
+  // target on this screen.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const { data: event, isLoading } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);
@@ -271,7 +277,9 @@ export default function ClubEventDetailScreen() {
               images={event.images.map((img) => ({ uri: img.path, width: img.width, height: img.height }))}
               width={SCREEN_WIDTH}
               aspectRatio={3 / 2}
+              naturalRatio
               rounded={false}
+              onImagePress={setViewerIndex}
             />
           ) : (
             <View
@@ -564,6 +572,14 @@ export default function ClubEventDetailScreen() {
         </ScrollView>
       )}
 
+      {event && (
+        <PhotoViewer
+          visible={viewerIndex !== null}
+          images={event.images.map((img) => ({ uri: img.path }))}
+          initialIndex={viewerIndex ?? 0}
+          onClose={() => setViewerIndex(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }

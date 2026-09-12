@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { naturalCropAspect } from "@weglue/shared";
 import { Modal } from "../shared/Modal";
 import { Avatar } from "../shared/Avatar";
-import { ImageCropper } from "../shared/ImageCropper";
+import { ImageCropper, type CropAspectOption } from "../shared/ImageCropper";
+import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { ImageIcon, CloseIcon } from "../shared/icons";
 import { useToast } from "../shared/Toast";
-import { uploadToBucket } from "../../lib/imageUpload";
+import { uploadToBucket, imageDimensions } from "../../lib/imageUpload";
 import {
   useOfficerClubs,
   useMemberSearch,
@@ -18,9 +20,18 @@ import {
   type EventAudienceMember,
 } from "../../lib/hooks/useCreateEvent";
 
-// Cover (required, cropped) + up to this many additional, uncropped photos —
-// task 4. Matches the 5-image cap enforced server-side.
+// Cover (required, crop optional) + up to this many additional, uncropped
+// photos — task 4. Matches the 5-image cap enforced server-side.
 const MAX_EXTRA_EVENT_PHOTOS = 4;
+
+/** Event-cover ratio picker: Original (the photo's own ratio), 1:1, 4:5. */
+function eventCoverAspectOptions(width: number, height: number): CropAspectOption[] {
+  return [
+    { key: "original", label: "Original", ratio: naturalCropAspect(width, height) },
+    { key: "square", label: "1:1", ratio: [1, 1] },
+    { key: "portrait", label: "4:5", ratio: [4, 5] },
+  ];
+}
 
 const VIS: { value: Visibility; label: string; desc: string }[] = [
   { value: "everyone", label: "Everyone", desc: "Anyone on campus can see it" },
@@ -97,7 +108,19 @@ export function ComposeEventModal({
     setSeeded(true);
   }, [isEdit, seeded, editing]);
 
-  const [cropUrl, setCropUrl] = useState<string | null>(null);
+  // Cropping the cover is optional: picking a file uses it exactly as-is
+  // (horizontal stays horizontal, vertical stays vertical, square stays
+  // square) unless the officer explicitly opens "Adjust", which offers the
+  // same Original / 1:1 / 4:5 ratio picker the post composer uses.
+  const [crop, setCrop] = useState<{ src: string; aspect: [number, number]; options: CropAspectOption[] } | null>(null);
+
+  // Revokes the PREVIOUS preview's object URL whenever `preview` changes (a
+  // new pick, an Adjust confirm, or Remove image) or on unmount — the single
+  // place this ever needs to happen, so callers just call setPreview/setFile.
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview]);
 
   const onFile = (f: File | undefined) => {
     if (!f) return;
@@ -105,15 +128,21 @@ export function ComposeEventModal({
       show("Please choose an image file.", "error");
       return;
     }
-    setCropUrl(URL.createObjectURL(f));
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
   };
 
-  const closeCrop = () => {
-    setCropUrl((cur) => {
-      if (cur) URL.revokeObjectURL(cur);
-      return null;
-    });
+  const openAdjust = async () => {
+    if (!file || !preview) return;
+    try {
+      const { width, height } = await imageDimensions(file);
+      setCrop({ src: preview, aspect: naturalCropAspect(width, height), options: eventCoverAspectOptions(width, height) });
+    } catch {
+      setCrop({ src: preview, aspect: [4, 5], options: eventCoverAspectOptions(4, 5) });
+    }
   };
+
+  const closeCrop = () => setCrop(null);
 
   const extraSlotsUsed = existingExtra.length + extraFiles.length;
 
@@ -237,11 +266,12 @@ export function ComposeEventModal({
 
   return (
     <>
-    {cropUrl && (
+    {crop && (
       <ImageCropper
-        src={cropUrl}
-        aspect={[4, 5]}
-        title="Position the event image"
+        src={crop.src}
+        aspect={crop.aspect}
+        aspectOptions={crop.options}
+        title="Adjust the event image"
         onCancel={closeCrop}
         onConfirm={({ blob }) => {
           const cropped = new File([blob], "event.jpg", { type: "image/jpeg" });
@@ -284,20 +314,34 @@ export function ComposeEventModal({
 
         {preview || (isEdit && existingCover) ? (
           <div className="relative mb-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={(preview ?? existingCover) as string} alt="preview" className="w-full rounded-xl object-cover" style={{ maxHeight: 240 }} />
+            {/* Natural-ratio preview — horizontal stays horizontal, vertical
+                stays vertical, square stays square, and it is never stretched
+                or force-cropped just to fill a fixed box. */}
+            <PhotoCarousel images={[{ uri: (preview ?? existingCover) as string }]} naturalRatio rounded />
             {preview ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setFile(null);
-                  setPreview(null);
-                }}
-                aria-label="Remove image"
-                className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white"
-              >
-                <CloseIcon size={16} />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={openAdjust}
+                  className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-semibold text-white"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <path d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2" />
+                  </svg>
+                  Adjust
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFile(null);
+                    setPreview(null);
+                  }}
+                  aria-label="Remove image"
+                  className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white"
+                >
+                  <CloseIcon size={16} />
+                </button>
+              </>
             ) : (
               <button
                 type="button"

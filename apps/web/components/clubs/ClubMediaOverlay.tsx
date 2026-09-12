@@ -83,7 +83,10 @@ export function ClubMediaOverlay({
         <div className="flex items-center justify-center bg-black md:w-[58%]" style={{ minHeight: 260 }}>
           {carousel ? (
             <div className="w-full self-center">
-              <PhotoCarousel key={photo.id} images={carousel.map((im) => ({ uri: im.path }))} aspectRatio={1} rounded={false} />
+              {/* Natural ratio: this panel shows the exact post carousel — it
+                  must match PostCard's shape, not force every multi-photo
+                  post into a square. */}
+              <PhotoCarousel key={photo.id} images={carousel.map((im) => ({ uri: im.path }))} naturalRatio rounded={false} />
             </div>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
