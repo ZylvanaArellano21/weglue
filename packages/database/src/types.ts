@@ -1432,6 +1432,21 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_tx_university_edit: {
+        Args: {
+          p_actor_email: string
+          p_actor_id: string
+          p_correlation_id: string
+          p_email_denied_message?: string | null
+          p_email_domains?: string[] | null
+          p_email_mode?: string | null
+          p_id: string
+          p_name?: string
+          p_reason?: string
+          p_slug?: string
+        }
+        Returns: Json
+      }
       before_user_created: { Args: { event: Json }; Returns: Json }
       campus_email_allowed: {
         Args: { p_email: string; p_university_id: string }
