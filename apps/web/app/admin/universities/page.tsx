@@ -1,4 +1,8 @@
-import { listUniversitiesFull, getCampusMode } from "../../../lib/admin/data2";
+import {
+  describeCampusEmailPolicy,
+  getCampusMode,
+  listUniversitiesFull,
+} from "../../../lib/admin/data2";
 import { SectionCard, Badge, EmptyState } from "../../../components/admin/primitives";
 import { ListControls } from "../../../components/admin/ListControls";
 import { Table, Th, Td, RowLink } from "../../../components/admin/Table";
@@ -26,8 +30,9 @@ export default async function AdminUniversitiesPage({
           <h1 className="text-xl font-semibold text-gray-900">Universities</h1>
           <p className="mt-0.5 text-sm text-gray-500">
             {rows.length.toLocaleString()} campus{rows.length === 1 ? "" : "es"} — canonical{" "}
-            <code className="rounded bg-gray-100 px-1 text-xs">universities</code>. (Domain→campus mapping is not yet in
-            schema — slug is the identifier.)
+            <code className="rounded bg-gray-100 px-1 text-xs">universities</code>. Slug is the identifier the apps use;
+            the email rule is per-campus data enforced by{" "}
+            <code className="rounded bg-gray-100 px-1 text-xs">campus_email_allowed()</code>.
           </p>
         </div>
         {/* Single-campus mode gates creation. The server action refuses on the
@@ -72,6 +77,7 @@ export default async function AdminUniversitiesPage({
               <>
                 <Th>Name</Th>
                 <Th>Slug</Th>
+                <Th>Email rule</Th>
                 <Th>Status</Th>
                 <Th className="text-right">Users</Th>
                 <Th className="text-right">Clubs</Th>
@@ -83,6 +89,11 @@ export default async function AdminUniversitiesPage({
               <RowLink key={u.id} href={`/admin/universities/${u.id}`}>
                 <Td className="font-medium text-gray-900">{u.name}</Td>
                 <Td className="font-mono text-gray-600">@{u.slug}</Td>
+                <Td className="text-gray-600">
+                  <Badge tone={u.email_mode === "allowlist" ? "blue" : "gray"}>
+                    {describeCampusEmailPolicy(u)}
+                  </Badge>
+                </Td>
                 <Td>{u.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</Td>
                 <Td className="text-right tabular-nums">{u.user_count}</Td>
                 <Td className="text-right tabular-nums">{u.club_count}</Td>

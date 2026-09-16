@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getUniversityDetail } from "../../../../lib/admin/data2";
+import {
+  describeCampusEmailPolicy,
+  getUniversityDetail,
+} from "../../../../lib/admin/data2";
 import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { EditUniversityDialog, UniversityActiveToggle } from "../../../../components/admin/UniversityControls";
@@ -43,6 +46,37 @@ export default async function UniversityDetailPage({ params }: { params: { id: s
           <Field label="Created">{fmtDate(uni.created_at)}</Field>
         </dl>
       </div>
+
+      {/* Who may join this campus. The database decides with
+          campus_email_allowed(); this is the same rule, shown. */}
+      <SectionCard title="Email rule">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 p-4 sm:grid-cols-3">
+          <Field label="Mode">
+            <Badge tone={uni.email_mode === "allowlist" ? "blue" : "gray"}>
+              {uni.email_mode === "allowlist" ? "Allowlist" : "Block school email"}
+            </Badge>
+          </Field>
+          <Field label="Accepted domains">
+            {uni.email_domains && uni.email_domains.length > 0 ? (
+              <span className="font-mono text-sm">
+                {uni.email_domains.map((d) => `@${d}`).join(", ")}
+              </span>
+            ) : (
+              "Any address that is not school-issued"
+            )}
+          </Field>
+          <Field label="Rejection message">
+            {uni.email_denied_message ?? (
+              <span className="text-gray-400">Shared default</span>
+            )}
+          </Field>
+        </dl>
+        <p className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
+          {describeCampusEmailPolicy(uni)} — applied identically at signup, at
+          Account Center email changes, and to any client that bypasses the apps.
+          Allowlist domains match exactly; subdomains are not accepted.
+        </p>
+      </SectionCard>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <SectionCard
