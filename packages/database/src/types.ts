@@ -1560,6 +1560,20 @@ export type Database = {
         Args: { p_conversation_id: string }
         Returns: undefined
       }
+      my_campus: {
+        Args: never
+        Returns: {
+          email_denied_message: string | null
+          email_domains: string[] | null
+          email_mode: string
+          name: string
+          slug: string
+        }[]
+      }
+      preview_club_match_count: {
+        Args: { p_interests: string[]; p_university_slug?: string }
+        Returns: number
+      }
       search_discovery: {
         Args: { p_query: string; p_user_id: string }
         Returns: {
