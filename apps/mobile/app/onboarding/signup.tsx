@@ -13,7 +13,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
-import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
+import {
+  type Campus,
+  retryIdempotent,
+  toCampuses,
+  useOnboardingStore,
+  validateCampusEmail,
+} from "@weglue/shared";
 import { useToast } from "../../components/Toast";
 import { LegalModal } from "../../components/shared/LegalModal";
 import {
@@ -28,6 +34,7 @@ export default function OnboardingSignupScreen() {
   const router = useRouter();
   const {
     matchCount,
+    selectedCampusSlug,
     selectedInterests,
     selectedActivities,
     avatarChoice,
@@ -46,14 +53,49 @@ export default function OnboardingSignupScreen() {
   // it's < 2 (can't be trusted) the heading drops the number instead of lying.
   const displayMatchCount = matchCount;
 
-  // Refresh the preview on mount — the Activities-step value goes stale if the
-  // user edited interests via Back — so "+N clubs" equals what the account gets.
+  // The campus chosen on the first onboarding step. Its row carries the email
+  // rule this account must satisfy, so the form cannot be evaluated — or
+  // submitted — until it resolves.
+  const [campus, setCampus] = useState<Campus | null>(null);
+  const [campusChecked, setCampusChecked] = useState(false);
+
+  // Resolve the campus, then refresh the match preview scoped to it. The
+  // Activities-step value goes stale if the user edited interests via Back, so
+  // "+N clubs" is re-read here and equals what the account actually gets —
+  // counted within the chosen campus, never across campuses.
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Signup is campus-scoped now: without a valid, still-active campus there
+      // is no email rule to apply and no membership to create, so the flow
+      // returns to the picker rather than letting the backend reject the
+      // account later with nothing on screen to explain why.
+      let resolved: Campus | null = null;
+      if (selectedCampusSlug) {
+        try {
+          const rows = await retryIdempotent(async () => {
+            const { data, error } = await supabase.rpc("list_active_campuses");
+            if (error) throw error;
+            return data;
+          });
+          resolved =
+            toCampuses(rows).find((c) => c.slug === selectedCampusSlug) ?? null;
+        } catch {
+          resolved = null;
+        }
+      }
+      if (cancelled) return;
+      if (!resolved) {
+        router.replace("/onboarding/choose-university");
+        return;
+      }
+      setCampus(resolved);
+      setCampusChecked(true);
+
       try {
         const { data } = await supabase.rpc("preview_club_match_count", {
           p_interests: selectedInterests,
+          p_university_slug: resolved.slug,
         });
         if (!cancelled && typeof data === "number" && data >= 2) {
           setMatchCount(data);
@@ -65,7 +107,7 @@ export default function OnboardingSignupScreen() {
     return () => {
       cancelled = true;
     };
-  }, [selectedInterests, setMatchCount]);
+  }, [selectedCampusSlug, selectedInterests, setMatchCount, router]);
 
   // Restore username/email from store so back navigation preserves the form
   const [username, setUsername] = useState(pendingUsername);
@@ -85,7 +127,7 @@ export default function OnboardingSignupScreen() {
     if (!email.trim()) {
       errs.email = "Email is required.";
     } else {
-      const emailCheck = validateEducationEmail(email.trim());
+      const emailCheck = validateCampusEmail(campus, email.trim());
       if (!emailCheck.valid) errs.email = emailCheck.reason!;
     }
     if (!password) {
@@ -110,11 +152,14 @@ export default function OnboardingSignupScreen() {
       setEmailFeedback(null);
       return;
     }
-    const result = validateEducationEmail(text.trim());
+    const result = validateCampusEmail(campus, text.trim());
     setEmailFeedback({ valid: result.valid, reason: result.reason });
   }
 
   async function handleNext() {
+    // Defence in depth: the mount effect already routes back to the picker when
+    // no campus resolved, so reaching here without one should be impossible.
+    if (!campus) return;
     if (!validate()) return;
     setLoading(true);
     setEmailExistsVerified(false);
@@ -175,6 +220,11 @@ export default function OnboardingSignupScreen() {
           data: {
             username: cleanUsername,
             full_name: cleanUsername,
+            // The campus this account belongs to. The auth trigger resolves the
+            // slug and writes profiles.university_id from it, and the backend
+            // rejects the signup outright if it is missing, unknown or
+            // inactive — there is deliberately no default campus.
+            university_slug: campus.slug,
             interests: selectedInterests,
             activities: selectedActivities,
             agreed_to_terms: true,
@@ -229,6 +279,23 @@ export default function OnboardingSignupScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // On a campus that accepts only its own domain, show it in the placeholder;
+  // every other campus keeps the original hint unchanged.
+  const emailPlaceholder =
+    campus?.emailMode === "allowlist" && campus.emailDomains?.[0]
+      ? `yourname@${campus.emailDomains[0]}`
+      : "yourname@email.com";
+
+  // Nothing renders until the campus resolves: the email field's rule comes
+  // from it, and a form shown under the wrong rule would validate wrongly.
+  if (!campusChecked) {
+    return (
+      <SafeAreaView style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#0FA6A6" />
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -294,7 +361,7 @@ export default function OnboardingSignupScreen() {
                   (!!errors.email || emailExistsVerified || (emailFeedback !== null && !emailFeedback.valid)) && styles.inputError,
                   emailFeedback?.valid && !emailExistsVerified && styles.inputValid,
                 ]}
-                placeholder="yourname@email.com"
+                placeholder={emailPlaceholder}
                 placeholderTextColor="rgba(0,0,0,0.3)"
                 value={email}
                 onChangeText={handleEmailChange}
@@ -406,6 +473,7 @@ export default function OnboardingSignupScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FEFCF0" },
+  loadingContainer: { alignItems: "center", justifyContent: "center" },
   topBar: { paddingHorizontal: 20, paddingTop: 8 },
   backBtn: { width: 40, height: 40, justifyContent: "center" },
   backArrow: { fontSize: 30, color: "#000", lineHeight: 36 },

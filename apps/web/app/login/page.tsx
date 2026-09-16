@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { validateEducationEmail } from "@weglue/shared";
+import { emailDomainOf } from "@weglue/shared";
 import { createClient } from "../../lib/supabase/client";
 import {
   clearPendingSignup,
@@ -61,9 +61,11 @@ function LoginContent(): JSX.Element {
   useEffect(() => {
     if (inviteParam) setPendingInvite(inviteParam);
   }, [inviteParam]);
+  // Signup now opens with the campus picker, so every entry into the flow —
+  // including this one — goes there first.
   const createAccountHref = inviteParam
-    ? `/onboarding/interests?invite=${encodeURIComponent(inviteParam)}`
-    : "/onboarding/interests";
+    ? `/onboarding/choose-university?invite=${encodeURIComponent(inviteParam)}`
+    : "/onboarding/choose-university";
 
   function clearAllErrors() {
     setFieldErrors({});
@@ -77,9 +79,13 @@ function LoginContent(): JSX.Element {
     const newFieldErrors: { email?: string; password?: string } = {};
     if (!email.trim()) {
       newFieldErrors.email = "Email is required.";
-    } else {
-      const emailCheck = validateEducationEmail(email.trim());
-      if (!emailCheck.valid) newFieldErrors.email = emailCheck.reason!;
+    } else if (!emailDomainOf(email.trim())) {
+      // Login checks only that the address is well-formed. It must NOT apply a
+      // campus email rule: login is universal, the campus is unknown until the
+      // account authenticates, and campus rules contradict each other — a
+      // Texas A&M address is required on that campus and rejected on Lone
+      // Star, so any rule here would lock one campus out of its own accounts.
+      newFieldErrors.email = "Please enter a valid email address.";
     }
     if (!password) newFieldErrors.password = "Password is required.";
 

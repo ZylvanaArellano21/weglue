@@ -16,7 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useToast } from "../../components/Toast";
-import { useOnboardingStore, validateEducationEmail } from "@weglue/shared";
+import { emailDomainOf, useOnboardingStore } from "@weglue/shared";
 import {
   checkSignupStatus,
   clearPendingSignup,
@@ -103,11 +103,16 @@ export default function LoginScreen() {
     }
   }
 
-  /** Both "Create an account" entry points start the survey at Interests. */
+  /**
+   * Both "Create an account" entry points — the footer link and "Create one
+   * now" on the no-account error — now open the campus picker, which is the
+   * first step of signup. The survey follows it. The typed email is carried
+   * over exactly as before.
+   */
   function startNewAccount() {
     setPendingEmail(email.trim().toLowerCase());
     setPendingPassword("");
-    router.replace("/onboarding/interests");
+    router.replace("/onboarding/choose-university");
   }
 
   function handleEmailChange(v: string) {
@@ -125,9 +130,13 @@ export default function LoginScreen() {
 
     if (!email.trim()) {
       newFieldErrors.email = "Email is required.";
-    } else {
-      const emailCheck = validateEducationEmail(email.trim());
-      if (!emailCheck.valid) newFieldErrors.email = emailCheck.reason!;
+    } else if (!emailDomainOf(email.trim())) {
+      // Login checks only that the address is well-formed. It must NOT apply a
+      // campus email rule: login is universal, the campus is unknown until the
+      // account authenticates, and campus rules contradict each other — a
+      // Texas A&M address is required on that campus and rejected on Lone
+      // Star, so any rule here would lock one campus out of its own accounts.
+      newFieldErrors.email = "Please enter a valid email address.";
     }
     if (!password) {
       newFieldErrors.password = "Password is required.";

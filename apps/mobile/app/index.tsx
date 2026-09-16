@@ -134,7 +134,7 @@ export default function WelcomeScreen() {
       <View style={styles.cta}>
         <TouchableOpacity
           style={styles.primaryBtn}
-          onPress={() => router.push("/onboarding/interests")}
+          onPress={() => router.push("/onboarding/choose-university")}
           activeOpacity={0.85}
         >
           <Text style={styles.primaryBtnText}>Sign up</Text>

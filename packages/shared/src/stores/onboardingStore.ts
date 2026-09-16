@@ -12,6 +12,13 @@ export type AvatarChoice =
   | { kind: "photo" | "camera"; token: string };
 
 interface OnboardingState {
+  /**
+   * Slug of the campus chosen on the "Choose your university" step, which now
+   * opens the signup flow. It travels to the server in the signup metadata and
+   * is what the account's campus membership is created from, so signup cannot
+   * proceed without it.
+   */
+  selectedCampusSlug: string | null;
   selectedInterests: string[];
   selectedActivities: string[];
   matchCount: number;
@@ -22,6 +29,7 @@ interface OnboardingState {
   pendingPassword: string;
   avatarChoice: AvatarChoice | null;
 
+  setSelectedCampusSlug: (slug: string | null) => void;
   setSelectedInterests: (interests: string[]) => void;
   toggleInterest: (interest: string) => void;
   setSelectedActivities: (activities: string[]) => void;
@@ -35,6 +43,7 @@ interface OnboardingState {
 }
 
 const initialState = {
+  selectedCampusSlug: null as string | null,
   selectedInterests: [] as string[],
   selectedActivities: [] as string[],
   matchCount: 0,
@@ -46,6 +55,8 @@ const initialState = {
 
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   ...initialState,
+
+  setSelectedCampusSlug: (selectedCampusSlug) => set({ selectedCampusSlug }),
 
   setSelectedInterests: (selectedInterests) => set({ selectedInterests }),
 

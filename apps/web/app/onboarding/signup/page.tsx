@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { validateEducationEmail } from "@weglue/shared";
+import {
+  type Campus,
+  retryIdempotent,
+  toCampuses,
+  validateCampusEmail,
+} from "@weglue/shared";
 import { createClient } from "../../../lib/supabase/client";
 import {
   checkPassword,
@@ -47,6 +52,11 @@ export default function SignupPage(): JSX.Element | null {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const submittingRef = useRef(false);
+  // The campus chosen on the first onboarding step. Its row carries the email
+  // rule this account must satisfy, so the form cannot be evaluated — or
+  // submitted — until it resolves. null + checked = the step was skipped.
+  const [campus, setCampus] = useState<Campus | null>(null);
+  const [campusChecked, setCampusChecked] = useState(false);
 
   // Restore flow state (survey selections, match count, form fields,
   // checkboxes) after refresh, Back navigation, or the Terms round-trip.
@@ -58,21 +68,56 @@ export default function SignupPage(): JSX.Element | null {
     setPassword(getTransientPassword());
     // Seed from the Activities-step preview; refreshed just below.
     setMatchCount(state.matchCount);
-    if (state.pendingEmail && state.pendingEmail.includes("@")) {
-      const result = validateEducationEmail(state.pendingEmail);
-      setEmailFeedback({ valid: result.valid, reason: result.reason });
-    }
 
-    // Re-run the same server preview the signup batch will use, so the "+N
-    // clubs" heading is the exact count the account gets after verifying (the
-    // Activities-step value goes stale if the user edited interests via Back).
-    // preview_club_match_count already enforces the min-2 + popular-fill rule
-    // server-side, so no client Math.max fudge — if it can't be trusted the
-    // heading falls back to no number rather than a wrong one.
     (async () => {
+      // Resolve the campus chosen on the first onboarding step. Signup is
+      // campus-scoped now: without a valid, still-active campus there is no
+      // email rule to apply and no membership to create, so the flow returns
+      // to the picker rather than letting the backend reject the account later
+      // with nothing on screen to explain why. Everything typed so far is kept
+      // in session storage, so coming back here loses nothing.
+      let resolved: Campus | null = null;
+      if (state.campusSlug) {
+        try {
+          const rows = await retryIdempotent(async () => {
+            const { data, error } = await createClient().rpc(
+              "list_active_campuses"
+            );
+            if (error) throw error;
+            return data;
+          });
+          resolved =
+            toCampuses(rows).find((c) => c.slug === state.campusSlug) ?? null;
+        } catch {
+          resolved = null;
+        }
+      }
+      if (!resolved) {
+        router.replace("/onboarding/choose-university");
+        return;
+      }
+      setCampus(resolved);
+      setCampusChecked(true);
+
+      // A restored email is re-checked against THIS campus's rule — the same
+      // address can be valid on one campus and rejected on another.
+      if (state.pendingEmail && state.pendingEmail.includes("@")) {
+        const result = validateCampusEmail(resolved, state.pendingEmail);
+        setEmailFeedback({ valid: result.valid, reason: result.reason });
+      }
+
+      // Re-run the same server preview the signup batch will use, so the "+N
+      // clubs" heading is the exact count the account gets after verifying (the
+      // Activities-step value goes stale if the user edited interests via Back).
+      // Scoped to the chosen campus, so a Texas A&M signup is never counting
+      // Lone Star clubs. preview_club_match_count already enforces the min-2 +
+      // popular-fill rule server-side, so no client Math.max fudge — if it
+      // can't be trusted the heading falls back to no number rather than a
+      // wrong one.
       try {
         const { data } = await createClient().rpc("preview_club_match_count", {
           p_interests: state.selectedInterests,
+          p_university_slug: resolved.slug,
         });
         if (typeof data === "number" && data >= 2) {
           setMatchCount(data);
@@ -82,7 +127,7 @@ export default function SignupPage(): JSX.Element | null {
         /* keep the seeded value */
       }
     })();
-  }, []);
+  }, [router]);
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
@@ -90,7 +135,7 @@ export default function SignupPage(): JSX.Element | null {
     if (!email.trim()) {
       errs.email = "Email is required.";
     } else {
-      const emailCheck = validateEducationEmail(email.trim());
+      const emailCheck = validateCampusEmail(campus, email.trim());
       if (!emailCheck.valid) errs.email = emailCheck.reason!;
     }
     const pwError = passwordError(password);
@@ -124,13 +169,16 @@ export default function SignupPage(): JSX.Element | null {
       setEmailFeedback(null);
       return;
     }
-    const result = validateEducationEmail(v.trim());
+    const result = validateCampusEmail(campus, v.trim());
     setEmailFeedback({ valid: result.valid, reason: result.reason });
   }
 
   async function handleNext(e: React.FormEvent) {
     e.preventDefault();
     if (submittingRef.current || loading) return;
+    // Defence in depth: the mount effect already routes back to the picker when
+    // no campus resolved, so reaching here without one should be impossible.
+    if (!campus) return;
     if (!validate()) return;
 
     submittingRef.current = true;
@@ -195,6 +243,11 @@ export default function SignupPage(): JSX.Element | null {
           data: {
             username: cleanUsername,
             full_name: cleanUsername,
+            // The campus this account belongs to. The auth trigger resolves the
+            // slug and writes profiles.university_id from it, and the backend
+            // rejects the signup outright if it is missing, unknown or
+            // inactive — there is deliberately no default campus.
+            university_slug: campus.slug,
             interests: selectedInterests,
             activities: selectedActivities,
             agreed_to_terms: true,
@@ -262,6 +315,17 @@ export default function SignupPage(): JSX.Element | null {
   const pw = checkPassword(password);
   const hintColor = (ok: boolean) =>
     password.length === 0 ? "text-[#9CA3AF]" : ok ? "text-[#0FA6A6]" : "text-[#F02719]";
+
+  // On a campus that accepts only its own domain, show it in the placeholder;
+  // every other campus keeps the original hint unchanged.
+  const emailPlaceholder =
+    campus?.emailMode === "allowlist" && campus.emailDomains?.[0]
+      ? `yourname@${campus.emailDomains[0]}`
+      : "yourname@email.com";
+
+  // Nothing renders until the campus resolves: the email field's rule comes
+  // from it, and a form shown under the wrong rule would validate wrongly.
+  if (!campusChecked) return null;
 
   return (
     <main className="min-h-screen bg-[#FEFCF0] px-4 pb-10">
@@ -345,7 +409,7 @@ export default function SignupPage(): JSX.Element | null {
                 name="email"
                 type="email"
                 autoComplete="email"
-                placeholder="yourname@email.com"
+                placeholder={emailPlaceholder}
                 value={email}
                 onChange={(e) => handleEmailChange(e.target.value)}
                 className={inputClass(
