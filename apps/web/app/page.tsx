@@ -171,7 +171,7 @@ export default function LandingPage({ searchParams }: { searchParams?: { deleted
           your clubs, your community, and your people.
         </p>
         <Link
-          href="/onboarding/interests"
+          href="/onboarding/choose-university"
           className="inline-flex items-center justify-center bg-[#0FA6A6] text-white font-semibold text-base px-10 py-3.5 rounded-full hover:bg-[#0d9494] transition-colors shadow-md"
         >
           Get Started
@@ -249,7 +249,7 @@ export default function LandingPage({ searchParams }: { searchParams?: { deleted
           Starts Here
         </h3>
         <Link
-          href="/onboarding/interests"
+          href="/onboarding/choose-university"
           className="inline-flex items-center justify-center bg-[#0FA6A6] text-white font-semibold text-base px-10 py-3.5 rounded-full hover:bg-[#0d9494] transition-colors shadow-md"
         >
           Get Started

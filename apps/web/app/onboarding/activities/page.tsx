@@ -68,7 +68,12 @@ export default function ActivitiesPage(): JSX.Element | null {
       const supabase = createClient();
       const { data, error: rpcError } = await supabase.rpc(
         "preview_club_match_count",
-        { p_interests: selectedInterests }
+        {
+          p_interests: selectedInterests,
+          // Scoped to the campus chosen on the first step, so the count is
+          // never drawn from another campus's clubs.
+          p_university_slug: readOnboardingState().campusSlug,
+        }
       );
       if (rpcError) throw rpcError;
       writeOnboardingState({

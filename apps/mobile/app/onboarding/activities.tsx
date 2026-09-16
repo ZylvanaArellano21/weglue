@@ -27,8 +27,13 @@ const ACTIVITIES = [
 
 export default function ActivitiesScreen() {
   const router = useRouter();
-  const { selectedActivities, toggleActivity, selectedInterests, setMatchCount } =
-    useOnboardingStore();
+  const {
+    selectedActivities,
+    toggleActivity,
+    selectedCampusSlug,
+    selectedInterests,
+    setMatchCount,
+  } = useOnboardingStore();
   const [loading, setLoading] = useState(false);
 
   async function handleFindMatches() {
@@ -41,6 +46,9 @@ export default function ActivitiesScreen() {
       // with the best-ranked active clubs.
       const { data, error } = await supabase.rpc("preview_club_match_count", {
         p_interests: selectedInterests,
+        // Scoped to the campus chosen on the first step, so the count is never
+        // drawn from another campus's clubs.
+        p_university_slug: selectedCampusSlug,
       });
       if (error) throw error;
       setMatchCount(typeof data === "number" ? data : 0);
