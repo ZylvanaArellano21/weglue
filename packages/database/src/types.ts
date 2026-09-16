@@ -14,6 +14,35 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_config: {
+        Row: {
+          id: boolean
+          launch_university_id: string | null
+          single_campus_mode: boolean
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          launch_university_id?: string | null
+          single_campus_mode?: boolean
+          updated_at?: string
+        }
+        Update: {
+          id?: boolean
+          launch_university_id?: string | null
+          single_campus_mode?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_config_launch_university_id_fkey"
+            columns: ["launch_university_id"]
+            isOneToOne: false
+            referencedRelation: "universities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       club_categories: {
         Row: {
           category: string
@@ -274,6 +303,7 @@ export type Database = {
           name: string
           university: string | null
           updated_at: string
+          university_id: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -298,6 +328,7 @@ export type Database = {
           name: string
           university?: string | null
           updated_at?: string
+          university_id?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -322,8 +353,17 @@ export type Database = {
           name?: string
           university?: string | null
           updated_at?: string
+          university_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "clubs_university_id_fkey"
+            columns: ["university_id"]
+            isOneToOne: false
+            referencedRelation: "universities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       conversation_channels: {
         Row: {
@@ -1138,6 +1178,7 @@ export type Database = {
           onboarding_complete: boolean
           university: string | null
           updated_at: string
+          university_id: string | null
           username: string
           year: string | null
         }
@@ -1156,6 +1197,7 @@ export type Database = {
           onboarding_complete?: boolean
           university?: string | null
           updated_at?: string
+          university_id?: string | null
           username: string
           year?: string | null
         }
@@ -1174,10 +1216,19 @@ export type Database = {
           onboarding_complete?: boolean
           university?: string | null
           updated_at?: string
+          university_id?: string | null
           username?: string
           year?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_university_id_fkey"
+            columns: ["university_id"]
+            isOneToOne: false
+            referencedRelation: "universities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       saved_events: {
         Row: {
@@ -1309,6 +1360,39 @@ export type Database = {
           },
         ]
       }
+      universities: {
+        Row: {
+          created_at: string
+          email_denied_message: string | null
+          email_domains: string[] | null
+          email_mode: string
+          id: string
+          is_active: boolean
+          name: string
+          slug: string
+        }
+        Insert: {
+          created_at?: string
+          email_denied_message?: string | null
+          email_domains?: string[] | null
+          email_mode?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          slug: string
+        }
+        Update: {
+          created_at?: string
+          email_denied_message?: string | null
+          email_domains?: string[] | null
+          email_mode?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          slug?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -1349,6 +1433,10 @@ export type Database = {
         Returns: Json
       }
       before_user_created: { Args: { event: Json }; Returns: Json }
+      campus_email_allowed: {
+        Args: { p_email: string; p_university_id: string }
+        Returns: boolean
+      }
       cast_poll_vote: {
         Args: { p_option_id: string; p_poll_id: string }
         Returns: undefined
@@ -1458,6 +1546,16 @@ export type Database = {
         Returns: boolean
       }
       is_educational_email: { Args: { email: string }; Returns: boolean }
+      list_active_campuses: {
+        Args: never
+        Returns: {
+          email_denied_message: string | null
+          email_domains: string[] | null
+          email_mode: string
+          name: string
+          slug: string
+        }[]
+      }
       mark_conversation_read: {
         Args: { p_conversation_id: string }
         Returns: undefined
