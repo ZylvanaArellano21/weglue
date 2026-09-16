@@ -10,10 +10,19 @@ function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+export type CampusEmailMode = "block_educational" | "allowlist";
+
+export interface CampusPolicyDraft {
+  emailMode: CampusEmailMode;
+  emailDomains: string[];
+  emailDeniedMessage: string;
+}
+
 function UniversityForm({
   heading,
   initialName,
   initialSlug,
+  initialPolicy,
   submitLabel,
   onSubmit,
   onClose,
@@ -22,8 +31,15 @@ function UniversityForm({
   heading: string;
   initialName: string;
   initialSlug: string;
+  /** Present only where the email rule is editable (Edit, not Add). */
+  initialPolicy?: CampusPolicyDraft;
   submitLabel: string;
-  onSubmit: (name: string, slug: string, reason: string) => Promise<{ ok: boolean; error?: string }>;
+  onSubmit: (
+    name: string,
+    slug: string,
+    reason: string,
+    policy?: CampusPolicyDraft
+  ) => Promise<{ ok: boolean; error?: string }>;
   onClose: () => void;
   /** Require a typed reason (recorded permanently in the audit trail). */
   requireReason?: boolean;
@@ -35,6 +51,15 @@ function UniversityForm({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [emailMode, setEmailMode] = useState<CampusEmailMode>(
+    initialPolicy?.emailMode ?? "block_educational"
+  );
+  const [domainsText, setDomainsText] = useState(
+    (initialPolicy?.emailDomains ?? []).join(", ")
+  );
+  const [deniedMessage, setDeniedMessage] = useState(
+    initialPolicy?.emailDeniedMessage ?? ""
+  );
   /** Synchronous re-entrancy latch, same rationale as ConfirmAction. */
   const inFlight = useRef(false);
 
@@ -51,7 +76,20 @@ function UniversityForm({
     inFlight.current = true;
     setPending(true);
     setError(null);
-    onSubmit(name, slug, trimmedReason)
+    // block_educational must send an EMPTY domain list, not an absent one: the
+    // RPC treats absent as "unchanged", which would leave stale domains behind
+    // and be refused by the shape constraint.
+    const policy: CampusPolicyDraft | undefined = initialPolicy
+      ? {
+          emailMode,
+          emailDomains:
+            emailMode === "allowlist"
+              ? domainsText.split(",").map((d) => d.trim()).filter(Boolean)
+              : [],
+          emailDeniedMessage: deniedMessage,
+        }
+      : undefined;
+    onSubmit(name, slug, trimmedReason, policy)
       .then((res) => {
         if (res.ok) {
           onClose();
@@ -92,6 +130,86 @@ function UniversityForm({
           />
           <p className="mt-1 text-xs text-gray-400">Lowercase words separated by hyphens.</p>
         </div>
+
+        {/* Who may join this campus. The database enforces the same rule via
+            campus_email_allowed(), at signup and at every email change. */}
+        {initialPolicy ? (
+          <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+            <div>
+              <label
+                htmlFor="university-email-mode"
+                className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500"
+              >
+                Email rule
+              </label>
+              <select
+                id="university-email-mode"
+                value={emailMode}
+                onChange={(e) => setEmailMode(e.target.value as CampusEmailMode)}
+                disabled={pending}
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
+              >
+                <option value="block_educational">
+                  Any address that is not school-issued
+                </option>
+                <option value="allowlist">Only specific domains</option>
+              </select>
+            </div>
+
+            {emailMode === "allowlist" ? (
+              <>
+                <div>
+                  <label
+                    htmlFor="university-email-domains"
+                    className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500"
+                  >
+                    Accepted domains <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="university-email-domains"
+                    value={domainsText}
+                    onChange={(e) => setDomainsText(e.target.value)}
+                    disabled={pending}
+                    placeholder="tamu.edu"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    Comma-separated. Matched exactly — a subdomain like
+                    mail.tamu.edu is NOT accepted unless you list it too.
+                  </p>
+                </div>
+                <div>
+                  <label
+                    htmlFor="university-denied-message"
+                    className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500"
+                  >
+                    Rejection message <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    id="university-denied-message"
+                    value={deniedMessage}
+                    onChange={(e) => setDeniedMessage(e.target.value)}
+                    disabled={pending}
+                    rows={2}
+                    maxLength={200}
+                    placeholder="Use your Texas A&M email address (@tamu.edu) to join this campus."
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    Shown to a student whose address is refused, on every
+                    platform.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-gray-500">
+                School-issued addresses are refused and the shared message is
+                shown. This is the rule Lone Star has used since launch.
+              </p>
+            )}
+          </div>
+        ) : null}
+
         {requireReason ? (
           <div>
             <label htmlFor="university-reason" className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -156,7 +274,17 @@ export function AddUniversityDialog() {
   );
 }
 
-export function EditUniversityDialog({ id, name, slug }: { id: string; name: string; slug: string }) {
+export function EditUniversityDialog({
+  id,
+  name,
+  slug,
+  policy,
+}: {
+  id: string;
+  name: string;
+  slug: string;
+  policy: CampusPolicyDraft;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -168,8 +296,17 @@ export function EditUniversityDialog({ id, name, slug }: { id: string; name: str
           heading="Edit university"
           initialName={name}
           initialSlug={slug}
+          initialPolicy={policy}
           submitLabel="Save"
-          onSubmit={(n, s) => editUniversity(id, { name: n, slug: s })}
+          onSubmit={(n, s, _reason, p) =>
+            editUniversity(id, {
+              name: n,
+              slug: s,
+              emailMode: p?.emailMode,
+              emailDomains: p?.emailDomains,
+              emailDeniedMessage: p?.emailDeniedMessage,
+            })
+          }
           onClose={() => setOpen(false)}
         />
       ) : null}

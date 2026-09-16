@@ -34,7 +34,16 @@ export default async function UniversityDetailPage({ params }: { params: { id: s
             <p className="mt-0.5 font-mono text-sm text-gray-500">@{uni.slug}</p>
           </div>
           <div className="flex items-center gap-2">
-            <EditUniversityDialog id={uni.id} name={uni.name} slug={uni.slug} />
+            <EditUniversityDialog
+              id={uni.id}
+              name={uni.name}
+              slug={uni.slug}
+              policy={{
+                emailMode: uni.email_mode,
+                emailDomains: uni.email_domains ?? [],
+                emailDeniedMessage: uni.email_denied_message ?? "",
+              }}
+            />
             <UniversityActiveToggle id={uni.id} isActive={uni.is_active} name={uni.name} />
           </div>
         </div>

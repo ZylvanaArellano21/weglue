@@ -49,7 +49,7 @@ import { requireSecureAdmin } from "./secureAdmin";
 import { adminAudit } from "./audit";
 import { runAtomicMutation } from "./atomicMutation";
 import { runCrossServiceOperation } from "./crossService";
-import { getCampusMode } from "./data2";
+import { getCampusMode, type CampusEmailMode } from "./data2";
 import { clearEntryTicketCookie } from "./entryTicketCookie";
 import type { User } from "@supabase/supabase-js";
 
@@ -492,10 +492,72 @@ export async function addUniversity(name: string, slug: string, reason: string):
   });
 }
 
-/** Edit supported university fields (name, slug). */
-export async function editUniversity(id: string, fields: { name?: string; slug?: string }): Promise<ActionResult> {
+/**
+ * Edit supported university fields: name, slug, and the campus email policy.
+ *
+ * A field left undefined is unchanged, matching the RPC's NULL semantics. The
+ * policy is validated here as well as in the database so an administrator gets
+ * a specific message rather than the generic transaction failure — the database
+ * remains the authority and refuses the same combinations.
+ */
+export async function editUniversity(
+  id: string,
+  fields: {
+    name?: string;
+    slug?: string;
+    emailMode?: CampusEmailMode;
+    emailDomains?: string[];
+    emailDeniedMessage?: string | null;
+  }
+): Promise<ActionResult> {
   const actor = await requireSecureAdmin({ write: true });
   if (!isUuid(id)) return fail("university.edit", actor, "Invalid university id.", { id });
+
+  const mode = fields?.emailMode;
+  if (mode !== undefined && mode !== "block_educational" && mode !== "allowlist") {
+    return fail("university.edit", actor, "Choose a supported email rule.", { id });
+  }
+
+  // Same canonicalisation the RPC performs, so what the admin sees previewed is
+  // what gets stored: trim, drop a typed leading @, lowercase, drop blanks and
+  // duplicates.
+  let domains: string[] | undefined;
+  if (fields?.emailDomains !== undefined) {
+    domains = [];
+    for (const raw of fields.emailDomains) {
+      const d = raw.trim().replace(/^@/, "").toLowerCase();
+      if (!d) continue;
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/.test(d)) {
+        return fail("university.edit", actor, `"${raw.trim()}" is not a valid email domain.`, { id });
+      }
+      if (!domains.includes(d)) domains.push(d);
+    }
+  }
+
+  const message = fields?.emailDeniedMessage?.trim() || undefined;
+
+  if (mode === "allowlist") {
+    if (!domains || domains.length === 0) {
+      return fail("university.edit", actor, "An allowlist campus needs at least one email domain.", { id });
+    }
+    if (!message) {
+      return fail(
+        "university.edit",
+        actor,
+        "An allowlist campus needs a rejection message to show students.",
+        { id }
+      );
+    }
+  }
+  if (mode === "block_educational" && domains && domains.length > 0) {
+    return fail(
+      "university.edit",
+      actor,
+      "Remove the email domains — this rule accepts any address that is not school-issued.",
+      { id }
+    );
+  }
+
   return runAtomicMutation({
     action: "university.edit",
     actor,
@@ -504,6 +566,11 @@ export async function editUniversity(id: string, fields: { name?: string; slug?:
       p_id: id,
       p_name: fields?.name?.trim() ?? null,
       p_slug: fields?.slug?.trim().toLowerCase() ?? null,
+      p_email_mode: mode ?? null,
+      // An allowlist campus always sends its domains; block_educational sends an
+      // empty array, which the RPC canonicalises to NULL as the shape requires.
+      p_email_domains: domains ?? null,
+      p_email_denied_message: mode === "block_educational" ? null : message ?? null,
     },
     target: { id },
   });
