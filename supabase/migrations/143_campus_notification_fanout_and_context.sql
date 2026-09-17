@@ -69,7 +69,12 @@ AS $$
           JOIN public.clubs c ON c.id = cp.club_id
           WHERE cp.id = p_entity_id
         ),
-        jsonb_build_object('screen','club','clubId',p_entity_id)
+        jsonb_build_object(
+          'screen', 'club',
+          'clubId', (SELECT cp_fallback.club_id
+                     FROM public.club_photos cp_fallback
+                     WHERE cp_fallback.id = p_entity_id)
+        )
       )
     WHEN p_type = 'event_canceled' AND p_entity_id IS NOT NULL
       THEN jsonb_build_object('screen','club','clubId',p_entity_id)
