@@ -16,12 +16,19 @@ import {
 } from "../clubs/clubManagement";
 import { clubProfileKey } from "./useClubProfile";
 import { myClubsKey, discoveryClubsKey } from "./useClubTab";
+import { markLocalClubEdit } from "./useClubRealtime";
 
 // Every officer mutation invalidates the club profile (and the sidebar/catalog
 // where a name/avatar/role change shows) so web + mobile stay in sync.
 function useClubInvalidation(clubId?: string, userId?: string) {
   const queryClient = useQueryClient();
   return () => {
+    // Marked before invalidating: this mutation's own invalidate below is
+    // what should refetch the profile. The realtime event for this same
+    // clubs/club_goals/club_officers row change still arrives moments later
+    // over the websocket (useClubRealtime) — without this marker it would
+    // invalidate (and refetch) the exact same query a second time.
+    if (clubId) markLocalClubEdit(clubId);
     void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
     void queryClient.invalidateQueries({ queryKey: ["clubMemberList", clubId] });
     void queryClient.invalidateQueries({ queryKey: myClubsKey(userId) });

@@ -274,7 +274,14 @@ export async function getClubProfile(
 }
 
 async function getClubGluemates(clubId: string, userId: string): Promise<ClubGluemate[]> {
-  const [{ data: following }, { data: followers }] = await Promise.all([
+  // All three reads are independent — fetching every club member's profile
+  // up front (instead of waiting for following/followers to resolve so the
+  // mutual set can be computed, THEN querying club_members for just that
+  // subset) trades a few extra lightweight rows for one fewer sequential
+  // network round trip. This function runs inside getClubProfile's own
+  // Promise.all, so its round-trip count directly sets a floor on how fast
+  // the whole club profile can open.
+  const [{ data: following }, { data: followers }, { data: members }] = await Promise.all([
     supabase
       .from('follows')
       .select('following_id')
@@ -285,25 +292,25 @@ async function getClubGluemates(clubId: string, userId: string): Promise<ClubGlu
       .select('follower_id')
       .eq('following_id', userId)
       .eq('status', 'accepted'),
+    supabase
+      .from('club_members')
+      .select('user_id, profiles!inner(id, username, avatar_url)')
+      .eq('club_id', clubId),
   ]);
 
   const followingIds = new Set((following ?? []).map((r: any) => r.following_id));
   const followerIds = new Set((followers ?? []).map((r: any) => r.follower_id));
-  const mutualIds = [...followingIds].filter((id) => followerIds.has(id));
+  const mutualIds = new Set([...followingIds].filter((id) => followerIds.has(id)));
 
-  if (mutualIds.length === 0) return [];
+  if (mutualIds.size === 0) return [];
 
-  const { data: members } = await supabase
-    .from('club_members')
-    .select('user_id, profiles!inner(id, username, avatar_url)')
-    .eq('club_id', clubId)
-    .in('user_id', mutualIds);
-
-  return ((members ?? []) as any[]).map((m) => ({
-    id: m.profiles.id,
-    username: m.profiles.username,
-    avatar_url: m.profiles.avatar_url,
-  }));
+  return ((members ?? []) as any[])
+    .filter((m) => mutualIds.has(m.user_id))
+    .map((m) => ({
+      id: m.profiles.id,
+      username: m.profiles.username,
+      avatar_url: m.profiles.avatar_url,
+    }));
 }
 
 export async function joinClub(userId: string, clubId: string): Promise<void> {

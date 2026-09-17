@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { currentWeekRange, addDaysToDateString } from '../lib/timezone';
 import type { AttendeePreview, EventImage } from './eventService';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -252,19 +253,28 @@ export async function getCalendarDayEvents(
 // Pure function — no Supabase calls. Always computed from the live current date
 // so buckets stay accurate without stale offsets between renders.
 //
-// Bucket boundaries (day-only comparison, time is stripped):
-//   TODAY:      dayDiff === 0
-//   THIS WEEK:  dayDiff  1–7
-//   NEXT WEEK:  dayDiff  8–14
-//   THIS MONTH: dayDiff 15–30
-//   NEXT MONTH: dayDiff 31+  (uncapped)
+// Bucket boundaries use TRUE Monday–Sunday calendar weeks (mirrors
+// apps/web/lib/hooks/useCalendar.ts's bucketCalendarEvents), not a rolling
+// 7/14/30-day window — a rolling window put next week's events under "This
+// Week" whenever today wasn't a Monday.
+//   TODAY:      event_date === today
+//   THIS WEEK:  rest of the current Monday–Sunday week
+//   NEXT WEEK:  the immediately following Monday–Sunday
+//   THIS MONTH: remainder of the current calendar month
+//   NEXT MONTH: everything after that (uncapped)
 //
 // Events within each bucket are already chronologically sorted by the Supabase query.
 export function bucketCalendarEvents(
   events: CalendarEvent[],
   todayStr: string, // YYYY-MM-DD
 ): CalendarSection[] {
-  const todayMs = new Date(todayStr + 'T00:00:00').getTime();
+  const { end: weekEnd } = currentWeekRange(new Date(todayStr + 'T12:00:00Z'));
+  const nextWeekEnd = addDaysToDateString(weekEnd, 7);
+
+  const [y, m] = todayStr.split('-').map(Number) as [number, number];
+  const thisMonthEnd = `${y}-${String(m).padStart(2, '0')}-${String(
+    new Date(y, m, 0).getDate(),
+  ).padStart(2, '0')}`;
 
   const buckets: Record<CalendarBucketKey, CalendarEvent[]> = {
     today: [],
@@ -275,14 +285,13 @@ export function bucketCalendarEvents(
   };
 
   for (const event of events) {
-    const eventMs = new Date(event.event_date + 'T00:00:00').getTime();
-    const dayDiff = Math.round((eventMs - todayMs) / 86_400_000);
+    const d = event.event_date;
 
     let key: CalendarBucketKey;
-    if (dayDiff === 0) key = 'today';
-    else if (dayDiff <= 7) key = 'this_week';
-    else if (dayDiff <= 14) key = 'next_week';
-    else if (dayDiff <= 30) key = 'this_month';
+    if (d === todayStr) key = 'today';
+    else if (d <= weekEnd) key = 'this_week';
+    else if (d <= nextWeekEnd) key = 'next_week';
+    else if (d <= thisMonthEnd) key = 'this_month';
     else key = 'next_month';
 
     buckets[key].push(event);

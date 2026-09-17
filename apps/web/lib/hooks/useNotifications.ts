@@ -103,7 +103,11 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   const eventIds = [...new Set(rows.filter((n) => n.entity_type === "event" || eventTypes.includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
   const postIds = [...new Set(rows.filter((n) => n.entity_type === "post" || n.type === "club_post").map((n) => n.entity_id).filter(Boolean) as string[])];
   const conversationIds = [...new Set(rows.filter((n) => n.entity_type === "message" || ["group_chat_added", "chat_invite_joined"].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
-  const clubIds = [...new Set(rows.filter((n) => n.entity_type === "club" || ["club_joined", "member_joined", "club_chat_added", "officer_chat_added", "officer_role", "officer_removed", "club_removed", "club_inactive"].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
+  // club_photo's entity_id is the club_photos ROW (migration 143), not the
+  // club itself — resolved separately below via a club_photos join, same as
+  // how message_reply's entity_id is a message id, not a conversation id.
+  const clubIds = [...new Set(rows.filter((n) => n.type !== "club_photo" && (n.entity_type === "club" || ["club_joined", "member_joined", "club_chat_added", "officer_chat_added", "officer_role", "officer_removed", "club_removed", "club_inactive"].includes(n.type))).map((n) => n.entity_id).filter(Boolean) as string[])];
+  const photoIds = [...new Set(rows.filter((n) => n.type === "club_photo").map((n) => n.entity_id).filter(Boolean) as string[])];
   // message_reply's entity_id is the reply MESSAGE (migration 129); resolve it
   // to its conversation so a tap opens that thread scrolled to the message.
   const replyMessageIds = [...new Set(rows.filter((n) => n.type === "message_reply").map((n) => n.entity_id).filter(Boolean) as string[])];
@@ -111,18 +115,20 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
     ? await supabase.from("messages").select("id, conversation_id").in("id", replyMessageIds)
     : { data: [] as any[] };
   const replyMsgConversation = new Map<string, string>((replyMsgRows ?? []).map((m: any) => [m.id, m.conversation_id]));
-  const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }] = await Promise.all([
+  const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }, { data: photoRows }] = await Promise.all([
     allActorIds.length ? supabase.from("profiles").select("id, username, avatar_url").in("id", allActorIds) : Promise.resolve({ data: [] as any[] }),
     eventIds.length ? supabase.from("events").select("id, clubs!inner(id, name, avatar_url)").in("id", eventIds) : Promise.resolve({ data: [] as any[] }),
     clubIds.length ? supabase.from("clubs").select("id, name, avatar_url").in("id", clubIds) : Promise.resolve({ data: [] as any[] }),
     postIds.length ? supabase.from("posts").select("id, clubs(id, name, avatar_url)").in("id", postIds) : Promise.resolve({ data: [] as any[] }),
     conversationIds.length ? supabase.from("conversations").select("id, clubs(id, name, avatar_url)").in("id", conversationIds) : Promise.resolve({ data: [] as any[] }),
+    photoIds.length ? supabase.from("club_photos").select("id, clubs(id, name, avatar_url)").in("id", photoIds) : Promise.resolve({ data: [] as any[] }),
   ]);
   const actorMap = new Map<string, NotificationVisualActor>((actorRows ?? []).map((p: any) => [p.id, { id: p.id, username: p.username, avatar_url: p.avatar_url ?? null }]));
   const eventMap = new Map<string, NotificationVisualEntity>((eventRows ?? []).map((e: any) => [e.id, { id: e.clubs.id, name: e.clubs.name, avatar_url: e.clubs.avatar_url ?? null }]));
   const clubMap = new Map<string, NotificationVisualEntity>((clubRows ?? []).map((c: any) => [c.id, { id: c.id, name: c.name, avatar_url: c.avatar_url ?? null }]));
   const postClubMap = new Map<string, NotificationVisualEntity>((postRows ?? []).filter((p: any) => p.clubs).map((p: any) => [p.id, { id: p.clubs.id, name: p.clubs.name, avatar_url: p.clubs.avatar_url ?? null }]));
   const conversationClubMap = new Map<string, NotificationVisualEntity>((conversationRows ?? []).filter((c: any) => c.clubs).map((c: any) => [c.id, { id: c.clubs.id, name: c.clubs.name, avatar_url: c.clubs.avatar_url ?? null }]));
+  const photoClubMap = new Map<string, NotificationVisualEntity>((photoRows ?? []).filter((p: any) => p.clubs).map((p: any) => [p.id, { id: p.clubs.id, name: p.clubs.name, avatar_url: p.clubs.avatar_url ?? null }]));
 
   const actorIds = [...new Set((data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[])];
   const followStateMap = new Map<string, ActorFollowState>();
@@ -156,9 +162,11 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
       ? eventMap.get(n.entity_id) ?? null
       : n.type === "club_post" || n.entity_type === "post"
         ? postClubMap.get(n.entity_id) ?? null
-        : n.entity_type === "message" || ["group_chat_added", "chat_invite_joined"].includes(n.type)
-          ? conversationClubMap.get(n.entity_id) ?? clubMap.get(n.entity_id) ?? null
-          : clubMap.get(n.entity_id) ?? null;
+        : n.type === "club_photo"
+          ? photoClubMap.get(n.entity_id) ?? null
+          : n.entity_type === "message" || ["group_chat_added", "chat_invite_joined"].includes(n.type)
+            ? conversationClubMap.get(n.entity_id) ?? clubMap.get(n.entity_id) ?? null
+            : clubMap.get(n.entity_id) ?? null;
     const sender = n.profiles ? { id: n.profiles.id, username: n.profiles.username, avatar_url: n.profiles.avatar_url } : null;
     const notification: AppNotification = {
       id: n.id,
@@ -341,12 +349,35 @@ async function markNotificationRead(notificationId: string): Promise<void> {
   await supabase.from("notifications").update({ read: true }).eq("id", notificationId).eq("read", false);
 }
 
+// Both mutations below flip is_read in the cached notification list the
+// instant the tap happens (onMutate), instead of waiting on the round trip +
+// a follow-up refetch before the UI shows anything — that wait was the
+// literal "Mark all as read feels slow" complaint. onError restores the exact
+// previous cache on failure so a real backend rejection is never hidden;
+// onSettled still reconciles with the server in the background.
 export function useMarkNotificationRead(userId: string | undefined) {
   const queryClient = useQueryClient();
-  return useMutation({
+  const key = ["notifications", userId];
+  return useMutation<void, Error, string, { previous?: NotificationSection[] }>({
     mutationFn: (id: string) => markNotificationRead(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<NotificationSection[]>(key);
+      if (previous) {
+        queryClient.setQueryData<NotificationSection[]>(key, (current) =>
+          (current ?? []).map((section) => ({
+            ...section,
+            data: section.data.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+          }))
+        );
+      }
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous !== undefined) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
       void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
     },
   });
@@ -354,13 +385,30 @@ export function useMarkNotificationRead(userId: string | undefined) {
 
 export function useMarkAllNotificationsRead(userId: string | undefined) {
   const queryClient = useQueryClient();
-  return useMutation({
+  const key = ["notifications", userId];
+  return useMutation<void, Error, void, { previous?: NotificationSection[] }>({
     mutationFn: async () => {
       const supabase = getSupabaseBrowser();
       await supabase.from("notifications").update({ read: true }).eq("user_id", userId!).eq("read", false);
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<NotificationSection[]>(key);
+      if (previous) {
+        queryClient.setQueryData<NotificationSection[]>(key, (current) =>
+          (current ?? []).map((section) => ({
+            ...section,
+            data: section.data.map((n) => (n.is_read ? n : { ...n, is_read: true })),
+          }))
+        );
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
       void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
     },
   });

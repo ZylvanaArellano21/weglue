@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
-import { todayInAppTz, isEventPastAt } from "../datetime";
+import { todayInAppTz, isEventPastAt, currentWeekRange, addDaysToDateString } from "../datetime";
 import { invalidateEventState } from "./eventSync";
 import type { AttendeePreview } from "./useHomeEventsFeed";
 
@@ -121,18 +121,27 @@ async function goingEventIds(userId: string): Promise<string[]> {
 }
 
 export function bucketCalendarEvents(events: CalendarEvent[], todayStr: string): CalendarSection[] {
-  const todayMs = new Date(todayStr + "T00:00:00").getTime();
+  // True Monday–Sunday week boundaries, not a rolling 7-day window — matches
+  // the same currentWeekRange() the Club sidebar/profile already use, so this
+  // calendar can never disagree with them about which week it is.
+  const { end: weekEnd } = currentWeekRange(new Date(todayStr + "T12:00:00Z"));
+  const nextWeekEnd = addDaysToDateString(weekEnd, 7);
+
+  const [y, m] = todayStr.split("-").map(Number) as [number, number];
+  const thisMonthEnd = `${y}-${String(m).padStart(2, "0")}-${String(
+    new Date(y, m, 0).getDate()
+  ).padStart(2, "0")}`;
+
   const buckets: Record<CalendarBucketKey, CalendarEvent[]> = {
     today: [], this_week: [], next_week: [], this_month: [], next_month: [],
   };
   for (const event of events) {
-    const eventMs = new Date(event.event_date + "T00:00:00").getTime();
-    const dayDiff = Math.round((eventMs - todayMs) / 86_400_000);
+    const d = event.event_date;
     let key: CalendarBucketKey;
-    if (dayDiff === 0) key = "today";
-    else if (dayDiff <= 7) key = "this_week";
-    else if (dayDiff <= 14) key = "next_week";
-    else if (dayDiff <= 30) key = "this_month";
+    if (d === todayStr) key = "today";
+    else if (d <= weekEnd) key = "this_week";
+    else if (d <= nextWeekEnd) key = "next_week";
+    else if (d <= thisMonthEnd) key = "this_month";
     else key = "next_month";
     buckets[key].push(event);
   }
