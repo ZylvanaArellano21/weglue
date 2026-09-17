@@ -1,4 +1,4 @@
-import { validateEducationEmail } from '@weglue/shared';
+import { type Campus, toCampuses, validateCampusEmail } from '@weglue/shared';
 import { supabase } from '../lib/supabase';
 import { CONFIRM_EMAIL_CHANGE_REDIRECT } from '../lib/authFlow';
 
@@ -127,8 +127,28 @@ export type ChangeEmailResult =
 
 const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+/**
+ * The campus of the signed-in account, for the email rule that applies to it.
+ *
+ * Read from `my_campus()` rather than from the picker's `list_active_campuses()`
+ * — that one is keyed by slug and only returns active campuses, and an account
+ * must still be able to manage its email if its campus is temporarily
+ * deactivated. Returns null on any failure so callers can fail CLOSED instead
+ * of silently applying some other campus's rule.
+ */
+async function loadMyCampus(): Promise<Campus | null> {
+  try {
+    const { data, error } = await supabase.rpc('my_campus');
+    if (error) return null;
+    return toCampuses(data)[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Safe email-change flow:
-//   1. Validate locally (format + .edu) — instant, no network.
+//   1. Validate the format locally, then the new address against the account's
+//      own campus rule.
 //   2. Confirm the session is still alive (local check, no network).
 //   3. Ask Supabase Auth to start the change — GoTrue itself rejects an email
 //      that is already registered to another account, so nothing is ever sent
@@ -151,12 +171,27 @@ export async function changeEmail(
       };
     }
 
-    const eduCheck = validateEducationEmail(trimmedEmail);
-    if (!eduCheck.valid) {
+    // The rule that applies is THIS account's campus rule: Lone Star rejects
+    // school-issued addresses, Texas A&M accepts only its own domain. Signup
+    // and Account Center must agree, or the campus rule could be escaped by
+    // creating an account and then changing its email. The backend enforces the
+    // same policy on the email change itself, so a bypassed client gains
+    // nothing; this is the immediate, in-form answer.
+    const campus = await loadMyCampus();
+    if (!campus) {
+      return {
+        success: false,
+        error: ACCOUNT_CENTER_ERRORS.NETWORK,
+        message: 'Network error. Check your connection and try again.',
+      };
+    }
+
+    const emailCheck = validateCampusEmail(campus, trimmedEmail);
+    if (!emailCheck.valid) {
       return {
         success: false,
         error: ACCOUNT_CENTER_ERRORS.INVALID_EMAIL,
-        message: eduCheck.reason!,
+        message: emailCheck.reason!,
       };
     }
 

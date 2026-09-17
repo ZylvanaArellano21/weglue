@@ -487,7 +487,22 @@ export async function getUserGluemates(userId: string): Promise<{
 
 // ── Universities ─────────────────────────────────────────────────────────────
 
-export interface UniversityRow {
+/** How a campus decides which email addresses may join it (migration 136). */
+export type CampusEmailMode = "block_educational" | "allowlist";
+
+export interface CampusEmailPolicy {
+  /**
+   * `block_educational` — any address EXCEPT a school-issued one (Lone Star's
+   * rule since launch). `allowlist` — only the listed domains, matched exactly.
+   * The two are deliberately opposite; `campus_email_allowed()` in the database
+   * is the authority, and this is what it will decide.
+   */
+  email_mode: CampusEmailMode;
+  email_domains: string[] | null;
+  email_denied_message: string | null;
+}
+
+export interface UniversityRow extends CampusEmailPolicy {
   id: string;
   name: string;
   slug: string;
@@ -497,11 +512,23 @@ export interface UniversityRow {
   club_count: number;
 }
 
+/** One-line description of a campus's email rule, for admin lists. */
+export function describeCampusEmailPolicy(p: CampusEmailPolicy): string {
+  if (p.email_mode === "allowlist") {
+    const domains = (p.email_domains ?? []).map((d) => `@${d}`).join(", ");
+    return domains ? `Only ${domains}` : "Allowlist (no domains set)";
+  }
+  return "Any non-school email";
+}
+
 export async function listUniversitiesFull(search?: string): Promise<UniversityRow[]> {
   await requireSecureAdmin();
   const admin = createAdminClient();
 
-  let q = admin.from("universities").select("id, name, slug, is_active, created_at").order("name", { ascending: true });
+  let q = admin
+    .from("universities")
+    .select("id, name, slug, is_active, created_at, email_mode, email_domains, email_denied_message")
+    .order("name", { ascending: true });
   if (search?.trim()) {
     const like = `%${search.trim()}%`;
     q = q.or(`name.ilike.${like},slug.ilike.${like}`);
@@ -527,12 +554,15 @@ export async function listUniversitiesFull(search?: string): Promise<UniversityR
     slug: u.slug,
     is_active: !!u.is_active,
     created_at: u.created_at,
+    email_mode: u.email_mode as CampusEmailMode,
+    email_domains: u.email_domains ?? null,
+    email_denied_message: u.email_denied_message ?? null,
     user_count: userCounts.get(u.id) ?? 0,
     club_count: clubCounts.get(u.id) ?? 0,
   }));
 }
 
-export interface UniversityDetail {
+export interface UniversityDetail extends CampusEmailPolicy {
   id: string;
   name: string;
   slug: string;
@@ -550,7 +580,7 @@ export async function getUniversityDetail(id: string): Promise<UniversityDetail 
   const admin = createAdminClient();
   const { data: uni } = await admin
     .from("universities")
-    .select("id, name, slug, is_active, created_at")
+    .select("id, name, slug, is_active, created_at, email_mode, email_domains, email_denied_message")
     .eq("id", id)
     .maybeSingle();
   if (!uni) return null;
@@ -576,6 +606,9 @@ export async function getUniversityDetail(id: string): Promise<UniversityDetail 
     slug: u.slug,
     is_active: !!u.is_active,
     created_at: u.created_at,
+    email_mode: u.email_mode as CampusEmailMode,
+    email_domains: u.email_domains ?? null,
+    email_denied_message: u.email_denied_message ?? null,
     userCount: userCount ?? 0,
     clubCount: clubCount ?? 0,
     eventCount,

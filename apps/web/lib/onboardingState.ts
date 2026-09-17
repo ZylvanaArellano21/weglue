@@ -17,6 +17,13 @@ import type { AvatarChoice } from "@weglue/shared";
 const KEY = "weglue-web/onboarding";
 
 export interface OnboardingFlowState {
+  /**
+   * Slug of the campus chosen on the "Choose your university" step, which now
+   * opens the signup flow. Persisted like the rest of the flow so a refresh or
+   * a Back navigation mid-signup does not silently drop the campus the account
+   * is about to be created on.
+   */
+  campusSlug: string | null;
   selectedInterests: string[];
   selectedActivities: string[];
   matchCount: number;
@@ -26,6 +33,7 @@ export interface OnboardingFlowState {
 }
 
 const initialState: OnboardingFlowState = {
+  campusSlug: null,
   selectedInterests: [],
   selectedActivities: [],
   matchCount: 0,
