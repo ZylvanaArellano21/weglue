@@ -338,10 +338,20 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
         .eq("id", userId!);
       if (error) throw error;
     },
-    // The avatar URL is embedded nearly everywhere (header, card, feeds,
-    // comments, attendees…) — full invalidation is the safe way to update it,
-    // and it clears the picture prompt once a custom avatar exists.
-    onSuccess: () => queryClient.invalidateQueries(),
+    onSuccess: (_data, { avatarUrl, avatarType }) => {
+      // Write the new avatar straight into the cache the sidebar card and own
+      // profile page both read (["ownProfile", userId]) so it shows instantly
+      // instead of waiting on a refetch — that wait was the "changing the
+      // picture doesn't load fast" symptom. The avatar URL is ALSO embedded in
+      // many other places (feeds, comments, attendee lists…) that this direct
+      // write doesn't reach; the blanket invalidateQueries() below still
+      // refreshes those in the background, it just no longer gates the one
+      // surface the user is actually looking at.
+      queryClient.setQueryData<OwnProfileData | null>(["ownProfile", userId], (prev) =>
+        prev ? { ...prev, avatar_url: avatarUrl, avatar_type: avatarType } : prev
+      );
+      void queryClient.invalidateQueries();
+    },
   });
 }
 
