@@ -103,7 +103,7 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   const eventIds = [...new Set(rows.filter((n) => n.entity_type === "event" || eventTypes.includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
   const postIds = [...new Set(rows.filter((n) => n.entity_type === "post" || n.type === "club_post").map((n) => n.entity_id).filter(Boolean) as string[])];
   const conversationIds = [...new Set(rows.filter((n) => n.entity_type === "message" || ["group_chat_added", "chat_invite_joined"].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
-  // club_photo's entity_id is the club_photos ROW (migration 143), not the
+  // club_photo's entity_id is the club_photos ROW (migration 144), not the
   // club itself — resolved separately below via a club_photos join, same as
   // how message_reply's entity_id is a message id, not a conversation id.
   const clubIds = [...new Set(rows.filter((n) => n.type !== "club_photo" && (n.entity_type === "club" || ["club_joined", "member_joined", "club_chat_added", "officer_chat_added", "officer_role", "officer_removed", "club_removed", "club_inactive"].includes(n.type))).map((n) => n.entity_id).filter(Boolean) as string[])];
