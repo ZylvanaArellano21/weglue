@@ -92,3 +92,23 @@ export function dayDiff(a: string, b: string): number {
   const bMs = new Date(b + 'T12:00:00Z').getTime();
   return Math.round((bMs - aMs) / 86_400_000);
 }
+
+// ─── Current Monday–Sunday week ────────────────────────────────────────────
+// Mirrors apps/web/lib/datetime.ts's currentWeekRange so mobile and web can
+// never disagree about which week it is.
+
+export interface WeekRange {
+  /** Monday, YYYY-MM-DD */
+  start: string;
+  /** Sunday, YYYY-MM-DD */
+  end: string;
+}
+
+export function currentWeekRange(now: Date = new Date()): WeekRange {
+  const today = dateInAppTz(now);
+  // Noon-UTC anchored so the weekday can never shift by a timezone hour.
+  const weekday = new Date(today + 'T12:00:00Z').getUTCDay(); // 0 = Sunday
+  const sinceMonday = (weekday + 6) % 7;
+  const start = addDaysToDateString(today, -sinceMonday);
+  return { start, end: addDaysToDateString(start, 6) };
+}

@@ -14,6 +14,27 @@ import { refreshPermissionSensitiveEventState } from "./eventSync";
  * stale) private payload caches: React Query otherwise renders a prior result
  * while a background RLS refetch is in flight after a user leaves a club.
  */
+// Self-echo suppression — see markLocalClubEdit(). A short, per-club window
+// so the Postgres realtime event for a change THIS user just made (Edit Club
+// save, add/remove officer, photo removal) doesn't trigger a second,
+// redundant invalidate/refetch of the exact query the mutation's own
+// onSuccess already refreshed — that duplicate round trip is what showed up
+// as the profile "refreshing again" right after Save. The window is short
+// and scoped to this one club, so a genuinely concurrent edit from another
+// officer is still picked up shortly after (by the query's normal staleTime,
+// or the very next realtime event once the window elapses).
+const recentLocalClubEdits = new Map<string, number>();
+const LOCAL_CLUB_EDIT_SUPPRESS_MS = 4000;
+
+export function markLocalClubEdit(clubId: string): void {
+  recentLocalClubEdits.set(clubId, Date.now());
+}
+
+function isSuppressedLocalEdit(clubId: string): boolean {
+  const at = recentLocalClubEdits.get(clubId);
+  return at !== undefined && Date.now() - at < LOCAL_CLUB_EDIT_SUPPRESS_MS;
+}
+
 function refreshMembershipPermissions(queryClient: ReturnType<typeof useQueryClient>, userId: string): void {
   refreshPermissionSensitiveEventState(queryClient, userId);
   for (const key of [
@@ -53,9 +74,15 @@ export function useClubRealtime(clubId: string | undefined, userId: string | und
   useEffect(() => {
     if (!clubId || !userId) return;
 
-    const invProfile = () => void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
-    const invMembers = () => {
-      invProfile();
+    const invalidateProfile = () => void queryClient.invalidateQueries({ queryKey: clubProfileKey(clubId, userId) });
+    // clubs (name/about/banner/schedule) and club_goals are only ever written
+    // by this club's own Edit Club save — always covered by markLocalClubEdit.
+    const invProfile = () => {
+      if (isSuppressedLocalEdit(clubId)) return;
+      invalidateProfile();
+    };
+    const invMembershipCore = () => {
+      invalidateProfile();
       void queryClient.invalidateQueries({ queryKey: ["clubMemberList", clubId] });
       void queryClient.invalidateQueries({ queryKey: myClubsKey(userId) });
       void queryClient.invalidateQueries({ queryKey: discoveryClubsKey(userId) });
@@ -64,12 +91,25 @@ export function useClubRealtime(clubId: string | undefined, userId: string | und
       // leave a member-only result usable until its normal stale timeout.
       refreshMembershipPermissions(queryClient, userId);
     };
+    // club_members (join/leave) is driven by useToggleClubMembership on the
+    // main profile view, not by Edit Club — never suppressed, so another
+    // student joining/leaving while an officer has the modal open still
+    // updates the member count/list live.
+    const invMembers = invMembershipCore;
+    // club_officers IS written by Edit Club's add/remove officer actions —
+    // same self-echo suppression as the profile fields.
+    const invOfficers = () => {
+      if (isSuppressedLocalEdit(clubId)) return;
+      invMembershipCore();
+    };
     const invEvents = () => {
-      invProfile();
+      invalidateProfile();
       void queryClient.invalidateQueries({ queryKey: clubEventsFeedKey(clubId, userId) });
     };
+    // club_photos IS written by Edit Club's photo-removal actions.
     const invMedia = () => {
-      invProfile();
+      if (isSuppressedLocalEdit(clubId)) return;
+      invalidateProfile();
       void queryClient.invalidateQueries({ queryKey: ["clubPhotoFeed", clubId] });
     };
 
@@ -77,7 +117,7 @@ export function useClubRealtime(clubId: string | undefined, userId: string | und
       { event: "*", schema: "public", table: "clubs", filter: `id=eq.${clubId}`, callback: invProfile },
       { event: "*", schema: "public", table: "club_goals", filter: `club_id=eq.${clubId}`, callback: invProfile },
       { event: "*", schema: "public", table: "club_members", filter: `club_id=eq.${clubId}`, callback: invMembers },
-      { event: "*", schema: "public", table: "club_officers", filter: `club_id=eq.${clubId}`, callback: invMembers },
+      { event: "*", schema: "public", table: "club_officers", filter: `club_id=eq.${clubId}`, callback: invOfficers },
       { event: "*", schema: "public", table: "events", filter: `club_id=eq.${clubId}`, callback: invEvents },
       { event: "*", schema: "public", table: "club_photos", filter: `club_id=eq.${clubId}`, callback: invMedia },
     ]);

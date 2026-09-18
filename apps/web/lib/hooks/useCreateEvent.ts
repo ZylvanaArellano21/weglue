@@ -139,20 +139,25 @@ export interface CreateEventInput {
 async function createEvent(userId: string, input: CreateEventInput, tag: string): Promise<string> {
   const supabase = getSupabaseBrowser();
 
-  // Defence-in-depth officer check (RLS also enforces this server-side).
-  const { data: officer } = await supabase
-    .from("club_members")
-    .select("id")
-    .eq("club_id", input.club_id)
-    .eq("user_id", userId)
-    .eq("role", "officer")
-    .maybeSingle();
+  // The officer check and the image uploads don't depend on each other —
+  // RLS is the actual security boundary here (this is just a defence-in-depth
+  // UX check for a clear error message), so there's no reason to make the
+  // upload wait behind it. Running them together hides the check's latency
+  // entirely behind the (much longer) upload time on every event creation.
+  const [{ data: officer }, uploadedUrls] = await Promise.all([
+    supabase
+      .from("club_members")
+      .select("id")
+      .eq("club_id", input.club_id)
+      .eq("user_id", userId)
+      .eq("role", "officer")
+      .maybeSingle(),
+    // Upload every selected image up front — first one is the legacy cover.
+    Promise.all(
+      input.files.map((file, i) => uploadToBucket("posts", `${userId}/events/${Date.now()}-${i}.jpg`, file))
+    ),
+  ]);
   if (!officer) throw new Error("Only club officers can create events");
-
-  // Upload every selected image up front — first one is the legacy cover.
-  const uploadedUrls = await Promise.all(
-    input.files.map((file, i) => uploadToBucket("posts", `${userId}/events/${Date.now()}-${i}.jpg`, file))
-  );
   const [coverUrl, ...restUrls] = uploadedUrls;
 
   const { data: event, error } = await supabase

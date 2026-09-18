@@ -5,6 +5,7 @@ import {
   acceptFollowRequest,
   declineFollowRequest,
   markNotificationsRead,
+  type NotificationSection,
 } from '../services/notificationService';
 import { followUser } from '../services/followService';
 import { createSafeChannel, removeSafeChannel } from '../lib/realtime';
@@ -142,10 +143,31 @@ export function useFollowBack(viewerUserId: string | undefined) {
 
 export function useMarkNotificationsRead(userId: string | undefined) {
   const queryClient = useQueryClient();
-  return useMutation({
+  const key = ['notifications', userId];
+  // Flips every row to read in the cached list the instant the tap happens
+  // instead of waiting on the round trip + a follow-up refetch — that wait
+  // was the "Mark all as read feels slow" complaint. onError restores the
+  // exact previous cache so a real backend failure is never hidden.
+  return useMutation<void, Error, void, { previous?: NotificationSection[] }>({
     mutationFn: () => markNotificationsRead(userId!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<NotificationSection[]>(key);
+      if (previous) {
+        queryClient.setQueryData<NotificationSection[]>(key, (current) =>
+          (current ?? []).map((section) => ({
+            ...section,
+            data: section.data.map((n) => (n.is_read ? n : { ...n, is_read: true })),
+          })),
+        );
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: key });
       // Entry badge + app icon badge react immediately.
       queryClient.invalidateQueries({ queryKey: ['unreadSummary', userId] });
     },
