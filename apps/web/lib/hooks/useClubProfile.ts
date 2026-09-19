@@ -88,10 +88,20 @@ export function useToggleClubMembership(clubId: string | undefined, userId: stri
       if (!variables.join && !_error) {
         // Direct event and chat routes should show their unavailable state
         // immediately after a successful leave, not stale restricted data.
-        queryClient.removeQueries({ queryKey: ["eventDetail"] });
-        queryClient.removeQueries({ queryKey: ["eventAttendees"] });
-        queryClient.removeQueries({ queryKey: ["savedEvents"] });
-        queryClient.removeQueries({ queryKey: ["messages"] });
+        //
+        // `resetQueries`, NOT `removeQueries` — see the same correction and
+        // rationale in studentSynchronization.ts:66-81. `removeQueries`
+        // destroys the query object; a screen still observing it (an open
+        // event detail, the messages list) keeps a subscription to nothing
+        // and an in-flight fetch resolves onto the discarded object, leaving
+        // it permanently `status: "pending"`. `resetQueries` returns the
+        // query to its initial state AND refetches every active observer, so
+        // the screen actually converges to the unavailable state instead of
+        // hanging on a skeleton forever.
+        queryClient.resetQueries({ queryKey: ["eventDetail"] });
+        queryClient.resetQueries({ queryKey: ["eventAttendees"] });
+        queryClient.resetQueries({ queryKey: ["savedEvents"] });
+        queryClient.resetQueries({ queryKey: ["messages"] });
       }
       void queryClient.invalidateQueries({ queryKey: ["ownProfile", userId] });
     },

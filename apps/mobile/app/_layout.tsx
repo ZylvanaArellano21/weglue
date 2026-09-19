@@ -265,9 +265,23 @@ export default function RootLayout() {
 
   // Fresh check on every foreground, so a restriction applied while the app was
   // backgrounded takes effect on the next resume rather than the next launch.
+  //
+  // Guarded the same way StudentSynchronizationHost guards its own foreground
+  // listener (Fix 9): a delivered push notification's banner makes iOS briefly
+  // report `active -> inactive -> active` WITHOUT the app ever truly
+  // backgrounding (`background` is skipped entirely). `shouldRecoverOnMobileForeground`
+  // only checks the new status, so without this it re-ran the access RPC on
+  // every banner blip — and since every message/photo/event send generates a
+  // notification, this fired on ordinary activity from ANY other student, not
+  // just a genuine app switch. A real return from the background always passes
+  // through `background` first; a banner blip never does.
+  const lastAppStateForAccessRef = useRef<string>(AppState.currentState);
   useEffect(() => {
     const sub = AppState.addEventListener("change", (status) => {
-      if (shouldRecoverOnMobileForeground(status)) void refreshAccess();
+      if (shouldRecoverOnMobileForeground(status) && lastAppStateForAccessRef.current === "background") {
+        void refreshAccess();
+      }
+      lastAppStateForAccessRef.current = status;
     });
     return () => sub.remove();
   }, [refreshAccess]);

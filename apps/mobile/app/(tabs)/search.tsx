@@ -40,8 +40,9 @@ import type { DiscoveryPerson, SearchResult } from '../../services/searchService
 const TABLET_BREAKPOINT = 768;
 
 export default function SearchTab() {
-  const { session } = useAuthStore();
-  const userId = session?.user.id ?? '';
+  // Selector, not `useAuthStore()`: a bare destructure re-renders this screen
+  // on every unrelated store field change, not just when the session changes.
+  const userId = useAuthStore((s) => s.session?.user.id) ?? '';
   const bottomPad = useTabBarBottomPadding();
   const isPhone = useWindowDimensions().width < TABLET_BREAKPOINT;
 
