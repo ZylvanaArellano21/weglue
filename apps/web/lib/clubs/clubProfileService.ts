@@ -83,6 +83,7 @@ export interface ClubProfileData {
 }
 
 const CLUB_PHOTOS_SELECT = "id, url, source, post_id, caption, created_at";
+const CLUB_PHOTOS_PAGE_SIZE = 24;
 
 async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
   const supabase = getSupabaseBrowser();
@@ -93,13 +94,16 @@ async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
       .eq("club_id", clubId)
       .eq("is_visible", true)
       .or("source.eq.officer_upload,post_id.not.is.null")
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .limit(CLUB_PHOTOS_PAGE_SIZE),
     supabase
       .from("posts")
       .select("id, image_url, caption, created_at")
       .eq("club_id", clubId)
       .eq("author_kind", "club")
-      .not("image_url", "is", null),
+      .not("image_url", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(CLUB_PHOTOS_PAGE_SIZE),
   ]);
   if (legacyError) throw legacyError;
   if (authoredError) throw authoredError;
@@ -126,7 +130,10 @@ async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
     });
   }
 
-  const postIds = [...new Set(photos.map((p) => p.post_id).filter(Boolean) as string[])];
+  photos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const pagePhotos = photos.slice(0, CLUB_PHOTOS_PAGE_SIZE);
+
+  const postIds = [...new Set(pagePhotos.map((p) => p.post_id).filter(Boolean) as string[])];
   if (postIds.length > 0) {
     const { data: imgRows } = await supabase
       .from("post_images")
@@ -136,13 +143,12 @@ async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
     for (const r of (imgRows ?? []) as { post_id: string }[]) {
       counts.set(r.post_id, (counts.get(r.post_id) ?? 0) + 1);
     }
-    for (const photo of photos) {
+    for (const photo of pagePhotos) {
       if (photo.post_id && counts.has(photo.post_id)) photo.image_count = counts.get(photo.post_id)!;
     }
   }
 
-  photos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  return photos;
+  return pagePhotos;
 }
 
 export async function getClubProfile(
@@ -256,39 +262,48 @@ export async function getClubProfile(
     upcoming_events: upcoming,
     past_events: past,
     photos: photoRows,
-    gluemates: gluemates.slice(0, 4),
-    gluemates_count: gluemates.length,
+    gluemates: gluemates.previews,
+    gluemates_count: gluemates.count,
   };
 }
 
-async function getClubGluemates(clubId: string, userId: string): Promise<ClubGluemate[]> {
+async function getClubGluemates(
+  clubId: string,
+  userId: string
+): Promise<{ previews: ClubGluemate[]; count: number }> {
   const supabase = getSupabaseBrowser();
-  // All three reads are independent — fetching every club member's profile
-  // up front (instead of waiting for following/followers to resolve so the
-  // mutual set can be computed, THEN querying club_members for just that
-  // subset) trades a few extra lightweight rows for one fewer sequential
-  // network round trip. This function runs inside getClubProfile's own
-  // Promise.all, so its round-trip count directly sets a floor on how fast
-  // the whole club profile can open.
-  const [{ data: following }, { data: followers }, { data: members }] = await Promise.all([
+  const [{ data: following }, { data: followers }] = await Promise.all([
     supabase.from("follows").select("following_id").eq("follower_id", userId).eq("status", "accepted"),
     supabase.from("follows").select("follower_id").eq("following_id", userId).eq("status", "accepted"),
-    supabase
-      .from("club_members")
-      .select("user_id, profiles!inner(id, username, avatar_url)")
-      .eq("club_id", clubId),
   ]);
 
   const followingIds = new Set((following ?? []).map((r: any) => r.following_id));
   const followerIds = new Set((followers ?? []).map((r: any) => r.follower_id));
   const mutualIds = new Set([...followingIds].filter((id) => followerIds.has(id)));
-  if (mutualIds.size === 0) return [];
+  if (mutualIds.size === 0) return { previews: [], count: 0 };
 
-  return ((members ?? []) as any[])
-    .filter((m) => mutualIds.has(m.user_id))
-    .map((m) => ({
+  const mutualMemberIds = [...mutualIds];
+  const [{ count }, { data: members }] = await Promise.all([
+    supabase
+      .from("club_members")
+      .select("id", { count: "exact", head: true })
+      .eq("club_id", clubId)
+      .in("user_id", mutualMemberIds),
+    supabase
+      .from("club_members")
+      .select("user_id, profiles!inner(id, username, avatar_url)")
+      .eq("club_id", clubId)
+      .in("user_id", mutualMemberIds)
+      .order("joined_at", { ascending: true })
+      .limit(4),
+  ]);
+
+  return {
+    previews: ((members ?? []) as any[]).map((m) => ({
       id: m.profiles.id,
       username: m.profiles.username,
       avatar_url: m.profiles.avatar_url,
-    }));
+    })),
+    count: count ?? 0,
+  };
 }
