@@ -78,6 +78,7 @@ export async function getNotifications(userId: string): Promise<NotificationSect
       .select('notification_id, actor_id, created_at')
       .in('notification_id', notificationIds)
       .order('created_at', { ascending: false })
+      .limit(100)
     : { data: [] as any[], error: null };
   const persistedActorsByNotification = new Map<string, PersistedNotificationActorRow[]>();
   for (const actor of (persistedActorRows ?? []) as PersistedNotificationActorRow[]) {
@@ -113,13 +114,27 @@ export async function getNotifications(userId: string): Promise<NotificationSect
     ? await supabase.from('messages').select('id, conversation_id').in('id', replyMessageIds)
     : { data: [] as any[] };
   const replyMsgConversation = new Map<string, string>((replyMsgRows ?? []).map((m: any) => [m.id, m.conversation_id]));
-  const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }, { data: photoRows }] = await Promise.all([
-    allActorIds.length ? supabase.from('profiles').select('id, username, avatar_url').in('id', allActorIds) : Promise.resolve({ data: [] as any[] }),
-    eventIds.length ? supabase.from('events').select('id, clubs!inner(id, name, avatar_url)').in('id', eventIds) : Promise.resolve({ data: [] as any[] }),
-    clubIds.length ? supabase.from('clubs').select('id, name, avatar_url').in('id', clubIds) : Promise.resolve({ data: [] as any[] }),
-    postIds.length ? supabase.from('posts').select('id, clubs(id, name, avatar_url)').in('id', postIds) : Promise.resolve({ data: [] as any[] }),
-    conversationIds.length ? supabase.from('conversations').select('id, clubs(id, name, avatar_url)').in('id', conversationIds) : Promise.resolve({ data: [] as any[] }),
-    photoIds.length ? supabase.from('club_photos').select('id, clubs(id, name, avatar_url)').in('id', photoIds) : Promise.resolve({ data: [] as any[] }),
+  const actorIds = [...new Set((data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[])];
+  const followStatePromise = actorIds.length > 0
+    ? supabase
+      .from('follows')
+      .select('following_id, status')
+      .eq('follower_id', userId)
+      .in('following_id', actorIds)
+    : Promise.resolve({ data: [] as any[] });
+  const [
+    [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }, { data: photoRows }],
+    { data: myFollows },
+  ] = await Promise.all([
+    Promise.all([
+      allActorIds.length ? supabase.from('profiles').select('id, username, avatar_url').in('id', allActorIds) : Promise.resolve({ data: [] as any[] }),
+      eventIds.length ? supabase.from('events').select('id, clubs!inner(id, name, avatar_url)').in('id', eventIds) : Promise.resolve({ data: [] as any[] }),
+      clubIds.length ? supabase.from('clubs').select('id, name, avatar_url').in('id', clubIds) : Promise.resolve({ data: [] as any[] }),
+      postIds.length ? supabase.from('posts').select('id, clubs(id, name, avatar_url)').in('id', postIds) : Promise.resolve({ data: [] as any[] }),
+      conversationIds.length ? supabase.from('conversations').select('id, clubs(id, name, avatar_url)').in('id', conversationIds) : Promise.resolve({ data: [] as any[] }),
+      photoIds.length ? supabase.from('club_photos').select('id, clubs(id, name, avatar_url)').in('id', photoIds) : Promise.resolve({ data: [] as any[] }),
+    ]),
+    followStatePromise,
   ]);
   const actorMap = new Map<string, NotificationVisualActor>((actorRows ?? []).map((p: any) => [p.id, { id: p.id, username: p.username, avatar_url: p.avatar_url ?? null }]));
   const eventMap = new Map<string, NotificationVisualEntity>((eventRows ?? []).map((e: any) => [e.id, { id: e.clubs.id, name: e.clubs.name, avatar_url: e.clubs.avatar_url ?? null }]));
@@ -130,20 +145,12 @@ export async function getNotifications(userId: string): Promise<NotificationSect
 
   // One extra round-trip: how the viewer relates to each actor, so rows can
   // render Follow back / Requested correctly without N queries.
-  const actorIds = [...new Set((data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[])];
   const followStateMap = new Map<string, ActorFollowState>();
-  if (actorIds.length > 0) {
-    const { data: myFollows } = await supabase
-      .from('follows')
-      .select('following_id, status')
-      .eq('follower_id', userId)
-      .in('following_id', actorIds);
-    for (const f of (myFollows ?? []) as any[]) {
-      followStateMap.set(
-        f.following_id,
-        f.status === 'accepted' ? 'following' : 'pending',
-      );
-    }
+  for (const f of (myFollows ?? []) as any[]) {
+    followStateMap.set(
+      f.following_id,
+      f.status === 'accepted' ? 'following' : 'pending',
+    );
   }
 
   // Group by calendar day in America/Chicago (device/UTC drift previously
