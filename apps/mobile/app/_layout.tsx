@@ -50,19 +50,22 @@ import {
 import { tearDownAuthenticatedSession } from "../lib/sessionCleanup";
 import { StudentSynchronizationHost } from "../components/synchronization/StudentSynchronizationHost";
 import { shouldRecoverOnMobileForeground } from "../lib/studentSynchronization";
-import * as Sentry from "@sentry/react-native";
 
-// P0 perf task 10: no production error/performance monitoring existed
-// anywhere in the app before this. Missing DSN (e.g. a fork without the env
-// var set) disables the SDK gracefully rather than throwing. Deliberately
-// not enabling Session Replay here — it records user screens, a real privacy
-// question for a campus social app that wasn't part of what this task asked
-// for. Revisit only with an explicit product decision.
-Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
-  environment: __DEV__ ? "development" : "production",
-  tracesSampleRate: __DEV__ ? 1.0 : 0.1,
-});
+// Sentry mobile (@sentry/react-native) is REVERTED as of 1.0.9 build 48/47 —
+// it shipped in build 47(iOS)/46(Android) and both crashed on launch with a
+// SIGABRT/uncaught NSException on Expo's own `expo.controller.errorRecoveryQueue`
+// thread (confirmed via a symbolicated device crash log). Sentry's native SDK
+// installs crash handlers / NDK hooks very early in the launch sequence — the
+// most mechanically plausible conflict with expo-updates' own early init,
+// though the exact interaction wasn't confirmed against a specific upstream
+// issue before this revert (none of the closest-matching expo/expo or
+// sentry-react-native issues were an exact signature match). expo-image
+// (the other native module added this release) was kept — no matching crash
+// reports anywhere and it's a mature, extremely widely-deployed package, much
+// lower suspicion. Web Sentry (apps/web) is unaffected and unrelated — that's
+// a completely separate deployment target with its own verified build.
+// Re-adding this needs isolated device/simulator testing BEFORE another
+// distributed release, not live production testing.
 
 SplashScreen.preventAutoHideAsync();
 
@@ -673,7 +676,4 @@ function RootLayout() {
   );
 }
 
-// Sentry.wrap adds crash reporting + navigation-instrumentation for the whole
-// app in one place, at the actual app root — every other screen mounts
-// beneath this.
-export default Sentry.wrap(RootLayout);
+export default RootLayout;
