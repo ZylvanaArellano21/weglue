@@ -47,6 +47,7 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
     { data: activities },
     { data: memberships },
     { data: clubRoles },
+    gluematesCount,
   ] = await Promise.all([
     supabase
       .from('profiles')
@@ -66,13 +67,12 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
       .from('club_officers')
       .select('club_id, role_title, clubs!inner(id, name)')
       .eq('user_id', userId),
+    getGluematesCount(userId),
   ]);
 
   if (!profile) return null;
 
   const clubIds = (memberships ?? []).map((m: any) => m.club_id);
-  const gluematesCount = await getGluematesCount(userId);
-
   return {
     id: profile.id,
     username: profile.username,
@@ -110,6 +110,7 @@ async function getGluematesCount(userId: string): Promise<number> {
     .from('follows')
     .select('*', { count: 'exact', head: true })
     .eq('following_id', userId)
+    // TODO(perf): verify an index supports this directional/status + follower_id IN query.
     .in('follower_id', followingIds)
     .eq('status', 'accepted');
 
@@ -189,7 +190,8 @@ export async function getOwnThisWeekEvents(userId: string): Promise<CalendarSect
     .gt('event_end_at', new Date().toISOString())
     .lte('event_date', sevenDaysOut)
     .order('event_date', { ascending: true })
-    .order('start_time', { ascending: true });
+    .order('start_time', { ascending: true })
+    .limit(20);
 
   if (!rawEvents || rawEvents.length === 0) return [];
 

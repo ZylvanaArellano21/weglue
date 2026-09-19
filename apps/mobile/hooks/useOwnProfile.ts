@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@weglue/shared';
 import {
   getOwnProfile,
@@ -28,6 +29,52 @@ function syncAuthStoreProfile(patch: { full_name?: string; avatar_url?: string |
   const updated = { ...profile, ...patch };
   setProfile(updated);
   void writeCachedProfile(profile.id, { profile: updated, isOnboarded });
+}
+
+// These are the cache roots whose payloads can embed this user's display name
+// or avatar: profile/post/comment/event surfaces, member/officer lists,
+// messages and conversation participants, notifications, discovery results,
+// and saved/RSVP'd content. Keep this scoped list complete without refreshing
+// unrelated query data after an edit.
+const PROFILE_EMBEDDING_QUERY_ROOTS = [
+  'homePostsFeed',
+  'postDetail',
+  'postComments',
+  'ownPosts',
+  'userPosts',
+  'userPostsFeed',
+  'clubPhotoFeed',
+  'homeEventsFeed',
+  'eventDetail',
+  'eventAttendees',
+  'clubEventsFeed',
+  'calendarEvents',
+  'calendarDayEvents',
+  'savedEventsUpcoming',
+  'savedEventsPast',
+  'ownThisWeekEvents',
+  'userWeeklyEvents',
+  'ownGluemates',
+  'ownProfile',
+  'userProfile',
+  'clubProfile',
+  'clubDetail',
+  'clubMembers',
+  'myChats',
+  'messages',
+  'conversationHub',
+  'clubChannels',
+  'chatDetails',
+  'notifications',
+  'discoveryClubs',
+  'discoveryEvents',
+  'discoverySearch',
+] as const;
+
+function invalidateProfileEmbeddingQueries(queryClient: QueryClient): void {
+  for (const root of PROFILE_EMBEDDING_QUERY_ROOTS) {
+    void queryClient.invalidateQueries({ queryKey: [root] });
+  }
 }
 
 export function useOwnProfile(userId: string | undefined) {
@@ -99,9 +146,8 @@ export function useUpdateDisplayName(userId: string | undefined) {
     mutationFn: (fullName: string) => updateDisplayName(userId!, fullName),
     onSuccess: (_data, fullName) => {
       syncAuthStoreProfile({ full_name: fullName.trim() });
-      // The display name is embedded in many query caches (profile, chats,
-      // member lists, attendees…) — refresh everything so no stale copy stays.
-      queryClient.invalidateQueries();
+      // Refresh every cache root that can embed this user's name or avatar.
+      invalidateProfileEmbeddingQueries(queryClient);
     },
   });
 }
@@ -150,11 +196,10 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
       // Home header + sidebar read the auth store, not React Query — update it
       // directly so the new picture shows without navigating away.
       syncAuthStoreProfile({ avatar_url: avatarUrl });
-      // The avatar URL is embedded in nearly every query cache (feeds, post
-      // detail, comments, chats, member lists, attendees, search…). A profile
-      // picture change is rare, so a full invalidation is the safe way to
-      // guarantee no stale copy survives anywhere.
-      queryClient.invalidateQueries();
+      // Refresh the profile-embedding roots (feeds, comments, attendee/member
+      // lists, chats, notifications, discovery and saved/RSVP'd content) so
+      // no stale name/avatar survives outside the auth store.
+      invalidateProfileEmbeddingQueries(queryClient);
     },
   });
 }
