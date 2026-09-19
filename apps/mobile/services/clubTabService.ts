@@ -81,6 +81,21 @@ export async function getMyClubs(
     });
   }
 
+  const officerClubIds = ((memberships ?? []) as any[])
+    .filter((m) => m.role === 'officer')
+    .map((m) => m.club_id);
+  const officerRoles = new Map<string, string | null>();
+  if (officerClubIds.length > 0) {
+    const { data: officerRows } = await supabase
+      .from('club_officers')
+      .select('club_id, role_title')
+      .eq('user_id', userId)
+      .in('club_id', officerClubIds);
+    (officerRows ?? []).forEach((row: any) => {
+      officerRoles.set(row.club_id, row.role_title ?? null);
+    });
+  }
+
   const officerClubs: ClubWithNextEvent[] = [];
   const memberClubs: ClubWithNextEvent[] = [];
 
@@ -106,14 +121,7 @@ export async function getMyClubs(
     };
 
     if (m.role === 'officer') {
-      const { data: officerRow } = await supabase
-        .from('club_officers')
-        .select('role_title')
-        .eq('club_id', c.id)
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      item.officer_role = officerRow?.role_title ?? null;
+      item.officer_role = officerRoles.get(c.id) ?? null;
 
       if (officerClubs.length < PAGE_SIZE) officerClubs.push(item);
     } else {
@@ -174,27 +182,31 @@ export async function getClubMembers(
     }
   }
 
-  // A club is a legitimate shared context: two students who have blocked each
-  // other stay in it and each still needs to see who the members and officers
-  // are. `profiles!inner` used to DROP a blocked person's row entirely (058
-  // hides the profile row in both directions), so they silently vanished from
-  // the list and `count` under-reported the club.
-  //
-  // Membership rows still come from `club_members` with its unchanged SELECT
-  // rule and unchanged server-side ordering/pagination. Display identity comes
-  // from the narrow, caller-bound `club_shared_identities` RPC (074), which
-  // returns id/username/full_name/avatar_url/role for the CURRENT members of
-  // this one club and nothing else. The normal profile stays unreadable.
-  const identityRows = await supabase.rpc('club_shared_identities', { p_club_id: clubId });
-  if (identityRows.error) throw identityRows.error;
-  const identities = new Map<string, any>(
-    ((identityRows.data ?? []) as any[]).map((row) => [row.id as string, row]),
-  );
+  const needle = search?.trim().toLowerCase() ?? '';
+  let identities = new Map<string, any>();
+  let matchedIdentityIds: string[] | null = null;
+
+  // Search must resolve identities before membership paging so it can match
+  // the full roster. The no-search path resolves only the already-paged rows.
+  if (needle) {
+    const identityRows = await supabase
+      .rpc('club_shared_identities', { p_club_id: clubId })
+      .ilike('username', `%${needle}%`);
+    if (identityRows.error) throw identityRows.error;
+    identities = new Map<string, any>(
+      ((identityRows.data ?? []) as any[]).map((row) => [row.id as string, row]),
+    );
+    matchedIdentityIds = [...identities.keys()];
+    if (matchedIdentityIds.length === 0) {
+      return { members: [], total: 0 };
+    }
+  }
 
   let query = supabase
     .from('club_members')
     .select('user_id, joined_at, role', { count: 'exact' })
     .eq('club_id', clubId)
+    // TODO(perf): verify index supports (club_id, joined_at)
     .order('joined_at', { ascending: true })
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
@@ -202,23 +214,23 @@ export async function getClubMembers(
     query = query.in('user_id', gluemateIds);
   }
 
-  if (search) {
-    // Username search now resolves through the same shared-identity source, so
-    // a blocked member is findable within a club they actually belong to while
-    // remaining absent from GENERAL people search (which is untouched).
-    const needle = search.toLowerCase();
-    const matched = [...identities.values()]
-      .filter((row: any) => (row.username ?? '').toLowerCase().includes(needle))
-      .map((row: any) => row.id as string);
-    if (matched.length === 0) {
-      return { members: [], total: 0 };
-    }
-    query = query.in('user_id', matched);
-  }
+  if (matchedIdentityIds) query = query.in('user_id', matchedIdentityIds);
 
   const { data: memberRows, count } = await query;
 
   const memberIds = ((memberRows ?? []) as any[]).map((m) => m.user_id);
+
+  if (!needle && memberIds.length > 0) {
+    // Membership rows are paged first; resolve only the identities needed for
+    // this 20-member page while preserving blocked-member visibility.
+    const identityRows = await supabase
+      .rpc('club_shared_identities', { p_club_id: clubId })
+      .in('id', memberIds);
+    if (identityRows.error) throw identityRows.error;
+    identities = new Map<string, any>(
+      ((identityRows.data ?? []) as any[]).map((row) => [row.id as string, row]),
+    );
+  }
 
   let followingSet = new Set<string>();
   let followersSet = new Set<string>();

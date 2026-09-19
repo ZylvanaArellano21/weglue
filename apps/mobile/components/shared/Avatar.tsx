@@ -1,5 +1,6 @@
 import { memo } from 'react';
-import { Image, View, Text } from 'react-native';
+import { View, Text } from 'react-native';
+import { Image } from 'expo-image';
 import { getResizedImageUrl } from '../../lib/imageResize';
 import {
   getPresetAvatar,
@@ -40,8 +41,8 @@ export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarP
         source={getPresetAvatarAsset(presetAvatarId)}
         accessibilityRole="image"
         accessibilityLabel={avatar?.label ?? 'We Glue avatar'}
-        resizeMode="cover"
-        fadeDuration={0}
+        contentFit="cover"
+        transition={0}
         style={{
           width: size,
           height: size,
@@ -105,13 +106,21 @@ export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarP
     );
   }
 
-  // Real image URI
+  // Real image URI. `cachePolicy="memory-disk"` is the whole point of this
+  // component: unlike core RN Image, expo-image keys its disk+memory cache by
+  // URI, so the same avatar rendered again — after scrolling a feed, after a
+  // navigation, after a background/foreground cycle — decodes from cache
+  // instead of hitting the network and re-decoding every time. `recyclingKey`
+  // prevents a stale frame flashing when this exact <Image> slot is reused by
+  // FlatList for a different avatar URI (list virtualization).
   if (resizedUri) {
     return (
       <Image
         source={{ uri: resizedUri }}
-        resizeMode="cover"
-        fadeDuration={0}
+        recyclingKey={resizedUri}
+        cachePolicy="memory-disk"
+        contentFit="cover"
+        transition={0}
         style={{
           width: size,
           height: size,

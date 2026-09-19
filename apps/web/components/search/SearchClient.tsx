@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "../home/AppHeader";
 import { PageOverlays } from "../shared/PageOverlays";
@@ -38,6 +38,17 @@ function SearchBody({ userId }: { userId: string }): JSX.Element {
   const [category, setCategory] = useState<string | null>(null);
   const searching = query.trim().length > 0;
 
+  // Debounce what reaches the RPC, not the input's own value or the
+  // searching/browse toggle below — the field stays responsive to every
+  // keystroke and the view switches to results mode immediately, but
+  // `search_discovery` (and its queryKey, so its cache) only sees the
+  // settled value, instead of firing once per keystroke.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timeout);
+  }, [query]);
+
   const { data: categories = [] } = useDistinctCategories();
   const {
     data: clubPages,
@@ -47,7 +58,7 @@ function SearchBody({ userId }: { userId: string }): JSX.Element {
     isLoading: clubsLoading,
   } = useSearchDiscoveryClubs(userId, category);
   const { data: people = [], isLoading: peopleLoading } = useSearchDiscoveryPeople(userId);
-  const { data: searchResults = [], isLoading: searchLoading } = useDiscoverySearch(userId, query);
+  const { data: searchResults = [], isLoading: searchLoading } = useDiscoverySearch(userId, debouncedQuery);
   const join = useJoinFromSearch(userId);
   const joiningId = join.isPending ? (join.variables ?? null) : null;
 

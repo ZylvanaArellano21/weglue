@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { getSupabaseBrowser } from "../supabase-browser";
 import { todayInAppTz, addDaysToDateString } from "../datetime";
 import { bucketCalendarEvents, type CalendarEvent, type CalendarSection } from "./useCalendar";
@@ -28,6 +29,50 @@ export interface OwnProfileData {
   club_roles: Array<{ club_id: string; club_name: string; role_title: string }>;
 }
 
+// These are the cache roots whose payloads can embed this user's display name
+// or avatar: profile/post/comment/event surfaces, member/officer lists,
+// messages and conversation participants, notifications, discovery results,
+// and saved/RSVP'd content. Keep this scoped list complete without refreshing
+// unrelated query data after an edit.
+const PROFILE_EMBEDDING_QUERY_ROOTS = [
+  "homePostsFeed",
+  "postDetail",
+  "postComments",
+  "ownPosts",
+  "userPosts",
+  "clubPhotoFeed",
+  "homeEventsFeed",
+  "eventDetail",
+  "eventAttendees",
+  "clubEventsFeed",
+  "clubCalendarEvents",
+  "calendarEvents",
+  "calendarDayEvents",
+  "savedEventsUpcoming",
+  "savedEventsPast",
+  "ownThisWeekEvents",
+  "userWeeklyEvents",
+  "ownGluemates",
+  "ownProfile",
+  "userProfile",
+  "clubProfile",
+  "clubMemberList",
+  "messages",
+  "conversationHub",
+  "clubChannels",
+  "chatDetails",
+  "notifications",
+  "discoveryClubs",
+  "discoveryEvents",
+  "discoverySearch",
+] as const;
+
+function invalidateProfileEmbeddingQueries(queryClient: QueryClient): void {
+  for (const root of PROFILE_EMBEDDING_QUERY_ROOTS) {
+    void queryClient.invalidateQueries({ queryKey: [root] });
+  }
+}
+
 async function getGluematesCount(userId: string): Promise<number> {
   const supabase = getSupabaseBrowser();
   const { data: following } = await supabase
@@ -44,6 +89,7 @@ async function getGluematesCount(userId: string): Promise<number> {
     .from("follows")
     .select("*", { count: "exact", head: true })
     .eq("following_id", userId)
+    // TODO(perf): verify an index supports this directional/status + follower_id IN query.
     .in("follower_id", followingIds)
     .eq("status", "accepted");
 
@@ -58,6 +104,7 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
     { data: activities },
     { data: memberships },
     { data: clubRoles },
+    gluematesCount,
   ] = await Promise.all([
     supabase
       .from("profiles")
@@ -73,13 +120,12 @@ export async function getOwnProfile(userId: string): Promise<OwnProfileData | nu
       .from("club_officers")
       .select("club_id, role_title, clubs!inner(id, name)")
       .eq("user_id", userId),
+    getGluematesCount(userId),
   ]);
 
   if (!profile) return null;
 
   const clubIds = (memberships ?? []).map((m: any) => m.club_id);
-  const gluematesCount = await getGluematesCount(userId);
-
   return {
     id: (profile as any).id,
     username: (profile as any).username,
@@ -213,7 +259,8 @@ export function useOwnThisWeekEvents(userId: string | undefined) {
         .gt("event_end_at", new Date().toISOString())
         .lte("event_date", sevenOut)
         .order("event_date", { ascending: true })
-        .order("start_time", { ascending: true });
+        .order("start_time", { ascending: true })
+        .limit(20);
       const events: CalendarEvent[] = ((raw ?? []) as any[]).map((e) => ({
         id: e.id,
         title: e.title,
@@ -314,8 +361,8 @@ export function useUpdateDisplayName(userId: string | undefined) {
       const { error } = await supabase.from("profiles").update({ full_name: trimmed }).eq("id", userId!);
       if (error) throw error;
     },
-    // Display name is embedded in many caches; refresh everything.
-    onSuccess: () => queryClient.invalidateQueries(),
+    // Refresh every cache root that can embed this user's name or avatar.
+    onSuccess: () => invalidateProfileEmbeddingQueries(queryClient),
   });
 }
 
@@ -342,15 +389,13 @@ export function useUpdateProfileAvatar(userId: string | undefined) {
       // Write the new avatar straight into the cache the sidebar card and own
       // profile page both read (["ownProfile", userId]) so it shows instantly
       // instead of waiting on a refetch — that wait was the "changing the
-      // picture doesn't load fast" symptom. The avatar URL is ALSO embedded in
-      // many other places (feeds, comments, attendee lists…) that this direct
-      // write doesn't reach; the blanket invalidateQueries() below still
-      // refreshes those in the background, it just no longer gates the one
-      // surface the user is actually looking at.
+      // picture doesn't load fast" symptom. Refresh the remaining profile-
+      // embedding roots (feeds, comments, attendee/member lists, chats,
+      // notifications, discovery and saved/RSVP'd content) below.
       queryClient.setQueryData<OwnProfileData | null>(["ownProfile", userId], (prev) =>
         prev ? { ...prev, avatar_url: avatarUrl, avatar_type: avatarType } : prev
       );
-      void queryClient.invalidateQueries();
+      invalidateProfileEmbeddingQueries(queryClient);
     },
   });
 }

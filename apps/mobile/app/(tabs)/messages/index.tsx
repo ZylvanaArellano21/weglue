@@ -28,8 +28,9 @@ import { chatColors, chatFonts, chatSizes, chatTypography } from '../../../compo
 
 export default function MessagesIndex() {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const userId = user?.id ?? '';
+  // Selector, not `useAuthStore()`: a bare destructure re-renders this screen
+  // on every unrelated store field change, not just when the user changes.
+  const userId = useAuthStore((s) => s.user?.id) ?? '';
 
   // A successful invitation-driven join lands here via
   // `/(tabs)/messages?filter=group` (Fix 4 — "Back always returns to

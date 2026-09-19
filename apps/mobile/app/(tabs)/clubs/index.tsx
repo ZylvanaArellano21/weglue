@@ -231,8 +231,9 @@ function buildClubTabItems(
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function ClubsTabScreen() {
   const router = useRouter();
-  const { session } = useAuthStore();
-  const userId = session?.user.id;
+  // Selector, not `useAuthStore()`: a bare destructure re-renders this screen
+  // on every unrelated store field change, not just when the session changes.
+  const userId = useAuthStore((s) => s.session?.user.id);
   const bottomPad = useTabBarBottomPadding();
   const { data, isLoading, refetch } = useMyClubs(userId);
 

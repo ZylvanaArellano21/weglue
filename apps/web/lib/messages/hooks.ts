@@ -206,8 +206,8 @@ export function useMessagesRealtime(conversationId: string | null, userId: strin
       void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
     };
     const inbox = createSafeChannel("messages-inbox", [
-      { event: "INSERT", schema: "public", table: "conversation_participants", callback: invalidateInbox },
-      { event: "UPDATE", schema: "public", table: "conversation_participants", callback: invalidateInbox },
+      { event: "INSERT", schema: "public", table: "conversation_participants", filter: `user_id=eq.${userId}`, callback: invalidateInbox },
+      { event: "UPDATE", schema: "public", table: "conversation_participants", filter: `user_id=eq.${userId}`, callback: invalidateInbox },
     ]);
     // The `sync:message-inbox:<uid>` broadcast (message deletion / read sync)
     // is owned session-long by useUnreadSummary — it shares this one Realtime

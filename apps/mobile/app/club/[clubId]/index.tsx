@@ -508,8 +508,10 @@ function OfficerRow({ officer, currentUserId }: { officer: ClubOfficer; currentU
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ClubProfileScreen() {
   const { clubId, source } = useLocalSearchParams<{ clubId: string; source?: string }>();
-  const { session, isLoading: authLoading } = useAuthStore();
-  const userId = session?.user.id;
+  // Selectors, not `useAuthStore()`: a bare destructure re-renders this screen
+  // on every unrelated store field change, not just when session/isLoading change.
+  const userId = useAuthStore((s) => s.session?.user.id);
+  const authLoading = useAuthStore((s) => s.isLoading);
   const router = useRouter();
 
   // A club QR / shared link opened from OUTSIDE the app (source=qr) has no

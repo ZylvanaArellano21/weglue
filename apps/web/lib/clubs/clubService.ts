@@ -77,7 +77,8 @@ export async function getMyClubs(userId: string): Promise<MyClubs> {
       .gte("event_date", today)
       .lte("event_date", weekEnd)
       .order("event_date", { ascending: true })
-      .order("start_time", { ascending: true });
+      .order("start_time", { ascending: true })
+      .limit(PAGE_SIZE * 5);
 
     (events ?? []).forEach((e: any) => {
       if (nextEvents[e.club_id]) return;

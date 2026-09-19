@@ -35,6 +35,18 @@ function isSuppressedLocalEdit(clubId: string): boolean {
   return at !== undefined && Date.now() - at < LOCAL_CLUB_EDIT_SUPPRESS_MS;
 }
 
+// `resetQueries`, NOT `removeQueries` — see studentSynchronization.ts:66-81 for
+// the documented defect this mirrors. `removeQueries` destroys the query
+// object; a screen still observing it (Messages open in another tab, a
+// mounted officer-only control) keeps a subscription to nothing and an
+// in-flight fetch resolves onto the discarded object, leaving it permanently
+// `status: "pending"`. `resetQueries` clears the cached payload (the same
+// privacy/correctness requirement `removeQueries` was reaching for) AND
+// refetches every active observer in one call, so the surface actually
+// converges instead of hanging on a skeleton. This previously called
+// `removeQueries` followed immediately by `invalidateQueries` on the same
+// key as a workaround for the same gap `resetQueries` already closes
+// correctly.
 function refreshMembershipPermissions(queryClient: ReturnType<typeof useQueryClient>, userId: string): void {
   refreshPermissionSensitiveEventState(queryClient, userId);
   for (const key of [
@@ -44,16 +56,15 @@ function refreshMembershipPermissions(queryClient: ReturnType<typeof useQueryCli
     ["notifications", userId],
     ["unreadSummary", userId],
   ]) {
-    queryClient.removeQueries({ queryKey: key });
-    void queryClient.invalidateQueries({ queryKey: key });
+    queryClient.resetQueries({ queryKey: key });
   }
   // Conversation participants are removed by the existing membership triggers.
-  // Drop every messages query so a removed member never briefly reuses local
+  // Reset every messages query so a removed member never briefly reuses local
   // history while its next RLS query resolves.
-  queryClient.removeQueries({ queryKey: ["messages"] });
-  queryClient.removeQueries({ queryKey: ["conversationHub"] });
-  queryClient.removeQueries({ queryKey: ["clubChannels"] });
-  queryClient.removeQueries({ queryKey: ["chatDetails"] });
+  queryClient.resetQueries({ queryKey: ["messages"] });
+  queryClient.resetQueries({ queryKey: ["conversationHub"] });
+  queryClient.resetQueries({ queryKey: ["clubChannels"] });
+  queryClient.resetQueries({ queryKey: ["chatDetails"] });
 }
 
 // Cross-user realtime for the open Club Profile. Subscribes ONLY to this club's

@@ -24,8 +24,11 @@ type FeedItem =
   | { type: 'event'; id: string; event: HomeFeedEvent };
 
 export function EventsFeed() {
-  const { session } = useAuthStore();
-  const userId = session?.user.id;
+  // Selector, not `useAuthStore()`: the store's default subscription is to the
+  // WHOLE object, so a bare destructure re-renders this feed on every
+  // unrelated store field change (e.g. every `setLoading` toggle during a
+  // profile-sync pass in app/_layout.tsx), not just when the session changes.
+  const userId = useAuthStore((s) => s.session?.user.id);
 
   const {
     data,
