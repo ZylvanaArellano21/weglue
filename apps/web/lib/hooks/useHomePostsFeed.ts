@@ -95,24 +95,12 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
   const supabase = getSupabaseBrowser();
   const offset = page * POSTS_PAGE_SIZE;
 
-  const [{ data: followedRows }, { data: followerRows }, { data: myProfile }] =
-    await Promise.all([
-      supabase.from("follows").select("following_id, status").eq("follower_id", userId),
-      supabase
-        .from("follows")
-        .select("follower_id")
-        .eq("following_id", userId)
-        .eq("status", "accepted"),
-      supabase.from("profiles").select("university").eq("id", userId).single(),
-    ]);
+  const { data: myProfile } = await supabase
+    .from("profiles")
+    .select("university")
+    .eq("id", userId)
+    .single();
 
-  const followedIds = ((followedRows ?? []) as any[])
-    .filter((r) => r.status === "accepted")
-    .map((r) => r.following_id);
-  const requestedIds = ((followedRows ?? []) as any[])
-    .filter((r) => r.status === "pending")
-    .map((r) => r.following_id);
-  const followerIds = ((followerRows ?? []) as any[]).map((r) => r.follower_id);
   const myUniversity: string | null = (myProfile as any)?.university ?? null;
 
   let postsQuery = supabase
@@ -129,7 +117,27 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
 
   if (myUniversity) postsQuery = postsQuery.eq("profiles.university", myUniversity);
 
-  const { data: rawPosts, error } = await postsQuery;
+  const [
+    { data: followedRows },
+    { data: followerRows },
+    { data: rawPosts, error },
+  ] = await Promise.all([
+    supabase.from("follows").select("following_id, status").eq("follower_id", userId),
+    supabase
+      .from("follows")
+      .select("follower_id")
+      .eq("following_id", userId)
+      .eq("status", "accepted"),
+    postsQuery,
+  ]);
+
+  const followedIds = ((followedRows ?? []) as any[])
+    .filter((r) => r.status === "accepted")
+    .map((r) => r.following_id);
+  const requestedIds = ((followedRows ?? []) as any[])
+    .filter((r) => r.status === "pending")
+    .map((r) => r.following_id);
+  const followerIds = ((followerRows ?? []) as any[]).map((r) => r.follower_id);
   if (error || !rawPosts) return [];
 
   const postIds = (rawPosts as any[]).map((p) => p.id);
