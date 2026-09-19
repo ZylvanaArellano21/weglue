@@ -27,10 +27,17 @@ import {
   copyLinkToClipboard,
   shareToWhatsApp,
   shareToMessages,
-  shareToInstagram,
+  shareInstagramStory,
   shareLinkExternally,
   shareMediaFileExternally,
+  enableExternalShare,
+  trackShareFunnelEvent,
+  type ShareFunnelSource,
 } from '../../lib/share';
+import { getPostById } from '../../services/postService';
+import { getEventDetail } from '../../services/eventService';
+import { clientUuid } from '../../lib/chatAttachments';
+import type { StoryCaptureRequest } from '../../lib/story/renderStoryImage';
 import type { ToastType } from '../Toast';
 
 // ─── Internal + external share sheet ─────────────────────────────────────────
@@ -55,6 +62,11 @@ export interface ShareSheetContentProps {
   /** Required when contentType === 'media'. */
   media?: ShareMedia;
   onShowToast: (message: string, type?: ToastType) => void;
+  /** Renders the matching off-screen StoryCard and resolves a local PNG
+   *  file:// URI (or null on failure) — see lib/story/renderStoryImage.ts.
+   *  Omitted by callers that only ever share private media (e.g. MediaViewer),
+   *  where Instagram Story sharing never applies. */
+  onCaptureStoryImage?: (request: StoryCaptureRequest) => Promise<string | null>;
 }
 
 type Selected = { key: string; target: ShareTarget; label: string };
@@ -65,10 +77,11 @@ type Selected = { key: string; target: ShareTarget; label: string };
  * bar and stays a real entry in the navigation history — dismissing returns to
  * the exact originating content, and sending never jumps to the Messages tab.
  */
-export function ShareSheetContent({ onDone, userId, contentType, contentId, media, onShowToast }: ShareSheetContentProps) {
+export function ShareSheetContent({ onDone, userId, contentType, contentId, media, onShowToast, onCaptureStoryImage }: ShareSheetContentProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Record<string, Selected>>({});
   const [sending, setSending] = useState(false);
+  const [sharingToInstagram, setSharingToInstagram] = useState(false);
   const isTyping = query.trim().length > 0;
   const isMedia = contentType === 'media';
 
@@ -156,6 +169,53 @@ export function ShareSheetContent({ onDone, userId, contentType, contentId, medi
     }
   }
 
+  async function handleInstagramStory(sessionId: string, linkUrl: string) {
+    if (sharingToInstagram || contentType === 'media' || !onCaptureStoryImage) return;
+    setSharingToInstagram(true);
+    trackShareFunnelEvent(
+      'instagram_story_selected',
+      contentType === 'event' ? 'event' : 'post',
+      contentId,
+      'instagram_story',
+      sessionId,
+    );
+    try {
+      // handleExternal() already gated this call on enableExternalShare —
+      // by the time we're here, external sharing is confirmed enabled.
+      const captured =
+        contentType === 'event'
+          ? await (async () => {
+              if (!userId) return null;
+              const event = await getEventDetail(contentId, userId);
+              return event ? onCaptureStoryImage({ kind: 'event', event }) : null;
+            })()
+          : await (async () => {
+              if (!userId) return null;
+              const post = await getPostById(contentId, userId);
+              return post ? onCaptureStoryImage({ kind: 'post', post }) : null;
+            })();
+
+      if (!captured) {
+        onShowToast('Could not prepare this for Instagram Story. Try again.', 'error');
+        return;
+      }
+
+      const result = await shareInstagramStory({ mediaUri: captured, linkUrl });
+      if (!result.usedNativeHandoff) {
+        onShowToast(
+          result.ok ? 'Link copied — paste it into Instagram' : 'Failed to copy link.',
+          result.ok ? 'success' : 'error',
+        );
+      } else if (!result.ok) {
+        onShowToast('Instagram isn’t installed.', 'error');
+      }
+      // A successful native handoff hands off to Instagram directly — no
+      // toast needed, and there is no publish-confirmation signal to report.
+    } finally {
+      setSharingToInstagram(false);
+    }
+  }
+
   async function handleExternal(key: string) {
     if (isMedia && media) {
       // Private media: share the real file via the OS sheet; never a link.
@@ -164,20 +224,46 @@ export function ShareSheetContent({ onDone, userId, contentType, contentId, medi
       handleClose();
       return;
     }
+
+    // Every external action below hands the canonical link to something
+    // outside We Glue (clipboard, WhatsApp, Instagram, the OS share sheet) —
+    // that link only resolves publicly once its owner has explicitly enabled
+    // external sharing. This call is a no-op if it's already enabled
+    // (resharing) and returns false, changing nothing, if the current viewer
+    // isn't the authorized owner.
+    const allowed = await enableExternalShare(contentType === 'event' ? 'event' : 'post', contentId);
+    if (!allowed) {
+      onShowToast(
+        `Only the ${contentType === 'event' ? 'event' : 'post'}’s owner can share this outside We Glue yet.`,
+        'error',
+      );
+      handleClose();
+      return;
+    }
+
+    // One session id per share act — the same id is embedded in the link so
+    // every downstream open of THIS specific share (however many people end
+    // up viewing it) correlates back to this one funnel journey.
+    const sessionId = clientUuid();
+    const source: ShareFunnelSource =
+      key === 'instagram' ? 'instagram_story' : key === 'copy' ? 'copy_link' : key === 'whatsapp' ? 'whatsapp' : key === 'messages' ? 'messages' : 'more';
+    trackShareFunnelEvent('share_initiated', contentType === 'event' ? 'event' : 'post', contentId, source, sessionId);
+    const sessionUrl = `${shareUrl}?ssid=${sessionId}`;
+    const sessionText = contentType === 'event' ? `Check out this event on We Glue: ${sessionUrl}` : `Check out this post on We Glue: ${sessionUrl}`;
+
     if (key === 'copy') {
-      const ok = await copyLinkToClipboard(shareUrl);
+      const ok = await copyLinkToClipboard(sessionUrl);
       onShowToast(ok ? 'Link copied!' : 'Failed to copy link.', ok ? 'success' : 'error');
     } else if (key === 'whatsapp') {
-      const ok = await shareToWhatsApp(shareText);
+      const ok = await shareToWhatsApp(sessionText);
       if (!ok) onShowToast('WhatsApp isn’t installed.', 'error');
     } else if (key === 'messages') {
-      const ok = await shareToMessages(shareText);
+      const ok = await shareToMessages(sessionText);
       if (!ok) onShowToast('Couldn’t open Messages.', 'error');
     } else if (key === 'instagram') {
-      const { copied } = await shareToInstagram(shareUrl);
-      onShowToast(copied ? 'Link copied — paste it into Instagram' : 'Failed to copy link.', copied ? 'success' : 'error');
+      await handleInstagramStory(sessionId, sessionUrl);
     } else if (key === 'more') {
-      await shareLinkExternally(shareText);
+      await shareLinkExternally(sessionText);
     }
     handleClose();
   }
@@ -189,7 +275,7 @@ export function ShareSheetContent({ onDone, userId, contentType, contentId, medi
   }
 
   const linkTargets = [
-    { key: 'instagram', label: 'Instagram', icon: 'logo-instagram' as const, color: '#E1306C' },
+    { key: 'instagram', label: 'Instagram Story', icon: 'logo-instagram' as const, color: '#E1306C' },
     { key: 'messages', label: 'Messages', icon: 'chatbubble-ellipses-outline' as const, color: '#34C759' },
     { key: 'whatsapp', label: 'WhatsApp', icon: 'logo-whatsapp' as const, color: '#25D366' },
     // Copy Link is public-content only — never expose a private media link.

@@ -222,7 +222,15 @@ export async function middleware(request: NextRequest) {
     const isClubQr =
       pathname.startsWith("/club/") &&
       request.nextUrl.searchParams.get("source") === "qr";
-    if (isProtected && !isClubQr) {
+    // A logged-out visitor on a shared /post/[id] or /event/[id] link must
+    // reach that page's own public-preview logic, not bounce to /login —
+    // the page itself (not the edge) decides public-preview vs a clean
+    // "unavailable" state via the narrow anonymous RPCs (migration 143).
+    // Unconditional, unlike the QR marker above: every anonymous hit on
+    // these two prefixes needs to reach the page, not just a subset.
+    const isPublicContentPreview =
+      pathname.startsWith("/post/") || pathname.startsWith("/event/");
+    if (isProtected && !isClubQr && !isPublicContentPreview) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
     // The whole auth flow (surveys, signup, confirm-email, login, forgot

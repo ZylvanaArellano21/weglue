@@ -22,9 +22,12 @@ import {
 import { pickPhotos } from '../../lib/media/pickPhotos';
 import type { PickedMedia } from '../../lib/media/types';
 import { PhotoTray } from '../../components/media/PhotoTray';
-import { useAuthStore, clampPostImageRatio, naturalCropAspect } from '@weglue/shared';
-import { createPost } from '../../services/postService';
+import { useAuthStore, clampPostImageRatio, naturalCropAspect, getPostShareUrl } from '@weglue/shared';
+import { createPost, getPostById } from '../../services/postService';
 import { clientUuid } from '../../lib/chatAttachments';
+import { enableExternalShare, shareInstagramStory, trackShareFunnelEvent } from '../../lib/share';
+import { PostStoryCard } from '../../components/share/StoryCard';
+import { useStoryImageCapture } from '../../lib/story/renderStoryImage';
 import { getAllClubs, UserClub } from '../../services/clubService';
 import { useToast } from '../../components/Toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -60,6 +63,8 @@ export default function NewPostScreen() {
   const [clubSelectorVisible, setClubSelectorVisible] = useState(false);
   const [clubSearch, setClubSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [justPublishedPostId, setJustPublishedPostId] = useState<string | null>(null);
+  const { capture, request: storyRequest, viewRef: storyViewRef, onReady: onStoryReady } = useStoryImageCapture();
   // One idempotency tag per logical compose. Reused across double-taps and
   // lost-response retries of the same draft; regenerated only when a genuinely
   // new draft starts (a new photo is chosen) or after a post succeeds.
@@ -229,10 +234,9 @@ export default function NewPostScreen() {
       useHomeTabStore.getState().setActiveTab('posts');
       useHomeTabStore.getState().setPendingScrollPostId(newPostId);
       show('Post shared! 📸');
-      setTimeout(() => {
-        if (router.canGoBack()) router.back();
-        else router.replace('/(tabs)');
-      }, 600);
+      // Offer the optional Instagram Story CTA before returning to Home —
+      // never automatic, the user chooses it on the next screen.
+      setJustPublishedPostId(newPostId);
     } catch (err: unknown) {
       console.error('[new-post] create failed', err);
       show('Failed to post. Please try again.', 'error');
@@ -240,6 +244,79 @@ export default function NewPostScreen() {
       setSubmitting(false);
     }
   };
+
+  const finishAfterPublish = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)');
+  };
+
+  const shareJustPublishedPostToInstagram = async () => {
+    if (!justPublishedPostId || !userId) return;
+    const sessionId = clientUuid();
+    trackShareFunnelEvent('share_initiated', 'post', justPublishedPostId, 'instagram_story', sessionId);
+    trackShareFunnelEvent('instagram_story_selected', 'post', justPublishedPostId, 'instagram_story', sessionId);
+    const allowed = await enableExternalShare('post', justPublishedPostId);
+    if (!allowed) {
+      // The publisher is always the post's owner, so this should never fail —
+      // but never silently pretend a share happened if it somehow did.
+      show('Could not enable sharing for this post.', 'error');
+      return;
+    }
+    const post = await getPostById(justPublishedPostId, userId);
+    if (!post) {
+      show('Could not prepare this for Instagram Story.', 'error');
+      return;
+    }
+    const mediaUri = await capture({ kind: 'post', post });
+    if (!mediaUri) {
+      show('Could not prepare this for Instagram Story.', 'error');
+      return;
+    }
+    const result = await shareInstagramStory({ mediaUri, linkUrl: `${getPostShareUrl(justPublishedPostId)}?ssid=${sessionId}` });
+    if (!result.usedNativeHandoff) {
+      show(result.ok ? 'Link copied — paste it into Instagram' : 'Failed to copy link.', result.ok ? 'success' : 'error');
+    } else if (!result.ok) {
+      show('Instagram isn’t installed.', 'error');
+    }
+  };
+
+  if (justPublishedPostId) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0', alignItems: 'center', justifyContent: 'center', padding: 24 }} edges={['top', 'bottom']}>
+        {ToastComponent}
+        <Text style={{ fontSize: 20, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold', marginBottom: 8 }}>
+          Post shared! 📸
+        </Text>
+        <Text style={{ fontSize: 14, color: '#6B7280', fontFamily: 'Inter_400Regular', marginBottom: 24, textAlign: 'center' }}>
+          Want more people to see it?
+        </Text>
+        <TouchableOpacity
+          onPress={shareJustPublishedPostToInstagram}
+          activeOpacity={0.85}
+          style={{ backgroundColor: '#E1306C', borderRadius: 999, paddingVertical: 14, width: '100%', alignItems: 'center', marginBottom: 12 }}
+        >
+          <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
+            Share it on Instagram
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={finishAfterPublish}
+          activeOpacity={0.85}
+          style={{ borderRadius: 999, borderWidth: 1, borderColor: '#D1D5DB', paddingVertical: 14, width: '100%', alignItems: 'center' }}
+        >
+          <Text style={{ color: '#374151', fontSize: 15, fontWeight: '700', fontFamily: 'Inter_700Bold' }}>Done</Text>
+        </TouchableOpacity>
+        <View
+          ref={storyViewRef}
+          collapsable={false}
+          pointerEvents="none"
+          style={{ position: 'absolute', top: 0, left: -10000 }}
+        >
+          {storyRequest?.kind === 'post' && <PostStoryCard post={storyRequest.post} onReady={onStoryReady} />}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top', 'bottom']}>

@@ -1,5 +1,5 @@
 -- ============================================================================
--- 145 — Permanent club QR attendance and event check-in
+-- 146 — Permanent club QR attendance and event check-in
 --
 -- Attendance is always available for every event. The only check-in window is
 -- the event lifecycle window widened by 15 minutes on either side.
