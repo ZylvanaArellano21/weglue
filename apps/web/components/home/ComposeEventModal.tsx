@@ -19,6 +19,7 @@ import {
   type Visibility,
   type EventAudienceMember,
 } from "../../lib/hooks/useCreateEvent";
+import { PublishedShareCta } from "./ComposePostModal";
 
 // Cover (required, crop optional) + up to this many additional, uncropped
 // photos — task 4. Matches the 5-image cap enforced server-side.
@@ -66,6 +67,7 @@ export function ComposeEventModal({
   const { data: editing } = useEventForEdit(editEventId);
 
   const [clubId, setClubId] = useState(presetClubId ?? "");
+  const [justPublished, setJustPublished] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [existingCover, setExistingCover] = useState<string | null>(null);
@@ -251,14 +253,19 @@ export function ComposeEventModal({
         specific_user_ids: specific,
       },
       {
-        onSuccess: () => {
+        onSuccess: (eventId) => {
           show("Event posted! 🎉");
-          onCreated();
+          setJustPublished(eventId);
         },
         onError: (e: any) =>
           show(e?.message === "Only club officers can create events" ? "Only club officers can create events." : "Failed to create event.", "error"),
       }
     );
+  };
+
+  const finishAfterPublish = () => {
+    setJustPublished(null);
+    onCreated();
   };
 
   const inputCls = "w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2";
@@ -281,7 +288,10 @@ export function ComposeEventModal({
         }}
       />
     )}
-    <Modal onClose={onClose} labelledBy="compose-event-title" maxWidth={560}>
+    <Modal onClose={justPublished ? finishAfterPublish : onClose} labelledBy="compose-event-title" maxWidth={560}>
+      {justPublished ? (
+        <PublishedShareCta contentType="event" contentId={justPublished} onDone={finishAfterPublish} />
+      ) : (
       <div className="max-h-[80vh] overflow-y-auto p-5 sm:p-6">
         <h2 id="compose-event-title" className="mb-4 text-center text-lg font-bold text-gray-900">
           {isEdit ? "Edit event" : "New Event"}
@@ -557,6 +567,7 @@ export function ComposeEventModal({
           {pending ? (isEdit ? "Saving…" : "Posting…") : isEdit ? "Save changes" : "Post event"}
         </button>
       </div>
+      )}
     </Modal>
     </>
   );

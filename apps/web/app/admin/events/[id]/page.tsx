@@ -5,6 +5,7 @@ import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { EditEventDialog } from "../../../../components/admin/EventActions";
+import { DisableEventExternalShareButton } from "../../../../components/admin/ExternalShareActions";
 import { AddRsvpDialog } from "../../../../components/admin/RsvpActions";
 import { LifecycleDetails } from "../../../../components/admin/LifecycleDetails";
 import { LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
@@ -226,40 +227,63 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
     </SectionCard>
   );
 
-  const actionsTab = (
-    <SectionCard title="Actions">
-      <div className="space-y-4 p-4">
-        {canonicalMutable ? (
-          <>
-            <EditEventDialog
-              eventId={event.id}
-              initial={{
-                title: event.title,
-                description: event.description,
-                event_date: event.event_date,
-                start_time: event.start_time,
-                end_time: event.end_time,
-                location: event.location,
-                building: event.building,
-                room: event.room,
-                visibility: event.visibility,
-                emoji: event.emoji,
-              }}
-            />
-            <p className="text-xs text-gray-400">
-              Editing writes to the canonical <code>events</code> row with start/end chronology + visibility
-              validation, a read-back check, and audit event. Lifecycle removal and restoration are in the
-              Lifecycle tab and require recent MFA.
-            </p>
-          </>
+  const externalSharing = (
+    <SectionCard title="External sharing">
+      <div className="flex flex-wrap items-center gap-3 p-4">
+        <Badge tone={event.externalShare.enabled ? "green" : "gray"}>
+          {event.externalShare.enabled ? "Enabled" : "Disabled"}
+        </Badge>
+        {event.externalShare.enabled_by_name && event.externalShare.enabled_at ? (
+          <span className="text-sm text-gray-600">
+            Enabled by {event.externalShare.enabled_by_name} on {fmtDateTime(event.externalShare.enabled_at)}.
+          </span>
         ) : (
-          <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
-            Canonical editing is unavailable while lifecycle state is not active. Use the Lifecycle tab to review or
-            restore eligible content.
-          </p>
+          <span className="text-sm text-gray-500">This event has not been enabled for external sharing.</span>
         )}
+        {event.externalShare.enabled ? (
+          <DisableEventExternalShareButton eventId={event.id} />
+        ) : null}
       </div>
     </SectionCard>
+  );
+
+  const actionsTab = (
+    <div className="space-y-5">
+      {externalSharing}
+      <SectionCard title="Actions">
+        <div className="space-y-4 p-4">
+          {canonicalMutable ? (
+            <>
+              <EditEventDialog
+                eventId={event.id}
+                initial={{
+                  title: event.title,
+                  description: event.description,
+                  event_date: event.event_date,
+                  start_time: event.start_time,
+                  end_time: event.end_time,
+                  location: event.location,
+                  building: event.building,
+                  room: event.room,
+                  visibility: event.visibility,
+                  emoji: event.emoji,
+                }}
+              />
+              <p className="text-xs text-gray-400">
+                Editing writes to the canonical <code>events</code> row with start/end chronology + visibility
+                validation, a read-back check, and audit event. Lifecycle removal and restoration are in the
+                Lifecycle tab and require recent MFA.
+              </p>
+            </>
+          ) : (
+            <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
+              Canonical editing is unavailable while lifecycle state is not active. Use the Lifecycle tab to review or
+              restore eligible content.
+            </p>
+          )}
+        </div>
+      </SectionCard>
+    </div>
   );
 
   return (

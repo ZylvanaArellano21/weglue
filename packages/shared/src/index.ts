@@ -16,3 +16,4 @@ export * from "./messaging/messageBanner";
 export * from "./messaging/replyPreview";
 export * from "./media/postImagePresentation";
 export * from "./comments/threads";
+export * from "./sharing/canonicalLink";

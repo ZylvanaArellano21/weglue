@@ -17,12 +17,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { pickImageForFeature, cropExistingImage, postCropAspectOptions } from '../../lib/media/pickMedia';
 import { pickPhotos } from '../../lib/media/pickPhotos';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useAuthStore, naturalCropAspect } from '@weglue/shared';
-import { createEvent, updateEvent, getEventForEdit, saveEventImages, searchEventAudienceMembers, eventAudienceRoleLabel, type EventAudienceMember } from '../../services/eventService';
+import { useAuthStore, naturalCropAspect, getEventShareUrl } from '@weglue/shared';
+import { createEvent, updateEvent, getEventForEdit, getEventDetail, saveEventImages, searchEventAudienceMembers, eventAudienceRoleLabel, type EventAudienceMember } from '../../services/eventService';
 import { getUserOfficerClubs, UserClub } from '../../services/clubService';
 import { invalidateClubDataEverywhere } from '../../lib/clubCache';
 import { clientUuid } from '../../lib/chatAttachments';
 import { useToast } from '../../components/Toast';
+import { enableExternalShare, shareInstagramStory, trackShareFunnelEvent } from '../../lib/share';
+import { EventStoryCard } from '../../components/share/StoryCard';
+import { useStoryImageCapture } from '../../lib/story/renderStoryImage';
 import { supabase } from '../../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SearchBottomSheet } from '../../components/shared/SearchBottomSheet';
@@ -138,6 +141,8 @@ export default function NewEventScreen() {
   const [userSelectorVisible, setUserSelectorVisible] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
+  const [justPublishedEventId, setJustPublishedEventId] = useState<string | null>(null);
+  const { capture, request: storyRequest, viewRef: storyViewRef, onReady: onStoryReady } = useStoryImageCapture();
   // One idempotency tag per compose; reused across retries of this create,
   // regenerated only after a successful create (migration 100).
   const composeTagRef = useRef(clientUuid());
@@ -405,7 +410,9 @@ export default function NewEventScreen() {
       // ID once the refreshed feed contains it) instead of the detail screen.
       useHomeTabStore.getState().setPendingScrollEventId(newEventId);
       show('Event posted! 🎉');
-      setTimeout(() => router.replace('/(tabs)'), 1000);
+      // Offer the optional Instagram Story CTA before returning to Home —
+      // never automatic, the user chooses it on the next screen.
+      setJustPublishedEventId(newEventId);
     } catch (err: unknown) {
       console.error('[new-event] save failed', err);
       show(
@@ -416,6 +423,74 @@ export default function NewEventScreen() {
       setSubmitting(false);
     }
   };
+
+  const finishAfterPublish = () => router.replace('/(tabs)');
+
+  const shareJustPublishedEventToInstagram = async () => {
+    if (!justPublishedEventId || !userId) return;
+    const sessionId = clientUuid();
+    trackShareFunnelEvent('share_initiated', 'event', justPublishedEventId, 'instagram_story', sessionId);
+    trackShareFunnelEvent('instagram_story_selected', 'event', justPublishedEventId, 'instagram_story', sessionId);
+    const allowed = await enableExternalShare('event', justPublishedEventId);
+    if (!allowed) {
+      show('Could not enable sharing for this event.', 'error');
+      return;
+    }
+    const eventDetail = await getEventDetail(justPublishedEventId, userId);
+    if (!eventDetail) {
+      show('Could not prepare this for Instagram Story.', 'error');
+      return;
+    }
+    const mediaUri = await capture({ kind: 'event', event: eventDetail });
+    if (!mediaUri) {
+      show('Could not prepare this for Instagram Story.', 'error');
+      return;
+    }
+    const result = await shareInstagramStory({ mediaUri, linkUrl: `${getEventShareUrl(justPublishedEventId)}?ssid=${sessionId}` });
+    if (!result.usedNativeHandoff) {
+      show(result.ok ? 'Link copied — paste it into Instagram' : 'Failed to copy link.', result.ok ? 'success' : 'error');
+    } else if (!result.ok) {
+      show('Instagram isn’t installed.', 'error');
+    }
+  };
+
+  if (justPublishedEventId) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0', alignItems: 'center', justifyContent: 'center', padding: 24 }} edges={['top', 'bottom']}>
+        {ToastComponent}
+        <Text style={{ fontSize: 20, fontWeight: '700', color: '#111827', fontFamily: 'Inter_700Bold', marginBottom: 8 }}>
+          Event published! 🎉
+        </Text>
+        <Text style={{ fontSize: 14, color: '#6B7280', fontFamily: 'Inter_400Regular', marginBottom: 24, textAlign: 'center' }}>
+          Want more people to see it?
+        </Text>
+        <TouchableOpacity
+          onPress={shareJustPublishedEventToInstagram}
+          activeOpacity={0.85}
+          style={{ backgroundColor: '#E1306C', borderRadius: 999, paddingVertical: 14, width: '100%', alignItems: 'center', marginBottom: 12 }}
+        >
+          <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
+            Share it on Instagram
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={finishAfterPublish}
+          activeOpacity={0.85}
+          style={{ borderRadius: 999, borderWidth: 1, borderColor: '#D1D5DB', paddingVertical: 14, width: '100%', alignItems: 'center' }}
+        >
+          <Text style={{ color: '#374151', fontSize: 15, fontWeight: '700', fontFamily: 'Inter_700Bold' }}>Done</Text>
+        </TouchableOpacity>
+        <View
+          ref={storyViewRef}
+          collapsable={false}
+          pointerEvents="none"
+          style={{ position: 'absolute', top: 0, left: -10000 }}
+        >
+          {storyRequest?.kind === 'event' && <EventStoryCard event={storyRequest.event} onReady={onStoryReady} />}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // ── Date picker handlers (Android shows natively, iOS uses modal) ─────────
   const openDatePicker = () => {
