@@ -14,6 +14,7 @@ import {
   EditClubDialog,
 } from "../../../../components/admin/MembershipControls";
 import { ClubInterestControls } from "../../../../components/admin/ClubInterestControls";
+import { getAdminClubAttendanceSummary } from "../../../../lib/admin/attendanceData";
 
 export const dynamic = "force-dynamic";
 
@@ -55,9 +56,10 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
   const club = await getClubDetail(params.id);
   if (!club) notFound();
 
-  const [clubInterests, universities] = await Promise.all([
+  const [clubInterests, universities, attendanceSummary] = await Promise.all([
     getClubInterests(params.id),
     listUniversities(),
+    getAdminClubAttendanceSummary(params.id),
   ]);
 
   const meeting = meetingSummary(club);
@@ -230,6 +232,32 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
     </SectionCard>
   );
 
+  const attendanceTab = (
+    <SectionCard
+      title="Attendance"
+      action={
+        attendanceSummary ? (
+          <Badge tone={attendanceSummary.checkin_applies ? "teal" : "gray"}>
+            {attendanceSummary.checkin_applies ? "Enabled" : "Not applicable"}
+          </Badge>
+        ) : undefined
+      }
+    >
+      {attendanceSummary ? (
+        <div className="grid grid-cols-3 gap-3 p-4">
+          <Stat label="Events with attendance" value={attendanceSummary.event_count} />
+          <Stat label="Total check-ins" value={attendanceSummary.total_count} />
+          <Stat label="Current check-ins" value={attendanceSummary.current_count} />
+        </div>
+      ) : (
+        <EmptyState icon="🎫" title="No attendance data" message="No events have check-in records for this club yet." />
+      )}
+      <p className="px-4 pb-4 text-xs text-gray-400">
+        Open an event's Attendance tab for its exact check-in window and the read-only Student ID / school email list.
+      </p>
+    </SectionCard>
+  );
+
   const actionsTab = (
     <SectionCard title="Club actions">
       <div className="space-y-3 p-4">
@@ -313,6 +341,7 @@ export default async function AdminClubDetailPage({ params }: { params: { id: st
             ),
           },
           { key: "related", label: "Content", content: relatedTab },
+          { key: "attendance", label: "Attendance", content: attendanceTab },
           { key: "actions", label: "Actions", content: actionsTab },
         ]}
       />

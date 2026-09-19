@@ -675,6 +675,10 @@ export interface EventDetail {
   /** Whether the viewer is the one who created this event — used to hide
    *  the Report affordance on your own content. */
   is_creator: boolean;
+  /** Officer of the hosting club (club_members.role === 'officer') — gates
+   *  the Edit event / Attendance / Delete items in the event ⋯ menu. There is
+   *  no separate "advisor" role in this schema; officer covers both. */
+  is_officer: boolean;
   images: EventImage[];
 }
 
@@ -717,7 +721,7 @@ export async function getEventDetail(
       .eq('status', 'going'),
     supabase
       .from('club_members')
-      .select('id')
+      .select('id, role')
       .eq('club_id', (event as any).club_id)
       .eq('user_id', userId)
       .maybeSingle(),
@@ -760,6 +764,7 @@ export async function getEventDetail(
     is_saved: !!savedRow,
     user_has_joined_club: !!memberCheck,
     is_creator: (event as any).created_by === userId,
+    is_officer: (memberCheck as any)?.role === 'officer',
     images,
   };
 }

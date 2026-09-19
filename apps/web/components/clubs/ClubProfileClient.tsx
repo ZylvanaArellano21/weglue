@@ -197,6 +197,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             onToggleMembership={handleToggleMembership}
             membershipPending={membership.isPending}
             onEdit={() => setEditing(true)}
+            onOpenAttendance={() => router.push(`/club/${clubId}/attendance`)}
             onOfficerChat={() => void openClubChat("officer_chat")}
             onGroupChat={() => void openClubChat("club_group")}
             onOpenPeople={setPeople}

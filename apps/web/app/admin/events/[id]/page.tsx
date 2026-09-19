@@ -10,6 +10,7 @@ import { AddRsvpDialog } from "../../../../components/admin/RsvpActions";
 import { LifecycleDetails } from "../../../../components/admin/LifecycleDetails";
 import { LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
 import { getContentLifecycleDetail } from "../../../../lib/admin/lifecycleData";
+import { getAdminEventAttendanceSummary } from "../../../../lib/admin/attendanceData";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -43,6 +44,7 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
   if (!event) notFound();
   const lifecycle = await getContentLifecycleDetail("event", event.id);
   const canonicalMutable = lifecycle.available && lifecycle.record?.state === "active";
+  const attendanceSummary = event.club_id ? await getAdminEventAttendanceSummary(event.id, event.club_id) : null;
 
   const going = event.attendees.filter((a) => a.status === "going");
   const cant = event.attendees.filter((a) => a.status === "cant");
@@ -227,6 +229,32 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
     </SectionCard>
   );
 
+  const attendanceTab = (
+    <SectionCard
+      title="Attendance"
+      action={
+        <Link href={`/admin/events/${event.id}/attendance`} className="text-xs text-teal-600 hover:underline">
+          View attendance →
+        </Link>
+      }
+    >
+      {attendanceSummary ? (
+        <dl className="grid gap-4 p-4 sm:grid-cols-2">
+          <Field label="Check-in">
+            <Badge tone={attendanceSummary.checkin_applies ? "teal" : "gray"}>
+              {attendanceSummary.checkin_applies ? "Enabled" : "Not applicable"}
+            </Badge>
+          </Field>
+          <Field label="Checked in">{attendanceSummary.current_count} / {attendanceSummary.total_count}</Field>
+          <Field label="Window opens">{fmtDateTime(attendanceSummary.window_starts_at)}</Field>
+          <Field label="Window closes">{fmtDateTime(attendanceSummary.window_ends_at)}</Field>
+        </dl>
+      ) : (
+        <EmptyState icon="🎫" title="Attendance unavailable" message="Could not load check-in data for this event." />
+      )}
+    </SectionCard>
+  );
+
   const externalSharing = (
     <SectionCard title="External sharing">
       <div className="flex flex-wrap items-center gap-3 p-4">
@@ -336,6 +364,7 @@ export default async function AdminEventDetailPage({ params }: { params: { id: s
           { key: "rsvps", label: "RSVPs", count: event.goingCount + event.cantCount, content: rsvpTab },
           { key: "posts", label: "Related posts", count: event.relatedPosts.length, content: postsTab },
           { key: "reports", label: "Reports", count: event.reportCount, content: reportsTab },
+          { key: "attendance", label: "Attendance", content: attendanceTab },
           { key: "lifecycle", label: "Lifecycle", content: <LifecycleDetails result={lifecycle} /> },
           { key: "actions", label: "Actions", content: actionsTab },
         ]}

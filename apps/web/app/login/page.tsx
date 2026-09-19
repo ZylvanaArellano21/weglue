@@ -13,6 +13,7 @@ import {
 } from "../../lib/authFlow";
 import { resetOnboardingState } from "../../lib/onboardingState";
 import { getPendingInvite, setPendingInvite, clearPendingInvite } from "../../lib/pendingInvite";
+import { resumePendingCheckinPath } from "../../lib/pendingCheckin";
 import { joinChatInvitation } from "../../lib/messages/service";
 import { clubHubHref } from "../../lib/messages/routes";
 
@@ -161,6 +162,15 @@ function LoginContent(): JSX.Element {
           // fall through to the normal destination below.
           clearPendingInvite();
         }
+      }
+
+      // A deferred check-in (signed out when the attendance QR/link was
+      // opened) is consumed here too, same pattern as the invite above.
+      const checkinPath = resumePendingCheckinPath();
+      if (checkinPath) {
+        router.push(checkinPath);
+        router.refresh();
+        return;
       }
 
       router.push("/dashboard");

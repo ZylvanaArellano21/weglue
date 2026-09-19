@@ -15,6 +15,53 @@ export interface ApiError {
   details?: unknown;
 }
 
+export interface EventAttendance {
+  id: string;
+  eventId: string;
+  clubId: string;
+  userId: string;
+  campus: string;
+  studentId: string;
+  schoolEmail: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedAttendanceInfo {
+  campus: string;
+  studentId: string;
+  schoolEmail: string;
+  updatedAt: string;
+}
+
+export interface ActiveCheckinEvent {
+  eventId: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+}
+
+export interface EventAttendanceSummary {
+  clubId: string;
+  eventId: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  checkinApplies: true;
+  windowStartsAt: string;
+  windowEndsAt: string;
+  currentCount: number;
+  totalCount: number;
+}
+
+export interface ClubAttendanceSummary {
+  clubId: string;
+  checkinApplies: true;
+  eventCount: number;
+  currentCount: number;
+  totalCount: number;
+}
+
 // ─── API Response Shapes ──────────────────────────────────────────────────────
 
 export type ApiResponse<T> =

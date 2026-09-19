@@ -630,6 +630,8 @@ export type Database = {
           room: string | null
           specific_user_ids: string[] | null
           start_time: string
+          event_start_at: string
+          event_end_at: string
           title: string
           updated_at: string
           visibility: string
@@ -650,6 +652,8 @@ export type Database = {
           room?: string | null
           specific_user_ids?: string[] | null
           start_time: string
+          event_start_at?: string
+          event_end_at?: string
           title: string
           updated_at?: string
           visibility?: string
@@ -670,6 +674,8 @@ export type Database = {
           room?: string | null
           specific_user_ids?: string[] | null
           start_time?: string
+          event_start_at?: string
+          event_end_at?: string
           title?: string
           updated_at?: string
           visibility?: string
@@ -687,6 +693,64 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_attendance: {
+        Row: {
+          campus: string
+          club_id: string
+          created_at: string
+          event_id: string
+          id: string
+          school_email: string
+          student_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campus: string
+          club_id: string
+          created_at?: string
+          event_id: string
+          id?: string
+          school_email: string
+          student_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campus?: string
+          club_id?: string
+          created_at?: string
+          event_id?: string
+          id?: string
+          school_email?: string
+          student_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_attendance_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_attendance_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_attendance_campus_fkey"
+            columns: ["campus"]
+            isOneToOne: false
+            referencedRelation: "universities"
             referencedColumns: ["id"]
           },
         ]
@@ -761,7 +825,15 @@ export type Database = {
           sort_order?: number
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "saved_attendance_info_campus_fkey"
+            columns: ["campus"]
+            isOneToOne: false
+            referencedRelation: "universities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       messages: {
         Row: {
@@ -1266,6 +1338,30 @@ export type Database = {
           },
         ]
       }
+      saved_attendance_info: {
+        Row: {
+          campus: string
+          school_email: string
+          student_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campus: string
+          school_email: string
+          student_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campus?: string
+          school_email?: string
+          student_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_activities: {
         Row: {
           activity: string
@@ -1447,6 +1543,38 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_club_attendance_summary: {
+        Args: { p_club_id?: string }
+        Returns: {
+          checkin_applies: boolean
+          club_id: string
+          current_count: number
+          event_count: number
+          total_count: number
+        }[]
+      }
+      admin_event_attendance_summary: {
+        Args: { p_club_id?: string }
+        Returns: {
+          checkin_applies: boolean
+          club_id: string
+          current_count: number
+          ends_at: string
+          event_id: string
+          starts_at: string
+          title: string
+          total_count: number
+          window_ends_at: string
+          window_starts_at: string
+        }[]
+      }
+      admin_list_event_attendance: {
+        Args: { p_event_id: string }
+        Returns: {
+          school_email: string
+          student_id: string
+        }[]
+      }
       before_user_created: { Args: { event: Json }; Returns: Json }
       campus_email_allowed: {
         Args: { p_email: string; p_university_id: string }
@@ -1457,6 +1585,13 @@ export type Database = {
         Returns: undefined
       }
       check_club_inactivity: { Args: never; Returns: undefined }
+      get_saved_attendance_info: {
+        Args: { p_campus: string }
+        Returns: {
+          school_email: string
+          student_id: string
+        }[]
+      }
       get_phone_discovery_categories: {
         Args: never
         Returns: {
@@ -1488,6 +1623,25 @@ export type Database = {
         }[]
       }
       set_my_interests: { Args: { p_slugs: string[] }; Returns: undefined }
+      submit_event_checkin: {
+        Args: {
+          p_event_id: string
+          p_school_email: string
+          p_save_for_future: boolean
+          p_student_id: string
+        }
+        Returns: {
+          campus: string
+          club_id: string
+          created_at: string
+          event_id: string
+          id: string
+          school_email: string
+          student_id: string
+          updated_at: string
+          user_id: string
+        }
+      }
       get_discovery_clubs: {
         Args: {
           p_category?: string
@@ -1561,6 +1715,13 @@ export type Database = {
         Returns: boolean
       }
       is_educational_email: { Args: { email: string }; Returns: boolean }
+      list_event_attendance: {
+        Args: { p_event_id: string }
+        Returns: {
+          school_email: string
+          student_id: string
+        }[]
+      }
       list_active_campuses: {
         Args: never
         Returns: {
@@ -1588,6 +1749,15 @@ export type Database = {
       preview_club_match_count: {
         Args: { p_interests: string[]; p_university_slug?: string }
         Returns: number
+      }
+      resolve_club_active_checkins: {
+        Args: { p_club_id: string }
+        Returns: {
+          ends_at: string
+          event_id: string
+          starts_at: string
+          title: string
+        }[]
       }
       search_discovery: {
         Args: { p_query: string; p_user_id: string }
@@ -1737,6 +1907,19 @@ export type CompositeTypes<
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
+
+export type EventAttendance = Tables<"event_attendance">
+export type EventAttendanceInsert = TablesInsert<"event_attendance">
+export type EventAttendanceUpdate = TablesUpdate<"event_attendance">
+export type SavedAttendanceInfo = Tables<"saved_attendance_info">
+export type SavedAttendanceInfoInsert = TablesInsert<"saved_attendance_info">
+export type SavedAttendanceInfoUpdate = TablesUpdate<"saved_attendance_info">
+export type ActiveCheckinEvent =
+  Database["public"]["Functions"]["resolve_club_active_checkins"]["Returns"][number]
+export type EventAttendanceSummary =
+  Database["public"]["Functions"]["admin_event_attendance_summary"]["Returns"][number]
+export type ClubAttendanceSummary =
+  Database["public"]["Functions"]["admin_club_attendance_summary"]["Returns"][number]
 
 export const Constants = {
   public: {
