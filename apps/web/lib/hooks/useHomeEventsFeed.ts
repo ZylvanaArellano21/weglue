@@ -78,11 +78,28 @@ async function getHomeEventsFeed(
     { data: userActivities },
     { data: savedEvents },
     { data: userRsvps },
+    { data: rawEvents, error },
   ] = await Promise.all([
     supabase.from("club_members").select("club_id, role").eq("user_id", userId),
     supabase.from("user_activities").select("activity").eq("user_id", userId),
     supabase.from("saved_events").select("event_id").eq("user_id", userId),
     supabase.from("event_rsvps").select("event_id, status").eq("user_id", userId),
+    supabase
+      .from("events")
+      .select(
+        `
+        id, title, description, cover_image_url, event_date, start_time, end_time, event_end_at,
+        location, building, room, club_id, created_by, visibility, specific_user_ids,
+        clubs!inner(id, name, avatar_url),
+        event_interests(interest),
+        event_activities(activity)
+      `
+      )
+      // Canonical timestamp: a same-day event leaves Home exactly at end_at.
+      .gt("event_end_at", new Date().toISOString())
+      .order("event_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + EVENTS_PAGE_SIZE - 1),
   ]);
 
   const joinedClubIds = new Set((memberships ?? []).map((m: any) => m.club_id));
@@ -96,23 +113,6 @@ async function getHomeEventsFeed(
   const rsvpMap = new Map<string, "going" | "cant">(
     (userRsvps ?? []).map((r: any) => [r.event_id, r.status as "going" | "cant"])
   );
-
-  const { data: rawEvents, error } = await supabase
-    .from("events")
-    .select(
-      `
-      id, title, description, cover_image_url, event_date, start_time, end_time, event_end_at,
-      location, building, room, club_id, created_by, visibility, specific_user_ids,
-      clubs!inner(id, name, avatar_url),
-      event_interests(interest),
-      event_activities(activity)
-    `
-    )
-    // Canonical timestamp: a same-day event leaves Home exactly at end_at.
-    .gt("event_end_at", new Date().toISOString())
-    .order("event_date", { ascending: true })
-    .order("id", { ascending: true })
-    .range(offset, offset + EVENTS_PAGE_SIZE - 1);
 
   if (error || !rawEvents) return { sections: [], hasMore: false };
 
