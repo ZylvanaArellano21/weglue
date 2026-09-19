@@ -233,7 +233,8 @@
       "expo-font",
       "@react-native-community/datetimepicker",
       "expo-web-browser",
-      "./plugins/withPlayInstallReferrer"
+      "./plugins/withPlayInstallReferrer",
+      "@sentry/react-native/expo"
     ],
     "experiments": {
       "typedRoutes": true
