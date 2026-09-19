@@ -13,6 +13,7 @@ import { useToast } from "../shared/Toast";
 import { ReportModal } from "../shared/ReportModal";
 import { LinkifiedText } from "../shared/LinkifiedText";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   useEventDetail,
   useRsvpMutation,
@@ -68,10 +69,12 @@ export function EventDetailModal({
   const { mutate: toggleSave, isPending: saving } = useSaveEventMutation(userId);
   const { mutate: joinClub, isPending: joining } = useJoinClubMutation(userId);
   const { mutate: deleteEvent, isPending: deleting } = useDeleteEvent(userId);
+  const router = useRouter();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
 
   const doRsvp = (status: "going" | "cant") =>
     rsvp(
@@ -157,11 +160,12 @@ export function EventDetailModal({
               {event.emoji ? `${event.emoji} ` : ""}
               {event.title}
             </h2>
-            {!event.is_creator && (
+            {(event.can_manage || !event.is_creator) && (
               <button
                 type="button"
-                onClick={() => setReportOpen(true)}
-                aria-label="Report this event"
+                onClick={() => (event.can_manage ? setOptionsOpen(true) : setReportOpen(true))}
+                aria-label={event.can_manage ? "Event options" : "Report this event"}
+                aria-haspopup={event.can_manage ? "menu" : undefined}
                 className="rounded p-1.5 text-gray-400 hover:bg-black/5 hover:text-gray-600"
               >
                 •••
@@ -269,57 +273,91 @@ export function EventDetailModal({
             </div>
           )}
 
-          {/* Officer/creator management (spec §17/§20) */}
-          {(event.can_manage && (onEdit || onDeleted)) && (
-            <div className="mt-5 flex items-center gap-3 border-t pt-4" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
-              {onEdit && (
-                <button
-                  type="button"
-                  onClick={() => onEdit(event.id)}
-                  className="rounded-full border-[1.5px] px-5 py-2 text-sm font-semibold text-teal transition hover:bg-teal/5"
-                  style={{ borderColor: "#0FA6A6" }}
-                >
-                  Edit event
-                </button>
-              )}
-              {onDeleted &&
-                (confirmingDelete ? (
-                  <span className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        deleteEvent(event.id, {
-                          onSuccess: () => {
-                            show("Event deleted");
-                            onDeleted();
-                          },
-                          onError: () => show("Could not delete event. Try again.", "error"),
-                        })
-                      }
-                      disabled={deleting}
-                      className="rounded-full bg-[#F02719] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                    >
-                      {deleting ? "Deleting…" : "Confirm delete"}
-                    </button>
-                    <button type="button" onClick={() => setConfirmingDelete(false)} className="text-sm font-semibold text-gray-500 hover:underline">
-                      Cancel
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmingDelete(true)}
-                    className="rounded-full border-[1.5px] border-[#F02719]/40 px-5 py-2 text-sm font-semibold text-[#F02719] transition hover:bg-[#F02719]/5"
-                  >
-                    Delete event
-                  </button>
-                ))}
+          {/* Officer/creator management now lives entirely in the ⋯ menu
+              (Edit event / Attendance / Report / Delete) — see optionsOpen
+              below. Delete keeps its confirm step, just triggered from there. */}
+          {confirmingDelete && onDeleted && (
+            <div className="mt-5 flex items-center gap-2 border-t pt-4" style={{ borderColor: "rgba(0,0,0,0.08)" }}>
+              <span className="text-sm font-semibold text-gray-700">Delete this event?</span>
+              <button
+                type="button"
+                onClick={() =>
+                  deleteEvent(event.id, {
+                    onSuccess: () => {
+                      show("Event deleted");
+                      onDeleted();
+                    },
+                    onError: () => show("Could not delete event. Try again.", "error"),
+                  })
+                }
+                disabled={deleting}
+                className="rounded-full bg-[#F02719] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {deleting ? "Deleting…" : "Confirm delete"}
+              </button>
+              <button type="button" onClick={() => setConfirmingDelete(false)} className="text-sm font-semibold text-gray-500 hover:underline">
+                Cancel
+              </button>
             </div>
           )}
           </div>
         </div>
       )}
     </Modal>
+    {optionsOpen && event && (
+      <div
+        role="presentation"
+        onClick={() => setOptionsOpen(false)}
+        className="fixed inset-0 z-[110] flex items-center justify-center bg-black/35 p-8"
+      >
+        <div
+          role="menu"
+          aria-label={`${event.title} options`}
+          onClick={(e) => e.stopPropagation()}
+          className="min-w-[260px] overflow-hidden rounded-2xl bg-cream py-1.5"
+        >
+          {onEdit && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setOptionsOpen(false); onEdit(event.id); }}
+              className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium text-gray-900 hover:bg-black/[0.03]"
+            >
+              Edit event
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setOptionsOpen(false); router.push(`/event/${event.id}/attendance`); }}
+            className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium text-gray-900 hover:bg-black/[0.03]"
+          >
+            Attendance
+          </button>
+          {!event.is_creator && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setOptionsOpen(false); setReportOpen(true); }}
+              className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium text-gray-900 hover:bg-black/[0.03]"
+            >
+              Report
+            </button>
+          )}
+          {onDeleted && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setOptionsOpen(false); setConfirmingDelete(true); }}
+              className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium hover:bg-black/[0.03]"
+              style={{ color: "#C62828" }}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      </div>
+    )}
     {shareOpen && <UnifiedShareSheet userId={userId} content={{ type: "event", id: eventId }} title={event?.title ?? "Event"} onClose={() => setShareOpen(false)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
     {leaveOpen && event && <LeaveClubDialog clubId={event.club_id} clubName={event.club.name} userId={userId} onClose={() => setLeaveOpen(false)} onLeft={() => show("You left the club.")} onError={(message) => show(message, "error")} />}
     {reportOpen && event && (

@@ -13,6 +13,7 @@ import * as Linking from "expo-linking";
 import { useAuthStore } from "@weglue/shared";
 import { getPendingSignupEmail } from "../lib/authFlow";
 import { resumePendingInvite } from "../lib/inviteController";
+import { resumePendingCheckin } from "../lib/pendingCheckin";
 import { checkAndroidInstallReferrerOnce } from "../lib/androidInstallReferrer";
 import { isContentDeepLinkUrl } from "../lib/coldStartRouting";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -97,12 +98,15 @@ export default function WelcomeScreen() {
     // expo-router is already routing there. Don't override it with Home.
     if (contentDeepLink) return;
 
-    // A deferred chat invite is consumed exactly here so the invited chat is
-    // the first destination shown — then normal app entry.
-    resumePendingInvite().then((hadPendingInvite) => {
-      if (!hadPendingInvite) {
-        router.replace("/(tabs)");
-      }
+    // A deferred check-in (signed out when the QR/link was opened) is
+    // consumed first, then a deferred chat invite, then normal app entry.
+    resumePendingCheckin().then((hadPendingCheckin) => {
+      if (hadPendingCheckin) return;
+      resumePendingInvite().then((hadPendingInvite) => {
+        if (!hadPendingInvite) {
+          router.replace("/(tabs)");
+        }
+      });
     });
   }, [isLoading, session, profile, pendingSignupEmail, contentDeepLink]);
 

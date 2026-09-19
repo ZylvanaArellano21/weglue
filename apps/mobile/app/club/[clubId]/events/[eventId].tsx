@@ -25,6 +25,7 @@ import { LinkifiedText } from '../../../../components/shared/LinkifiedText';
 import { useToast } from '../../../../components/Toast';
 import { requestLeaveClub } from '../../../../store/leaveClubStore';
 import { openReportFlow } from '../../../../components/shared/ReportButton';
+import { deleteEvent } from '../../../../services/eventService';
 import { formatEventLocation, isEventPastAt } from '../../../../lib/eventDisplay';
 import { EventAudienceBadge } from '../../../../components/events/EventAudienceBadge';
 import { PhotoCarousel } from '../../../../components/shared/PhotoCarousel';
@@ -153,6 +154,67 @@ export default function ClubEventDetailScreen() {
     });
   };
 
+  const handleDeleteEvent = () => {
+    if (!event) return;
+    Alert.alert(
+      'Delete this event?',
+      `"${event.title}" will be permanently removed for everyone — club profile, Home, Calendar, Weekly Events, and all RSVPs. Chats where it was shared will show "This event is no longer available."`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteEvent(userId!, event.id);
+              queryClient.invalidateQueries({ queryKey: ['eventDetail'] });
+              queryClient.invalidateQueries({ queryKey: ['homeEventsFeed'] });
+              queryClient.invalidateQueries({ queryKey: ['ownThisWeekEvents'] });
+              queryClient.invalidateQueries({ queryKey: ['userWeeklyEvents'] });
+              show('Event deleted.');
+              router.back();
+            } catch {
+              Alert.alert('Error', 'Could not delete the event. Try again.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // Officers/advisors get a real ⋯ menu (Edit event / Attendance / Report /
+  // Delete); everyone else keeps the exact single-purpose report tap this
+  // control has always had. "Edit event" reuses the SAME destination as the
+  // pencil in Edit Club → Events (router push to /home/new-event with
+  // editEventId) — one edit flow, two entry points.
+  const handleEventOptions = () => {
+    if (!event) return;
+    if (!event.is_officer) {
+      handleReport();
+      return;
+    }
+    Alert.alert(event.title, undefined, [
+      {
+        text: 'Edit event',
+        onPress: () =>
+          router.push({ pathname: '/home/new-event', params: { editEventId: event.id } } as any),
+      },
+      {
+        text: 'Attendance',
+        onPress: () =>
+          router.push({
+            pathname: '/club/[clubId]/events/[eventId]/attendance',
+            params: { clubId: event.club_id, eventId: event.id },
+          } as any),
+      },
+      // Never offer reporting your own event, same rule the plain report
+      // button already enforced.
+      ...(event.is_creator ? [] : [{ text: 'Report', onPress: handleReport }]),
+      { text: 'Delete', style: 'destructive' as const, onPress: handleDeleteEvent },
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FEFCF0' }} edges={['top']}>
       {ToastComponent}
@@ -231,9 +293,11 @@ export default function ClubEventDetailScreen() {
               </Text>
             </TouchableOpacity>
 
-            {/* Report button — never on an event you created yourself */}
-            {!event.is_creator && (
-              <TouchableOpacity onPress={handleReport} activeOpacity={0.7} style={{ marginRight: 8 }}>
+            {/* ⋯ — officers/advisors always get the management menu (Edit
+                event / Attendance / Report / Delete); everyone else gets the
+                plain report tap, never on an event you created yourself. */}
+            {(event.is_officer || !event.is_creator) && (
+              <TouchableOpacity onPress={handleEventOptions} activeOpacity={0.7} style={{ marginRight: 8 }}>
                 <Ionicons name="ellipsis-horizontal" size={20} color="#6B7280" />
               </TouchableOpacity>
             )}

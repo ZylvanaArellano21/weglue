@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
+  Alert,
   View,
   Text,
   ScrollView,
@@ -25,7 +26,7 @@ import { CarouselBadge } from '../../../components/shared/PhotoCarousel';
 import { openProfile } from '../../../lib/profileNavigation';
 import { useToast } from '../../../components/Toast';
 import { requestLeaveClub } from '../../../store/leaveClubStore';
-import { ReportButton } from '../../../components/shared/ReportButton';
+import { openReportFlow } from '../../../components/shared/ReportButton';
 import { QrShareScreen } from '../../../components/share/QrShareScreen';
 import { getClubShareUrl } from '../../../lib/share';
 import type { ClubUpcomingEvent, ClubPhoto, ClubOfficer } from '../../../services/clubService';
@@ -559,6 +560,33 @@ export default function ClubProfileScreen() {
 
   const isOfficer = !!clubId && officerClubIds.includes(clubId);
 
+  // Officers/advisors get a real ⋯ menu (Edit club / QR attendance / Report);
+  // everyone else keeps the exact single-purpose report flow this control has
+  // always had — same confirm dialog, same openReportFlow call, unchanged.
+  const handleClubOptions = () => {
+    if (!club) return;
+    if (!isOfficer) {
+      openReportFlow({ entityType: 'club', entityId: clubId!, entityName: club.name, clubId });
+      return;
+    }
+    Alert.alert(club.name, undefined, [
+      {
+        text: 'Edit club',
+        onPress: () => router.push({ pathname: '/club/[clubId]/edit', params: { clubId: clubId! } }),
+      },
+      {
+        text: 'QR attendance',
+        onPress: () => router.push({ pathname: '/club/[clubId]/attendance', params: { clubId: clubId! } }),
+      },
+      {
+        text: 'Report',
+        style: 'destructive',
+        onPress: () => openReportFlow({ entityType: 'club', entityId: clubId!, entityName: club.name, clubId }),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const handleJoinLeave = () => {
     if (club?.is_member && clubId) {
       requestLeaveClub({ clubId, clubName: club.name, onLeft: () => router.back() });
@@ -722,15 +750,26 @@ export default function ClubProfileScreen() {
             <Ionicons name="chevron-back" size={22} color={INK} />
           </TouchableOpacity>
 
-          {/* Report ⋯ menu — bottom-right of the banner, clear of the Edit
-              button (top-right) and the club avatar (bottom-left). */}
-          <ReportButton
-            entityType="club"
-            entityId={clubId!}
-            entityName={club.name}
-            clubId={clubId}
-            style={{ position: 'absolute', bottom: 12, right: 12 }}
-          />
+          {/* ⋯ menu — bottom-right of the banner, clear of the club avatar
+              (bottom-left). Officers/advisors get Edit club / QR attendance /
+              Report; everyone else keeps the exact single-purpose report tap
+              this control has always had. */}
+          <TouchableOpacity
+            onPress={handleClubOptions}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={isOfficer ? 'Club options' : `Report ${club.name}`}
+            style={{
+              position: 'absolute',
+              bottom: 12,
+              right: 12,
+              backgroundColor: 'rgba(255,255,255,0.85)',
+              borderRadius: 20,
+              padding: 8,
+            }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color={INK} />
+          </TouchableOpacity>
 
           {/* Share — a visible control beside the ⋯ menu, never hidden inside
               it. Every valid club is shareable regardless of membership.
@@ -750,36 +789,6 @@ export default function ClubProfileScreen() {
               }}
             >
               <Ionicons name="share-outline" size={22} color={INK} />
-            </TouchableOpacity>
-          )}
-
-          {/* Officer edit button */}
-          {isOfficer && (
-            <TouchableOpacity
-              onPress={() =>
-                router.push({
-                  pathname: '/club/[clubId]/edit',
-                  params: { clubId: clubId! },
-                })
-              }
-              activeOpacity={0.7}
-              style={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                backgroundColor: TEAL,
-                borderRadius: 20,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 5,
-              }}
-            >
-              <Ionicons name="pencil" size={14} color={CREAM} />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: CREAM, fontFamily: 'Inter_600SemiBold' }}>
-                Edit
-              </Text>
             </TouchableOpacity>
           )}
 

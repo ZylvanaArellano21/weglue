@@ -16,8 +16,11 @@
 // app's associated-domains / intent-filter path list (app.json) AND backed by
 // a real dynamic route file. `/invite/*` is deliberately NOT here: invite
 // tokens have their own capture + deferred-navigation controller
-// (lib/inviteController.ts) that WelcomeScreen already consults.
-const CONTENT_DEEP_LINK_PATH = /\/(?:club|post)\//;
+// (lib/inviteController.ts) that WelcomeScreen already consults. `/checkin/*`
+// has the analogous pendingCheckin capture + resume controller for the
+// signed-out case, but a signed-IN cold launch must still land on the
+// checkin screen itself, exactly like /club and /post.
+const CONTENT_DEEP_LINK_PATH = /\/(?:club|post|checkin)\//;
 
 /**
  * True when `url` (the app's cold-start URL) points at an in-app content screen

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Avatar } from "../shared/Avatar";
 import { AvatarStack } from "../shared/AvatarStack";
 import { ChatBubbleOutlineIcon, StarOutlineIcon, ChevronLeftIcon, CalendarIcon, LocationIcon, EllipsisIcon, ShareIcon } from "../shared/icons";
@@ -27,6 +28,7 @@ export function ClubProfileHeader({
   onToggleMembership,
   membershipPending,
   onEdit,
+  onOpenAttendance,
   onOfficerChat,
   onGroupChat,
   onOpenPeople,
@@ -39,7 +41,10 @@ export function ClubProfileHeader({
   onSelectTab: (tab: ClubTab) => void;
   onToggleMembership: () => void;
   membershipPending: boolean;
+  /** Opens the existing club-edit flow — now reached only via the ⋯ menu. */
   onEdit: () => void;
+  /** Opens the club's permanent QR attendance screen — officers/advisors only. */
+  onOpenAttendance: () => void;
   onOfficerChat: () => void;
   onGroupChat: () => void;
   /** Opens the Members / Gluemates list. Available to officers AND members. */
@@ -48,20 +53,32 @@ export function ClubProfileHeader({
    * against the native Club Profile screenshot, which has no other way
    * back. Desktop/tablet keep browser/AppHeader navigation, unchanged. */
   onBack: () => void;
-  /** Phone-only "…" report button, bottom-right of the banner — native's
-   * ReportButton for the club itself. Desktop has no equivalent affordance
-   * on this screen today, so this stays additive to phone only. */
+  /** "…" trigger, bottom-right of the banner on phone / top-right on
+   * desktop-tablet. Officers/advisors get a real menu (Edit club / QR
+   * attendance / Report); everyone else gets this single report action
+   * directly, same as before. */
   onReport: () => void;
   /** Phone-only Share button, beside the "…" — opens the club QR share
    * screen. Every valid club is shareable regardless of membership. The
    * larger-device club profile is intentionally left unchanged. */
   onShare: () => void;
 }): JSX.Element {
+  const [optionsOpen, setOptionsOpen] = useState(false);
+
+  function handleOptionsPress() {
+    if (club.is_officer) {
+      setOptionsOpen(true);
+    } else {
+      onReport();
+    }
+  }
+
   return (
-    // Negative margins cancel the parent <main>'s own px-4 sm:px-6 exactly,
-    // so the banner reaches the real screen edges on phone like native's —
-    // md:mx-0 removes the offset entirely at md+, leaving desktop identical
-    // to before.
+    <>
+    {/* Negative margins cancel the parent <main>'s own px-4 sm:px-6 exactly,
+        so the banner reaches the real screen edges on phone like native's —
+        md:mx-0 removes the offset entirely at md+, leaving desktop identical
+        to before. */}
     <section className="-mx-4 overflow-hidden rounded-none bg-white shadow-none sm:-mx-6 md:mx-0 md:rounded-2xl md:shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
       {/* Banner + overlapping avatar + Edit */}
       <div className="relative h-40 w-full bg-gray-200 sm:h-48">
@@ -79,31 +96,17 @@ export function ClubProfileHeader({
         >
           <ChevronLeftIcon size={22} />
         </button>
-        {club.is_officer && (
-          // Native puts this top-right, bottom-right on desktop is this
-          // component's pre-existing (unrelated) position — kept exactly as
-          // it was for md+, only phone moves to match native.
-          <button
-            type="button"
-            onClick={onEdit}
-            className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-teal px-4 py-1.5 text-[13px] font-semibold text-white shadow-md transition hover:opacity-90 md:top-auto md:bottom-3"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-            Edit
-          </button>
-        )}
-        {/* "…" report-club button, bottom-right of the banner — native's
-            ReportButton, always present (not officer-gated), clear of the
-            Edit button (top-right on phone) and the avatar (bottom-left). No
-            desktop equivalent existed before, so this stays phone-only. */}
+        {/* "…" — bottom-right of the banner on phone, top-right on
+            desktop/tablet (desktop had no equivalent affordance before this;
+            it's additive there, in the Edit button's old top-right spot).
+            Officers/advisors get Edit club / QR attendance / Report;
+            everyone else gets the plain report action, same as before. */}
         <button
           type="button"
-          onClick={onReport}
-          aria-label={`Report ${club.name}`}
-          className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-gray-800 shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:hidden"
+          onClick={handleOptionsPress}
+          aria-label={club.is_officer ? "Club options" : `Report ${club.name}`}
+          aria-haspopup={club.is_officer ? "menu" : undefined}
+          className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-gray-800 shadow-[0_1px_4px_rgba(0,0,0,0.15)] md:bottom-auto md:right-3 md:top-3"
         >
           <EllipsisIcon size={20} />
         </button>
@@ -378,6 +381,47 @@ export function ClubProfileHeader({
         </nav>
       </div>
     </section>
+
+    {optionsOpen && (
+      <div
+        role="presentation"
+        onClick={() => setOptionsOpen(false)}
+        className="fixed inset-0 z-[110] flex items-center justify-center bg-black/35 p-8"
+      >
+        <div
+          role="menu"
+          aria-label={`${club.name} options`}
+          onClick={(e) => e.stopPropagation()}
+          className="min-w-[260px] overflow-hidden rounded-2xl bg-cream py-1.5"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setOptionsOpen(false); onEdit(); }}
+            className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium text-gray-900 hover:bg-black/[0.03]"
+          >
+            Edit club
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setOptionsOpen(false); onOpenAttendance(); }}
+            className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium text-gray-900 hover:bg-black/[0.03]"
+          >
+            QR attendance
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setOptionsOpen(false); onReport(); }}
+            className="flex w-full items-center gap-3 px-4.5 py-3 text-left text-sm font-medium text-gray-900 hover:bg-black/[0.03]"
+          >
+            Report
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
