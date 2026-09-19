@@ -15,6 +15,13 @@ import {
  * invalidations. Broadcasts are opaque: this host only invalidates RLS-backed
  * queries, never adopts received data as state.
  */
+// A navigation-triggered invalidation is belt-and-suspenders against a stale
+// cached query resurfacing (staleTime + refetchOnMount already cover a
+// genuinely stale one). Coalesce it so rapid tab-switching doesn't re-invalidate
+// ~29 query roots on every hop — parity with STUDENT_NAV_INVALIDATE_MS in
+// apps/web/app/providers.tsx, which already had this correction.
+const STUDENT_NAV_INVALIDATE_MS = 10_000;
+
 export function StudentSynchronizationHost({ userId }: { userId?: string }) {
   const queryClient = useQueryClient();
   const pathname = usePathname();
@@ -86,10 +93,30 @@ export function StudentSynchronizationHost({ userId }: { userId?: string }) {
     };
   }, [recover, refresh, userId]);
 
+  const firstPathRef = useRef(true);
+  const lastNavInvalidateRef = useRef(0);
   useEffect(() => {
     // An inactive persisted query can otherwise become visible before its next
     // normal stale-time window. Navigation always revalidates lifecycle state —
     // it just no longer discards what it is revalidating.
+    //
+    // The first run is skipped: this host mounts once per authenticated
+    // session with a freshly restored (or empty) query client, so on that pass
+    // there is no cached query to revalidate — only the queries the screen
+    // just started. Marking them stale here is not a stale-data guard, it is a
+    // guaranteed double fetch of every student surface on first mount.
+    if (firstPathRef.current) {
+      firstPathRef.current = false;
+      return;
+    }
+    // Coalesce bursts of navigation — parity with the web twin
+    // (STUDENT_NAV_INVALIDATE_MS in apps/web/app/providers.tsx). A query that
+    // genuinely went stale still refetches on remount (60s staleTime +
+    // refetchOnMount); a real permission change still arrives unthrottled
+    // through the opaque broadcast and the foreground-recovery path below. So
+    // rapidly switching tabs no longer fires a 29-root invalidation per hop.
+    if (Date.now() - lastNavInvalidateRef.current < STUDENT_NAV_INVALIDATE_MS) return;
+    lastNavInvalidateRef.current = Date.now();
     refresh();
   }, [pathname, refresh]);
 
