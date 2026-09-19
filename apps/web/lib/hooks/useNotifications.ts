@@ -6,6 +6,7 @@ import { getSupabaseBrowser } from "../supabase-browser";
 import { dateInAppTz, dayDiff, todayInAppTz } from "../datetime";
 import { resolveNotificationVisual, type NotificationVisual, type NotificationVisualActor, type NotificationVisualEntity } from "@weglue/shared";
 import { publishNotificationInsert, type BannerNotificationRow } from "../notifications/bannerBus";
+import { createSafeChannel, removeSafeChannel } from "../realtime";
 
 // Web port of apps/mobile/services/notificationService.ts + hooks/useNotifications.ts
 // + lib/notifications/routes.ts. Same canonical notifications table, same types,
@@ -67,6 +68,7 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
        profiles!notifications_actor_id_fkey(id, username, avatar_url)`
     )
     .eq("user_id", userId)
+    // TODO(perf): verify index supports (user_id, created_at).
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -80,6 +82,7 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
       .select("notification_id, actor_id, created_at")
       .in("notification_id", notificationIds)
       .order("created_at", { ascending: false })
+      .limit(100)
     : { data: [] as any[], error: null };
   const persistedActorsByNotification = new Map<string, PersistedNotificationActorRow[]>();
   for (const actor of (persistedActorRows ?? []) as PersistedNotificationActorRow[]) {
@@ -115,13 +118,27 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
     ? await supabase.from("messages").select("id, conversation_id").in("id", replyMessageIds)
     : { data: [] as any[] };
   const replyMsgConversation = new Map<string, string>((replyMsgRows ?? []).map((m: any) => [m.id, m.conversation_id]));
-  const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }, { data: photoRows }] = await Promise.all([
-    allActorIds.length ? supabase.from("profiles").select("id, username, avatar_url").in("id", allActorIds) : Promise.resolve({ data: [] as any[] }),
-    eventIds.length ? supabase.from("events").select("id, clubs!inner(id, name, avatar_url)").in("id", eventIds) : Promise.resolve({ data: [] as any[] }),
-    clubIds.length ? supabase.from("clubs").select("id, name, avatar_url").in("id", clubIds) : Promise.resolve({ data: [] as any[] }),
-    postIds.length ? supabase.from("posts").select("id, clubs(id, name, avatar_url)").in("id", postIds) : Promise.resolve({ data: [] as any[] }),
-    conversationIds.length ? supabase.from("conversations").select("id, clubs(id, name, avatar_url)").in("id", conversationIds) : Promise.resolve({ data: [] as any[] }),
-    photoIds.length ? supabase.from("club_photos").select("id, clubs(id, name, avatar_url)").in("id", photoIds) : Promise.resolve({ data: [] as any[] }),
+  const actorIds = [...new Set((data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[])];
+  const followStatePromise = actorIds.length > 0
+    ? supabase
+      .from("follows")
+      .select("following_id, status")
+      .eq("follower_id", userId)
+      .in("following_id", actorIds)
+    : Promise.resolve({ data: [] as any[] });
+  const [
+    [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }, { data: photoRows }],
+    { data: myFollows },
+  ] = await Promise.all([
+    Promise.all([
+      allActorIds.length ? supabase.from("profiles").select("id, username, avatar_url").in("id", allActorIds) : Promise.resolve({ data: [] as any[] }),
+      eventIds.length ? supabase.from("events").select("id, clubs!inner(id, name, avatar_url)").in("id", eventIds) : Promise.resolve({ data: [] as any[] }),
+      clubIds.length ? supabase.from("clubs").select("id, name, avatar_url").in("id", clubIds) : Promise.resolve({ data: [] as any[] }),
+      postIds.length ? supabase.from("posts").select("id, clubs(id, name, avatar_url)").in("id", postIds) : Promise.resolve({ data: [] as any[] }),
+      conversationIds.length ? supabase.from("conversations").select("id, clubs(id, name, avatar_url)").in("id", conversationIds) : Promise.resolve({ data: [] as any[] }),
+      photoIds.length ? supabase.from("club_photos").select("id, clubs(id, name, avatar_url)").in("id", photoIds) : Promise.resolve({ data: [] as any[] }),
+    ]),
+    followStatePromise,
   ]);
   const actorMap = new Map<string, NotificationVisualActor>((actorRows ?? []).map((p: any) => [p.id, { id: p.id, username: p.username, avatar_url: p.avatar_url ?? null }]));
   const eventMap = new Map<string, NotificationVisualEntity>((eventRows ?? []).map((e: any) => [e.id, { id: e.clubs.id, name: e.clubs.name, avatar_url: e.clubs.avatar_url ?? null }]));
@@ -130,17 +147,9 @@ async function getNotifications(userId: string): Promise<NotificationSection[]> 
   const conversationClubMap = new Map<string, NotificationVisualEntity>((conversationRows ?? []).filter((c: any) => c.clubs).map((c: any) => [c.id, { id: c.clubs.id, name: c.clubs.name, avatar_url: c.clubs.avatar_url ?? null }]));
   const photoClubMap = new Map<string, NotificationVisualEntity>((photoRows ?? []).filter((p: any) => p.clubs).map((p: any) => [p.id, { id: p.clubs.id, name: p.clubs.name, avatar_url: p.clubs.avatar_url ?? null }]));
 
-  const actorIds = [...new Set((data as any[]).map((n) => n.profiles?.id).filter(Boolean) as string[])];
   const followStateMap = new Map<string, ActorFollowState>();
-  if (actorIds.length > 0) {
-    const { data: myFollows } = await supabase
-      .from("follows")
-      .select("following_id, status")
-      .eq("follower_id", userId)
-      .in("following_id", actorIds);
-    for (const f of (myFollows ?? []) as any[]) {
-      followStateMap.set(f.following_id, f.status === "accepted" ? "following" : "pending");
-    }
+  for (const f of (myFollows ?? []) as any[]) {
+    followStateMap.set(f.following_id, f.status === "accepted" ? "following" : "pending");
   }
 
   const today = todayInAppTz();
@@ -512,32 +521,34 @@ export function useRealtimeNotifications(userId: string | undefined) {
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!userId) return;
-    const supabase = getSupabaseBrowser();
-    const channel = supabase
-      .channel(`notifications:${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
-        (payload: { new: BannerNotificationRow | null }) => {
+    const channel = createSafeChannel(`notifications:${userId}`, [
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${userId}`,
+        callback: (payload: { new: BannerNotificationRow | null }) => {
           void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
           void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
           // Correction 3: the ONE feed for the foreground banner — no second
           // realtime subscription.
           if (payload.new) publishNotificationInsert(payload.new);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
-        () => {
+        },
+      },
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${userId}`,
+        callback: () => {
           // A read on another device must flip this device's badge + list rows.
           void queryClient.invalidateQueries({ queryKey: ["unreadSummary", userId] });
           void queryClient.invalidateQueries({ queryKey: ["notifications", userId] });
-        }
-      )
-      .subscribe();
+        },
+      },
+    ]);
     return () => {
-      void supabase.removeChannel(channel);
+      removeSafeChannel(channel);
     };
   }, [userId, queryClient]);
 }

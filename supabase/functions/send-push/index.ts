@@ -119,9 +119,15 @@ async function deliverPending(admin: SupabaseClient) {
 
   // iOS icon badge: one summary per recipient per run.
   const badgeByUser = new Map<string, number>();
-  for (const userId of userIds) {
-    if (!tokensByUser.has(userId)) continue;
-    const { data } = await admin.rpc("get_unread_summary_for", { p_user: userId });
+  const badgeResults = await Promise.all(
+    userIds
+      .filter((userId) => tokensByUser.has(userId))
+      .map(async (userId) => {
+        const { data } = await admin.rpc("get_unread_summary_for", { p_user: userId });
+        return [userId, data] as const;
+      }),
+  );
+  for (const [userId, data] of badgeResults) {
     const summary = (data ?? {}) as { unread_notifications?: number; unread_threads?: number };
     badgeByUser.set(
       userId,
@@ -134,21 +140,27 @@ async function deliverPending(admin: SupabaseClient) {
   const skippedIds: string[] = [];
   const suppressedIds: string[] = [];
   const deferredIds: string[] = [];
+  const visibilityChecks = await Promise.all(
+    rows.map(async (row) => {
+      if (!row.source_message_id) return { row, active: true, error: null };
+      const { data: active, error } = await admin.rpc('message_is_active', {
+        p_message_id: row.source_message_id,
+      });
+      return { row, active: active === true, error };
+    }),
+  );
 
-  for (const row of rows) {
+  for (const { row, active, error: activeError } of visibilityChecks) {
     // A deletion may race this already-claimed batch. Re-check the canonical
     // visibility predicate immediately before building an Expo payload. If the
     // check is unavailable, fail closed for this run and retry rather than
     // risking a stale private preview in a notification.
     if (row.source_message_id) {
-      const { data: active, error: activeError } = await admin.rpc('message_is_active', {
-        p_message_id: row.source_message_id,
-      });
       if (activeError) {
         deferredIds.push(row.id);
         continue;
       }
-      if (active !== true) {
+      if (!active) {
         suppressedIds.push(row.id);
         continue;
       }
@@ -205,6 +217,7 @@ async function deliverPending(admin: SupabaseClient) {
   const sentIds = new Set<string>();
   const failedIds = new Map<string, string>();
   const tickets: { ticket_id: string; push_id: string; token_id: string }[] = [];
+  const invalidTokenIds = new Set<string>();
 
   for (let i = 0; i < outbox.length; i += BATCH_SIZE) {
     const chunk = outbox.slice(i, i + BATCH_SIZE);
@@ -235,7 +248,7 @@ async function deliverPending(admin: SupabaseClient) {
           tickets.push({ ticket_id: ticket.id, push_id: m.pushId, token_id: m.tokenId });
         } else {
           if (ticket.details?.error === "DeviceNotRegistered") {
-            await admin.from("push_tokens").update({ status: "invalid" }).eq("id", m.tokenId);
+            invalidTokenIds.add(m.tokenId);
             // Token dead ≠ push failed: another device may have received it.
             if (!sentIds.has(m.pushId)) skippedIds.push(m.pushId);
           } else if (!sentIds.has(m.pushId)) {
@@ -247,6 +260,13 @@ async function deliverPending(admin: SupabaseClient) {
     } catch {
       for (const m of chunk) failedIds.set(m.pushId, "expo_send_failed");
     }
+  }
+
+  if (invalidTokenIds.size > 0) {
+    await admin
+      .from("push_tokens")
+      .update({ status: "invalid" })
+      .in("id", [...invalidTokenIds]);
   }
 
   if (tickets.length > 0) {
@@ -319,12 +339,19 @@ async function reconcileReceipts(admin: SupabaseClient) {
     const payload = await res.json();
     const receipts: Record<string, { status: string; details?: { error?: string } }> =
       payload.data ?? {};
+    const invalidTokenIds = new Set<string>();
     for (const t of data) {
       const receipt = receipts[t.ticket_id as string];
       if (receipt?.status === "error" && receipt.details?.error === "DeviceNotRegistered") {
-        await admin.from("push_tokens").update({ status: "invalid" }).eq("id", t.token_id);
-        invalidated++;
+        invalidTokenIds.add(t.token_id as string);
       }
+    }
+    if (invalidTokenIds.size > 0) {
+      await admin
+        .from("push_tokens")
+        .update({ status: "invalid" })
+        .in("id", [...invalidTokenIds]);
+      invalidated = invalidTokenIds.size;
     }
     await admin.from("push_tickets").update({ checked: true }).in("ticket_id", ids);
   } catch (e) {
