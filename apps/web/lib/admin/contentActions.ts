@@ -49,6 +49,31 @@ async function fail(action: string, actor: User, error: string, target: Record<s
   return { ok: false, error };
 }
 
+export async function disableExternalShare(entityType: "post" | "event", entityId: string): Promise<ActionResult> {
+  const actor = await requireSecureAdmin({ write: true });
+  const action = "externalShare.disable";
+  const target = { entityType, entityId };
+  if ((entityType !== "post" && entityType !== "event") || !isUuid(entityId)) {
+    return fail(action, actor, "Invalid external share target.", target);
+  }
+
+  const admin = createAdminClient();
+  const disabledAt = new Date().toISOString();
+  const { data, error } = await admin
+    .from("external_share_settings")
+    .update({ enabled: false, disabled_at: disabledAt, updated_at: disabledAt })
+    .eq("entity_type", entityType)
+    .eq("entity_id", entityId)
+    .select("entity_type, entity_id, enabled, disabled_at, updated_at")
+    .maybeSingle();
+
+  if (error) return fail(action, actor, error.message, target);
+  if (!data || data.enabled !== false) return fail(action, actor, "External sharing setting not found.", target);
+
+  await adminAudit({ action, actorId: actor.id, actorEmail: actor.email, target, ok: true });
+  return { ok: true, data: null };
+}
+
 const CAPTION_MAX = 2000;
 const COMMENT_MAX = 2000;
 

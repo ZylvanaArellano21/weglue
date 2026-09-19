@@ -9,6 +9,7 @@ import { useAllClubs, useCreatePost } from "../../lib/hooks/useCreatePost";
 import { imageDimensions } from "../../lib/imageUpload";
 import { PhotoCarousel } from "../shared/PhotoCarousel";
 import { ImageCropper, type CropAspectOption } from "../shared/ImageCropper";
+import { enableExternalShare, trackShareFunnelEvent } from "../shared/UnifiedShareSheet";
 
 /** Post-compose ratio picker: Original (the image's own ratio), 1:1, 4:5. */
 function postCropAspectOptions(width: number, height: number): CropAspectOption[] {
@@ -49,6 +50,7 @@ export function ComposePostModal({
   const create = useCreatePost(userId);
 
   const [files, setFiles] = useState<File[]>([]);
+  const [justPublished, setJustPublished] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [clubQuery, setClubQuery] = useState("");
@@ -136,13 +138,18 @@ export function ComposePostModal({
     create.mutate(
       { file: files.length === 1 ? files[0]! : files, caption: caption.trim() || undefined, clubIds, authoredClubId },
       {
-        onSuccess: () => {
+        onSuccess: (postId) => {
           show("Post shared! 📸");
-          onCreated();
+          setJustPublished(postId);
         },
         onError: () => show("Failed to post. Please try again.", "error"),
       }
     );
+  };
+
+  const finishAfterPublish = () => {
+    setJustPublished(null);
+    onCreated();
   };
 
   return (
@@ -160,7 +167,10 @@ export function ComposePostModal({
         }}
       />
     )}
-    <Modal onClose={onClose} labelledBy="compose-post-title" maxWidth={520}>
+    <Modal onClose={justPublished ? finishAfterPublish : onClose} labelledBy="compose-post-title" maxWidth={520}>
+      {justPublished ? (
+        <PublishedShareCta contentType="post" contentId={justPublished} onDone={finishAfterPublish} />
+      ) : (
       <div className="p-5 sm:p-6">
         <h2 id="compose-post-title" className="mb-4 text-center text-lg font-bold text-gray-900">
           New Post
@@ -330,7 +340,83 @@ export function ComposePostModal({
           {create.isPending ? "Posting…" : "Post"}
         </button>
       </div>
+      )}
     </Modal>
     </>
+  );
+}
+
+/** Post-publish "Share it on Instagram" — optional, never auto-opens
+ *  anything. Reuses the exact same web behavior as the main share sheet's
+ *  Instagram Story action (see UnifiedShareSheet.tsx): web can never perform
+ *  the native Stories handoff, so this is the same honest "continue in the
+ *  We Glue app" prompt, not a second implementation. */
+export function PublishedShareCta({
+  contentType,
+  contentId,
+  onDone,
+}: {
+  contentType: "post" | "event";
+  contentId: string;
+  onDone: () => void;
+}): JSX.Element {
+  const show = useToast();
+  const [showContinueInApp, setShowContinueInApp] = useState(false);
+  const [sessionId] = useState(() => crypto.randomUUID());
+  const baseLink = typeof window === "undefined" ? "" : `${window.location.origin}/${contentType}/${contentId}`;
+  const link = `${baseLink}?ssid=${sessionId}`;
+
+  const startInstagramShare = async () => {
+    trackShareFunnelEvent("share_initiated", contentType, contentId, "instagram_story", sessionId);
+    trackShareFunnelEvent("instagram_story_selected", contentType, contentId, "instagram_story", sessionId);
+    // Tapping this IS the explicit owner action that enables external
+    // sharing (migration 143) — the user just created this content, so
+    // they're always the authorized owner and this always succeeds.
+    await enableExternalShare(contentType, contentId);
+    setShowContinueInApp(true);
+  };
+
+  return (
+    <div className="p-6 text-center">
+      <p className="text-lg font-bold text-gray-900">{contentType === "post" ? "Post shared! 📸" : "Event published! 🎉"}</p>
+      <p className="mt-1 text-sm text-gray-500">Want more people to see it?</p>
+      <button
+        type="button"
+        onClick={startInstagramShare}
+        className="mt-4 w-full rounded-full py-3 text-[15px] font-semibold text-white"
+        style={{ background: "#E1306C" }}
+      >
+        Share it on Instagram
+      </button>
+      <button type="button" onClick={onDone} className="mt-3 w-full rounded-full border border-gray-300 py-3 text-[15px] font-semibold text-gray-700">
+        Done
+      </button>
+
+      {showContinueInApp && (
+        <div role="dialog" aria-label="Continue in the We Glue app" className="mt-4 rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm">
+          <p className="text-[13px] font-semibold text-gray-900">Continue in the We Glue app</p>
+          <p className="mt-1 text-[12.5px] text-gray-600">Instagram Story sharing works from the We Glue mobile app.</p>
+          <div className="mt-3 flex gap-2">
+            <a
+              href={link}
+              onClick={() => trackShareFunnelEvent("open_in_app_clicked", contentType, contentId, "instagram_story", sessionId)}
+              className="flex-1 rounded-full bg-[#0FA6A6] py-2 text-center text-[13px] font-semibold text-white"
+            >
+              Open in We Glue
+            </a>
+            <button
+              type="button"
+              onClick={async () => {
+                await navigator.clipboard.writeText(link);
+                show("Link copied!");
+              }}
+              className="flex-1 rounded-full border border-gray-300 py-2 text-[13px] font-semibold text-gray-700"
+            >
+              Copy Link
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

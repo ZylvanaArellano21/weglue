@@ -5,8 +5,57 @@ import { Modal } from "./Modal";
 import { Avatar } from "./Avatar";
 import { useMessageConversations, useMessagePeopleSearch, useMessageSuggestions } from "../../lib/messages/hooks";
 import { getOrCreateDirectConversation, shareContentToConversation, type ConversationPreview, type Person, type ShareableContent } from "../../lib/messages/service";
+import { getSupabaseBrowser } from "../../lib/supabase-browser";
 
 const MAX_SUGGESTIONS = 5;
+
+// A post/event's canonical link only resolves publicly once its authorized
+// owner (personal post: its author; club post/event: a club officer) has
+// explicitly enabled external sharing — see migration 143. This RPC enforces
+// that ownership check server-side and returns false, changing nothing, for
+// anyone else; it's a no-op (still true) once already enabled, which is what
+// makes resharing already-public content work for any viewer.
+export async function enableExternalShare(entityType: "post" | "event", entityId: string): Promise<boolean> {
+  const { data, error } = await getSupabaseBrowser().rpc("enable_external_share", {
+    p_entity_type: entityType,
+    p_entity_id: entityId,
+  });
+  return !error && data === true;
+}
+
+// ─── Share funnel analytics (migration 145) ─────────────────────────────────
+// Anonymous, aggregate-only counters — no user identity is ever recorded, and
+// there is no direct table write: everything goes through the narrow
+// log_share_funnel_event SECURITY DEFINER RPC, which validates every field
+// and dedupes retries/rerenders of the same step server-side. Fire-and-forget
+// — a failed/rejected call must never interrupt or delay a share.
+export type ShareFunnelEvent =
+  | "share_initiated"
+  | "instagram_story_selected"
+  | "preview_opened"
+  | "open_in_app_clicked"
+  | "store_clicked";
+
+export type ShareFunnelSource = "instagram_story" | "copy_link" | "messages" | "whatsapp" | "more" | "direct_unknown";
+
+export function trackShareFunnelEvent(
+  eventName: ShareFunnelEvent,
+  entityType: "post" | "event" | null,
+  entityId: string | null,
+  source: ShareFunnelSource | null,
+  shareSessionId: string | null,
+): void {
+  void getSupabaseBrowser()
+    .rpc("log_share_funnel_event", {
+      p_share_session_id: shareSessionId,
+      p_event_name: eventName,
+      p_entity_type: entityType,
+      p_entity_id: entityId,
+      p_source: source,
+      p_platform: "web",
+    })
+    .then(() => {}, () => {});
+}
 
 export function UnifiedShareSheet({ userId, content, title, onClose, onToast }: {
   userId: string;
@@ -84,9 +133,26 @@ export function UnifiedShareSheet({ userId, content, title, onClose, onToast }: 
     }
   };
 
-  const link = typeof window === "undefined" ? "" : `${window.location.origin}/${content.type}/${content.id}`;
+  const baseLink = typeof window === "undefined" ? "" : `${window.location.origin}/${content.type}/${content.id}`;
+  const [showContinueInApp, setShowContinueInApp] = useState(false);
+  const [sessionLink, setSessionLink] = useState("");
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const external = async (kind: ExternalAction) => {
-    if (!link) return;
+    if (!baseLink) return;
+    const allowed = await enableExternalShare(content.type, content.id);
+    if (!allowed) {
+      onToast(`Only the ${content.type}’s owner can share this outside We Glue yet.`, "error");
+      return;
+    }
+    // One session id per share act — embedded in the link so every
+    // downstream open of THIS specific share correlates to one funnel journey.
+    const sessionId = crypto.randomUUID();
+    const link = `${baseLink}?ssid=${sessionId}`;
+    setSessionLink(link);
+    setActiveSessionId(sessionId);
+    const source: ShareFunnelSource =
+      kind === "instagram" ? "instagram_story" : kind === "copy" ? "copy_link" : kind === "whatsapp" ? "whatsapp" : kind === "messages" ? "messages" : "more";
+    trackShareFunnelEvent("share_initiated", content.type, content.id, source, sessionId);
     try {
       if (kind === "copy") {
         await navigator.clipboard.writeText(link);
@@ -96,8 +162,16 @@ export function UnifiedShareSheet({ userId, content, title, onClose, onToast }: 
       } else if (kind === "messages") {
         window.open(`sms:?&body=${encodeURIComponent(`${title} ${link}`)}`, "_blank", "noopener,noreferrer");
       } else if (kind === "instagram") {
-        await navigator.clipboard.writeText(link);
-        onToast("Link copied — paste it into Instagram.");
+        trackShareFunnelEvent("instagram_story_selected", content.type, content.id, "instagram_story", sessionId);
+        // Instagram Stories composition is native-app-only — there is no web
+        // equivalent, on desktop or on mobile browsers (a browser cannot
+        // write the native pasteboard/intent extras the composer preload
+        // needs). Every web surface gets the same honest prompt; the "Open
+        // in We Glue" action is a real link click to the canonical content
+        // URL, which already hands off to the installed app via the
+        // existing Universal Link / App Link association (see
+        // apps/mobile/app.json) when one is installed.
+        setShowContinueInApp(true);
       } else if (navigator.share) {
         await navigator.share({ title, url: link });
       } else {
@@ -125,17 +199,45 @@ export function UnifiedShareSheet({ userId, content, title, onClose, onToast }: 
         </div>
       </section>
 
-      <footer className="shrink-0 border-t border-gray-200 pt-3">
+      <footer className="relative shrink-0 border-t border-gray-200 pt-3">
         <button type="button" onClick={send} disabled={!selectedCount || sending} className="w-full rounded-full bg-[#0FA6A6] py-2.5 text-sm font-semibold text-white disabled:opacity-50">{sending ? "Sharing…" : selectedCount ? `Share with ${selectedCount} ${selectedCount === 1 ? "recipient" : "recipients"}` : "Select recipients"}</button>
         <div className="my-4 border-t border-gray-200" />
         <h3 className="text-[13px] font-semibold text-gray-700">Share externally</h3>
         <div className="mt-2 flex justify-around gap-1">
-          <ExternalButton action="instagram" label="Instagram" color="#E1306C" onClick={external} />
+          <ExternalButton action="instagram" label="Instagram Story" color="#E1306C" onClick={external} />
           <ExternalButton action="messages" label="Messages" color="#34C759" onClick={external} />
           <ExternalButton action="whatsapp" label="WhatsApp" color="#25D366" onClick={external} />
           <ExternalButton action="copy" label="Copy Link" color="#0FA6A6" onClick={external} />
           <ExternalButton action="more" label="More" color="#6B7280" onClick={external} />
         </div>
+
+        {showContinueInApp && (
+          <div role="dialog" aria-label="Continue in the We Glue app" className="absolute inset-x-4 bottom-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
+            <p className="text-[13px] font-semibold text-gray-900">Continue in the We Glue app</p>
+            <p className="mt-1 text-[12.5px] text-gray-600">Instagram Story sharing works from the We Glue mobile app.</p>
+            <div className="mt-3 flex gap-2">
+              <a
+                href={sessionLink}
+                onClick={() => trackShareFunnelEvent("open_in_app_clicked", content.type, content.id, "instagram_story", activeSessionId)}
+                className="flex-1 rounded-full bg-[#0FA6A6] py-2 text-center text-[13px] font-semibold text-white"
+              >
+                Open in We Glue
+              </a>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(sessionLink);
+                  onToast("Link copied!");
+                  setShowContinueInApp(false);
+                }}
+                className="flex-1 rounded-full border border-gray-300 py-2 text-[13px] font-semibold text-gray-700"
+              >
+                Copy Link
+              </button>
+            </div>
+            <button type="button" onClick={() => setShowContinueInApp(false)} aria-label="Dismiss" className="absolute right-3 top-3 text-gray-400">✕</button>
+          </div>
+        )}
       </footer>
     </div>
   </Modal>;

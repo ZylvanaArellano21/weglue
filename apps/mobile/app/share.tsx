@@ -15,6 +15,8 @@ import {
   type ShareContentType,
   type ShareMedia,
 } from '../components/shared/ShareSheet';
+import { PostStoryCard, EventStoryCard } from '../components/share/StoryCard';
+import { useStoryImageCapture } from '../lib/story/renderStoryImage';
 import { useAndroidKeyboardHeight } from '../lib/useAndroidKeyboardHeight';
 import { useToast, type ToastType } from '../components/Toast';
 
@@ -23,6 +25,7 @@ export default function ShareScreen() {
   const { session } = useAuthStore();
   const params = useLocalSearchParams<{ contentType: string; contentId: string; media?: string }>();
   const { show, ToastComponent } = useToast();
+  const { capture, request: storyCaptureRequest, viewRef: storyViewRef, onReady: onStoryReady } = useStoryImageCapture();
   // Android: lift the bottom-anchored share sheet above the keyboard so the
   // search field and people results stay visible (iOS uses KeyboardAvoidingView).
   const { height: androidKeyboardHeight } = useAndroidKeyboardHeight();
@@ -70,9 +73,28 @@ export default function ShareScreen() {
           contentId={contentId}
           media={media}
           onShowToast={onShowToast}
+          onCaptureStoryImage={capture}
         />
       </KeyboardAvoidingView>
       {ToastComponent}
+      {/* Off-screen Story render source — positioned past the visible bounds
+          (not opacity: 0) so it's fully rasterized for react-native-view-shot
+          to capture; opacity-hidden views can render blank on some Android
+          GPU paths. collapsable={false} stops Android from flattening it out
+          of the native view hierarchy entirely. */}
+      <View
+        ref={storyViewRef}
+        collapsable={false}
+        pointerEvents="none"
+        style={{ position: 'absolute', top: 0, left: -10000 }}
+      >
+        {storyCaptureRequest?.kind === 'post' && (
+          <PostStoryCard post={storyCaptureRequest.post} onReady={onStoryReady} />
+        )}
+        {storyCaptureRequest?.kind === 'event' && (
+          <EventStoryCard event={storyCaptureRequest.event} onReady={onStoryReady} />
+        )}
+      </View>
     </View>
   );
 }

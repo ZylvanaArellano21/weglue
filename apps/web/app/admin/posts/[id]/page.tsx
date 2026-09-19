@@ -5,6 +5,7 @@ import { Avatar } from "../../../../components/shared/Avatar";
 import { Badge, Field, SectionCard, EmptyState } from "../../../../components/admin/primitives";
 import { DetailTabs } from "../../../../components/admin/DetailTabs";
 import { EditCaptionDialog, RemoveFromClubButton } from "../../../../components/admin/PostActions";
+import { DisablePostExternalShareButton } from "../../../../components/admin/ExternalShareActions";
 import { LifecycleDetails } from "../../../../components/admin/LifecycleDetails";
 import { LifecycleBadge } from "../../../../components/admin/ContentLifecycleActions";
 import { getContentLifecycleDetail } from "../../../../lib/admin/lifecycleData";
@@ -261,30 +262,53 @@ export default async function AdminPostDetailPage({ params }: { params: { id: st
     </SectionCard>
   );
 
-  const actionsTab = (
-    <SectionCard title="Actions">
-      <div className="space-y-4 p-4">
-        {canonicalMutable ? (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <EditCaptionDialog postId={post.id} caption={post.caption} />
-              {primaryTag ? (
-                <RemoveFromClubButton postId={post.id} clubId={primaryTag.club_id} clubName={primaryTag.name} />
-              ) : null}
-            </div>
-            <p className="text-xs text-gray-400">
-              Editing writes to the canonical <code>posts</code> row with a read-back check and audit event.
-              Lifecycle removal and restoration are in the Lifecycle tab and require recent MFA.
-            </p>
-          </>
+  const externalSharing = (
+    <SectionCard title="External sharing">
+      <div className="flex flex-wrap items-center gap-3 p-4">
+        <Badge tone={post.externalShare.enabled ? "green" : "gray"}>
+          {post.externalShare.enabled ? "Enabled" : "Disabled"}
+        </Badge>
+        {post.externalShare.enabled_by_name && post.externalShare.enabled_at ? (
+          <span className="text-sm text-gray-600">
+            Enabled by {post.externalShare.enabled_by_name} on {fmtDateTime(post.externalShare.enabled_at)}.
+          </span>
         ) : (
-          <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
-            Canonical editing is unavailable while lifecycle state is not active. Use the Lifecycle tab to review or
-            restore eligible content.
-          </p>
+          <span className="text-sm text-gray-500">This post has not been enabled for external sharing.</span>
         )}
+        {post.externalShare.enabled ? (
+          <DisablePostExternalShareButton postId={post.id} />
+        ) : null}
       </div>
     </SectionCard>
+  );
+
+  const actionsTab = (
+    <div className="space-y-5">
+      {externalSharing}
+      <SectionCard title="Actions">
+        <div className="space-y-4 p-4">
+          {canonicalMutable ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <EditCaptionDialog postId={post.id} caption={post.caption} />
+                {primaryTag ? (
+                  <RemoveFromClubButton postId={post.id} clubId={primaryTag.club_id} clubName={primaryTag.name} />
+                ) : null}
+              </div>
+              <p className="text-xs text-gray-400">
+                Editing writes to the canonical <code>posts</code> row with a read-back check and audit event.
+                Lifecycle removal and restoration are in the Lifecycle tab and require recent MFA.
+              </p>
+            </>
+          ) : (
+            <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
+              Canonical editing is unavailable while lifecycle state is not active. Use the Lifecycle tab to review or
+              restore eligible content.
+            </p>
+          )}
+        </div>
+      </SectionCard>
+    </div>
   );
 
   return (

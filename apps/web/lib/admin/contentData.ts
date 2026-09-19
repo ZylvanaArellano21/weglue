@@ -424,6 +424,42 @@ export interface PostTag {
   primary: boolean;
 }
 
+export interface ExternalShareStatus {
+  enabled: boolean;
+  enabled_by_name: string | null;
+  enabled_by_avatar: string | null;
+  enabled_at: string | null;
+  disabled_at: string | null;
+}
+
+async function externalShareStatus(
+  admin: ReturnType<typeof createAdminClient>,
+  entityType: "post" | "event",
+  entityId: string
+): Promise<ExternalShareStatus> {
+  const { data } = await admin
+    .from("external_share_settings")
+    .select("enabled, enabled_by, enabled_at, disabled_at")
+    .eq("entity_type", entityType)
+    .eq("entity_id", entityId)
+    .maybeSingle();
+
+  if (!data) {
+    return { enabled: false, enabled_by_name: null, enabled_by_avatar: null, enabled_at: null, disabled_at: null };
+  }
+
+  const row = data as any;
+  const enabledBy = row.enabled_by ? await profileMap(admin, [row.enabled_by]) : new Map<string, any>();
+  const profile = row.enabled_by ? enabledBy.get(row.enabled_by) : null;
+  return {
+    enabled: row.enabled === true,
+    enabled_by_name: profile?.full_name ?? profile?.username ?? null,
+    enabled_by_avatar: profile?.avatar_url ?? null,
+    enabled_at: row.enabled_at ?? null,
+    disabled_at: row.disabled_at ?? null,
+  };
+}
+
 export interface PostDetail {
   id: string;
   caption: string | null;
@@ -449,6 +485,7 @@ export interface PostDetail {
   reportCount: number;
   comments: PostComment[];
   reports: PostReport[];
+  externalShare: ExternalShareStatus;
 }
 
 export async function getPostDetail(id: string): Promise<PostDetail | null> {
@@ -463,7 +500,7 @@ export async function getPostDetail(id: string): Promise<PostDetail | null> {
   if (!post) return null;
   const p = post as any;
 
-  const [authorMap, extraTagsRes, commentsRes, reportsRes, likeCount, commentCount, reportCount, imageMap] =
+  const [authorMap, extraTagsRes, commentsRes, reportsRes, likeCount, commentCount, reportCount, imageMap, externalShare] =
     await Promise.all([
       profileMap(admin, [p.author_id]),
       admin.from("post_club_tags").select("club_id").eq("post_id", id),
@@ -483,6 +520,7 @@ export async function getPostDetail(id: string): Promise<PostDetail | null> {
       admin.from("post_comments").select("id", { count: "exact", head: true }).eq("post_id", id),
       admin.from("reports").select("id", { count: "exact", head: true }).eq("entity_type", "post").eq("entity_id", id),
       postImagesMap(admin, [id]),
+      externalShareStatus(admin, "post", id),
     ]);
 
   const author = authorMap.get(p.author_id);
@@ -548,6 +586,7 @@ export async function getPostDetail(id: string): Promise<PostDetail | null> {
       reporter_username: r.reporter_username ?? null,
       created_at: r.created_at,
     })),
+    externalShare,
   };
 }
 
@@ -1022,6 +1061,7 @@ export interface EventDetail {
   attendees: EventAttendee[];
   relatedPosts: EventRelatedPost[];
   reports: EventReport[];
+  externalShare: ExternalShareStatus;
 }
 
 export async function getEventDetail(id: string): Promise<EventDetail | null> {
@@ -1038,7 +1078,7 @@ export async function getEventDetail(id: string): Promise<EventDetail | null> {
   if (!event) return null;
   const e = event as any;
 
-  const [clubMap, creatorMap, rsvpsRes, relatedRes, reportsRes, eventImages] = await Promise.all([
+  const [clubMap, creatorMap, rsvpsRes, relatedRes, reportsRes, eventImages, externalShare] = await Promise.all([
     clubMap_(admin, [e.club_id]),
     profileMap(admin, [e.created_by]),
     admin
@@ -1055,6 +1095,7 @@ export async function getEventDetail(id: string): Promise<EventDetail | null> {
       .eq("entity_id", id)
       .order("created_at", { ascending: false }),
     eventImagesFor(admin, id),
+    externalShareStatus(admin, "event", id),
   ]);
 
   const club = clubMap.get(e.club_id);
@@ -1121,6 +1162,7 @@ export async function getEventDetail(id: string): Promise<EventDetail | null> {
       reporter_username: r.reporter_username ?? null,
       created_at: r.created_at,
     })),
+    externalShare,
   };
 }
 
