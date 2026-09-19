@@ -101,7 +101,11 @@ export async function getNotifications(userId: string): Promise<NotificationSect
   const eventIds = [...new Set(rows.filter((n) => n.entity_type === 'event' || eventTypes.includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
   const postIds = [...new Set(rows.filter((n) => n.entity_type === 'post' || n.type === 'club_post').map((n) => n.entity_id).filter(Boolean) as string[])];
   const conversationIds = [...new Set(rows.filter((n) => n.entity_type === 'message' || ['group_chat_added', 'chat_invite_joined'].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
-  const clubIds = [...new Set(rows.filter((n) => n.entity_type === 'club' || ['club_joined', 'member_joined', 'club_chat_added', 'officer_chat_added', 'officer_role', 'officer_removed', 'club_removed', 'club_inactive'].includes(n.type)).map((n) => n.entity_id).filter(Boolean) as string[])];
+  // club_photo's entity_id is the club_photos ROW (migration 144), not the
+  // club itself — resolved separately below via a club_photos join, same as
+  // how message_reply's entity_id is a message id, not a conversation id.
+  const clubIds = [...new Set(rows.filter((n) => n.type !== 'club_photo' && (n.entity_type === 'club' || ['club_joined', 'member_joined', 'club_chat_added', 'officer_chat_added', 'officer_role', 'officer_removed', 'club_removed', 'club_inactive'].includes(n.type))).map((n) => n.entity_id).filter(Boolean) as string[])];
+  const photoIds = [...new Set(rows.filter((n) => n.type === 'club_photo').map((n) => n.entity_id).filter(Boolean) as string[])];
   // message_reply's entity_id is the reply MESSAGE (migration 129); resolve it
   // to its conversation so the tap opens the thread scrolled to that message.
   const replyMessageIds = [...new Set(rows.filter((n) => n.type === 'message_reply').map((n) => n.entity_id).filter(Boolean) as string[])];
@@ -109,18 +113,20 @@ export async function getNotifications(userId: string): Promise<NotificationSect
     ? await supabase.from('messages').select('id, conversation_id').in('id', replyMessageIds)
     : { data: [] as any[] };
   const replyMsgConversation = new Map<string, string>((replyMsgRows ?? []).map((m: any) => [m.id, m.conversation_id]));
-  const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }] = await Promise.all([
+  const [{ data: actorRows }, { data: eventRows }, { data: clubRows }, { data: postRows }, { data: conversationRows }, { data: photoRows }] = await Promise.all([
     allActorIds.length ? supabase.from('profiles').select('id, username, avatar_url').in('id', allActorIds) : Promise.resolve({ data: [] as any[] }),
     eventIds.length ? supabase.from('events').select('id, clubs!inner(id, name, avatar_url)').in('id', eventIds) : Promise.resolve({ data: [] as any[] }),
     clubIds.length ? supabase.from('clubs').select('id, name, avatar_url').in('id', clubIds) : Promise.resolve({ data: [] as any[] }),
     postIds.length ? supabase.from('posts').select('id, clubs(id, name, avatar_url)').in('id', postIds) : Promise.resolve({ data: [] as any[] }),
     conversationIds.length ? supabase.from('conversations').select('id, clubs(id, name, avatar_url)').in('id', conversationIds) : Promise.resolve({ data: [] as any[] }),
+    photoIds.length ? supabase.from('club_photos').select('id, clubs(id, name, avatar_url)').in('id', photoIds) : Promise.resolve({ data: [] as any[] }),
   ]);
   const actorMap = new Map<string, NotificationVisualActor>((actorRows ?? []).map((p: any) => [p.id, { id: p.id, username: p.username, avatar_url: p.avatar_url ?? null }]));
   const eventMap = new Map<string, NotificationVisualEntity>((eventRows ?? []).map((e: any) => [e.id, { id: e.clubs.id, name: e.clubs.name, avatar_url: e.clubs.avatar_url ?? null }]));
   const clubMap = new Map<string, NotificationVisualEntity>((clubRows ?? []).map((c: any) => [c.id, { id: c.id, name: c.name, avatar_url: c.avatar_url ?? null }]));
   const postClubMap = new Map<string, NotificationVisualEntity>((postRows ?? []).filter((p: any) => p.clubs).map((p: any) => [p.id, { id: p.clubs.id, name: p.clubs.name, avatar_url: p.clubs.avatar_url ?? null }]));
   const conversationClubMap = new Map<string, NotificationVisualEntity>((conversationRows ?? []).filter((c: any) => c.clubs).map((c: any) => [c.id, { id: c.clubs.id, name: c.clubs.name, avatar_url: c.clubs.avatar_url ?? null }]));
+  const photoClubMap = new Map<string, NotificationVisualEntity>((photoRows ?? []).filter((p: any) => p.clubs).map((p: any) => [p.id, { id: p.clubs.id, name: p.clubs.name, avatar_url: p.clubs.avatar_url ?? null }]));
 
   // One extra round-trip: how the viewer relates to each actor, so rows can
   // render Follow back / Requested correctly without N queries.
@@ -164,9 +170,11 @@ export async function getNotifications(userId: string): Promise<NotificationSect
       ? eventMap.get(n.entity_id) ?? null
       : n.type === 'club_post' || n.entity_type === 'post'
         ? postClubMap.get(n.entity_id) ?? null
-        : n.entity_type === 'message' || ['group_chat_added', 'chat_invite_joined'].includes(n.type)
-          ? conversationClubMap.get(n.entity_id) ?? clubMap.get(n.entity_id) ?? null
-          : clubMap.get(n.entity_id) ?? null;
+        : n.type === 'club_photo'
+          ? photoClubMap.get(n.entity_id) ?? null
+          : n.entity_type === 'message' || ['group_chat_added', 'chat_invite_joined'].includes(n.type)
+            ? conversationClubMap.get(n.entity_id) ?? clubMap.get(n.entity_id) ?? null
+            : clubMap.get(n.entity_id) ?? null;
     const notification: AppNotification = {
       id: n.id,
       type: n.type,

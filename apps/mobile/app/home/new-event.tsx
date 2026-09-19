@@ -78,8 +78,17 @@ export default function NewEventScreen() {
 
   // Edit mode: opened from Edit Club with an existing event to modify.
   // Same form, same pickers — saving updates instead of creating.
-  const { editEventId } = useLocalSearchParams<{ editEventId?: string }>();
+  const { editEventId, lockedClubId, lockedClubName } = useLocalSearchParams<{
+    editEventId?: string;
+    lockedClubId?: string;
+    lockedClubName?: string;
+  }>();
   const isEditMode = !!editEventId;
+  // Opened from a Club Profile's Upcoming Events "+ Event" (officers only —
+  // same lockedClubId/lockedClubName convention as new-post.tsx): the club is
+  // already chosen, so the picker stays closed and pre-filled the same way
+  // edit mode locks it.
+  const isLockedClub = !isEditMode && !!lockedClubId;
 
   // Club selection
   const [selectedClub, setSelectedClub] = useState<UserClub | null>(null);
@@ -149,6 +158,14 @@ export default function NewEventScreen() {
     enabled: isEditMode,
     staleTime: 0,
   });
+
+  // Prefill the locked club once (mirrors new-post.tsx's lockedClubId — the
+  // id/name already came from the club profile the officer tapped + from,
+  // so no extra round trip is needed to select it again).
+  useEffect(() => {
+    if (!isLockedClub || selectedClub) return;
+    setSelectedClub({ id: lockedClubId!, name: lockedClubName ?? '', avatar_url: null });
+  }, [isLockedClub, lockedClubId, lockedClubName, selectedClub]);
 
   useEffect(() => {
     if (!editEvent || editLoaded) return;
@@ -503,8 +520,9 @@ export default function NewEventScreen() {
               Hosting by: @{' '}
               <Text
                 onPress={() => {
-                  // The hosting club is fixed when editing an existing event.
-                  if (isEditMode) return;
+                  // The hosting club is fixed when editing an existing event,
+                  // or when opened from a club profile's "+ Event" button.
+                  if (isEditMode || isLockedClub) return;
                   setClubSearch('');
                   setClubSelectorVisible(true);
                 }}

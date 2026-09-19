@@ -31,22 +31,23 @@ export interface UserProfileData {
   club_roles: Array<{ club_id: string; club_name: string; role_title: string }>;
 }
 
+// Both reads are independent — fetching everyone targetUser follows AND
+// everyone who follows targetUser in one parallel wave (then intersecting
+// client-side) replaces two sequential round trips (get "following", then a
+// second query filtered by those ids) with one, with no query depending on
+// another's result.
 async function getGluematesCount(userId: string): Promise<number> {
   const supabase = getSupabaseBrowser();
-  const { data: following } = await supabase
-    .from("follows")
-    .select("following_id")
-    .eq("follower_id", userId)
-    .eq("status", "accepted");
-  if (!following || following.length === 0) return 0;
-  const ids = (following as any[]).map((r) => r.following_id);
-  const { count } = await supabase
-    .from("follows")
-    .select("*", { count: "exact", head: true })
-    .eq("following_id", userId)
-    .in("follower_id", ids)
-    .eq("status", "accepted");
-  return count ?? 0;
+  const [{ data: following }, { data: followers }] = await Promise.all([
+    supabase.from("follows").select("following_id").eq("follower_id", userId).eq("status", "accepted"),
+    supabase.from("follows").select("follower_id").eq("following_id", userId).eq("status", "accepted"),
+  ]);
+  const followingIds = new Set((following ?? []).map((r: any) => r.following_id));
+  let count = 0;
+  for (const r of (followers ?? []) as any[]) {
+    if (followingIds.has(r.follower_id)) count++;
+  }
+  return count;
 }
 
 export function useUserProfile(targetUserId: string | undefined, viewerUserId: string | undefined) {
@@ -62,6 +63,7 @@ export function useUserProfile(targetUserId: string | undefined, viewerUserId: s
         { data: interests },
         { data: memberships },
         { data: clubRoles },
+        gluematesCount,
       ] = await Promise.all([
         supabase.from("profiles").select("id, username, full_name, avatar_url, bio, major").eq("id", targetUserId!).single(),
         supabase.from("user_privacy").select("is_private, hide_interests, hide_events").eq("user_id", targetUserId!).maybeSingle(),
@@ -70,11 +72,13 @@ export function useUserProfile(targetUserId: string | undefined, viewerUserId: s
         supabase.from("user_interests").select("interest").eq("user_id", targetUserId!),
         supabase.from("club_members").select("club_id").eq("user_id", targetUserId!),
         supabase.from("club_officers").select("club_id, role_title, clubs!inner(id, name)").eq("user_id", targetUserId!),
+        // Only depends on targetUserId (known up front) — no reason to wait
+        // for the rest of this Promise.all to resolve before starting it.
+        getGluematesCount(targetUserId!),
       ]);
 
       if (!profile) return null;
       const p = profile as any;
-      const gluematesCount = await getGluematesCount(targetUserId!);
       let followStatus: FollowStatus = "not_following";
       if (followRow) followStatus = (followRow as any).status === "accepted" ? "following" : "pending";
 

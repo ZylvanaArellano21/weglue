@@ -140,6 +140,13 @@ function NotificationRow({
   const isFollowType = item.type === "new_follower" || item.type === "follow_accepted";
   const showFollowBack = isFollowType && item.actor_follow_state === "not_following";
   const showRequested = isFollowType && item.actor_follow_state === "pending";
+  const visual = item.visual ?? resolveNotificationVisual({ type: item.type, group_count: item.group_count, actor: item.sender, actors: item.actors, entity: item.entity });
+  // Club-anchored notifications (new/updated event, reminders, club post,
+  // officer/membership changes…) show the CLUB as the bold lead-in instead of
+  // the actor — "Math Society posted a new event", not "Alex posted a new
+  // event" — matching whichever name the avatar itself already resolved to
+  // (visual.kind === "entity"), so the two can never disagree.
+  const leadName = visual.kind === "entity" ? visual.entity.name : (item.sender?.username ?? "Someone");
 
   return (
     <button
@@ -148,14 +155,14 @@ function NotificationRow({
       className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-black/[0.03]"
       style={{ background: item.is_read ? "transparent" : "rgba(15,166,166,0.06)" }}
     >
-      <NotificationVisual visual={item.visual ?? resolveNotificationVisual({ type: item.type, group_count: item.group_count, actor: item.sender, actors: item.actors, entity: item.entity })} />
+      <NotificationVisual visual={visual} />
       <div className="min-w-0 flex-1">
         <p className="text-sm text-gray-900">
           {item.message ? (
             item.message
           ) : (
             <>
-              <span className="font-bold">{item.sender?.username ?? "Someone"}</span>{" "}
+              <span className="font-bold">{leadName}</span>{" "}
               {notificationDescription(item)}
             </>
           )}

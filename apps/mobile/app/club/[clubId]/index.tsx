@@ -10,6 +10,7 @@ import {
   RefreshControl,
   StyleSheet,
   BackHandler,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -175,7 +176,11 @@ function MiniCalendar({
   // width so every date sits under its weekday and the first week can never
   // drift away from the rest of the month. Percentage widths are avoided on
   // purpose: they resolve inconsistently for cells inside the bordered grid.
-  const CELL_WIDTH = Math.floor((SCREEN_WIDTH - 32 - 28) / 7);
+  // useWindowDimensions (not the module-level SCREEN_WIDTH captured once at
+  // launch) so the grid re-measures on rotation and on iPad/Android-tablet
+  // multi-window resizing instead of staying squished to its launch width.
+  const { width: windowWidth } = useWindowDimensions();
+  const CELL_WIDTH = Math.floor((windowWidth - 32 - 28) / 7);
   const GRID_WIDTH = CELL_WIDTH * 7;
   const HAIRLINE = StyleSheet.hairlineWidth;
 
@@ -1080,6 +1085,28 @@ export default function ClubProfileScreen() {
           title="Upcoming Events"
           emptyText="No upcoming events yet"
           isEmpty={club.upcoming_events.length === 0}
+          // Officer-only, mirrors the "+ Post" button below: opens the shared
+          // New Event screen with this club already locked on, so creation
+          // starts here without asking the officer to pick the club again.
+          headerAction={
+            isOfficer ? (
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({
+                    pathname: '/home/new-event',
+                    params: { lockedClubId: clubId!, lockedClubName: club?.name ?? '' },
+                  } as any)
+                }
+                activeOpacity={0.7}
+                hitSlop={8}
+                accessibilityLabel="Create an event for this club"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
+              >
+                <Ionicons name="add" size={16} color={TEAL} />
+                <Text style={{ fontSize: 13, color: TEAL, fontFamily: 'Inter_500Medium' }}>Event</Text>
+              </TouchableOpacity>
+            ) : undefined
+          }
         >
           {club.upcoming_events.map((event) => (
             <ClubEventCard

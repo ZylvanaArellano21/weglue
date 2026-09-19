@@ -84,6 +84,18 @@ export function CalendarGrid({
 }: CalendarGridProps) {
   const markedSet = useMemo(() => new Set(markedDates), [markedDates]);
   const cells = useMemo(() => buildGridCells(year, month), [year, month]);
+  // Chunked into fixed 7-cell rows (flex:1 children, no flexWrap) rather than
+  // one flex-wrapping row of percentage-width cells: Yoga rounds each
+  // '14.285714%' cell to whole pixels independently, so the 7 widths in a row
+  // don't always sum back to exactly the container width — on some device
+  // widths that pushed the 7th column onto its own wrapped row, and made the
+  // header row (laid out separately) drift out of alignment with the grid
+  // below it. flex:1 inside a plain (non-wrapping) row can't do either.
+  const weeks = useMemo(() => {
+    const rows: GridCell[][] = [];
+    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+    return rows;
+  }, [cells]);
 
   const handleCellPress = useCallback(
     (date: string) => {
@@ -129,60 +141,64 @@ export function CalendarGrid({
         </View>
 
         <View style={styles.grid}>
-          {cells.map((cell, index) => {
-            if (!cell.date) {
-              return <View key={`empty-${index}`} style={styles.cell} />;
-            }
-
-            const isToday = cell.date === today;
-            const hasEvent = markedSet.has(cell.date);
-            const isPressable = hasEvent;
-
-            return (
-              <TouchableOpacity
-                key={cell.date}
-                style={[
-                  styles.cell,
-                  !cell.isCurrentMonth && styles.trailingCell,
-                ]}
-                onPress={() => handleCellPress(cell.date)}
-                activeOpacity={isPressable ? 0.7 : 1}
-                disabled={!isPressable}
-                accessibilityRole={isPressable ? 'button' : 'text'}
-                accessibilityLabel={
-                  isToday
-                    ? `Today, ${cell.day}${hasEvent ? ', has events' : ''}`
-                    : `${cell.day}${hasEvent ? ', has events' : ''}`
+          {weeks.map((week, weekIndex) => (
+            <View key={weekIndex} style={styles.weekRow}>
+              {week.map((cell, cellIndex) => {
+                if (!cell.date) {
+                  return <View key={`empty-${weekIndex}-${cellIndex}`} style={styles.cell} />;
                 }
-              >
-                <View style={styles.dayContent}>
-                  {isToday ? (
-                    <View style={styles.todayCircle}>
-                      <Text style={calendarTypography.dayNumberToday}>{cell.day}</Text>
-                    </View>
-                  ) : (
-                    <Text
-                      style={[
-                        calendarTypography.dayNumber,
-                        !cell.isCurrentMonth && styles.trailingDayText,
-                      ]}
-                    >
-                      {cell.day}
-                    </Text>
-                  )}
 
-                  {hasEvent && (
-                    <View
-                      style={[
-                        styles.eventUnderline,
-                        isToday ? styles.eventUnderlineToday : styles.eventUnderlineOther,
-                      ]}
-                    />
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+                const isToday = cell.date === today;
+                const hasEvent = markedSet.has(cell.date);
+                const isPressable = hasEvent;
+
+                return (
+                  <TouchableOpacity
+                    key={cell.date}
+                    style={[
+                      styles.cell,
+                      !cell.isCurrentMonth && styles.trailingCell,
+                    ]}
+                    onPress={() => handleCellPress(cell.date)}
+                    activeOpacity={isPressable ? 0.7 : 1}
+                    disabled={!isPressable}
+                    accessibilityRole={isPressable ? 'button' : 'text'}
+                    accessibilityLabel={
+                      isToday
+                        ? `Today, ${cell.day}${hasEvent ? ', has events' : ''}`
+                        : `${cell.day}${hasEvent ? ', has events' : ''}`
+                    }
+                  >
+                    <View style={styles.dayContent}>
+                      {isToday ? (
+                        <View style={styles.todayCircle}>
+                          <Text style={calendarTypography.dayNumberToday}>{cell.day}</Text>
+                        </View>
+                      ) : (
+                        <Text
+                          style={[
+                            calendarTypography.dayNumber,
+                            !cell.isCurrentMonth && styles.trailingDayText,
+                          ]}
+                        >
+                          {cell.day}
+                        </Text>
+                      )}
+
+                      {hasEvent && (
+                        <View
+                          style={[
+                            styles.eventUnderline,
+                            isToday ? styles.eventUnderlineToday : styles.eventUnderlineOther,
+                          ]}
+                        />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ))}
         </View>
       </View>
     </View>
@@ -222,11 +238,13 @@ const styles = StyleSheet.create({
     borderBottomColor: calendarColors.gridBorder,
   },
   grid: {
+    flexDirection: 'column',
+  },
+  weekRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
   },
   cell: {
-    width: '14.285714%',
+    flex: 1,
     height: cellSize,
     alignItems: 'center',
     justifyContent: 'center',

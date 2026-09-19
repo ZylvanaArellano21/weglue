@@ -51,6 +51,13 @@ type TokenRow = {
   platform: "ios" | "android";
 };
 
+function pushTitle(row: PushRow): string {
+  const clubName = row.route && typeof row.route.clubName === "string"
+    ? row.route.clubName.trim()
+    : "";
+  return clubName || row.title?.trim() || "We Glue";
+}
+
 // Android channel per category — must match lib/notifications/channels.ts.
 const CATEGORY_CHANNEL: Record<string, string> = {
   messages: "messages",
@@ -157,7 +164,7 @@ async function deliverPending(admin: SupabaseClient) {
         tokenId: t.id,
         message: {
           to: t.token,
-          title: row.title ?? "We Glue",
+          title: pushTitle(row),
           body: row.body ?? "",
           data: { route: row.route, notificationId: row.notification_id },
           sound: "default",

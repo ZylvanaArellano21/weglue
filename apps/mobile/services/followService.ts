@@ -53,6 +53,7 @@ export async function getUserProfile(
     { data: interests },
     { data: memberships },
     { data: clubRoles },
+    gluematesCount,
   ] = await Promise.all([
     supabase
       .from('profiles')
@@ -83,12 +84,14 @@ export async function getUserProfile(
       .from('club_officers')
       .select('club_id, role_title, clubs!inner(id, name)')
       .eq('user_id', targetUserId),
+    // Only depends on targetUserId (known up front) — no reason to wait for
+    // the rest of this Promise.all to resolve before starting it.
+    getGluematesCount(targetUserId),
   ]);
 
   if (!profile) return null;
 
   const clubIds = (memberships ?? []).map((m: any) => m.club_id);
-  const gluematesCount = await getGluematesCount(targetUserId);
 
   let followStatus: FollowStatus = 'not_following';
   if (followRow) {
@@ -122,25 +125,21 @@ export async function getUserProfile(
   };
 }
 
+// Both reads are independent — fetching everyone the user follows AND
+// everyone who follows the user in one parallel wave (then intersecting
+// client-side) replaces two sequential round trips with one.
 async function getGluematesCount(userId: string): Promise<number> {
-  const { data: following } = await supabase
-    .from('follows')
-    .select('following_id')
-    .eq('follower_id', userId)
-    .eq('status', 'accepted');
+  const [{ data: following }, { data: followers }] = await Promise.all([
+    supabase.from('follows').select('following_id').eq('follower_id', userId).eq('status', 'accepted'),
+    supabase.from('follows').select('follower_id').eq('following_id', userId).eq('status', 'accepted'),
+  ]);
 
-  if (!following || following.length === 0) return 0;
-
-  const followingIds = following.map((r: any) => r.following_id);
-
-  const { count } = await supabase
-    .from('follows')
-    .select('*', { count: 'exact', head: true })
-    .eq('following_id', userId)
-    .in('follower_id', followingIds)
-    .eq('status', 'accepted');
-
-  return count ?? 0;
+  const followingIds = new Set((following ?? []).map((r: any) => r.following_id));
+  let count = 0;
+  for (const r of (followers ?? []) as any[]) {
+    if (followingIds.has(r.follower_id)) count++;
+  }
+  return count;
 }
 
 // Follow (or request to follow) a user. Notifications are created by DB

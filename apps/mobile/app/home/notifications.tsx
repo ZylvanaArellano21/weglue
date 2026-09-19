@@ -156,7 +156,12 @@ export default function NotificationsScreen() {
           ) : (
             <Text style={{ fontSize: 14, color: '#111827', fontFamily: 'Inter_400Regular' }}>
               <Text style={{ fontWeight: '700', fontFamily: 'Inter_700Bold' }}>
-                {item.sender?.username ?? 'Someone'}
+                {/* Club-anchored rows (new/updated event, reminders, officer/
+                    membership changes…) lead with the CLUB, not the actor —
+                    "Math Society posted a new event", not "Alex posted a new
+                    event" — matching whichever name the avatar already
+                    resolved to (visual.kind === 'entity'). */}
+                {item.visual.kind === 'entity' ? item.visual.entity.name : (item.sender?.username ?? 'Someone')}
               </Text>
               {' '}
               {notificationDescription(item)}
