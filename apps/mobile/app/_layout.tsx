@@ -50,6 +50,19 @@ import {
 import { tearDownAuthenticatedSession } from "../lib/sessionCleanup";
 import { StudentSynchronizationHost } from "../components/synchronization/StudentSynchronizationHost";
 import { shouldRecoverOnMobileForeground } from "../lib/studentSynchronization";
+import * as Sentry from "@sentry/react-native";
+
+// P0 perf task 10: no production error/performance monitoring existed
+// anywhere in the app before this. Missing DSN (e.g. a fork without the env
+// var set) disables the SDK gracefully rather than throwing. Deliberately
+// not enabling Session Replay here — it records user screens, a real privacy
+// question for a campus social app that wasn't part of what this task asked
+// for. Revisit only with an explicit product decision.
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  environment: __DEV__ ? "development" : "production",
+  tracesSampleRate: __DEV__ ? 1.0 : 0.1,
+});
 
 SplashScreen.preventAutoHideAsync();
 
@@ -201,7 +214,7 @@ function useRealtimeAuthBridge(): void {
   }, []);
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [fontsLoaded] = useFonts({
     Zain_400Regular,
     Zain_700Bold,
@@ -645,3 +658,8 @@ export default function RootLayout() {
     </PersistQueryClientProvider>
   );
 }
+
+// Sentry.wrap adds crash reporting + navigation-instrumentation for the whole
+// app in one place, at the actual app root — every other screen mounts
+// beneath this.
+export default Sentry.wrap(RootLayout);

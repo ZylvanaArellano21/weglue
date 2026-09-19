@@ -1,3 +1,9 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# @sentry/cli's postinstall downloads its own CLI binary (used for source-map
+# upload at build time). Official first-party Sentry package, known/expected
+# postinstall — approved to run.
+allowBuilds:
+  '@sentry/cli': true
