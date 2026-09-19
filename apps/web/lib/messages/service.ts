@@ -515,7 +515,7 @@ export async function getConversationDetails(conversationId: string, currentUser
       ? `${raw.clubs?.name ?? raw.name ?? "Club"} · ${raw.type === "officer_chat" ? "Officers" : "Members"}`
       : raw.name?.trim() || "Group chat";
   const roleRows = raw.club_id
-    ? await supabase.from("club_members").select("user_id, role").eq("club_id", raw.club_id)
+    ? await supabase.from("club_members").select("user_id, role").eq("club_id", raw.club_id).in("user_id", participants.map((participant) => participant.user_id))
     : { data: [] as any[] };
   const roles = new Map<string, string>((roleRows.data ?? []).map((row: any): [string, string] => [row.user_id, row.role === "officer" ? "Officer" : "Member"]));
   return {
@@ -543,6 +543,7 @@ export async function getChannels(conversationId: string): Promise<Channel[]> {
     .from("conversation_channels")
     .select("id, conversation_id, name, kind, avatar_url, post_permission, display_order")
     .eq("conversation_id", conversationId)
+    // TODO(perf): verify index supports (conversation_id, display_order)
     .order("display_order", { ascending: true });
   if (error) throw error;
   return ((data ?? []) as any[]).map((row) => ({ ...row, post_permission: row.post_permission as PostingPermission }));
@@ -558,27 +559,37 @@ export async function getConversationHub(conversationId: string, userId: string)
     .eq("user_id", userId)
     .in("channel_id", channels.map((channel) => channel.id));
   const readAt = new Map((reads ?? []).map((row: any) => [row.channel_id, row.last_read_at]));
-  return Promise.all(channels.map(async (channel) => {
-    const [{ data: latest, error: latestError }, { count, error: countError }] = await Promise.all([
-      supabase.from("messages").select("content, message_type, created_at, profiles!sender_id(username, full_name)").eq("channel_id", channel.id).order("created_at", { ascending: false }).limit(1),
-      (() => {
-        let query = supabase.from("messages").select("id", { count: "exact", head: true }).eq("channel_id", channel.id).neq("sender_id", userId);
-        const last = readAt.get(channel.id);
-        if (last) query = query.gt("created_at", last);
-        return query;
-      })(),
-    ]);
-    if (latestError) throw latestError;
-    if (countError) throw countError;
-    const last = (latest ?? [])[0] as any;
+  // TODO(perf): verify index supports (channel_id, created_at)
+  // Bound the hub payload; a very busy channel can crowd out older rows from
+  // another channel, but the thread view remains the source of truth.
+  const { data: messageRows, error: messageError } = await supabase
+    .from("messages")
+    .select("channel_id, sender_id, content, message_type, created_at, profiles!sender_id(username, full_name)")
+    .in("channel_id", channels.map((channel) => channel.id))
+    .limit(channels.length * 50)
+    .order("created_at", { ascending: false });
+  if (messageError) throw messageError;
+
+  const latestByChannel = new Map<string, any>();
+  const unreadByChannel = new Map<string, number>();
+  for (const row of (messageRows ?? []) as any[]) {
+    if (!latestByChannel.has(row.channel_id)) latestByChannel.set(row.channel_id, row);
+    const lastReadAt = readAt.get(row.channel_id);
+    if (row.sender_id !== userId && (!lastReadAt || row.created_at > lastReadAt)) {
+      unreadByChannel.set(row.channel_id, (unreadByChannel.get(row.channel_id) ?? 0) + 1);
+    }
+  }
+
+  return channels.map((channel) => {
+    const last = latestByChannel.get(channel.id) as any;
     return {
       ...channel,
       last_preview: previewForMessage(last ?? null),
       last_sender: last ? displayName(last.profiles) : null,
       last_at: last?.created_at ?? null,
-      unread_count: count ?? 0,
+      unread_count: unreadByChannel.get(channel.id) ?? 0,
     };
-  }));
+  });
 }
 
 /**
@@ -826,7 +837,9 @@ export async function getMessageReactors(messageId: string): Promise<MessageReac
     .from("message_reactions")
     .select("user_id, emoji, created_at, profiles!user_id(username, full_name, avatar_url)")
     .eq("message_id", messageId)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    // The UI has no expand/pagination path; keep this reactor list bounded.
+    .limit(50);
   if (error) throw error;
   return ((data ?? []) as any[]).map((row) => ({
     userId: row.user_id,

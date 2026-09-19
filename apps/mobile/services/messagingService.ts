@@ -437,7 +437,9 @@ export async function getMessageReactors(messageId: string): Promise<MessageReac
     .from('message_reactions')
     .select('user_id, emoji, created_at, profiles!user_id(username, full_name, avatar_url)')
     .eq('message_id', messageId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    // The UI has no expand/pagination path; keep this reactor list bounded.
+    .limit(50);
   if (error) throw error;
   return ((data ?? []) as any[]).map((row) => ({
     userId: row.user_id,
