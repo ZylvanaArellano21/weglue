@@ -85,8 +85,11 @@ async function markNotificationRead(notificationId: unknown): Promise<void> {
 export function usePushNotifications(): void {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { session, isLoading } = useAuthStore();
-  const userId = session?.user.id;
+  // Selectors, not `useAuthStore()`: a bare destructure re-renders this
+  // app-root-mounted hook's owner on every unrelated store field change, not
+  // just when session/isLoading change.
+  const userId = useAuthStore((s) => s.session?.user.id);
+  const isLoading = useAuthStore((s) => s.isLoading);
 
   // Survives re-renders: a cold-start response must be handled exactly once.
   const handledColdStart = useRef(false);

@@ -64,8 +64,9 @@ function formatTime(timeStr: string): string {
 
 export default function UserProfileScreen() {
   const { userId: targetUserId } = useLocalSearchParams<{ userId: string }>();
-  const { session } = useAuthStore();
-  const viewerUserId = session?.user.id;
+  // Selector, not `useAuthStore()`: a bare destructure re-renders this screen
+  // on every unrelated store field change, not just when the session changes.
+  const viewerUserId = useAuthStore((s) => s.session?.user.id);
   const router = useRouter();
   const { show, ToastComponent } = useToast();
 
