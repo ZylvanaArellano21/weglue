@@ -213,6 +213,7 @@ export async function getConversationHub(
     .from('conversation_channels')
     .select('id, name, kind, avatar_url, post_permission, display_order')
     .eq('conversation_id', conversationId)
+    // TODO(perf): verify index supports (conversation_id, display_order)
     .order('display_order', { ascending: true });
   if (chErr) throw chErr;
   const channels = (chRows ?? []) as any[];
@@ -227,45 +228,47 @@ export async function getConversationHub(
     (readRows ?? []).map((r: any) => [r.channel_id, r.last_read_at]),
   );
 
-  const threads = await Promise.all(
-    channels.map(async (c): Promise<HubThread> => {
-      const { data: lastRows } = await supabase
-        .from('messages')
-        .select(
-          'content, message_type, created_at, profiles!sender_id(username, full_name)',
-        )
-        .eq('channel_id', c.id)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      const last = (lastRows ?? [])[0] as any | undefined;
+  // TODO(perf): verify index supports (channel_id, created_at)
+  // Bound the hub payload; a very busy channel can crowd out older rows from
+  // another channel, but the thread view remains the source of truth.
+  const { data: messageRows, error: messageErr } = await supabase
+    .from('messages')
+    .select(
+      'channel_id, sender_id, content, message_type, created_at, profiles!sender_id(username, full_name)',
+    )
+    .in('channel_id', channels.map((c) => c.id))
+    .is('deleted_at', null)
+    .limit(channels.length * 50)
+    .order('created_at', { ascending: false });
+  if (messageErr) throw messageErr;
 
-      const readAt = reads.get(c.id);
-      let unreadQuery = supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('channel_id', c.id)
-        .is('deleted_at', null)
-        .neq('sender_id', userId);
-      if (readAt) unreadQuery = unreadQuery.gt('created_at', readAt);
-      const { count } = await unreadQuery;
+  const latestByChannel = new Map<string, any>();
+  const unreadByChannel = new Map<string, number>();
+  for (const row of (messageRows ?? []) as any[]) {
+    if (!latestByChannel.has(row.channel_id)) latestByChannel.set(row.channel_id, row);
+    const readAt = reads.get(row.channel_id);
+    if (row.sender_id !== userId && (!readAt || row.created_at > readAt)) {
+      unreadByChannel.set(row.channel_id, (unreadByChannel.get(row.channel_id) ?? 0) + 1);
+    }
+  }
 
-      return {
-        id: c.id,
-        name: c.name,
-        kind: c.kind,
-        avatar_url: c.avatar_url,
-        post_permission: c.post_permission,
-        display_order: c.display_order,
-        last_preview: last ? previewForMessage(last) : null,
-        last_sender: last
-          ? (last.profiles?.full_name?.trim() || last.profiles?.username || null)
-          : null,
-        last_at: last?.created_at ?? null,
-        unread_count: count ?? 0,
-      };
-    }),
-  );
+  const threads = channels.map((c): HubThread => {
+    const last = latestByChannel.get(c.id) as any | undefined;
+    return {
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      avatar_url: c.avatar_url,
+      post_permission: c.post_permission,
+      display_order: c.display_order,
+      last_preview: last ? previewForMessage(last) : null,
+      last_sender: last
+        ? (last.profiles?.full_name?.trim() || last.profiles?.username || null)
+        : null,
+      last_at: last?.created_at ?? null,
+      unread_count: unreadByChannel.get(c.id) ?? 0,
+    };
+  });
 
   return threads;
 }

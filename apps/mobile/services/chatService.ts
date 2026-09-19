@@ -396,16 +396,19 @@ export async function getChatDetails(
   );
 
   const rolesMap = new Map<string, string>();
-  if ((conv as any).club_id) {
+  const participantIds = ((participants ?? []) as any[]).map((p) => p.user_id);
+  if ((conv as any).club_id && participantIds.length > 0) {
     const [{ data: members }, { data: officers }] = await Promise.all([
       supabase
         .from('club_members')
         .select('user_id, role')
-        .eq('club_id', (conv as any).club_id),
+        .eq('club_id', (conv as any).club_id)
+        .in('user_id', participantIds),
       supabase
         .from('club_officers')
         .select('user_id, role_title')
-        .eq('club_id', (conv as any).club_id),
+        .eq('club_id', (conv as any).club_id)
+        .in('user_id', participantIds),
     ]);
     for (const m of (members ?? []) as any[]) {
       rolesMap.set(m.user_id, m.role === 'officer' ? 'Officer' : 'Member');
