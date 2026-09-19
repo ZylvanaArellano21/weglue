@@ -27,6 +27,31 @@ export function useClubRealtimeSync(userId: string | undefined) {
       queryClient.invalidateQueries({ queryKey: ['joinedClubs'] });
     };
 
+    const invalidateClubUpdate = (payload: {
+      new?: { id?: string | null } | null;
+      old?: { id?: string | null } | null;
+    }) => {
+      const clubId = payload?.new?.id ?? payload?.old?.id;
+
+      // These are unscoped list families, so a club name/avatar change should
+      // still update any list that currently contains the edited club.
+      queryClient.invalidateQueries({ queryKey: ['myClubs'] });
+      queryClient.invalidateQueries({ queryKey: ['joinedClubs'] });
+      // The catalog key is not defined in the approved hook references, so
+      // preserve its existing family invalidation until its shape is confirmed.
+      queryClient.invalidateQueries({ queryKey: ['clubs'] });
+
+      if (!clubId) return;
+
+      // Club-scoped queries are invalidated only for the edited club. This is
+      // deliberately invalidateQueries (not the privacy-sensitive clearing
+      // pass used for membership/access changes).
+      queryClient.invalidateQueries({ queryKey: ['clubProfile', clubId] });
+      queryClient.invalidateQueries({ queryKey: ['clubDetail', clubId] });
+      queryClient.invalidateQueries({ queryKey: ['clubMembers', clubId] });
+      queryClient.invalidateQueries({ queryKey: ['clubPhotoFeed', clubId] });
+    };
+
     const invalidateChannels = () => {
       queryClient.invalidateQueries({ queryKey: ['conversationHub'] });
       queryClient.invalidateQueries({ queryKey: ['clubChannels'] });
@@ -53,8 +78,8 @@ export function useClubRealtimeSync(userId: string | undefined) {
           invalidateClubState();
         },
       },
-      // Club rename → Members/Officers conversation titles everywhere.
-      { event: 'UPDATE', schema: 'public', table: 'clubs', callback: invalidateClubState },
+      // Club rename/edit → only the edited club's cache entries plus lists.
+      { event: 'UPDATE', schema: 'public', table: 'clubs', callback: invalidateClubUpdate },
       // Channel added / renamed / deleted / permission changed anywhere in a
       // conversation I'm in → hub rows, thread headers and info stay current.
       { event: '*', schema: 'public', table: 'conversation_channels', callback: invalidateChannels },
