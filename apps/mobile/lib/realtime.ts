@@ -59,40 +59,24 @@ export function createSafeChannel(
   }
 }
 
-// @supabase/realtime-js's RealtimeClient.removeChannel() only calls
-// unsubscribe()+teardown() on the channel itself — it never calls the
-// client's own `_remove()`, which is the only thing that drops a channel
-// from `client.channels`. (Verified by reading node_modules directly:
-// `_remove` exists but has zero callers anywhere in the package.) That
-// leaves every torn-down channel sitting in `channels` forever — a zombie —
-// and the socket's own reconnect handling rejoins EVERY channel still in
-// that array on every reconnect, regardless of whether anything is still
-// listening to it. On a screen-heavy app this array only grows as users
-// navigate, so each reconnect resurrects more zombies than the last —
-// this is the actual mechanism behind the realtime retry storm getting
-// WORSE the longer a session runs, not just the one or two channels that
-// happen to log a visible error. `channels` is a plain public field
-// (`channels: RealtimeChannel[]` in the SDK's own .d.ts), so pruning it
-// here is a supported, if undocumented, workaround until upstream wires
-// `_remove()` up.
-function pruneFromRealtimeClient(channel: RealtimeChannel): void {
-  try {
-    const client = supabase.realtime as unknown as { channels: RealtimeChannel[] };
-    client.channels = client.channels.filter((c) => c !== channel);
-  } catch {
-    // Best-effort — never let cleanup crash an unmount.
-  }
-}
+// RealtimeClient.removeChannel() calls unsubscribe(); the channel's close
+// handler removes it from the client on a successful leave or leave timeout.
+// Track in-flight removals so repeated cleanup does not send another leave.
+const removingChannels = new WeakSet<RealtimeChannel>();
 
 export function removeSafeChannel(channel: RealtimeChannel | null): void {
-  if (!channel) return;
-  // Prune synchronously, before the async unsubscribe below even starts, so
-  // there is no window where a socket reconnect could rejoin this channel
-  // while its removal is still in flight.
-  pruneFromRealtimeClient(channel);
+  if (!channel || removingChannels.has(channel)) return;
   try {
-    void supabase.removeChannel(channel).catch(() => {});
+    if (!supabase.getChannels().includes(channel)) return;
+    removingChannels.add(channel);
+    void supabase.removeChannel(channel).then(
+      (status) => {
+        if (status === 'error') removingChannels.delete(channel);
+      },
+      () => { removingChannels.delete(channel); },
+    );
   } catch {
+    removingChannels.delete(channel);
     // Never let realtime teardown crash an unmount.
   }
 }
