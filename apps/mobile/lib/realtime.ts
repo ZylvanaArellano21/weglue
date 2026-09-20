@@ -59,13 +59,39 @@ export function createSafeChannel(
   }
 }
 
+// RealtimeClient.removeChannel() calls unsubscribe(); the channel's close
+// handler removes it from the client on a successful leave or leave timeout.
+// Track in-flight removals so repeated cleanup does not send another leave.
+const removingChannels = new WeakSet<RealtimeChannel>();
+
 export function removeSafeChannel(channel: RealtimeChannel | null): void {
-  if (!channel) return;
+  if (!channel || removingChannels.has(channel)) return;
   try {
-    void supabase.removeChannel(channel).catch(() => {});
+    if (!supabase.getChannels().includes(channel)) return;
+    removingChannels.add(channel);
+    void supabase.removeChannel(channel).then(
+      (status) => {
+        if (status === 'error') removingChannels.delete(channel);
+      },
+      () => { removingChannels.delete(channel); },
+    );
   } catch {
+    removingChannels.delete(channel);
     // Never let realtime teardown crash an unmount.
   }
+}
+
+// A private channel's own Phoenix rejoin timer retries CHANNEL_ERROR/TIMED_OUT
+// forever with no way for us to intervene from the outside — that's correct
+// for a transient network blip, but an "Unauthorized" denial from the
+// realtime.messages RLS policy is a HARD, PERMANENT verdict: the topic is
+// wrong or the policy doesn't cover it, and no amount of rejoining ever
+// changes that. Left alone this retries every few seconds for the entire app
+// session, one wasted socket round-trip at a time. Detecting the specific
+// "Unauthorized" signature and tearing the channel down (rather than letting
+// it keep rejoining) turns an infinite failing loop into a single warning.
+function isPermanentChannelAuthFailure(err?: Error): boolean {
+  return !!err?.message && /unauthorized/i.test(err.message);
 }
 
 // One private-broadcast subscription carrying SEVERAL events on one channel —
@@ -110,6 +136,12 @@ export function subscribeBroadcastEvents(
         }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.warn(`[realtime] ${topic} ${status}`, err?.message ?? '');
+          if (isPermanentChannelAuthFailure(err)) {
+            console.warn(`[realtime] ${topic} unauthorized — giving up, will not retry`);
+            const dead = channel;
+            channel = null;
+            removeSafeChannel(dead);
+          }
         }
       });
     } catch (e) {
@@ -162,6 +194,12 @@ export function subscribeBroadcast(
           }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             console.warn(`[realtime] ${topic} ${status}`, err?.message ?? '');
+            if (isPermanentChannelAuthFailure(err)) {
+              console.warn(`[realtime] ${topic} unauthorized — giving up, will not retry`);
+              const dead = channel;
+              channel = null;
+              removeSafeChannel(dead);
+            }
           }
         });
     } catch (e) {
