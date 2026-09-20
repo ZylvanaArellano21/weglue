@@ -51,13 +51,56 @@ export function createSafeChannel(
   }
 }
 
+// @supabase/realtime-js's RealtimeClient.removeChannel() only calls
+// unsubscribe()+teardown() on the channel itself — it never calls the
+// client's own `_remove()`, which is the only thing that drops a channel
+// from `client.channels`. (Verified by reading node_modules directly:
+// `_remove` exists but has zero callers anywhere in the package.) That
+// leaves every torn-down channel sitting in `channels` forever — a zombie —
+// and the socket's own reconnect handling rejoins EVERY channel still in
+// that array on every reconnect, regardless of whether anything is still
+// listening to it. On a screen-heavy app this array only grows as users
+// navigate, so each reconnect resurrects more zombies than the last — this
+// is the actual mechanism behind the realtime retry storm getting WORSE the
+// longer a session runs, not just the one or two channels that happen to
+// log a visible error. `channels` is a plain public field
+// (`channels: RealtimeChannel[]` in the SDK's own .d.ts), so pruning it here
+// is a supported, if undocumented, workaround until upstream wires
+// `_remove()` up. Mirrors apps/mobile/lib/realtime.ts's identical fix.
+function pruneFromRealtimeClient(channel: RealtimeChannel): void {
+  try {
+    const client = getSupabaseBrowser().realtime as unknown as { channels: RealtimeChannel[] };
+    client.channels = client.channels.filter((c) => c !== channel);
+  } catch {
+    // Best-effort — never let cleanup crash an unmount.
+  }
+}
+
 export function removeSafeChannel(channel: RealtimeChannel | null): void {
   if (!channel) return;
+  // Prune synchronously, before the async unsubscribe below even starts, so
+  // there is no window where a socket reconnect could rejoin this channel
+  // while its removal is still in flight.
+  pruneFromRealtimeClient(channel);
   try {
     void getSupabaseBrowser().removeChannel(channel);
   } catch (e) {
     console.warn("[realtime] removeChannel failed", e);
   }
+}
+
+// A private channel's own Phoenix rejoin timer retries CHANNEL_ERROR/TIMED_OUT
+// forever with no way for us to intervene from the outside — that's correct
+// for a transient network blip, but an "Unauthorized" denial from the
+// realtime.messages RLS policy is a HARD, PERMANENT verdict: the topic is
+// wrong or the policy doesn't cover it, and no amount of rejoining ever
+// changes that. Left alone this retries every few seconds for the entire app
+// session, one wasted socket round-trip at a time. Detecting the specific
+// "Unauthorized" signature and tearing the channel down (rather than letting
+// it keep rejoining) turns an infinite failing loop into a single warning.
+// Mirrors apps/mobile/lib/realtime.ts's isPermanentChannelAuthFailure.
+function isPermanentChannelAuthFailure(err?: Error): boolean {
+  return !!err?.message && /unauthorized/i.test(err.message);
 }
 
 // Subscribe to a PRIVATE Broadcast channel whose name IS the authorization topic
@@ -117,6 +160,12 @@ export function subscribeBroadcastEvents(
         }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn(`[realtime] ${topic} ${status}`, err?.message ?? "");
+          if (isPermanentChannelAuthFailure(err)) {
+            console.warn(`[realtime] ${topic} unauthorized — giving up, will not retry`);
+            const dead = channel;
+            channel = null;
+            removeSafeChannel(dead);
+          }
         }
       });
     } catch (e) {
@@ -166,6 +215,12 @@ export function subscribeBroadcast(
           }
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
             console.warn(`[realtime] ${topic} ${status}`, err?.message ?? "");
+            if (isPermanentChannelAuthFailure(err)) {
+              console.warn(`[realtime] ${topic} unauthorized — giving up, will not retry`);
+              const dead = channel;
+              channel = null;
+              removeSafeChannel(dead);
+            }
           }
         });
     } catch (e) {
