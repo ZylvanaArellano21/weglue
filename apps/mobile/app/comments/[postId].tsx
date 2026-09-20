@@ -66,8 +66,8 @@ export default function CommentsScreen() {
   // One idempotency tag per comment; reused if a send has to be retried,
   // regenerated after a comment is posted (migration 100).
   const commentTagRef = useRef(clientUuid());
-  const { data: post, isLoading: isPostLoading } = usePostDetail(postId, viewerUserId);
-  const { data: comments = [], isLoading } = usePostComments(postId);
+  const { data: post, isLoading: isPostLoading, isError: isPostError, refetch: refetchPost } = usePostDetail(postId, viewerUserId);
+  const { data: comments = [], isLoading, isError: isCommentsError, refetch: refetchComments } = usePostComments(postId);
   const { mutate: submitComment, isPending } = useAddComment();
 
   // Flatten one-level threads into FlatList rows so virtualization and
@@ -260,7 +260,14 @@ export default function CommentsScreen() {
             Comments
           </Text>
 
-          {!isPostLoading && !post ? (
+          {isPostError && !post ? (
+            <View style={{ padding: 24, alignItems: 'center' }}>
+              <Text style={{ color: '#6B7280' }}>Couldn't load post.</Text>
+              <TouchableOpacity onPress={() => void refetchPost()} style={{ padding: 12 }}>
+                <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : !isPostLoading && !post ? (
             <View style={{ padding: 24, alignItems: 'center' }}>
               <Text style={{ color: '#6B7280', textAlign: 'center', fontFamily: 'Inter_400Regular' }}>
                 This post is no longer available.
@@ -269,6 +276,13 @@ export default function CommentsScreen() {
           ) : isLoading || isPostLoading ? (
             <View style={{ padding: 24, alignItems: 'center' }}>
               <ActivityIndicator color="#0FA6A6" />
+            </View>
+          ) : isCommentsError && comments.length === 0 ? (
+            <View style={{ padding: 24, alignItems: 'center' }}>
+              <Text style={{ color: '#6B7280' }}>Couldn't load comments.</Text>
+              <TouchableOpacity onPress={() => void refetchComments()} style={{ padding: 12 }}>
+                <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <FlatList<Row>

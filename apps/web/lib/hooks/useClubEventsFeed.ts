@@ -20,7 +20,7 @@ export interface ClubEventsFeed {
 async function getClubEventsFeed(clubId: string, userId: string): Promise<ClubEventsFeed> {
   const supabase = getSupabaseBrowser();
 
-  const [{ data: membership }, { data: savedEvents }, { data: userRsvps }, { data: club }] = await Promise.all([
+  const [{ data: membership, error: membershipError }, { data: savedEvents, error: savedError }, { data: userRsvps, error: rsvpsError }, { data: club, error: clubError }] = await Promise.all([
     supabase
       .from("club_members")
       .select("role")
@@ -31,6 +31,10 @@ async function getClubEventsFeed(clubId: string, userId: string): Promise<ClubEv
     supabase.from("event_rsvps").select("event_id, status").eq("user_id", userId),
     supabase.from("clubs").select("id, name, avatar_url").eq("id", clubId).maybeSingle(),
   ]);
+  if (membershipError) throw membershipError;
+  if (savedError) throw savedError;
+  if (rsvpsError) throw rsvpsError;
+  if (clubError) throw clubError;
 
   const isMember = !!membership;
   const savedSet = new Set((savedEvents ?? []).map((s: any) => s.event_id));
@@ -49,11 +53,12 @@ async function getClubEventsFeed(clubId: string, userId: string): Promise<ClubEv
   const attendeeCountMap = new Map<string, number>();
   const attendeePreviewMap = new Map<string, AttendeePreview[]>();
   if (openEventIds.length > 0) {
-    const { data: goingRsvps } = await supabase
+    const { data: goingRsvps, error: attendeesError } = await supabase
       .from("event_rsvps")
       .select("event_id, user_id, profiles!inner(id, username, avatar_url)")
       .in("event_id", openEventIds)
       .eq("status", "going");
+    if (attendeesError) throw attendeesError;
     for (const rsvp of ((goingRsvps as any[]) ?? [])) {
       attendeeCountMap.set(rsvp.event_id, (attendeeCountMap.get(rsvp.event_id) ?? 0) + 1);
       const previews = attendeePreviewMap.get(rsvp.event_id) ?? [];

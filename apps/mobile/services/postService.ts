@@ -96,11 +96,12 @@ async function getPostImages(postIds: string[]): Promise<Map<string, PostImage[]
   const result = new Map<string, PostImage[]>();
   if (postIds.length === 0) return result;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('post_images')
     .select('post_id, storage_path, position, width, height')
     .in('post_id', postIds)
     .order('position', { ascending: true });
+  if (error) throw error;
 
   for (const row of (data ?? []) as any[]) {
     const images = result.get(row.post_id) ?? [];
@@ -169,7 +170,7 @@ export async function getHomePostsFeed(
   const PAGE_SIZE = 20;
   const offset = page * PAGE_SIZE;
 
-  const [{ data: followedRows }, { data: followerRows }, { data: myProfile }] = await Promise.all([
+  const [{ data: followedRows, error: followsError }, { data: followerRows, error: followersError }, { data: myProfile, error: profileError }] = await Promise.all([
     supabase
       .from('follows')
       .select('following_id, status')
@@ -181,6 +182,9 @@ export async function getHomePostsFeed(
       .eq('status', 'accepted'),
     supabase.from('profiles').select('university').eq('id', userId).single(),
   ]);
+  if (followsError) throw followsError;
+  if (followersError) throw followersError;
+  if (profileError) throw profileError;
 
   const followedIds = ((followedRows ?? []) as any[])
     .filter((r) => r.status === 'accepted')
@@ -213,12 +217,13 @@ export async function getHomePostsFeed(
 
   const { data: rawPosts, error } = await postsQuery;
 
-  if (error || !rawPosts) return [];
+  if (error) throw error;
+  if (!rawPosts) return [];
 
   const postIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: privacyRows }, { data: extraTagRows }, imageMap] =
+  const [{ data: likesRows, error: likesError }, { data: commentsRows, error: commentsError }, { data: privacyRows, error: privacyError }, { data: extraTagRows, error: tagsError }, imageMap] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase
@@ -235,6 +240,10 @@ export async function getHomePostsFeed(
         .in('post_id', postIds),
       getPostImages(postIds),
     ]);
+  if (likesError) throw likesError;
+  if (commentsError) throw commentsError;
+  if (privacyError) throw privacyError;
+  if (tagsError) throw tagsError;
 
   const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
 
@@ -298,11 +307,12 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
       clubs(id, name, avatar_url)
     `)
     .eq('id', postId)
-    .single();
+    .maybeSingle();
 
-  if (error || !p) return null;
+  if (error) throw error;
+  if (!p) return null;
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }, imageMap] =
+  const [{ data: likesRows, error: likesError }, { data: commentsRows, error: commentsError }, { data: followRow, error: followError }, { data: followsMeRow, error: followsMeError }, { data: privacyRow, error: privacyError }, { data: extraTagRows, error: tagsError }, imageMap] =
     await Promise.all([
       supabase.from('post_likes').select('user_id').eq('post_id', postId),
       supabase.from('post_comments').select('id').eq('post_id', postId),
@@ -330,6 +340,12 @@ export async function getPostById(postId: string, userId: string): Promise<FeedP
         .eq('post_id', postId),
       getPostImages([postId]),
     ]);
+  if (likesError) throw likesError;
+  if (commentsError) throw commentsError;
+  if (followError) throw followError;
+  if (followsMeError) throw followsMeError;
+  if (privacyError) throw privacyError;
+  if (tagsError) throw tagsError;
 
   const likes = (likesRows ?? []) as any[];
 
@@ -385,11 +401,12 @@ export async function getUserPostsFeed(
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1);
 
-  if (error || !rawPosts || rawPosts.length === 0) return [];
+  if (error) throw error;
+  if (!rawPosts || rawPosts.length === 0) return [];
 
   const postIds = (rawPosts as any[]).map((p) => p.id);
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: followRow }, { data: followsMeRow }, { data: privacyRow }, { data: extraTagRows }, imageMap] =
+  const [{ data: likesRows, error: likesError }, { data: commentsRows, error: commentsError }, { data: followRow, error: followError }, { data: followsMeRow, error: followsMeError }, { data: privacyRow, error: privacyError }, { data: extraTagRows, error: tagsError }, imageMap] =
     await Promise.all([
       supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
       supabase.from('post_comments').select('post_id').in('post_id', postIds),
@@ -417,6 +434,12 @@ export async function getUserPostsFeed(
         .in('post_id', postIds),
       getPostImages(postIds),
     ]);
+  if (likesError) throw likesError;
+  if (commentsError) throw commentsError;
+  if (followError) throw followError;
+  if (followsMeError) throw followsMeError;
+  if (privacyError) throw privacyError;
+  if (tagsError) throw tagsError;
 
   const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
 
@@ -480,18 +503,19 @@ export async function getPostsByIds(
     `)
     .in('id', postIds);
 
-  if (error || !rawPosts || rawPosts.length === 0) return result;
+  if (error) throw error;
+  if (!rawPosts || rawPosts.length === 0) return result;
 
   const foundIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
   const [
-    { data: likesRows },
-    { data: commentsRows },
-    { data: myFollows },
-    { data: followerRows },
-    { data: privacyRows },
-    { data: extraTagRows },
+    { data: likesRows, error: likesError },
+    { data: commentsRows, error: commentsError },
+    { data: myFollows, error: followsError },
+    { data: followerRows, error: followersError },
+    { data: privacyRows, error: privacyError },
+    { data: extraTagRows, error: tagsError },
     imageMap,
   ] = await Promise.all([
     supabase.from('post_likes').select('post_id, user_id').in('post_id', foundIds),
@@ -514,6 +538,12 @@ export async function getPostsByIds(
       .in('post_id', foundIds),
     getPostImages(foundIds),
   ]);
+  if (likesError) throw likesError;
+  if (commentsError) throw commentsError;
+  if (followsError) throw followsError;
+  if (followersError) throw followersError;
+  if (privacyError) throw privacyError;
+  if (tagsError) throw tagsError;
 
   const extraTaggedClubsMap = buildTaggedClubsMap(extraTagRows as any);
 
@@ -585,7 +615,8 @@ export async function getPostComments(postId: string): Promise<PostComment[]> {
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
 
-  if (error || !data) return [];
+  if (error) throw error;
+  if (!data) return [];
 
   return (data as any[]).map((c) => ({
     id: c.id,

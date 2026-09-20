@@ -68,8 +68,8 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   const show = useToast();
 
   const queryClient = useQueryClient();
-  const { data: club, isLoading } = useClubProfile(clubId, userId);
-  const { data: feed } = useClubEventsFeed(clubId, userId);
+  const { data: club, isLoading, isError: clubError, refetch: refetchClub } = useClubProfile(clubId, userId);
+  const { data: feed, isLoading: feedLoading, isError: feedError, refetch: refetchFeed } = useClubEventsFeed(clubId, userId);
   const membership = useToggleClubMembership(clubId, userId);
   const { mutate: rsvp } = useRsvpToEvent();
   const { mutate: toggleSave } = useToggleSaveEvent();
@@ -175,9 +175,9 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
   if (!club) {
     return (
       <main className="mx-auto max-w-app px-4 py-16 text-center sm:px-6">
-        <p className="text-gray-500">This club is no longer available.</p>
-        <button type="button" onClick={() => router.push("/clubs")} className="mt-4 text-sm font-semibold text-teal hover:underline">
-          Back to Clubs
+        <p className="text-gray-500">{clubError ? "Couldn't load this club." : "This club is no longer available."}</p>
+        <button type="button" onClick={() => clubError ? void refetchClub() : router.push("/clubs")} className="mt-4 text-sm font-semibold text-teal hover:underline">
+          {clubError ? "Try again" : "Back to Clubs"}
         </button>
       </main>
     );
@@ -207,8 +207,22 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
           />
 
           {/* Desktop/tablet — unchanged tab-switched content. */}
+          {feedError && feed && (
+            <div className="py-3 text-center text-sm text-gray-500">Couldn't refresh events.
+              <button type="button" onClick={() => void refetchFeed()} className="ml-2 font-semibold text-teal">Try again</button>
+            </div>
+          )}
           <div className="hidden md:block">
-          {activeTab === "home" && (
+          {(activeTab === "home" || activeTab === "calendar") && feedLoading && !feed && (
+            <div className="mt-4 h-32 animate-pulse rounded-xl bg-black/5" />
+          )}
+          {activeTab === "home" && feedError && !feed && (
+            <div className="py-10 text-center text-sm text-gray-500">
+              <p>Couldn't load events.</p>
+              <button type="button" onClick={() => void refetchFeed()} className="mt-3 font-semibold text-teal">Try again</button>
+            </div>
+          )}
+          {activeTab === "home" && (feed || (!feedError && !feedLoading)) && (
             <ClubHomeTab
               club={club}
               upcoming={upcoming}
@@ -228,7 +242,13 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               onCreatePost={club.is_officer ? () => setCompose("post") : undefined}
             />
           )}
-          {activeTab === "calendar" && (
+          {activeTab === "calendar" && feedError && !feed && (
+            <div className="py-10 text-center text-sm text-gray-500">
+              <p>Couldn't load events.</p>
+              <button type="button" onClick={() => void refetchFeed()} className="mt-3 font-semibold text-teal">Try again</button>
+            </div>
+          )}
+          {activeTab === "calendar" && (feed || (!feedError && !feedLoading)) && (
             <ClubCalendarTab
               events={allEvents}
               onOpenDate={(dateEvents) => setOverlay({ kind: "event", list: dateEvents, index: 0 })}
@@ -258,7 +278,14 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
               differs. */}
           <div className="md:hidden">
             <h2 className="mb-3 mt-2 text-xl font-bold text-gray-900">Upcoming Events</h2>
-            {upcoming.length > 0 ? (
+            {feedLoading && !feed ? (
+              <div className="h-28 animate-pulse rounded-xl bg-black/5" />
+            ) : feedError && !feed ? (
+              <div className="rounded-xl bg-white/60 py-8 text-center text-sm text-gray-500">
+                <p>Couldn't load events.</p>
+                <button type="button" onClick={() => void refetchFeed()} className="mt-3 font-semibold text-teal">Try again</button>
+              </div>
+            ) : upcoming.length > 0 ? (
               <div>
                 {upcoming.map((e) => (
                   <ClubEventCard
@@ -274,7 +301,7 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             )}
 
             <h2 className="mb-3 mt-8 text-xl font-bold text-gray-900">Past Events</h2>
-            {past.length > 0 ? (
+            {(feedLoading || feedError) && !feed ? null : past.length > 0 ? (
               <div>
                 {past.map((e) => (
                   <ClubEventCard
@@ -329,10 +356,10 @@ function Body({ clubId, userId }: { clubId: string; userId: string }): JSX.Eleme
             )}
 
             <h2 className="mb-3 mt-8 text-xl font-bold text-gray-900">Calendar</h2>
-            <ClubCalendarTab
+            {(feed || (!feedLoading && !feedError)) && <ClubCalendarTab
               events={allEvents}
               onOpenDate={(dateEvents) => setOverlay({ kind: "event", list: dateEvents, index: 0 })}
-            />
+            />}
 
             {club.officers.length > 0 && (
               <>

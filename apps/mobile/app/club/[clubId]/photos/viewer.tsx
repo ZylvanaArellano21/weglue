@@ -46,7 +46,7 @@ export default function ClubPhotoViewerScreen() {
   const queryClient = useQueryClient();
   const { show, ToastComponent } = useToast();
 
-  const { data: items, isLoading } = useClubPhotoFeed(clubId, viewerUserId);
+  const { data: items, isLoading, isError, refetch } = useClubPhotoFeed(clubId, viewerUserId);
   const { mutate: likePost } = useLikePost();
 
   const feed = items ?? [];
@@ -134,6 +134,13 @@ export default function ClubPhotoViewerScreen() {
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={profileColors.teal} />
+        </View>
+      ) : isError && !items ? (
+        <View style={styles.loading}>
+          <Text style={styles.emptyText}>Couldn't load photos.</Text>
+          <TouchableOpacity onPress={() => void refetch()} style={{ padding: 12 }}>
+            <Text style={{ color: profileColors.teal, fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
         </View>
       ) : feed.length === 0 || initialIndex < 0 ? (
         <View style={styles.loading}>

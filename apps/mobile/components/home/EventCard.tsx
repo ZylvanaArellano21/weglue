@@ -96,14 +96,20 @@ export const EventCard = memo(function EventCard({ event, onRsvp, onToggleSave, 
       </View>
 
       {/* Event Image — its own tap target (opens the full-screen photo
-          viewer). Natural ratio: horizontal stays horizontal, vertical stays
-          vertical, square stays square — never a forced 3:2 crop. */}
+          viewer). Stored dimensions preserve natural height; legacy covers
+          use a stable 3:2 frame without a probe. */}
       <View style={{ position: 'relative' }}>
         {event.cover_image_url ? (
           <PhotoCarousel
-            images={[{ uri: event.cover_image_url }]}
+            images={[{
+              uri: event.cover_image_url,
+              width: event.cover_image_width,
+              height: event.cover_image_height,
+            }]}
             width={SCREEN_WIDTH - 40}
-            naturalRatio
+            aspectRatio={3 / 2}
+            naturalRatio={!!(event.cover_image_width && event.cover_image_height)}
+            fit="contain"
             rounded={false}
             onImagePress={() => setViewerOpen(true)}
           />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, FlatList, RefreshControl, ListRenderItem } from 'react-native';
+import { View, Text, FlatList, RefreshControl, ListRenderItem, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { useHomeTabStore } from '../../store/homeTabStore';
 import {
@@ -34,6 +34,7 @@ export function EventsFeed() {
     data,
     isLoading,
     isError,
+    isFetchNextPageError,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -264,14 +265,17 @@ export function EventsFeed() {
     );
   }
 
-  if (isError) {
+  if (isError && !data) {
     return (
       <View style={{ flex: 1 }}>
         {matchesHeader}
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
           <Text style={{ color: '#6B7280', textAlign: 'center', fontSize: 15 }}>
-            Something went wrong loading events.
+            Couldn't load events.
           </Text>
+          <TouchableOpacity onPress={() => void refetch()} style={{ marginTop: 12, padding: 12 }}>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -288,7 +292,15 @@ export function EventsFeed() {
         keyExtractor={(item) => item.id}
         onScrollToIndexFailed={handleScrollToIndexFailed}
         renderItem={renderItem}
-        ListHeaderComponent={matchesHeader}
+        ListHeaderComponent={<>
+          {matchesHeader}
+          {isError && data && !isFetchNextPageError ? (
+            <TouchableOpacity onPress={() => void refetch()} style={{ alignItems: 'center', padding: 12 }}>
+              <Text style={{ color: '#6B7280' }}>Couldn't refresh events.</Text>
+              <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+            </TouchableOpacity>
+          ) : null}
+        </>}
         ListEmptyComponent={<EmptyEvents centered={!matchesHeader} />}
         contentContainerStyle={{
           paddingTop: 8,
@@ -299,12 +311,18 @@ export function EventsFeed() {
         }}
         showsVerticalScrollIndicator={false}
         onEndReached={() => {
-          if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+          if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) fetchNextPage();
         }}
         onEndReachedThreshold={0.5}
         windowSize={7}
         maxToRenderPerBatch={6}
         initialNumToRender={6}
+        ListFooterComponent={isFetchNextPageError ? (
+          <TouchableOpacity onPress={() => void fetchNextPage()} style={{ alignItems: 'center', padding: 16 }}>
+            <Text style={{ color: '#6B7280' }}>Couldn't load more events.</Text>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700', marginTop: 8 }}>Try again</Text>
+          </TouchableOpacity>
+        ) : null}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

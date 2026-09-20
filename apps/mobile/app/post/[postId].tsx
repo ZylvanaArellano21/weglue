@@ -41,7 +41,7 @@ export default function PostDetailScreen() {
     });
   }, [postId, focusCommentId, router]);
 
-  const { data: post, isLoading } = usePostDetail(postId, userId);
+  const { data: post, isLoading, isError, refetch } = usePostDetail(postId, userId);
   const { mutate: likePost } = useLikePost();
 
   function handleLike(id: string, hasLiked: boolean) {
@@ -125,6 +125,13 @@ export default function PostDetailScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}>
         {isLoading ? (
           <PostCardSkeleton />
+        ) : isError && !post ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Text style={{ color: '#6B7280' }}>Couldn't load post.</Text>
+            <TouchableOpacity onPress={() => void refetch()} style={{ padding: 12 }}>
+              <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+            </TouchableOpacity>
+          </View>
         ) : post ? (
           <PostCard
             post={post}

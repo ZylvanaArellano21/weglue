@@ -4,12 +4,31 @@ import {
   naturalCropAspect,
   postMediaDisplayRatio,
   postMediaDisplayRatioDetail,
+  shouldLoadCarouselImage,
   POST_IMAGE_MIN_RATIO,
   POST_IMAGE_MAX_RATIO,
   POST_IMAGE_FALLBACK_RATIO,
 } from '@weglue/shared';
 
 const ratio = ([w, h]: [number, number]) => w / h;
+
+describe('carousel image window', () => {
+  const loaded = (count: number, active: number) =>
+    Array.from({ length: count }, (_, i) => i).filter((i) => shouldLoadCarouselImage(i, active));
+
+  it('loads one image for a single-photo post and two on the first page of a long carousel', () => {
+    expect(loaded(1, 0)).toEqual([0]);
+    expect(loaded(2, 0)).toEqual([0, 1]);
+    expect(loaded(6, 0)).toEqual([0, 1]);
+  });
+
+  it('keeps only the previous, active, and next images while moving in either direction', () => {
+    expect(loaded(6, 2)).toEqual([1, 2, 3]);
+    expect(loaded(6, 4)).toEqual([3, 4, 5]);
+    expect(loaded(6, 3)).toEqual([2, 3, 4]);
+    expect(loaded(6, 5)).toEqual([4, 5]);
+  });
+});
 
 describe('naturalCropAspect', () => {
   it('keeps a landscape image landscape (does not force square/portrait)', () => {

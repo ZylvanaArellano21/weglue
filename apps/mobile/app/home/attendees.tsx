@@ -35,6 +35,9 @@ export default function AttendeesScreen() {
   const {
     data,
     isLoading,
+    isError,
+    isFetchNextPageError,
+    refetch,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -213,6 +216,13 @@ export default function AttendeesScreen() {
             </View>
           ))}
         </View>
+      ) : isError && !data ? (
+        <View style={{ alignItems: 'center', padding: 40 }}>
+          <Text style={{ color: '#6B7280' }}>Couldn't load attendees.</Text>
+          <TouchableOpacity onPress={() => void refetch()} style={{ padding: 12 }}>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList<EventAttendee>
           data={attendees}
@@ -220,12 +230,17 @@ export default function AttendeesScreen() {
           renderItem={renderAttendee}
           showsVerticalScrollIndicator={false}
           onEndReached={() => {
-            if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+            if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) fetchNextPage();
           }}
           onEndReachedThreshold={0.5}
           ListFooterComponent={
             isFetchingNextPage ? (
               <ActivityIndicator style={{ paddingVertical: 16 }} color="#0FA6A6" />
+            ) : isFetchNextPageError ? (
+              <TouchableOpacity onPress={() => void fetchNextPage()} style={{ alignItems: 'center', padding: 16 }}>
+                <Text style={{ color: '#6B7280' }}>Couldn't load more attendees.</Text>
+                <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+              </TouchableOpacity>
             ) : null
           }
           ListEmptyComponent={

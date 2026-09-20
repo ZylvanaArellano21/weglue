@@ -70,7 +70,7 @@ export default function ClubEventDetailScreen() {
   // target on this screen.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
-  const { data: event, isLoading } = useEventDetail(eventId, userId);
+  const { data: event, isLoading, isError, refetch } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);
   const { mutate: toggleSave, isPending: isSaving } = useSaveEventMutation(userId, eventId);
   const { mutate: joinClubMutate, isPending: joiningClub } = useJoinClubMutation(userId);
@@ -246,6 +246,13 @@ export default function ClubEventDetailScreen() {
             <Skeleton width="100%" height={60} borderRadius={12} />
           </View>
         </ScrollView>
+      ) : isError && !event ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <Text style={{ color: '#6B7280', fontSize: 15 }}>Couldn't load event.</Text>
+          <TouchableOpacity onPress={() => void refetch()} style={{ padding: 12 }}>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
+        </View>
       ) : !event ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
           <Ionicons name="calendar-outline" size={48} color="#D1D5DB" />

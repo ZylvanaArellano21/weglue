@@ -24,7 +24,7 @@ export function PostCommentsModal({
   focusCommentId?: string;
 }): JSX.Element {
   const { data: comments, isLoading, isError } = usePostComments(postId, true);
-  const { mutate: addComment, isPending, isError: commentError, error: commentErrorDetails } = useAddComment();
+  const { mutate: addComment, isPending, isError: commentError } = useAddComment();
   const [content, setContent] = useState("");
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [reportTarget, setReportTarget] = useState<{ id: string; content: string } | null>(null);
@@ -141,7 +141,7 @@ export function PostCommentsModal({
               <button type="submit" disabled={!content.trim() || isPending} className="rounded-full bg-[#0FA6A6] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isPending ? "Posting…" : replyTarget ? "Reply" : "Post"}</button>
             </div>
           </form>
-          {commentError && <p role="alert" className="mt-2 text-xs text-red-600">{commentErrorDetails instanceof Error ? commentErrorDetails.message : "Could not add comment. Try again."}</p>}
+          {commentError && <p role="alert" className="mt-2 text-xs text-red-600">Could not add comment. Try again.</p>}
         </div>
       </Modal>
       {reportTarget && (

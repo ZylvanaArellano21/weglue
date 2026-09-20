@@ -30,6 +30,8 @@ export interface HomeFeedEvent {
   title: string;
   description: string | null;
   cover_image_url: string | null;
+  cover_image_width?: number | null;
+  cover_image_height?: number | null;
   event_date: string;
   start_time: string;
   end_time: string;
@@ -74,10 +76,10 @@ async function getHomeEventsFeed(
   const offset = page * EVENTS_PAGE_SIZE;
 
   const [
-    { data: memberships },
-    { data: userActivities },
-    { data: savedEvents },
-    { data: userRsvps },
+    { data: memberships, error: membershipsError },
+    { data: userActivities, error: activitiesError },
+    { data: savedEvents, error: savedError },
+    { data: userRsvps, error: rsvpsError },
     { data: rawEvents, error },
   ] = await Promise.all([
     supabase.from("club_members").select("club_id, role").eq("user_id", userId),
@@ -91,6 +93,7 @@ async function getHomeEventsFeed(
         id, title, description, cover_image_url, event_date, start_time, end_time, event_end_at,
         location, building, room, club_id, created_by, visibility, specific_user_ids,
         clubs!inner(id, name, avatar_url),
+        event_images(position, width, height),
         event_interests(interest),
         event_activities(activity)
       `
@@ -101,6 +104,10 @@ async function getHomeEventsFeed(
       .order("id", { ascending: true })
       .range(offset, offset + EVENTS_PAGE_SIZE - 1),
   ]);
+  if (membershipsError) throw membershipsError;
+  if (activitiesError) throw activitiesError;
+  if (savedError) throw savedError;
+  if (rsvpsError) throw rsvpsError;
 
   const joinedClubIds = new Set((memberships ?? []).map((m: any) => m.club_id));
   const officerClubIds = new Set(
@@ -114,15 +121,17 @@ async function getHomeEventsFeed(
     (userRsvps ?? []).map((r: any) => [r.event_id, r.status as "going" | "cant"])
   );
 
-  if (error || !rawEvents) return { sections: [], hasMore: false };
+  if (error) throw error;
+  if (!rawEvents) return { sections: [], hasMore: false };
 
   const eventIds = (rawEvents as any[]).map((e) => e.id);
 
-  const { data: goingRsvps } = await supabase
+  const { data: goingRsvps, error: attendeesError } = await supabase
     .from("event_rsvps")
     .select("event_id, user_id, profiles!inner(id, username, avatar_url)")
     .in("event_id", eventIds)
     .eq("status", "going");
+  if (attendeesError) throw attendeesError;
 
   const attendeeCountMap = new Map<string, number>();
   const attendeePreviewMap = new Map<string, AttendeePreview[]>();
@@ -167,6 +176,8 @@ async function getHomeEventsFeed(
       title: e.title,
       description: e.description,
       cover_image_url: e.cover_image_url,
+      cover_image_width: e.event_images?.find((image: any) => image.position === 0)?.width ?? null,
+      cover_image_height: e.event_images?.find((image: any) => image.position === 0)?.height ?? null,
       event_date: e.event_date,
       start_time: e.start_time,
       end_time: e.end_time,

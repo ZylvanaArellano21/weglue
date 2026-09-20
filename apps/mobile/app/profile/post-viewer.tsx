@@ -55,6 +55,9 @@ export default function ProfilePostViewerScreen() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isError,
+    isFetchNextPageError,
+    refetch,
   } = useUserPostsFeed(profileUserId, viewerUserId);
   const { mutate: likePost } = useLikePost();
   const deletePost = useDeleteOwnPost(viewerUserId);
@@ -70,10 +73,10 @@ export default function ProfilePostViewerScreen() {
   // keep paging until it's loaded so the list can start on it.
   useEffect(() => {
     if (isLoading) return;
-    if (initialIndex < 0 && hasNextPage && !isFetchingNextPage) {
+    if (initialIndex < 0 && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
       fetchNextPage();
     }
-  }, [initialIndex, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [initialIndex, isLoading, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   // Instagram-style anchoring without scroll estimation (post blocks have
   // variable heights, so scrollToIndex-by-estimate clipped the first visible
@@ -199,7 +202,21 @@ export default function ProfilePostViewerScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {ToastComponent}
 
-      {isLoading || (initialIndex < 0 && hasNextPage) ? (
+      {isError && !data ? (
+        <View style={styles.loading}>
+          <Text style={styles.emptyText}>Couldn't load posts.</Text>
+          <TouchableOpacity onPress={() => void refetch()} style={{ padding: 12 }}>
+            <Text style={{ color: profileColors.teal, fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : initialIndex < 0 && isFetchNextPageError ? (
+        <View style={styles.loading}>
+          <Text style={styles.emptyText}>Couldn't load more posts.</Text>
+          <TouchableOpacity onPress={() => void fetchNextPage()} style={{ padding: 12 }}>
+            <Text style={{ color: profileColors.teal, fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : isLoading || (initialIndex < 0 && hasNextPage) ? (
         // Also wait while earlier pages are still being fetched to locate the
         // tapped post, so the list always mounts anchored on it.
         <View style={styles.loading}>
@@ -220,7 +237,7 @@ export default function ProfilePostViewerScreen() {
           // fully visible above the home indicator.
           contentContainerStyle={{ paddingTop: 54, paddingBottom: insets.bottom + 32 }}
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-          onEndReached={() => hasNextPage && !isFetchingNextPage && fetchNextPage()}
+          onEndReached={() => hasNextPage && !isFetchingNextPage && !isFetchNextPageError && fetchNextPage()}
           onEndReachedThreshold={0.6}
           renderItem={({ item }) => (
             <PostViewerBlock
@@ -238,6 +255,11 @@ export default function ProfilePostViewerScreen() {
               <View style={{ padding: 16, alignItems: 'center' }}>
                 <ActivityIndicator color={profileColors.teal} />
               </View>
+            ) : isFetchNextPageError ? (
+              <TouchableOpacity onPress={() => void fetchNextPage()} style={{ padding: 16, alignItems: 'center' }}>
+                <Text style={styles.emptyText}>Couldn't load more posts.</Text>
+                <Text style={{ color: profileColors.teal, fontWeight: '700' }}>Try again</Text>
+              </TouchableOpacity>
             ) : null
           }
           ListEmptyComponent={

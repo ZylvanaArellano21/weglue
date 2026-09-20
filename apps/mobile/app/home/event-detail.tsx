@@ -56,7 +56,7 @@ export default function EventDetailScreen() {
     return () => clearActiveDestination('event', eventId);
   }, [eventId]);
 
-  const { data: event, isLoading } = useEventDetail(eventId, userId);
+  const { data: event, isLoading, isError, refetch } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: isRsvping } = useRsvpMutation(userId, eventId);
   const { mutate: toggleSave, isPending: isSaving } = useSaveEventMutation(userId, eventId);
   const { mutate: joinClubMutate, isPending: joiningClub } = useJoinClubMutation(userId);
@@ -145,6 +145,13 @@ export default function EventDetailScreen() {
             <Skeleton width="50%" height={16} />
           </View>
         </ScrollView>
+      ) : isError && !event ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: '#6B7280', fontSize: 15 }}>Couldn't load event.</Text>
+          <TouchableOpacity onPress={() => void refetch()} style={{ padding: 12 }}>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
+        </View>
       ) : !event ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: '#6B7280', fontSize: 15 }}>This event is no longer available.</Text>
