@@ -77,6 +77,28 @@ const GAP = 8;
 /** Fraction of the viewport the next photo peeks in from the right. */
 const PEEK_RATIO = 0.13;
 const RADIUS = 16;
+// One transform per displayed ratio, independent of small layout-width changes.
+const FEED_IMAGE_WIDTH = 960;
+
+function SlideImage({ uri, radius, resizeMode }: { uri: string; radius: number; resizeMode: 'cover' | 'contain' }) {
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  if (failedUri === uri) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' }}>
+        <Ionicons name="image-outline" size={40} color="#9CA3AF" />
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={{ width: '100%', height: '100%', borderRadius: radius }}
+      resizeMode={resizeMode}
+      fadeDuration={0}
+      onError={() => setFailedUri(uri)}
+    />
+  );
+}
 
 /** Resolve the first image's ratio synchronously from stored dimensions. */
 function singleImageRatio(
@@ -153,18 +175,13 @@ export const PhotoCarousel = memo(function PhotoCarousel({
     const resized = shouldLoad
       ? getResizedImageUrl(
           img.uri,
-          slideWidth * 2,
-          height * 2,
+          FEED_IMAGE_WIDTH,
+          Math.round(FEED_IMAGE_WIDTH / effectiveRatio),
           wholeImage ? 'contain' : 'cover',
         ) ?? img.uri
       : null;
     const photo = shouldLoad ? (
-      <Image
-        source={{ uri: resized ?? img.uri }}
-        style={{ width: '100%', height: '100%', borderRadius: radius }}
-        resizeMode={wholeImage ? 'contain' : 'cover'}
-        fadeDuration={0}
-      />
+      <SlideImage uri={resized ?? img.uri} radius={radius} resizeMode={wholeImage ? 'contain' : 'cover'} />
     ) : null;
     return (
       <View

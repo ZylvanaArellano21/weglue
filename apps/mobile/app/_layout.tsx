@@ -203,17 +203,30 @@ const queryPersister = createAsyncStoragePersister({
 // canonical data through normal RPCs and RLS-backed queries.
 function useRealtimeAuthBridge(): void {
   useEffect(() => {
+    let cancelled = false;
+    let authEventSeen = false;
     void supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.access_token) void supabase.realtime.setAuth(session.access_token);
+      if (!cancelled && !authEventSeen && session?.access_token) {
+        void supabase.realtime.setAuth(session.access_token);
+      }
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      authEventSeen = true;
+      if (event === 'SIGNED_OUT') {
+        void supabase.realtime.setAuth(null);
+        void supabase.removeAllChannels();
+        return;
+      }
       if (session?.access_token) {
         void supabase.realtime.setAuth(session.access_token);
       } else {
         void supabase.realtime.setAuth(null);
       }
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 }
 
@@ -400,7 +413,12 @@ function RootLayout() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let authEventSeen = false;
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      // A later auth event is authoritative; an older session read must not
+      // restore the previous user's navigator and its Realtime hooks.
+      if (cancelled || authEventSeen) return;
       observeSessionForSignInDetection(session);
       if (session && shouldSyncStudentProfile(session) && shouldGateStartupAccess(session)) {
         // Close the navigator before profile hydration on every authenticated
@@ -429,6 +447,7 @@ function RootLayout() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      authEventSeen = true;
       observeSessionForSignInDetection(session);
       // A first-time gate for THIS user id (genuine login, account switch, or
       // cold start) — never a routine TOKEN_REFRESHED / re-emitted SIGNED_IN
@@ -473,7 +492,10 @@ function RootLayout() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Student profile work begins only after the canonical access decision. This

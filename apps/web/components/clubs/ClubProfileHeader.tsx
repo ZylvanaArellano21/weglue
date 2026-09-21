@@ -64,6 +64,7 @@ export function ClubProfileHeader({
   onShare: () => void;
 }): JSX.Element {
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [failedBanner, setFailedBanner] = useState<string | null>(null);
 
   function handleOptionsPress() {
     if (club.is_officer) {
@@ -82,9 +83,9 @@ export function ClubProfileHeader({
     <section className="-mx-4 overflow-hidden rounded-none bg-white shadow-none sm:-mx-6 md:mx-0 md:rounded-2xl md:shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
       {/* Banner + overlapping avatar + Edit */}
       <div className="relative h-40 w-full bg-gray-200 sm:h-48">
-        {club.banner_url ? (
+        {club.banner_url && failedBanner !== club.banner_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={club.banner_url} alt="" className="h-full w-full object-cover" />
+          <img src={club.banner_url} alt="" className="h-full w-full object-cover" onError={() => setFailedBanner(club.banner_url)} />
         ) : (
           <div className="h-full w-full" style={{ background: "linear-gradient(135deg,#0FA6A6,#0b7d7d)" }} />
         )}

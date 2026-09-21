@@ -33,8 +33,9 @@ export function createSafeChannel(
   topicBase: string,
   bindings: PostgresChangesBinding[],
 ): RealtimeChannel | null {
+  let channel: RealtimeChannel | null = null;
   try {
-    let channel = supabase.channel(`${topicBase}:${instanceSalt}:${++topicSeq}`);
+    channel = supabase.channel(`${topicBase}:${instanceSalt}:${++topicSeq}`);
     for (const { callback, ...filter } of bindings) {
       // Wrap every callback so a subscriber's own error can never bubble up
       // into the realtime socket handler and crash the error boundary.
@@ -54,27 +55,42 @@ export function createSafeChannel(
     });
     return channel;
   } catch (e) {
+    removeSafeChannel(channel);
     console.warn(`[realtime] failed to subscribe ${topicBase}`, e);
     return null;
   }
 }
 
-// RealtimeClient.removeChannel() calls unsubscribe(); the channel's close
-// handler removes it from the client on a successful leave or leave timeout.
-// Track in-flight removals so repeated cleanup does not send another leave.
+// RealtimeClient.removeChannel() calls unsubscribe(). A leave timeout closes
+// the Phoenix channel, but a leave error can leave it registered. Retry that
+// teardown once if the client still owns it; never spin on a failed leave.
 const removingChannels = new WeakSet<RealtimeChannel>();
+const pendingRemovals = new Map<string, Promise<void>>();
+
+async function waitForPriorRemoval(topic: string): Promise<void> {
+  const pending = pendingRemovals.get(`realtime:${topic}`) ?? pendingRemovals.get(topic);
+  if (pending) await pending;
+}
 
 export function removeSafeChannel(channel: RealtimeChannel | null): void {
   if (!channel || removingChannels.has(channel)) return;
   try {
     if (!supabase.getChannels().includes(channel)) return;
     removingChannels.add(channel);
-    void supabase.removeChannel(channel).then(
-      (status) => {
-        if (status === 'error') removingChannels.delete(channel);
-      },
-      () => { removingChannels.delete(channel); },
-    );
+    const removal = (async () => {
+      try {
+        const status = await supabase.removeChannel(channel);
+        if (status === 'error' && supabase.getChannels().includes(channel)) {
+          await supabase.removeChannel(channel);
+        }
+      } catch {
+        // A leave failure cannot crash an unmount. There is no retry loop.
+      } finally {
+        removingChannels.delete(channel);
+        pendingRemovals.delete(channel.topic);
+      }
+    })();
+    pendingRemovals.set(channel.topic, removal);
   } catch {
     removingChannels.delete(channel);
     // Never let realtime teardown crash an unmount.
@@ -107,6 +123,7 @@ export function subscribeBroadcastEvents(
 ): () => void {
   let channel: RealtimeChannel | null = null;
   let cancelled = false;
+  let ownsChannel = false;
 
   void (async () => {
     try {
@@ -115,7 +132,13 @@ export function subscribeBroadcastEvents(
       if (token) await supabase.realtime.setAuth(token);
       if (cancelled) return;
 
+      await waitForPriorRemoval(topic);
+      if (cancelled) return;
+
+      ownsChannel = !supabase.getChannels().some((existing) => existing.topic === `realtime:${topic}` || existing.topic === topic);
+      if (!ownsChannel) return; // Another mounted owner already receives this topic.
       let ch = supabase.channel(topic, { config: { private: true } });
+      channel = ch;
       for (const [event, handler] of Object.entries(handlers)) {
         ch = ch.on('broadcast', { event }, (message: any) => {
           try {
@@ -145,13 +168,14 @@ export function subscribeBroadcastEvents(
         }
       });
     } catch (e) {
+      if (ownsChannel) removeSafeChannel(channel);
       console.warn(`[realtime] failed to subscribe broadcast ${topic}`, e);
     }
   })();
 
   return () => {
     cancelled = true;
-    removeSafeChannel(channel);
+    if (ownsChannel) removeSafeChannel(channel);
   };
 }
 
@@ -166,6 +190,7 @@ export function subscribeBroadcast(
 ): () => void {
   let channel: RealtimeChannel | null = null;
   let cancelled = false;
+  let ownsChannel = false;
 
   void (async () => {
     try {
@@ -174,8 +199,13 @@ export function subscribeBroadcast(
       if (token) await supabase.realtime.setAuth(token);
       if (cancelled) return;
 
-      channel = supabase
-        .channel(topic, { config: { private: true } })
+      await waitForPriorRemoval(topic);
+      if (cancelled) return;
+
+      ownsChannel = !supabase.getChannels().some((existing) => existing.topic === `realtime:${topic}` || existing.topic === topic);
+      if (!ownsChannel) return; // Another mounted owner already receives this topic.
+      channel = supabase.channel(topic, { config: { private: true } });
+      channel
         .on('broadcast', { event }, () => {
           try {
             onMessage();
@@ -203,12 +233,13 @@ export function subscribeBroadcast(
           }
         });
     } catch (e) {
+      if (ownsChannel) removeSafeChannel(channel);
       console.warn(`[realtime] failed to subscribe broadcast ${topic}`, e);
     }
   })();
 
   return () => {
     cancelled = true;
-    removeSafeChannel(channel);
+    if (ownsChannel) removeSafeChannel(channel);
   };
 }

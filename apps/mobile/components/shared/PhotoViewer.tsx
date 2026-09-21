@@ -17,6 +17,14 @@ export interface PhotoViewerImage {
   uri: string;
 }
 
+function ViewerImage({ uri, width, height }: { uri: string; width: number; height: number }) {
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  if (failedUri === uri) {
+    return <View style={{ width, height, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="image-outline" size={48} color="#9CA3AF" /></View>;
+  }
+  return <Image source={{ uri }} style={{ width, height }} resizeMode="contain" onError={() => setFailedUri(uri)} />;
+}
+
 interface Props {
   visible: boolean;
   images: PhotoViewerImage[];
@@ -50,7 +58,7 @@ export function PhotoViewer({ visible, images, initialIndex, onClose }: Props) {
           onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
           renderItem={({ item }) => (
             <View style={[styles.page, { width, height }]}>
-              <Image source={{ uri: item.uri }} style={{ width, height }} resizeMode="contain" />
+              <ViewerImage uri={item.uri} width={width} height={height} />
             </View>
           )}
         />

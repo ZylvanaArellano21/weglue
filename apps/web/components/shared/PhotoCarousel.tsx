@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { postMediaDisplayRatioDetail, shouldLoadCarouselImage } from "@weglue/shared";
+import { getResizedImageUrl } from "../../lib/imageResize";
 
 export interface CarouselImage {
   uri: string;
@@ -37,6 +38,20 @@ interface PhotoCarouselProps {
 
 const PEEK = "13%";
 const GAP = 8;
+const FEED_IMAGE_WIDTH = 960;
+
+function feedImageUrl(uri: string, ratio: number, fit: 'cover' | 'contain'): string {
+  return getResizedImageUrl(uri, FEED_IMAGE_WIDTH, Math.round(FEED_IMAGE_WIDTH / ratio), fit) ?? uri;
+}
+
+function SlideImage({ uri, fit, label }: { uri: string; fit: 'cover' | 'contain'; label: string }) {
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  if (failedUri === uri) {
+    return <span className="flex h-full w-full items-center justify-center bg-gray-200 text-sm text-gray-500" role="img" aria-label={label}>Image unavailable</span>;
+  }
+  // The browser can report load failure for <img>; CSS backgrounds cannot.
+  return <img src={uri} alt={label} className="block h-full w-full bg-gray-200" style={{ objectFit: fit }} onError={() => setFailedUri(uri)} />;
+}
 
 /** Resolve the first image's ratio synchronously from stored dimensions. */
 function singleImageRatio(image: CarouselImage | undefined, enabled: boolean) {
@@ -79,9 +94,7 @@ export function PhotoCarousel({
   const paddingTop = `${(1 / effectiveRatio) * 100}%`;
   // A lone natural-aspect image is shown whole (contain-fit): the box already
   // IS its ratio, so there is nothing to crop. A carousel slide stays cover.
-  const imageFit = !multi && (fit === "contain" || sharedRatio?.fromStoredDimensions)
-    ? "bg-contain bg-no-repeat"
-    : "bg-cover";
+  const imageFit = !multi && (fit === "contain" || sharedRatio?.fromStoredDimensions) ? "contain" : "cover";
 
   const onScroll = () => {
     const el = trackRef.current;
@@ -98,18 +111,13 @@ export function PhotoCarousel({
     // Keep every slide in the scroll track, but leave distant slides without
     // a background URL so the browser cannot request their images yet.
     const shouldLoad = shouldLoadCarouselImage(i, index);
-    const inner = (
-      <span
-        className={`block h-full w-full bg-center bg-gray-200 ${imageFit} ${radius}`}
-        style={shouldLoad ? { backgroundImage: `url(${img.uri})` } : undefined}
-        role="img"
-        aria-label={`Photo ${i + 1} of ${count}`}
-      />
-    );
+    const inner = shouldLoad ? (
+      <SlideImage uri={feedImageUrl(img.uri, effectiveRatio, imageFit)} fit={imageFit} label={`Photo ${i + 1} of ${count}`} />
+    ) : <span className="block h-full w-full bg-gray-200" />;
     return (
       <div
         key={i}
-        className="relative shrink-0"
+        className={`relative shrink-0 overflow-hidden ${radius}`}
         style={{
           width: multi ? `calc(100% - ${PEEK})` : "100%",
           marginRight: i < count - 1 ? GAP : 0,

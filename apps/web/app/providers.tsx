@@ -85,6 +85,8 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
     let lastCheckAt = 0;
     let removeAccessSync: (() => void) | null = null;
     let accessSyncUserId: string | null = null;
+    let accessAuthEventSeen = false;
+    let accessDisposed = false;
     const check = async ({ force = true }: { force?: boolean } = {}) => {
       if (checking) return;
       if (!force && Date.now() - lastCheckAt < ACCESS_RECHECK_MS) return;
@@ -137,19 +139,21 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
     };
 
     void supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
+      if (accessDisposed || accessAuthEventSeen) return;
       void check();
       subscribeAccessSync(data.session);
     });
     const recover = () => void check();
     const removeBrowserRecovery = subscribeBrowserCanonicalRecovery(recover);
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      accessAuthEventSeen = true;
       if (event === "SIGNED_OUT") {
         removeAccessSync?.();
         removeAccessSync = null;
         accessSyncUserId = null;
         return;
       }
-      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
         void check();
         subscribeAccessSync(session);
       }
@@ -160,6 +164,7 @@ function useApplicationAccessGate(queryClient: QueryClient): void {
       if (error?.code === "42501" || error?.message?.includes("account_restricted")) void check();
     });
     return () => {
+      accessDisposed = true;
       checkRef.current = () => {};
       removeBrowserRecovery();
       removeAccessSync?.();
@@ -195,6 +200,7 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
     let cancelled = false;
     let contentSyncUserId: string | null = null;
     let contentSyncRequest = 0;
+    let contentAuthEventSeen = false;
 
     const subscribeForUser = async (userId: string | undefined) => {
       const nextUserId = userId ?? null;
@@ -226,9 +232,12 @@ function useStudentContentSynchronization(queryClient: QueryClient): void {
     };
 
     void supabase.auth.getSession().then(
-      ({ data }: { data: { session: Session | null } }) => void subscribeForUser(data.session?.user.id)
+      ({ data }: { data: { session: Session | null } }) => {
+        if (!cancelled && !contentAuthEventSeen) void subscribeForUser(data.session?.user.id);
+      }
     );
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
+      contentAuthEventSeen = true;
       void subscribeForUser(session?.user.id);
     });
 
@@ -349,16 +358,21 @@ function useLegacyServiceWorkerCleanup(): void {
 function useRealtimeAuthBridge(): void {
   useEffect(() => {
     const supabase = getSupabaseBrowser();
+    let cancelled = false;
+    let authEventSeen = false;
 
     // Push the current token immediately so a channel opened before the first
     // auth event still authorizes.
     void supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
-      if (data.session?.access_token) void supabase.realtime.setAuth(data.session.access_token);
+      if (!cancelled && !authEventSeen && data.session?.access_token) {
+        void supabase.realtime.setAuth(data.session.access_token);
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      authEventSeen = true;
       if (event === "SIGNED_OUT") {
         void supabase.realtime.setAuth(null);
         void supabase.removeAllChannels();
@@ -369,7 +383,10 @@ function useRealtimeAuthBridge(): void {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 }
 

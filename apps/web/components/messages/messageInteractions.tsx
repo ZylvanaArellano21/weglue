@@ -442,6 +442,15 @@ export interface LightboxItem {
   senderName?: string;
 }
 
+function LightboxImage({ url, alt }: { url: string; alt: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  if (failedUrl === url) {
+    return <span className="flex min-h-48 min-w-48 items-center justify-center text-sm text-white/70">Image unavailable</span>;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={alt} className="max-h-[90vh] max-w-[92vw] rounded-lg object-contain" onError={() => setFailedUrl(url)} />;
+}
+
 export function MediaLightbox({
   items,
   index,
@@ -537,8 +546,7 @@ export function MediaLightbox({
           // eslint-disable-next-line jsx-a11y/media-has-caption
           <video src={current.url} controls autoPlay className="max-h-[90vh] max-w-[92vw] rounded-lg" />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.url} alt={current.senderName ? `Photo from ${current.senderName}` : "Photo"} className="max-h-[90vh] max-w-[92vw] rounded-lg object-contain" />
+          <LightboxImage url={current.url} alt={current.senderName ? `Photo from ${current.senderName}` : "Photo"} />
         )}
       </div>
     </div>
