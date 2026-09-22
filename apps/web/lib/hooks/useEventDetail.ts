@@ -46,7 +46,7 @@ export interface EventDetail {
 
 async function getEventDetail(eventId: string, userId: string): Promise<EventDetail | null> {
   const supabase = getSupabaseBrowser();
-  const [{ data: event }, { data: savedRow }, { data: rsvpRow }] = await Promise.all([
+  const [{ data: event, error: eventError }, { data: savedRow, error: savedError }, { data: rsvpRow, error: rsvpError }] = await Promise.all([
     supabase
       .from("events")
       .select(
@@ -59,11 +59,14 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
     supabase.from("saved_events").select("id").eq("user_id", userId).eq("event_id", eventId).maybeSingle(),
     supabase.from("event_rsvps").select("status").eq("user_id", userId).eq("event_id", eventId).maybeSingle(),
   ]);
+  if (eventError) throw eventError;
+  if (savedError) throw savedError;
+  if (rsvpError) throw rsvpError;
 
   if (!event) return null;
   const e = event as any;
 
-  const [{ data: goingRsvps }, { data: memberCheck }, { data: imageRows }] = await Promise.all([
+  const [{ data: goingRsvps, error: attendeesError }, { data: memberCheck, error: membershipError }, { data: imageRows, error: imagesError }] = await Promise.all([
     supabase
       .from("event_rsvps")
       .select("user_id, profiles!inner(id, username, avatar_url)")
@@ -76,6 +79,9 @@ async function getEventDetail(eventId: string, userId: string): Promise<EventDet
       .eq("event_id", eventId)
       .order("position", { ascending: true }),
   ]);
+  if (attendeesError) throw attendeesError;
+  if (membershipError) throw membershipError;
+  if (imagesError) throw imagesError;
   const fetchedImages: EventImage[] = ((imageRows ?? []) as any[]).map((row) => ({
     path: row.storage_path,
     position: row.position,

@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import type { DiscoveryClub } from '../../services/searchService';
 import { searchCardShadow, searchColors, searchSizes, searchTypography } from './searchTheme';
+import { getResizedImageUrl } from '../../lib/imageResize';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 export const CLUB_CARD_WIDTH =
@@ -44,9 +45,10 @@ interface Props {
 
 export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
   const router = useRouter();
-  const [imageError, setImageError] = useState(false);
+  const [failedUri, setFailedUri] = useState<string | null>(null);
 
   const imageUri = club.cover_image_url ?? club.avatar_url;
+  const displayUri = getResizedImageUrl(imageUri, 512, Math.round(512 * searchSizes.clubImageAspect));
   const timeStr =
     club.meeting_time_start && club.meeting_time_end
       ? `${formatTime(club.meeting_time_start)} - ${formatTime(club.meeting_time_end)}`
@@ -66,12 +68,12 @@ export function ClubDiscoveryCard({ club, onJoin, joining }: Props) {
       activeOpacity={0.85}
     >
       <View style={styles.imageWrap}>
-        {imageUri && !imageError ? (
+        {displayUri && failedUri !== displayUri ? (
           <Image
-            source={{ uri: imageUri }}
+            source={{ uri: displayUri }}
             style={styles.image}
             resizeMode="cover"
-            onError={() => setImageError(true)}
+            onError={() => setFailedUri(displayUri)}
           />
         ) : (
           <View style={styles.imagePlaceholder}>

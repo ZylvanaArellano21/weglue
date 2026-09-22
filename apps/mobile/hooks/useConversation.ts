@@ -59,7 +59,7 @@ export function useThread(conversationId: string | undefined, channelId: string 
   });
 }
 
-export function useConversationRealtime(conversationId: string | undefined, channelId: string | null) {
+export function useConversationRealtime(conversationId: string | undefined) {
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!conversationId) return;
@@ -84,7 +84,7 @@ export function useConversationRealtime(conversationId: string | undefined, chan
     return () => {
       removeMessageSync();
     };
-  }, [conversationId, channelId, queryClient]);
+  }, [conversationId, queryClient]);
 }
 
 export function useSendPipeline(opts: {

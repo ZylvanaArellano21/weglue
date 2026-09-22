@@ -135,10 +135,11 @@ async function getClubPhotos(clubId: string): Promise<ClubPhoto[]> {
 
   const postIds = [...new Set(pagePhotos.map((p) => p.post_id).filter(Boolean) as string[])];
   if (postIds.length > 0) {
-    const { data: imgRows } = await supabase
+    const { data: imgRows, error: imagesError } = await supabase
       .from("post_images")
       .select("post_id")
       .in("post_id", postIds);
+    if (imagesError) throw imagesError;
     const counts = new Map<string, number>();
     for (const r of (imgRows ?? []) as { post_id: string }[]) {
       counts.set(r.post_id, (counts.get(r.post_id) ?? 0) + 1);
@@ -158,12 +159,12 @@ export async function getClubProfile(
   const supabase = getSupabaseBrowser();
 
   const [
-    { data: club },
-    { count: memberCount },
-    { data: membership },
-    { data: goals },
-    { data: officerRows },
-    { data: eventRows },
+    { data: club, error: clubError },
+    { count: memberCount, error: countError },
+    { data: membership, error: membershipError },
+    { data: goals, error: goalsError },
+    { data: officerRows, error: officersError },
+    { data: eventRows, error: eventsError },
     photoRows,
     gluemates,
   ] = await Promise.all([
@@ -173,7 +174,7 @@ export async function getClubProfile(
         "id, name, handle, description, avatar_url, banner_url, meeting_day, meeting_time_start, meeting_time_end, meeting_location, meeting_building, meeting_room, meeting_schedule"
       )
       .eq("id", clubId)
-      .single(),
+      .maybeSingle(),
     supabase.from("club_members").select("id", { count: "exact", head: true }).eq("club_id", clubId),
     supabase
       .from("club_members")
@@ -198,6 +199,12 @@ export async function getClubProfile(
     getClubPhotos(clubId),
     getClubGluemates(clubId, userId),
   ]);
+  if (clubError) throw clubError;
+  if (countError) throw countError;
+  if (membershipError) throw membershipError;
+  if (goalsError) throw goalsError;
+  if (officersError) throw officersError;
+  if (eventsError) throw eventsError;
 
   if (!club) return null;
 

@@ -36,11 +36,12 @@ export interface FeedPost {
 async function getPostImages(postIds: string[]) {
   const result = new Map<string, { path: string; position: number; width?: number | null; height?: number | null }[]>();
   if (postIds.length === 0) return result;
-  const { data } = await getSupabaseBrowser()
+  const { data, error } = await getSupabaseBrowser()
     .from("post_images")
     .select("post_id, storage_path, position, width, height")
     .in("post_id", postIds)
     .order("position", { ascending: true });
+  if (error) throw error;
   for (const row of (data ?? []) as any[]) {
     const images = result.get(row.post_id) ?? [];
     images.push({ path: row.storage_path, position: Number(row.position), width: row.width ?? null, height: row.height ?? null });
@@ -95,11 +96,12 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
   const supabase = getSupabaseBrowser();
   const offset = page * POSTS_PAGE_SIZE;
 
-  const { data: myProfile } = await supabase
+  const { data: myProfile, error: profileError } = await supabase
     .from("profiles")
     .select("university")
     .eq("id", userId)
     .single();
+  if (profileError) throw profileError;
 
   const myUniversity: string | null = (myProfile as any)?.university ?? null;
 
@@ -118,8 +120,8 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
   if (myUniversity) postsQuery = postsQuery.eq("profiles.university", myUniversity);
 
   const [
-    { data: followedRows },
-    { data: followerRows },
+    { data: followedRows, error: followsError },
+    { data: followerRows, error: followersError },
     { data: rawPosts, error },
   ] = await Promise.all([
     supabase.from("follows").select("following_id, status").eq("follower_id", userId),
@@ -130,6 +132,8 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
       .eq("status", "accepted"),
     postsQuery,
   ]);
+  if (followsError) throw followsError;
+  if (followersError) throw followersError;
 
   const followedIds = ((followedRows ?? []) as any[])
     .filter((r) => r.status === "accepted")
@@ -138,12 +142,13 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
     .filter((r) => r.status === "pending")
     .map((r) => r.following_id);
   const followerIds = ((followerRows ?? []) as any[]).map((r) => r.follower_id);
-  if (error || !rawPosts) return [];
+  if (error) throw error;
+  if (!rawPosts) return [];
 
   const postIds = (rawPosts as any[]).map((p) => p.id);
   const authorIds = [...new Set((rawPosts as any[]).map((p) => p.author_id))];
 
-  const [{ data: likesRows }, { data: commentsRows }, { data: privacyRows }, { data: extraTagRows }, imageMap] =
+  const [{ data: likesRows, error: likesError }, { data: commentsRows, error: commentsError }, { data: privacyRows, error: privacyError }, { data: extraTagRows, error: tagsError }, imageMap] =
     await Promise.all([
       supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
       supabase.from("post_comments").select("post_id").in("post_id", postIds),
@@ -154,6 +159,10 @@ async function getHomePostsFeed(userId: string, page = 0): Promise<FeedPost[]> {
         .in("post_id", postIds),
       getPostImages(postIds),
     ]);
+  if (likesError) throw likesError;
+  if (commentsError) throw commentsError;
+  if (privacyError) throw privacyError;
+  if (tagsError) throw tagsError;
 
   const extraTaggedClubsMap = new Map<string, { id: string; name: string }[]>();
   for (const row of (extraTagRows as any[]) ?? []) {
@@ -231,11 +240,12 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
     )
     .eq("id", postId)
     .maybeSingle();
-  if (error || !p) return null;
+  if (error) throw error;
+  if (!p) return null;
   const post = p as any;
 
   const isSelf = post.author_id === userId;
-  const [{ data: likesRows }, { data: commentsRows }, { data: extraTagRows }, { data: myFollow }, { data: theirFollow }, imageMap] =
+  const [{ data: likesRows, error: likesError }, { data: commentsRows, error: commentsError }, { data: extraTagRows, error: tagsError }, { data: myFollow, error: followError }, { data: theirFollow, error: theirFollowError }, imageMap] =
     await Promise.all([
       supabase.from("post_likes").select("user_id").eq("post_id", postId),
       supabase.from("post_comments").select("id").eq("post_id", postId),
@@ -243,10 +253,10 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
       // Real follow relationship viewer → author (so the media overlay's Follow
       // button reflects actual state instead of always showing "Follow").
       isSelf
-        ? Promise.resolve({ data: null })
+        ? Promise.resolve({ data: null, error: null })
         : supabase.from("follows").select("status").eq("follower_id", userId).eq("following_id", post.author_id).maybeSingle(),
       isSelf
-        ? Promise.resolve({ data: null })
+        ? Promise.resolve({ data: null, error: null })
         : supabase
             .from("follows")
             .select("id")
@@ -256,6 +266,11 @@ async function getPostById(postId: string, userId: string): Promise<FeedPost | n
             .maybeSingle(),
       getPostImages([postId]),
     ]);
+  if (likesError) throw likesError;
+  if (commentsError) throw commentsError;
+  if (tagsError) throw tagsError;
+  if (followError) throw followError;
+  if (theirFollowError) throw theirFollowError;
 
   const myFollowStatus = (myFollow as { status?: string } | null)?.status ?? null;
 

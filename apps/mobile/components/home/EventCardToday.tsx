@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, Pressable, Dimensions } from 'react-native';
+import { View, Text, Image, TouchableOpacity, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../shared/Avatar';
@@ -10,8 +10,6 @@ import { LinkifiedText } from '../shared/LinkifiedText';
 import type { HomeFeedEvent } from '../../services/eventService';
 import type { DesiredRsvp } from '../../hooks/useEventRsvp';
 import { getResizedImageUrl } from '../../lib/imageResize';
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
 
 interface EventCardTodayProps {
   event: HomeFeedEvent;
@@ -31,7 +29,8 @@ function formatTime(timeStr: string): string {
 
 export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onToggleSave, onJoinClub, onRequestLeaveClub }: EventCardTodayProps) {
   const router = useRouter();
-  const [imageError, setImageError] = useState(false);
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const coverUri = getResizedImageUrl(event.cover_image_url, 960, 640);
 
   const handlePressEvent = () => {
     router.push({ pathname: '/home/event-detail', params: { eventId: event.id } });
@@ -114,16 +113,13 @@ export const EventCardToday = memo(function EventCardToday({ event, onRsvp, onTo
       {/* Event Image */}
       <Pressable onPress={handlePressEvent}>
         <View style={{ position: 'relative' }}>
-          {event.cover_image_url && !imageError ? (
+          {coverUri && failedUri !== coverUri ? (
             <Image
-              source={{ uri: getResizedImageUrl(event.cover_image_url, SCREEN_WIDTH * 2, (SCREEN_WIDTH * 2 * 2) / 3) ?? undefined }}
+              source={{ uri: coverUri }}
               style={{ width: '100%', aspectRatio: 3 / 2 }}
               resizeMode="cover"
               fadeDuration={0}
-              onError={(e) => {
-                console.warn('[EventCardToday] Image failed to load:', event.cover_image_url, e.nativeEvent.error);
-                setImageError(true);
-              }}
+              onError={() => setFailedUri(coverUri)}
             />
           ) : (
             <View

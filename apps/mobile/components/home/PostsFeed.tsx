@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, FlatList, RefreshControl, Platform } from 'react-native';
+import { View, Text, FlatList, RefreshControl, Platform, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '@weglue/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useHomePostsFeed, useLikePost } from '../../hooks/useHomePostsFeed';
@@ -24,6 +24,7 @@ export function PostsFeed() {
     data,
     isLoading,
     isError,
+    isFetchNextPageError,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -190,12 +191,15 @@ export function PostsFeed() {
     );
   }
 
-  if (isError) {
+  if (isError && !data) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
         <Text style={{ color: '#6B7280', textAlign: 'center', fontSize: 15 }}>
-          Something went wrong loading posts.
+          Couldn't load posts.
         </Text>
+        <TouchableOpacity onPress={() => void refetch()} style={{ marginTop: 12, padding: 12 }}>
+          <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -238,6 +242,12 @@ export function PostsFeed() {
         data={allPosts}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
+        ListHeaderComponent={isError && data && !isFetchNextPageError ? (
+          <TouchableOpacity onPress={() => void refetch()} style={{ alignItems: 'center', padding: 12 }}>
+            <Text style={{ color: '#6B7280' }}>Couldn't refresh posts.</Text>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
+        ) : null}
         onScrollToIndexFailed={({ index }) => {
           // Post cards vary in height, so distant indexes may not be measured
           // yet — jump to top (new posts are newest-first) as a safe landing.
@@ -250,9 +260,8 @@ export function PostsFeed() {
         showsVerticalScrollIndicator={false}
         // Post cards have variable, unpredictable heights (image ratio, caption
         // length, single vs carousel) so the list has no getItemLayout. Removing
-        // the async image measurement (`stableHeightOnly` on the card's
-        // PhotoCarousel) is what keeps the content height stable; anchoring the
-        // scroll position on top of that (maintainVisibleContentPosition) stops
+        // async image measurement in PhotoCarousel keeps content height stable;
+        // anchoring the scroll position (maintainVisibleContentPosition) stops
         // the user being snapped off the true bottom by any residual estimate
         // shift. iOS only — on Android the prop also holds the scroll far
         // enough from the end that onEndReached never fires.
@@ -260,12 +269,18 @@ export function PostsFeed() {
           Platform.OS === 'ios' ? { minIndexForVisible: 0 } : undefined
         }
         onEndReached={() => {
-          if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+          if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) fetchNextPage();
         }}
         onEndReachedThreshold={0.5}
         windowSize={9}
         maxToRenderPerBatch={6}
         initialNumToRender={6}
+        ListFooterComponent={isFetchNextPageError ? (
+          <TouchableOpacity onPress={() => void fetchNextPage()} style={{ alignItems: 'center', padding: 16 }}>
+            <Text style={{ color: '#6B7280' }}>Couldn't load more posts.</Text>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700', marginTop: 8 }}>Try again</Text>
+          </TouchableOpacity>
+        ) : null}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

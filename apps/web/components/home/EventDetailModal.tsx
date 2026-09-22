@@ -64,7 +64,7 @@ export function EventDetailModal({
 }): JSX.Element {
   const show = useToast();
   useEventRsvpRealtime(eventId, userId); // live attendee count/avatars from other users
-  const { data: event, isLoading } = useEventDetail(eventId, userId);
+  const { data: event, isLoading, isError, refetch } = useEventDetail(eventId, userId);
   const { mutate: rsvp, isPending: rsvping } = useRsvpMutation(userId);
   const { mutate: toggleSave, isPending: saving } = useSaveEventMutation(userId);
   const { mutate: joinClub, isPending: joining } = useJoinClubMutation(userId);
@@ -108,6 +108,11 @@ export function EventDetailModal({
           <div className="h-9 w-2/3 animate-pulse rounded bg-black/5" />
           <div className="h-52 animate-pulse rounded-xl bg-black/5" />
           <div className="h-6 w-1/2 animate-pulse rounded bg-black/5" />
+        </div>
+      ) : isError && !event ? (
+        <div className="p-10 text-center text-[15px] text-gray-500">
+          <p>Couldn't load event.</p>
+          <button type="button" onClick={() => void refetch()} className="mt-3 font-semibold text-teal">Try again</button>
         </div>
       ) : !event ? (
         <p className="p-10 text-center text-[15px] text-gray-500">

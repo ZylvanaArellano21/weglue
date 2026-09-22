@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import {
   getPresetAvatar,
   parseLegacyPresetColor,
@@ -5,6 +8,7 @@ import {
   parseTextAvatar as parseTextAvatarValue,
 } from "@weglue/shared";
 import { getPresetAvatarSrc } from "../../lib/presetAvatarAssets";
+import { avatarImagePixels, getResizedImageUrl } from "../../lib/imageResize";
 
 // Web port of apps/mobile/components/shared/Avatar.tsx. Avatar URLs in the
 // shared backend can be an uploaded image, `preset:<stable-id>`, legacy
@@ -28,11 +32,13 @@ interface AvatarProps {
 }
 
 export function Avatar({ uri, size = 40, name, className }: AvatarProps): JSX.Element {
+  const [failedUri, setFailedUri] = useState<string | null>(null);
   const initials = name ? name.slice(0, 2).toUpperCase() : "?";
   const presetAvatarId = parsePresetAvatarId(uri);
   const presetColor = parsePresetColor(uri);
   const textContent = parseTextAvatar(uri);
-  const isImage = !!uri && !presetAvatarId && !presetColor && !textContent;
+  const isImage = !!uri && failedUri !== uri && !presetAvatarId && !presetColor && !textContent;
+  const displayUri = getResizedImageUrl(uri, avatarImagePixels(size));
 
   const base: React.CSSProperties = {
     width: size,
@@ -98,7 +104,8 @@ export function Avatar({ uri, size = 40, name, className }: AvatarProps): JSX.El
     // eslint-disable-next-line @next/next/no-img-element
     return (
       <img
-        src={uri as string}
+        src={displayUri ?? uri as string}
+        onError={() => setFailedUri(uri as string)}
         alt={name ?? "avatar"}
         className={className}
         style={{ ...base, objectFit: "cover", background: "#E5E7EB" }}

@@ -20,7 +20,7 @@ import { LinkifiedText } from "../shared/LinkifiedText";
 // like toggling is wired here because it is part of the feed hook.
 export function PostsFeed({ userId }: { userId: string }): JSX.Element {
   const router = useRouter();
-  const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
+  const { data, isLoading, isError, isFetchNextPageError, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } =
     useHomePostsFeed(userId);
   const { mutate: like } = useLikePost();
   const [sharePostId, setSharePostId] = useState<string | null>(null);
@@ -38,11 +38,12 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
     );
   }
 
-  if (isError) {
+  if (isError && !data) {
     return (
-      <p className="py-12 text-center text-[15px] text-gray-500">
-        Something went wrong loading posts.
-      </p>
+      <div className="py-12 text-center text-[15px] text-gray-500">
+        <p>Couldn't load posts.</p>
+        <button type="button" onClick={() => void refetch()} className="mt-3 font-semibold text-teal">Try again</button>
+      </div>
     );
   }
 
@@ -58,6 +59,11 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
 
   return (
     <div className="mt-4 space-y-4">
+      {isError && data && !isFetchNextPageError && (
+        <div className="text-center text-sm text-gray-500">Couldn't refresh posts.
+          <button type="button" onClick={() => void refetch()} className="ml-2 font-semibold text-teal">Try again</button>
+        </div>
+      )}
       {posts.map((post) => (
         <PostCard
           key={post.id}
@@ -76,7 +82,12 @@ export function PostsFeed({ userId }: { userId: string }): JSX.Element {
       ))}
 
       {sharePostId && <UnifiedShareSheet userId={userId} content={{ type: "post", id: sharePostId }} title="Share post" onClose={() => setSharePostId(null)} onToast={(message, kind) => show(message, kind === "error" ? "error" : undefined)} />}
-      {hasNextPage && (
+      {isFetchNextPageError && (
+        <div className="text-center text-sm text-gray-500">Couldn't load more posts.
+          <button type="button" onClick={() => void fetchNextPage()} className="ml-2 font-semibold text-teal">Try again</button>
+        </div>
+      )}
+      {hasNextPage && !isFetchNextPageError && (
         <button
           type="button"
           onClick={() => fetchNextPage()}

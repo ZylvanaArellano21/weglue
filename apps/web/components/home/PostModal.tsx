@@ -31,7 +31,7 @@ export function PostModal({
   /** Optional officer moderation controls (Club Media overlay). */
   officerActions?: React.ReactNode;
 }): JSX.Element {
-  const { data: post, isLoading } = usePostDetail(postId, userId);
+  const { data: post, isLoading, isError, refetch } = usePostDetail(postId, userId);
   const { mutate: like } = useLikePost();
   const [shareOpen, setShareOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -44,6 +44,11 @@ export function PostModal({
         <div className="space-y-3 p-6">
           <div className="h-12 w-1/2 animate-pulse rounded bg-black/5" />
           <div className="aspect-square w-full animate-pulse rounded-xl bg-black/5" />
+        </div>
+      ) : isError && !post ? (
+        <div className="p-10 text-center text-[15px] text-gray-500">
+          <p>Couldn't load post.</p>
+          <button type="button" onClick={() => void refetch()} className="mt-3 font-semibold text-teal">Try again</button>
         </div>
       ) : !post ? (
         <p className="p-10 text-center text-[15px] text-gray-500">This post is no longer available.</p>

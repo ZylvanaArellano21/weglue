@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { clampPostImageRatio, POST_IMAGE_FALLBACK_RATIO } from "@weglue/shared";
+import { useRef, useState } from "react";
+import { postMediaDisplayRatioDetail, shouldLoadCarouselImage } from "@weglue/shared";
+import { getResizedImageUrl } from "../../lib/imageResize";
 
 export interface CarouselImage {
   uri: string;
@@ -26,6 +27,8 @@ interface PhotoCarouselProps {
    * height never jumps while swiping.
    */
   naturalRatio?: boolean;
+  /** Show the whole image inside a fixed-ratio frame when dimensions are unknown. */
+  fit?: "cover" | "contain";
   onImageClick?: (index: number) => void;
   /** Fires with the slide index as the user swipes the carousel. */
   onIndexChange?: (index: number) => void;
@@ -35,47 +38,27 @@ interface PhotoCarouselProps {
 
 const PEEK = "13%";
 const GAP = 8;
+const FEED_IMAGE_WIDTH = 960;
 
-// Legacy posts (created before dimensions were stored on post_images) have no
-// known width/height, so their ratio can only be learned by probing the
-// image — an async load. Caching the measured ratio per URL means that only
-// ever happens once per image per page session, not on every remount (e.g.
-// leaving and reopening the feed) — mirrors the identical cache in the mobile
-// PhotoCarousel, which exists to stop a real, reproduced layout-shift bug on
-// the equivalent native list. Unbounded is fine at this scale.
-const measuredRatioCache = new Map<string, number>();
+function feedImageUrl(uri: string, ratio: number, fit: 'cover' | 'contain'): string {
+  return getResizedImageUrl(uri, FEED_IMAGE_WIDTH, Math.round(FEED_IMAGE_WIDTH / ratio), fit) ?? uri;
+}
 
-/** Resolves the display ratio (w/h) from an image's dimensions: known, else
- *  cached-measured, else freshly measured, else the stable fallback — all
- *  clamped. For a carousel this is the first image and the result is the
- *  shared slide ratio. */
-function useSingleImageRatio(image: CarouselImage | undefined, enabled: boolean): number | null {
-  const known =
-    image?.width && image?.height && image.height > 0 ? image.width / image.height : null;
-  const cachedFor = (uri: string | undefined) => (uri ? measuredRatioCache.get(uri) ?? null : null);
-  const [measured, setMeasured] = useState<number | null>(() => cachedFor(image?.uri));
+function SlideImage({ uri, fit, label }: { uri: string; fit: 'cover' | 'contain'; label: string }) {
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  if (failedUri === uri) {
+    return <span className="flex h-full w-full items-center justify-center bg-gray-200 text-sm text-gray-500" role="img" aria-label={label}>Image unavailable</span>;
+  }
+  // The browser can report load failure for <img>; CSS backgrounds cannot.
+  return <img src={uri} alt={label} className="block h-full w-full bg-gray-200" style={{ objectFit: fit }} onError={() => setFailedUri(uri)} />;
+}
 
-  useEffect(() => {
-    setMeasured(cachedFor(image?.uri));
-    if (!enabled || known || !image?.uri || typeof window === "undefined") return;
-    if (measuredRatioCache.has(image.uri)) return;
-    let alive = true;
-    const probe = new window.Image();
-    probe.onload = () => {
-      if (probe.naturalWidth <= 0 || probe.naturalHeight <= 0) return;
-      const ratio = probe.naturalWidth / probe.naturalHeight;
-      measuredRatioCache.set(image.uri, ratio);
-      if (alive) setMeasured(ratio);
-    };
-    probe.src = image.uri;
-    return () => {
-      alive = false;
-      probe.onload = null;
-    };
-  }, [enabled, known, image?.uri]);
-
-  if (!enabled) return null; // caller falls back to the fixed aspectRatio
-  return clampPostImageRatio(known ?? measured ?? POST_IMAGE_FALLBACK_RATIO);
+/** Resolve the first image's ratio synchronously from stored dimensions. */
+function singleImageRatio(image: CarouselImage | undefined, enabled: boolean) {
+  if (!enabled) return null;
+  return postMediaDisplayRatioDetail([
+    image ? { width: image.width ?? null, height: image.height ?? null } : null,
+  ]);
 }
 
 /**
@@ -91,6 +74,7 @@ export function PhotoCarousel({
   images,
   aspectRatio = 4 / 5,
   naturalRatio = false,
+  fit,
   onImageClick,
   onIndexChange,
   rounded = true,
@@ -103,14 +87,14 @@ export function PhotoCarousel({
   const multi = count > 1;
   const radius = rounded ? "rounded-2xl" : "";
 
-  // For posts the ratio comes from the first image (single: that image; multi:
-  // the one shared slide ratio). Events keep the fixed `aspectRatio`.
-  const sharedRatio = useSingleImageRatio(images[0], naturalRatio && count >= 1);
-  const effectiveRatio = sharedRatio ?? aspectRatio;
+  // When requested, use the first image's stored ratio for the shared frame;
+  // otherwise use the caller's fixed aspectRatio.
+  const sharedRatio = singleImageRatio(images[0], naturalRatio && count >= 1);
+  const effectiveRatio = sharedRatio?.ratio ?? aspectRatio;
   const paddingTop = `${(1 / effectiveRatio) * 100}%`;
   // A lone natural-aspect image is shown whole (contain-fit): the box already
   // IS its ratio, so there is nothing to crop. A carousel slide stays cover.
-  const fit = !multi && naturalRatio && sharedRatio ? "bg-contain bg-no-repeat" : "bg-cover";
+  const imageFit = !multi && (fit === "contain" || sharedRatio?.fromStoredDimensions) ? "contain" : "cover";
 
   const onScroll = () => {
     const el = trackRef.current;
@@ -123,18 +107,17 @@ export function PhotoCarousel({
     }
   };
 
-  const Photo = ({ img, i }: { img: CarouselImage; i: number }) => {
-    const inner = (
-      <span
-        className={`block h-full w-full bg-center bg-gray-200 ${fit} ${radius}`}
-        style={{ backgroundImage: `url(${img.uri})` }}
-        role="img"
-        aria-label={`Photo ${i + 1} of ${count}`}
-      />
-    );
+  const renderPhoto = (img: CarouselImage, i: number) => {
+    // Keep every slide in the scroll track, but leave distant slides without
+    // a background URL so the browser cannot request their images yet.
+    const shouldLoad = shouldLoadCarouselImage(i, index);
+    const inner = shouldLoad ? (
+      <SlideImage uri={feedImageUrl(img.uri, effectiveRatio, imageFit)} fit={imageFit} label={`Photo ${i + 1} of ${count}`} />
+    ) : <span className="block h-full w-full bg-gray-200" />;
     return (
       <div
-        className="relative shrink-0"
+        key={i}
+        className={`relative shrink-0 overflow-hidden ${radius}`}
         style={{
           width: multi ? `calc(100% - ${PEEK})` : "100%",
           marginRight: i < count - 1 ? GAP : 0,
@@ -167,7 +150,7 @@ export function PhotoCarousel({
         <div style={{ paddingTop }} />
         {only ? (
           <div className="absolute inset-0">
-            <Photo img={only} i={0} />
+            {renderPhoto(only, 0)}
           </div>
         ) : null}
       </div>
@@ -182,9 +165,7 @@ export function PhotoCarousel({
         className="flex w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ scrollSnapType: "x mandatory" }}
       >
-        {images.map((img, i) => (
-          <Photo key={i} img={img} i={i} />
-        ))}
+        {images.map(renderPhoto)}
       </div>
       <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-semibold text-white">
         {index + 1}/{count}

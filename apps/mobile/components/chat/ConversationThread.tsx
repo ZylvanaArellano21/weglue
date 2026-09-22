@@ -120,7 +120,7 @@ export function ConversationThread({
     () => new Set(restrictedSenderIds ?? []),
     [restrictedSenderIds],
   );
-  useConversationRealtime(conversationId, channelId);
+  useConversationRealtime(conversationId);
 
   const pipeline = useSendPipeline({
     conversationId,

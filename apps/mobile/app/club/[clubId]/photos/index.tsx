@@ -29,7 +29,7 @@ export default function ClubPhotosScreen() {
   const userId = session?.user.id;
   const router = useRouter();
 
-  const { data: items, isLoading } = useClubPhotoFeed(clubId, userId);
+  const { data: items, isLoading, isError, refetch } = useClubPhotoFeed(clubId, userId);
   const photos = items ?? [];
 
   return (
@@ -61,6 +61,13 @@ export default function ClubPhotosScreen() {
           {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <Skeleton key={i} width={PHOTO_SIZE} height={PHOTO_SIZE} borderRadius={0} />
           ))}
+        </View>
+      ) : isError && !items ? (
+        <View style={{ alignItems: 'center', padding: 40 }}>
+          <Text style={{ color: MUTED }}>Couldn't load photos.</Text>
+          <TouchableOpacity onPress={() => void refetch()} style={{ padding: 12 }}>
+            <Text style={{ color: '#0FA6A6', fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList

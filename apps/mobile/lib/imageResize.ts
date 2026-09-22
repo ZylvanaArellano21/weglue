@@ -30,3 +30,12 @@ export function getResizedImageUrl(
 
   return `${renderBase}?${params.toString()}`;
 }
+
+/** Reuse a small set of avatar renders across nearby UI sizes. */
+export function avatarImagePixels(size: number): number {
+  const pixels = size * 2;
+  if (pixels <= 64) return 64;
+  if (pixels <= 128) return 128;
+  if (pixels <= 256) return 256;
+  return 512;
+}

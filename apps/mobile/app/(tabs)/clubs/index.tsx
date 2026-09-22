@@ -44,6 +44,8 @@ function formatEventDate(dateStr: string): string {
 // ─── Club Card ───────────────────────────────────────────────────────────────
 const ClubCard = memo(function ClubCard({ club }: { club: ClubWithNextEvent }) {
   const router = useRouter();
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const coverUri = getResizedImageUrl(club.avatar_url, 512, 287);
   const isOfficer = !!club.officer_role;
   const hasEventThisWeek = !!club.next_event;
 
@@ -69,12 +71,13 @@ const ClubCard = memo(function ClubCard({ club }: { club: ClubWithNextEvent }) {
     >
       {/* Cover image */}
       <View style={{ width: '100%', height: CARD_WIDTH * 0.56, backgroundColor: '#E5E7EB', position: 'relative' }}>
-        {club.avatar_url ? (
+        {coverUri && failedUri !== coverUri ? (
           <Image
-            source={{ uri: getResizedImageUrl(club.avatar_url, CARD_WIDTH * 2, CARD_WIDTH * 0.56 * 2) ?? undefined }}
+            source={{ uri: coverUri }}
             style={{ width: '100%', height: '100%' }}
             resizeMode="cover"
             fadeDuration={0}
+            onError={() => setFailedUri(coverUri)}
           />
         ) : (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' }}>

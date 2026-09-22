@@ -36,6 +36,11 @@ export const POST_CAROUSEL_RATIO = 0.8;
 /** Hard cap on images per post / carousel (matches the compose + DB limit). */
 export const MAX_POST_IMAGES = 5;
 
+/** Mount only the active carousel image and its immediate neighbors. */
+export function shouldLoadCarouselImage(slideIndex: number, activeIndex: number): boolean {
+  return Math.abs(slideIndex - activeIndex) <= 1;
+}
+
 /**
  * Clamp a width/height ratio into the feed-safe display range. A missing or
  * malformed ratio falls back to {@link POST_IMAGE_FALLBACK_RATIO}.

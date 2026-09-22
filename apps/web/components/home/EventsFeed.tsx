@@ -32,7 +32,7 @@ export function EventsFeed({
   const searchParams = useSearchParams();
   const show = useToast();
 
-  const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
+  const { data, isLoading, isError, isFetchNextPageError, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } =
     useHomeEventsFeed(userId);
   const { data: batch } = useClubRecommendations(userId);
 
@@ -106,13 +106,14 @@ export function EventsFeed({
     );
   }
 
-  if (isError) {
+  if (isError && !data) {
     return (
       <div>
         {strip}
-        <p className="py-12 text-center text-[15px] text-gray-500">
-          Something went wrong loading events.
-        </p>
+        <div className="py-12 text-center text-[15px] text-gray-500">
+          <p>Couldn't load events.</p>
+          <button type="button" onClick={() => void refetch()} className="mt-3 font-semibold text-teal">Try again</button>
+        </div>
       </div>
     );
   }
@@ -122,6 +123,11 @@ export function EventsFeed({
   return (
     <div>
       {strip}
+      {isError && data && !isFetchNextPageError && (
+        <div className="py-3 text-center text-sm text-gray-500">Couldn't refresh events.
+          <button type="button" onClick={() => void refetch()} className="ml-2 font-semibold text-teal">Try again</button>
+        </div>
+      )}
       {isEmpty ? (
         <EmptyState
           emoji="🌟"
@@ -157,7 +163,12 @@ export function EventsFeed({
             </section>
           ))}
 
-          {hasNextPage && (
+          {isFetchNextPageError && (
+            <div className="text-center text-sm text-gray-500">Couldn't load more events.
+              <button type="button" onClick={() => void fetchNextPage()} className="ml-2 font-semibold text-teal">Try again</button>
+            </div>
+          )}
+          {hasNextPage && !isFetchNextPageError && (
             <button
               type="button"
               onClick={() => fetchNextPage()}

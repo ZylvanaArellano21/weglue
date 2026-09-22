@@ -90,15 +90,19 @@ export function EventCard({
       </div>
 
       {/* Event image — its own tap target (opens the full-screen photo
-          viewer), independent of the event-details tap targets (title, club
-          row, body) elsewhere on this card. Natural ratio: horizontal stays
-          horizontal, vertical stays vertical, square stays square — never a
-          forced 3:2 crop. */}
+          viewer), independent of the event-details tap targets. Stored
+          dimensions preserve natural height; legacy covers use a stable 3:2. */}
       <div className="relative">
         {event.cover_image_url ? (
           <PhotoCarousel
-            images={[{ uri: event.cover_image_url }]}
-            naturalRatio
+            images={[{
+              uri: event.cover_image_url,
+              width: event.cover_image_width,
+              height: event.cover_image_height,
+            }]}
+            aspectRatio={3 / 2}
+            naturalRatio={!!(event.cover_image_width && event.cover_image_height)}
+            fit="contain"
             rounded={false}
             onImageClick={event.can_open ? () => setViewerOpen(true) : onRestricted}
           />

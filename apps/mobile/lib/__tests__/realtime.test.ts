@@ -9,6 +9,7 @@ const fakeRealtime = vi.hoisted(() => {
     broadcast?: (payload: unknown) => void;
   };
   let channels: Channel[] = [];
+  let throwOnNextSubscribe = false;
   const channel = vi.fn((topic: string) => {
     const ch = { topic } as Channel;
     ch.on = vi.fn((_kind, _config, handler) => {
@@ -16,6 +17,10 @@ const fakeRealtime = vi.hoisted(() => {
       return ch;
     });
     ch.subscribe = vi.fn((handler) => {
+      if (throwOnNextSubscribe) {
+        throwOnNextSubscribe = false;
+        throw new Error('subscribe failed');
+      }
       ch.status = handler;
       return ch;
     });
@@ -35,7 +40,8 @@ const fakeRealtime = vi.hoisted(() => {
   };
   return {
     client,
-    reset: () => { channels = []; channel.mockClear(); removeChannel.mockClear(); },
+    failNextSubscribe: () => { throwOnNextSubscribe = true; },
+    reset: () => { channels = []; throwOnNextSubscribe = false; channel.mockClear(); removeChannel.mockClear(); },
   };
 });
 
@@ -55,6 +61,16 @@ async function subscribe(kind: 'single' | 'events') {
 }
 
 describe('realtime cleanup', () => {
+  it('removes a channel when setup throws after channel creation', async () => {
+    fakeRealtime.failNextSubscribe();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(createSafeChannel('failed-setup', [])).toBeNull();
+      await vi.waitFor(() => expect(fakeRealtime.client.getChannels()).toHaveLength(0));
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it('removes a normal channel without leaving a zombie or removing another channel', async () => {
     const first = createSafeChannel('first', []);
     const second = createSafeChannel('second', []);
@@ -96,6 +112,33 @@ describe('realtime cleanup', () => {
     await vi.waitFor(() => expect(fakeRealtime.client.getChannels()).toHaveLength(0));
   });
 
+  it('waits for a previous private-topic leave before remounting', async () => {
+    const { channel: first, cleanup } = await subscribe('single');
+    let finish!: () => void;
+    fakeRealtime.client.removeChannel.mockImplementationOnce((ch) => new Promise((resolve) => {
+      finish = () => {
+        fakeRealtime.client.getChannels().splice(fakeRealtime.client.getChannels().indexOf(ch), 1);
+        resolve('ok');
+      };
+    }));
+    cleanup();
+    const nextCleanup = subscribeBroadcast('sync:access:user', 'invalidate', () => {});
+    expect(fakeRealtime.client.getChannels()).toEqual([first]);
+    finish();
+    await vi.waitFor(() => expect(fakeRealtime.client.getChannels()).toHaveLength(1));
+    expect(fakeRealtime.client.getChannels()[0]).not.toBe(first);
+    nextCleanup();
+    await vi.waitFor(() => expect(fakeRealtime.client.getChannels()).toHaveLength(0));
+  });
+
+  it('retries a failed leave once and removes the registered channel', async () => {
+    const channel = createSafeChannel('failed-leave', [])!;
+    fakeRealtime.client.removeChannel.mockImplementationOnce(async () => 'error');
+    removeSafeChannel(channel);
+    await vi.waitFor(() => expect(fakeRealtime.client.getChannels()).toHaveLength(0));
+    expect(fakeRealtime.client.removeChannel).toHaveBeenCalledTimes(2);
+  });
+
   it('uses receipt and reconnect only to trigger canonical recovery', async () => {
     const { channel, cleanup, received } = await subscribe('single');
     channel.status?.('SUBSCRIBED');
@@ -108,6 +151,19 @@ describe('realtime cleanup', () => {
 });
 
 describe.each(['single', 'events'] as const)('%s private broadcast', (kind) => {
+  it('removes its channel if subscription setup throws', async () => {
+    fakeRealtime.failNextSubscribe();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const cleanup = kind === 'single'
+        ? subscribeBroadcast('sync:failed:user', 'invalidate', () => {})
+        : subscribeBroadcastEvents('sync:failed:user', { invalidate: () => {} });
+      await vi.waitFor(() => expect(fakeRealtime.client.getChannels()).toHaveLength(0));
+      cleanup();
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it.each(['CHANNEL_ERROR', 'TIMED_OUT'])('tears down permanently on unauthorized %s', async (status) => {
     const { channel, cleanup } = await subscribe(kind);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

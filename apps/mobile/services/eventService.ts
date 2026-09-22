@@ -62,6 +62,8 @@ export interface HomeFeedEvent {
   title: string;
   description: string | null;
   cover_image_url: string | null;
+  cover_image_width?: number | null;
+  cover_image_height?: number | null;
   event_date: string;
   start_time: string;
   end_time: string;
@@ -108,16 +110,20 @@ export async function getHomeEventsFeed(
   const offset = page * EVENTS_PAGE_SIZE;
 
   const [
-    { data: memberships },
-    { data: userActivities },
-    { data: savedEvents },
-    { data: userRsvps },
+    { data: memberships, error: membershipsError },
+    { data: userActivities, error: activitiesError },
+    { data: savedEvents, error: savedError },
+    { data: userRsvps, error: rsvpsError },
   ] = await Promise.all([
     supabase.from('club_members').select('club_id, role').eq('user_id', userId),
     supabase.from('user_activities').select('activity').eq('user_id', userId),
     supabase.from('saved_events').select('event_id').eq('user_id', userId),
     supabase.from('event_rsvps').select('event_id, status').eq('user_id', userId),
   ]);
+  if (membershipsError) throw membershipsError;
+  if (activitiesError) throw activitiesError;
+  if (savedError) throw savedError;
+  if (rsvpsError) throw rsvpsError;
 
   const joinedClubIds = new Set((memberships ?? []).map((m: any) => m.club_id));
   // Officers of a club always see that club's events, regardless of visibility
@@ -135,6 +141,7 @@ export async function getHomeEventsFeed(
       id, title, description, cover_image_url, event_date, start_time, end_time, event_end_at,
       location, building, room, club_id, created_by, visibility, specific_user_ids,
       clubs!inner(id, name, avatar_url),
+      event_images(position, width, height),
       event_interests(interest),
       event_activities(activity)
     `)
@@ -143,15 +150,17 @@ export async function getHomeEventsFeed(
     .order('id', { ascending: true })
     .range(offset, offset + EVENTS_PAGE_SIZE - 1);
 
-  if (error || !rawEvents) return { sections: [], hasMore: false };
+  if (error) throw error;
+  if (!rawEvents) return { sections: [], hasMore: false };
 
   const eventIds = (rawEvents as any[]).map((e) => e.id);
 
-  const { data: goingRsvps } = await supabase
+  const { data: goingRsvps, error: attendeesError } = await supabase
     .from('event_rsvps')
     .select('event_id, user_id, profiles!inner(id, username, avatar_url)')
     .in('event_id', eventIds)
     .eq('status', 'going');
+  if (attendeesError) throw attendeesError;
 
   const attendeeCountMap = new Map<string, number>();
   const attendeePreviewMap = new Map<string, AttendeePreview[]>();
@@ -209,6 +218,8 @@ export async function getHomeEventsFeed(
       title: e.title,
       description: e.description,
       cover_image_url: e.cover_image_url,
+      cover_image_width: e.event_images?.find((image: any) => image.position === 0)?.width ?? null,
+      cover_image_height: e.event_images?.find((image: any) => image.position === 0)?.height ?? null,
       event_date: e.event_date,
       start_time: e.start_time,
       end_time: e.end_time,
@@ -500,7 +511,8 @@ export async function getEventForEdit(eventId: string): Promise<EventForEdit | n
     .eq('id', eventId)
     .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) throw error;
+  if (!data) return null;
   const e = data as any;
   const imagesByEvent = await getEventImages([eventId]);
   const images = imagesByEvent.get(eventId) ?? (e.cover_image_url ? [{ path: e.cover_image_url, position: 0, width: null, height: null }] : []);
@@ -686,7 +698,7 @@ export async function getEventDetail(
   eventId: string,
   userId: string,
 ): Promise<EventDetail | null> {
-  const [{ data: event }, { data: savedRow }, { data: rsvpRow }] =
+  const [{ data: event, error: eventError }, { data: savedRow, error: savedError }, { data: rsvpRow, error: rsvpError }] =
     await Promise.all([
       supabase
         .from('events')
@@ -696,7 +708,7 @@ export async function getEventDetail(
           clubs!inner(id, name, avatar_url)
         `)
         .eq('id', eventId)
-        .single(),
+        .maybeSingle(),
       supabase
         .from('saved_events')
         .select('id')
@@ -710,10 +722,13 @@ export async function getEventDetail(
         .eq('event_id', eventId)
         .maybeSingle(),
     ]);
+  if (eventError) throw eventError;
+  if (savedError) throw savedError;
+  if (rsvpError) throw rsvpError;
 
   if (!event) return null;
 
-  const [{ data: goingRsvps }, { data: memberCheck }, imagesByEvent] = await Promise.all([
+  const [{ data: goingRsvps, error: attendeesError }, { data: memberCheck, error: membershipError }, imagesByEvent] = await Promise.all([
     supabase
       .from('event_rsvps')
       .select('user_id, profiles!inner(id, username, avatar_url)')
@@ -727,6 +742,8 @@ export async function getEventDetail(
       .maybeSingle(),
     getEventImages([eventId]),
   ]);
+  if (attendeesError) throw attendeesError;
+  if (membershipError) throw membershipError;
   const images = imagesByEvent.get(eventId) ??
     (event.cover_image_url ? [{ path: event.cover_image_url, position: 0, width: null, height: null }] : []);
 
@@ -789,11 +806,12 @@ export async function getEventAttendees(
   const PAGE_SIZE = 20;
   const offset = page * PAGE_SIZE;
 
-  const { data: goingRsvps } = await supabase
+  const { data: goingRsvps, error: attendeesError } = await supabase
     .from('event_rsvps')
     .select('user_id, profiles!inner(id, username, full_name, avatar_url)')
     .eq('event_id', eventId)
     .eq('status', 'going');
+  if (attendeesError) throw attendeesError;
 
   if (!goingRsvps || goingRsvps.length === 0) {
     return { attendees: [], total: 0 };
@@ -801,18 +819,20 @@ export async function getEventAttendees(
 
   const attendeeIds = (goingRsvps as any[]).map((r) => r.profiles.id);
 
-  const { data: following } = await supabase
+  const { data: following, error: followingError } = await supabase
     .from('follows')
     .select('following_id, status')
     .eq('follower_id', viewerUserId)
     .in('following_id', attendeeIds);
+  if (followingError) throw followingError;
 
-  const { data: reverseFollows } = await supabase
+  const { data: reverseFollows, error: reverseFollowsError } = await supabase
     .from('follows')
     .select('follower_id')
     .eq('following_id', viewerUserId)
     .in('follower_id', attendeeIds)
     .eq('status', 'accepted');
+  if (reverseFollowsError) throw reverseFollowsError;
 
   const followingMap = new Map(
     (following ?? []).map((f: any) => [f.following_id, f.status]),

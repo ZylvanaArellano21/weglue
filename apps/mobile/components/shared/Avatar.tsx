@@ -1,6 +1,6 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Image, View, Text } from 'react-native';
-import { getResizedImageUrl } from '../../lib/imageResize';
+import { avatarImagePixels, getResizedImageUrl } from '../../lib/imageResize';
 import {
   getPresetAvatar,
   parseLegacyPresetColor,
@@ -31,7 +31,8 @@ export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarP
   const presetAvatarId = parsePresetAvatarId(uri);
   const presetColor = parsePresetColor(uri);
   const textContent = parseTextAvatar(uri);
-  const resizedUri = getResizedImageUrl(uri, size * 2);
+  const resizedUri = getResizedImageUrl(uri, avatarImagePixels(size));
+  const [failedUri, setFailedUri] = useState<string | null>(null);
 
   if (presetAvatarId) {
     const avatar = getPresetAvatar(presetAvatarId);
@@ -106,12 +107,13 @@ export const Avatar = memo(function Avatar({ uri, size = 40, username }: AvatarP
   }
 
   // Real image URI
-  if (resizedUri) {
+  if (resizedUri && failedUri !== resizedUri) {
     return (
       <Image
         source={{ uri: resizedUri }}
         resizeMode="cover"
         fadeDuration={0}
+        onError={() => setFailedUri(resizedUri)}
         style={{
           width: size,
           height: size,
