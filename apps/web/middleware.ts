@@ -9,6 +9,7 @@ import {
 import { platformAdminRedirectPath } from "./lib/auth/platformAdminGuard";
 import { storeTargetFromUserAgent, storeUrlFor } from "./lib/deviceRouting";
 import {
+  isRestrictionExemptPath,
   restrictionRedirectPath,
   shouldLeaveRestrictedShell,
   type ServerAccessState,
@@ -59,7 +60,105 @@ const PROTECTED_PREFIXES = [
   "/settings/",
 ];
 
+// These routes are public and are already explicitly exempt from both the
+// platform-admin and restricted-student guards. They never need middleware
+// identity, so keep Supabase completely out of their availability path.
+const PUBLIC_NO_SUPABASE_ROUTES = [
+  "/privacy-policy",
+  "/terms",
+  "/terms-of-service",
+  "/child-safety-standards",
+  "/delete-account",
+];
+
+// Temporary production diagnostics. Keep the thresholds high enough that
+// routine traffic stays quiet; remove this block after the P0 is verified.
+const MIDDLEWARE_PERF_PREFIX = "[MiddlewarePerf]";
+const SLOW_OPERATION_MS = 500;
+const SLOW_TOTAL_MS = 1_000;
+const REDACTED_ADMIN_PATH = "[REDACTED_ADMIN_PATH]";
+
+function safeLogPathname(pathname: string): string {
+  const entryPath = adminEntryPath();
+  const isPrivateEntry =
+    !!entryPath && (pathname === entryPath || pathname.startsWith(`${entryPath}/`));
+  const isAdminPath = pathname === "/admin" || pathname.startsWith("/admin/");
+  const isInternalAdminPath =
+    pathname === ADMIN_ENTRY_INTERNAL_ROUTE ||
+    pathname.startsWith(`${ADMIN_ENTRY_INTERNAL_ROUTE}/`) ||
+    pathname === ADMIN_NOT_FOUND_ROUTE ||
+    pathname.startsWith(`${ADMIN_NOT_FOUND_ROUTE}/`);
+
+  return isPrivateEntry || isAdminPath || isInternalAdminPath
+    ? REDACTED_ADMIN_PATH
+    : pathname;
+}
+
+function logSlowOperation(label: string, startedAt: number, pathname: string): void {
+  const durationMs = Date.now() - startedAt;
+  if (durationMs >= SLOW_OPERATION_MS) {
+    console.warn(
+      `${MIDDLEWARE_PERF_PREFIX} ${label} ${durationMs}ms pathname=${safeLogPathname(pathname)}`
+    );
+  }
+}
+
+async function timeOperation<T>(
+  label: string,
+  pathname: string,
+  operation: () => PromiseLike<T>
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await operation();
+  } finally {
+    logSlowOperation(label, startedAt, pathname);
+  }
+}
+
+function isPublicNoSupabaseRoute(pathname: string): boolean {
+  return PUBLIC_NO_SUPABASE_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
+}
+
+/**
+ * Cookie presence is used only to avoid auth work on the public landing page;
+ * it never authenticates or authorizes a request. A possible session still
+ * goes through getUser(), including chunked @supabase/ssr cookies.
+ */
+function hasPossibleSupabaseSession(request: NextRequest): boolean {
+  return request.cookies
+    .getAll()
+    .some(({ name }) => name.startsWith("sb-") && name.includes("-auth-token"));
+}
+
+function requiresAccessState(pathname: string): boolean {
+  // The shell must re-check so a lifted/lapsed restriction can leave it.
+  return (
+    pathname === "/restricted" ||
+    pathname.startsWith("/restricted/") ||
+    !isRestrictionExemptPath(pathname)
+  );
+}
+
 export async function middleware(request: NextRequest) {
+  const startedAt = Date.now();
+  try {
+    return await routeRequest(request);
+  } finally {
+    const durationMs = Date.now() - startedAt;
+    if (durationMs >= SLOW_TOTAL_MS) {
+      console.warn(
+        `${MIDDLEWARE_PERF_PREFIX} total ${durationMs}ms pathname=${safeLogPathname(
+          request.nextUrl.pathname
+        )}`
+      );
+    }
+  }
+}
+
+async function routeRequest(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Always allow Next.js internals, API routes, and static assets through
@@ -84,6 +183,18 @@ export async function middleware(request: NextRequest) {
     if (store) {
       return NextResponse.redirect(storeUrlFor(store));
     }
+    return NextResponse.next({ request });
+  }
+
+  // The marketing landing page is public, but a validated signed-in identity
+  // currently participates in platform-admin and restricted-account routing.
+  // Only requests with no possible Supabase session can skip that behavior.
+  // The legal/account-exit routes below are exempt from both guards for every
+  // visitor, so they can always bypass Supabase.
+  if (
+    isPublicNoSupabaseRoute(pathname) ||
+    (pathname === "/" && !hasPossibleSupabaseSession(request))
+  ) {
     return NextResponse.next({ request });
   }
 
@@ -157,7 +268,7 @@ export async function middleware(request: NextRequest) {
   // getUser() validates the JWT on every request — required for secure middleware
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await timeOperation("getUser", pathname, () => supabase.auth.getUser());
 
   // ── Admin portal: hardened routing + non-cacheable, non-indexable headers ──
   // Runs before the ordinary app routing so /admin has its own security posture.
@@ -178,21 +289,25 @@ export async function middleware(request: NextRequest) {
 
   // ── Administrator restriction containment (Day 10B2) ──────────────────────
   //
-  // Runs for every signed-in student, on EVERY request — not just the
+  // Runs for signed-in students on every non-exempt route — not just the
   // PROTECTED_PREFIXES set — so a deep link, a client-side navigation, or a
-  // browser refresh all land on the restricted shell. Server actions and route
+  // browser refresh all land on the restricted shell. Public legal/account-exit
+  // routes are explicitly exempt in restrictionGuard. Server actions and route
   // handlers are additionally denied by the database itself (migration 058),
   // so this is containment and clarity, never the sole control.
   //
-  // One RPC per request for signed-in students. It is the SAME predicate the
-  // enforcement layer uses, so the routing decision and the database can never
-  // disagree, and it rides a partial index covering only restricted accounts.
-  if (user) {
+  // One RPC per relevant request for signed-in students. It is the SAME
+  // predicate the enforcement layer uses, so the routing decision and the
+  // database can never disagree, and it rides a partial index covering only
+  // restricted accounts.
+  if (user && requiresAccessState(pathname)) {
     // `my_access_state()` — NOT `get_account_access_state(uuid)`. The per-user
     // probe is service_role only so students cannot enumerate other accounts;
     // this one is scoped to auth.uid() inside the function body and returns the
     // generic 'restricted' rather than naming the internal classification.
-    const { data: accessPayload } = await supabase.rpc("my_access_state");
+    const { data: accessPayload } = await timeOperation("accessState", pathname, () =>
+      supabase.rpc("my_access_state")
+    );
     const state = ((accessPayload as { state?: string } | null)?.state ?? null) as
       | ServerAccessState
       | null;
@@ -260,11 +375,13 @@ export async function middleware(request: NextRequest) {
   // Verified session. An account that never finished We Glue onboarding must
   // complete it (username + survey) before entering the app.
   if (isProtected || isAuthFlow) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("onboarding_completed")
-      .eq("id", user.id)
-      .maybeSingle();
+    const { data: profile } = await timeOperation("onboardingProfile", pathname, () =>
+      supabase
+        .from("profiles")
+        .select("onboarding_completed")
+        .eq("id", user.id)
+        .maybeSingle()
+    );
 
     const onboardingPending = profile?.onboarding_completed === false;
 
@@ -385,6 +502,6 @@ export const config = {
      * - favicon.ico
      * - public static assets
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|map|woff|woff2|ttf|otf|eot)$).*)",
   ],
 };
