@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import {
   getPresetAvatar,
   parseLegacyPresetColor,
@@ -128,6 +131,3 @@ export function Avatar({ uri, size = 40, name, className }: AvatarProps): JSX.El
     </span>
   );
 }
-"use client";
-
-import { useState } from "react";

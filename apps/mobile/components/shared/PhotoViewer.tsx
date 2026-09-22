@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, Modal, FlatList, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { shouldLoadCarouselImage } from '@weglue/shared';
 
 // ─── Full-screen photo viewer for posts + events ─────────────────────────────
 // Deliberately separate from components/chat/MediaViewer.tsx (which is
@@ -35,13 +36,59 @@ interface Props {
 export function PhotoViewer({ visible, images, initialIndex, onClose }: Props) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [index, setIndex] = useState(initialIndex);
+  const clampedInitialIndex = Math.max(0, Math.min(initialIndex, Math.max(images.length - 1, 0)));
+  const [index, setIndex] = useState(clampedInitialIndex);
+  const [loadIndex, setLoadIndex] = useState(clampedInitialIndex);
+  const loadIndexRef = useRef(clampedInitialIndex);
+  const wasVisibleRef = useRef(false);
+  const lastInitialIndexRef = useRef(clampedInitialIndex);
+
+  // Use the new opening index synchronously so a retained viewer cannot render
+  // one frame with the previous session's lazy-load window.
+  const needsInitialSync =
+    visible && (!wasVisibleRef.current || lastInitialIndexRef.current !== clampedInitialIndex);
+  const effectiveIndex = needsInitialSync ? clampedInitialIndex : index;
+  const effectiveLoadIndex = needsInitialSync ? clampedInitialIndex : loadIndex;
 
   useEffect(() => {
-    if (visible) setIndex(Math.max(0, Math.min(initialIndex, images.length - 1)));
-  }, [visible, initialIndex, images.length]);
+    const opening = visible && !wasVisibleRef.current;
+    const openingIndexChanged = visible && lastInitialIndexRef.current !== clampedInitialIndex;
+
+    if (opening || openingIndexChanged) {
+      loadIndexRef.current = clampedInitialIndex;
+      setIndex(clampedInitialIndex);
+      setLoadIndex(clampedInitialIndex);
+    }
+
+    wasVisibleRef.current = visible;
+    lastInitialIndexRef.current = clampedInitialIndex;
+  }, [visible, clampedInitialIndex]);
 
   if (!visible || images.length === 0) return null;
+
+  const pageIndexFromOffset = (offsetX: number): number | null => {
+    if (width <= 0 || images.length === 0 || !Number.isFinite(offsetX)) return null;
+    const nearestIndex = Math.round(offsetX / width);
+    if (!Number.isFinite(nearestIndex)) return null;
+    return Math.max(0, Math.min(nearestIndex, images.length - 1));
+  };
+
+  const updateLoadIndexDuringScroll = (offsetX: number) => {
+    const nextLoadIndex = pageIndexFromOffset(offsetX);
+    if (nextLoadIndex === null || nextLoadIndex === loadIndexRef.current) return;
+
+    loadIndexRef.current = nextLoadIndex;
+    setLoadIndex((current) => (current === nextLoadIndex ? current : nextLoadIndex));
+  };
+
+  const settleIndexAfterMomentum = (offsetX: number) => {
+    const finalIndex = pageIndexFromOffset(offsetX);
+    if (finalIndex === null) return;
+
+    loadIndexRef.current = finalIndex;
+    setIndex((current) => (current === finalIndex ? current : finalIndex));
+    setLoadIndex((current) => (current === finalIndex ? current : finalIndex));
+  };
 
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -49,16 +96,21 @@ export function PhotoViewer({ visible, images, initialIndex, onClose }: Props) {
         <FlatList
           key={`w${Math.round(width)}`}
           data={images}
+          extraData={effectiveLoadIndex}
           horizontal
           pagingEnabled
-          initialScrollIndex={Math.max(0, Math.min(initialIndex, images.length - 1))}
+          initialScrollIndex={clampedInitialIndex}
           getItemLayout={(_d, i) => ({ length: width, offset: width * i, index: i })}
           keyExtractor={(item, i) => `${item.uri}:${i}`}
           showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
-          renderItem={({ item }) => (
+          onScroll={(e) => updateLoadIndexDuringScroll(e.nativeEvent.contentOffset.x)}
+          scrollEventThrottle={16}
+          onMomentumScrollEnd={(e) => settleIndexAfterMomentum(e.nativeEvent.contentOffset.x)}
+          renderItem={({ item, index: itemIndex }) => (
             <View style={[styles.page, { width, height }]}>
-              <ViewerImage uri={item.uri} width={width} height={height} />
+              {shouldLoadCarouselImage(itemIndex, effectiveLoadIndex) ? (
+                <ViewerImage uri={item.uri} width={width} height={height} />
+              ) : null}
             </View>
           )}
         />
@@ -75,7 +127,7 @@ export function PhotoViewer({ visible, images, initialIndex, onClose }: Props) {
           </TouchableOpacity>
           {images.length > 1 && (
             <Text style={styles.counter}>
-              {index + 1} / {images.length}
+              {effectiveIndex + 1} / {images.length}
             </Text>
           )}
         </View>
