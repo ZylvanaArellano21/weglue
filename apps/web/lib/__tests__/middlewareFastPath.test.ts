@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
   const getUser = vi.fn();
@@ -32,6 +32,10 @@ beforeEach(() => {
   h.getUser.mockResolvedValue({ data: { user: null } });
   h.rpc.mockResolvedValue({ data: { state: "active" } });
   h.maybeSingle.mockResolvedValue({ data: { onboarding_completed: true } });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("middleware Supabase fast paths", () => {
@@ -111,4 +115,42 @@ describe("middleware Supabase fast paths", () => {
     expect(h.getUser).toHaveBeenCalledTimes(1);
     expect(h.rpc).not.toHaveBeenCalled();
   });
+
+  it.each([
+    "/admin/users/11111111-1111-1111-1111-111111111111",
+    "/wgx-entry/private",
+    "/wgx-404/private",
+  ])("redacts admin path %s from slow-request logs", async (pathname) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(1_000);
+
+    await middleware(request(pathname));
+
+    expect(warn).toHaveBeenCalledWith(
+      "[MiddlewarePerf] total 1000ms pathname=[REDACTED_ADMIN_PATH]"
+    );
+    expect(warn.mock.calls.flat().join(" ")).not.toContain(pathname);
+  });
+
+  it.each(["/admin-private-entry-xyz", "/admin-private-entry-xyz/nested"])(
+    "redacts configured private entry path %s from slow-request logs",
+    async (pathname) => {
+      const previousEntryPath = process.env.ADMIN_ENTRY_PATH;
+      process.env.ADMIN_ENTRY_PATH = "/admin-private-entry-xyz";
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(1_000);
+
+      try {
+        await middleware(request(pathname));
+      } finally {
+        if (previousEntryPath === undefined) delete process.env.ADMIN_ENTRY_PATH;
+        else process.env.ADMIN_ENTRY_PATH = previousEntryPath;
+      }
+
+      expect(warn).toHaveBeenCalledWith(
+        "[MiddlewarePerf] total 1000ms pathname=[REDACTED_ADMIN_PATH]"
+      );
+      expect(warn.mock.calls.flat().join(" ")).not.toContain("admin-private-entry-xyz");
+    }
+  );
 });

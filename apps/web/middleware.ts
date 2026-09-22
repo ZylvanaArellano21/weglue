@@ -76,11 +76,30 @@ const PUBLIC_NO_SUPABASE_ROUTES = [
 const MIDDLEWARE_PERF_PREFIX = "[MiddlewarePerf]";
 const SLOW_OPERATION_MS = 500;
 const SLOW_TOTAL_MS = 1_000;
+const REDACTED_ADMIN_PATH = "[REDACTED_ADMIN_PATH]";
+
+function safeLogPathname(pathname: string): string {
+  const entryPath = adminEntryPath();
+  const isPrivateEntry =
+    !!entryPath && (pathname === entryPath || pathname.startsWith(`${entryPath}/`));
+  const isAdminPath = pathname === "/admin" || pathname.startsWith("/admin/");
+  const isInternalAdminPath =
+    pathname === ADMIN_ENTRY_INTERNAL_ROUTE ||
+    pathname.startsWith(`${ADMIN_ENTRY_INTERNAL_ROUTE}/`) ||
+    pathname === ADMIN_NOT_FOUND_ROUTE ||
+    pathname.startsWith(`${ADMIN_NOT_FOUND_ROUTE}/`);
+
+  return isPrivateEntry || isAdminPath || isInternalAdminPath
+    ? REDACTED_ADMIN_PATH
+    : pathname;
+}
 
 function logSlowOperation(label: string, startedAt: number, pathname: string): void {
   const durationMs = Date.now() - startedAt;
   if (durationMs >= SLOW_OPERATION_MS) {
-    console.warn(`${MIDDLEWARE_PERF_PREFIX} ${label} ${durationMs}ms pathname=${pathname}`);
+    console.warn(
+      `${MIDDLEWARE_PERF_PREFIX} ${label} ${durationMs}ms pathname=${safeLogPathname(pathname)}`
+    );
   }
 }
 
@@ -131,7 +150,9 @@ export async function middleware(request: NextRequest) {
     const durationMs = Date.now() - startedAt;
     if (durationMs >= SLOW_TOTAL_MS) {
       console.warn(
-        `${MIDDLEWARE_PERF_PREFIX} total ${durationMs}ms pathname=${request.nextUrl.pathname}`
+        `${MIDDLEWARE_PERF_PREFIX} total ${durationMs}ms pathname=${safeLogPathname(
+          request.nextUrl.pathname
+        )}`
       );
     }
   }
