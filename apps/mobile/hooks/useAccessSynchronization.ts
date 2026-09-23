@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { usePathname } from 'expo-router';
 import { subscribeBroadcast } from '../lib/realtime';
 
 /**
@@ -12,7 +11,6 @@ export function useAccessSynchronization(
   enabled: boolean,
   refreshAccess: () => Promise<void>,
 ): void {
-  const pathname = usePathname();
   const refreshRef = useRef(refreshAccess);
 
   useEffect(() => {
@@ -21,15 +19,18 @@ export function useAccessSynchronization(
 
   useEffect(() => {
     if (!enabled || !userId) return;
+    let hasSubscribed = false;
     return subscribeBroadcast(
       `sync:access:${userId}`,
       'invalidate',
       () => void refreshRef.current(),
-      () => void refreshRef.current(),
+      () => {
+        // The root startup gate already performs the canonical first check.
+        // Only a later SUBSCRIBED transition represents a reconnect that may
+        // have missed an invalidation while the socket was unavailable.
+        if (hasSubscribed) void refreshRef.current();
+        hasSubscribed = true;
+      },
     );
   }, [enabled, userId]);
-
-  useEffect(() => {
-    if (enabled && userId) void refreshRef.current();
-  }, [enabled, pathname, userId]);
 }

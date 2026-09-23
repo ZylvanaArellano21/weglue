@@ -22,25 +22,26 @@ import { useBlockSynchronization } from '../../hooks/useBlocking';
 import { getPermissionState } from '../../lib/notifications/permissions';
 import { ForegroundNotificationBanner } from './ForegroundNotificationBanner';
 
-export function PushNotificationsHost() {
+export function PushNotificationsHost({ startupReady = true }: { startupReady?: boolean }) {
   // Selector, not `useAuthStore()`: this host is mounted once at the app root
   // for the whole session lifetime, so a bare destructure re-rendered it (and
   // its three realtime-hook children below) on every unrelated store field
   // change, not just when the session changes.
   const userId = useAuthStore((s) => s.session?.user.id);
+  const synchronizedUserId = startupReady ? userId : undefined;
   usePushNotifications();
   // Owns the single `sync:message-inbox:<uid>` broadcast subscription, which
   // now also carries the `new_message` foreground-banner signal for push-only
   // message types (dm_message/group_message/club_chat_message) — replacing the
   // old broad `messages` INSERT postgres_changes subscription.
-  useUnreadSummary(userId);
+  useUnreadSummary(synchronizedUserId);
   // Conversation-scoped foreground-banner subscriptions for large conversations
   // (migration 105). No-op until a conversation has `banner_broadcast_active`.
-  useConversationBannerChannels(userId);
+  useConversationBannerChannels(synchronizedUserId);
   // Must live inside the query provider — this is exactly why it moved here
   // rather than being called from RootLayout's own body, which executes
   // outside the PersistQueryClientProvider it needs.
-  useBlockSynchronization(userId);
+  useBlockSynchronization(synchronizedUserId);
 
   const [permissionGranted, setPermissionGranted] = useState(true);
   useEffect(() => {
