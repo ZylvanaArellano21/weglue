@@ -27,10 +27,29 @@ export const PRODUCTION_SUPABASE_URL = `https://${PRODUCTION_SUPABASE_REF}.supab
 export const URL_VAR = "EXPO_PUBLIC_SUPABASE_URL";
 export const KEY_VAR = "EXPO_PUBLIC_SUPABASE_ANON_KEY";
 
-// Exact, founder-approved harmless matches for the local-host rule. Each entry
-// is the exact matched text plus its surrounding context as reported by this
-// script. Empty on purpose: nothing may be added without founder approval.
-export const LOCAL_HOST_ALLOWLIST = [];
+// Founder-approved (2026-09-23) harmless LIBRARY string literals. An entry only
+// matches a Hermes string-table literal that is EXACTLY equal to it — a URL with
+// a path, another port, another scheme, or `127.0.0.1` used as a host/host:port
+// is a different literal and still fails. Never applies to injected env values
+// or to bytes outside the Hermes string table. Changes need founder approval.
+//   http://localhost:8081/  react-native Libraries/Core/Devtools/getDevServer.js (dev fallback)
+//   http://localhost:9999   @supabase/auth-js lib/constants.js GOTRUE_URL default (unused: URL is passed)
+//   http://localhost:3000   expo-router build/head/url.js (dev fallback, iOS bundle)
+//   127.0.0.1               @supabase/supabase-js trace-propagation target list (bare host, not a URL)
+//   localhost               @supabase/supabase-js trace targets, whatwg-url and @supabase/auth-js
+//                           webauthn hostname comparisons (bare host, not a URL)
+export const LIBRARY_LITERAL_ALLOWLIST = Object.freeze([
+  "http://localhost:8081/",
+  "http://localhost:9999",
+  "http://localhost:3000",
+  "127.0.0.1",
+  "localhost",
+]);
+
+// Hermes bytecode versions whose string-table layout this verifier understands.
+// A Hermes upgrade fails closed until the parser is re-validated.
+export const SUPPORTED_HERMES_VERSIONS = Object.freeze([96]);
+const HERMES_MAGIC = 0x1f1903c103bc1fc6n;
 
 // ─── Pattern definitions ──────────────────────────────────────────────────────
 
@@ -94,10 +113,6 @@ function context(text, index, length) {
   return text.slice(start, end).replace(/[^\x20-\x7e]/g, "·");
 }
 
-function isAllowlisted(match, ctx) {
-  return LOCAL_HOST_ALLOWLIST.some((entry) => entry.match === match && ctx.includes(entry.context));
-}
-
 // ─── Value rules (shared by env + bundle checks) ──────────────────────────────
 
 /** Local/LAN host problems inside a single string. */
@@ -108,9 +123,7 @@ export function findLocalHostProblems(text, label, secrets = []) {
     let m;
     while ((m = rule.re.exec(text)) !== null) {
       const ctx = context(text, m.index, m[0].length);
-      if (!isAllowlisted(m[0], ctx)) {
-        problems.push(`${label}: ${rule.name} found: "${m[0]}" in context "${redact(ctx, secrets)}"`);
-      }
+      problems.push(`${label}: ${rule.name} found: "${m[0]}" in context "${redact(ctx, secrets)}"`);
     }
   }
   return problems;
@@ -197,6 +210,85 @@ export function validateEnv(env) {
   return { url, key, summary: `URL host ${new URL(url).host}; key ${describeKey(key)}` };
 }
 
+// ─── Hermes string table ──────────────────────────────────────────────────────
+
+/**
+ * Read every string literal from a Hermes bytecode (HBC) file.
+ * Returns null when the buffer is not HBC; throws VerificationError when it is
+ * HBC but cannot be parsed with confidence (fail closed).
+ *
+ * Hermes packs string storage and overlaps literals, so raw byte scans report
+ * artefacts like "127.0.0.13:30…" that span unrelated literals. Checking whole
+ * literals is what makes an exact allowlist possible.
+ *
+ * Layout (hermes BytecodeFileHeader, 128 bytes): u64 magic, u32 version,
+ * u8[20] sourceHash, u32 fileLength, u32 globalCodeIndex, u32 functionCount,
+ * u32 stringKindCount, u32 identifierCount, u32 stringCount,
+ * u32 overflowStringCount, u32 stringStorageSize, … Sections follow, each
+ * 4-byte aligned: small function headers (16 B each), string kinds (4 B),
+ * identifier hashes (4 B), small string table (4 B: isUTF16:1 offset:23
+ * length:8; length 255 = index into overflow table), overflow table
+ * (8 B: u32 offset, u32 length), string storage.
+ */
+export function readHermesStrings(buffer, label = "bundle") {
+  if (buffer.length < 128 || buffer.readBigUInt64LE(0) !== HERMES_MAGIC) return null;
+  const fail = (why) => {
+    throw new VerificationError([`${label}: cannot parse Hermes string table (${why}) — refusing to verify`]);
+  };
+  const version = buffer.readUInt32LE(8);
+  if (!SUPPORTED_HERMES_VERSIONS.includes(version)) fail(`unsupported bytecode version ${version}`);
+  if (buffer.readUInt32LE(32) !== buffer.length) fail("fileLength does not match file size");
+
+  const field = (index) => buffer.readUInt32LE(36 + index * 4);
+  const functionCount = field(1);
+  const stringKindCount = field(2);
+  const identifierCount = field(3);
+  const stringCount = field(4);
+  const overflowCount = field(5);
+  const storageSize = field(6);
+
+  const align = (x) => (x + 3) & ~3;
+  let offset = 128;
+  offset = align(offset + functionCount * 16);
+  offset = align(offset + stringKindCount * 4);
+  offset = align(offset + identifierCount * 4);
+  const smallTable = offset;
+  offset = align(offset + stringCount * 4);
+  const overflowTable = offset;
+  offset = align(offset + overflowCount * 8);
+  const storageStart = offset;
+  const storageEnd = storageStart + storageSize;
+  if (storageEnd > buffer.length) fail("string storage extends past end of file");
+
+  const strings = new Array(stringCount);
+  for (let i = 0; i < stringCount; i++) {
+    const entry = buffer.readUInt32LE(smallTable + i * 4);
+    const isUtf16 = entry & 1;
+    let start = (entry >>> 1) & 0x7fffff;
+    let length = entry >>> 24;
+    if (length === 0xff) {
+      if (start >= overflowCount) fail(`string ${i} overflow index out of range`);
+      length = buffer.readUInt32LE(overflowTable + start * 8 + 4);
+      start = buffer.readUInt32LE(overflowTable + start * 8);
+    }
+    const byteLength = isUtf16 ? length * 2 : length;
+    if (start + byteLength > storageSize) fail(`string ${i} lies outside string storage`);
+    const bytes = buffer.subarray(storageStart + start, storageStart + start + byteLength);
+    strings[i] = isUtf16 ? bytes.toString("utf16le") : bytes.toString("latin1");
+  }
+  return { version, strings, storageStart, storageEnd };
+}
+
+/** Local-host problems in Hermes literals; only exact library literals are allowed. */
+export function findLiteralLocalHostProblems(strings, label, secrets = []) {
+  const problems = [];
+  for (const literal of new Set(strings)) {
+    if (LIBRARY_LITERAL_ALLOWLIST.includes(literal)) continue;
+    for (const p of findLocalHostProblems(literal, `${label} literal`, secrets)) problems.push(p);
+  }
+  return problems;
+}
+
 // ─── bundle ───────────────────────────────────────────────────────────────────
 
 function listFiles(dir) {
@@ -232,32 +324,51 @@ export function readUploadSet(dist) {
 
 /**
  * Validate an exported dist directory against the injected env values.
- * Every launch bundle must contain the exact injected URL and key; shipped files
- * are scanned for local hosts, and every file for foreign refs and privileged
- * credentials.
+ *
+ * Launch bundles: Hermes bytecode is checked literal-by-literal — it must hold a
+ * string literal exactly equal to the injected URL and to the injected key, and
+ * every literal with a local/LAN host must be an exact LIBRARY_LITERAL_ALLOWLIST
+ * entry. Bytes outside the Hermes string table, non-Hermes bundles and assets get
+ * the strict raw scan with no allowlist. Every file in the directory (shipped or
+ * not) is scanned for foreign refs and privileged credentials.
  */
 export function verifyBundle(dist, env) {
   const { url, key, summary } = validateEnv(env);
   const problems = [];
   const uploadSet = readUploadSet(dist);
+  const launchBundles = new Set();
 
   for (const { platform, bundle } of uploadSet) {
     if (!existsSync(bundle)) {
       problems.push(`${platform}: launch bundle ${bundle} missing`);
       continue;
     }
-    const text = readFileSync(bundle).toString("latin1");
-    if (!text.includes(url)) problems.push(`${platform}: bundle does not contain the injected production Supabase URL`);
-    if (!text.includes(key)) problems.push(`${platform}: bundle does not contain the injected anon/publishable key`);
+    launchBundles.add(bundle);
+    const label = relative(dist, bundle);
+    const buffer = readFileSync(bundle);
+    const hermes = readHermesStrings(buffer, label);
+    if (hermes) {
+      const literals = new Set(hermes.strings);
+      if (!literals.has(url)) problems.push(`${platform}: bundle has no string literal equal to the injected production Supabase URL`);
+      if (!literals.has(key)) problems.push(`${platform}: bundle has no string literal equal to the injected anon/publishable key`);
+      problems.push(...findLiteralLocalHostProblems(hermes.strings, label, [key]));
+      problems.push(...findLocalHostProblems(buffer.subarray(0, hermes.storageStart).toString("latin1"), `${label} (outside string table)`, [key]));
+      problems.push(...findLocalHostProblems(buffer.subarray(hermes.storageEnd).toString("latin1"), `${label} (outside string table)`, [key]));
+    } else {
+      const text = buffer.toString("latin1");
+      if (!text.includes(url)) problems.push(`${platform}: bundle does not contain the injected production Supabase URL`);
+      if (!text.includes(key)) problems.push(`${platform}: bundle does not contain the injected anon/publishable key`);
+      problems.push(...findLocalHostProblems(text, label, [key]));
+    }
   }
 
-  // Local-host rules apply to everything that ships to devices (bundles + assets).
-  // Credential rules apply to every file in the directory, shipped or not.
-  const shipped = new Set(uploadSet.flatMap((u) => [u.bundle, ...u.assets]));
+  // Assets ship to devices too: strict local-host scan. Credential rules apply to
+  // every file in the directory, shipped or not.
+  const shippedAssets = new Set(uploadSet.flatMap((u) => u.assets));
   for (const file of listFiles(dist)) {
     const label = relative(dist, file);
     const text = readFileSync(file).toString("latin1");
-    if (shipped.has(file)) problems.push(...findLocalHostProblems(text, label, [key]));
+    if (shippedAssets.has(file) && !launchBundles.has(file)) problems.push(...findLocalHostProblems(text, label, [key]));
     problems.push(...findCredentialProblems(text, label));
   }
 

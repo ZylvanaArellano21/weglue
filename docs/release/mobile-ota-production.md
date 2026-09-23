@@ -40,29 +40,43 @@ The verifier fails when any of these is true:
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY` absent, not an anon JWT / `sb_publishable_` key,
   JWT `role` ≠ `anon`, or JWT `ref` ≠ `yoozrnosmqtaiksgcixc`
 - any `EXPO_PUBLIC_*` value or shipped file contains `localhost`, `127.x`, `10.0.2.2`,
-  `host.docker.internal`, an RFC1918/LAN address, or `:54321`
+  `host.docker.internal`, an RFC1918/LAN address, or `:54321` (Hermes string literals:
+  except the exact library literals below)
 - any file contains a non-production `*.supabase.co` ref, a `service_role` JWT,
   a JWT for another project, or an `sb_secret_` credential
-- a launch bundle does not contain the exact injected URL and key
+- a launch bundle does not contain the exact injected URL and key (as whole Hermes literals)
+- the Hermes bundle uses an unsupported bytecode version or its string table cannot be parsed
 - the export lacks an iOS or Android bundle
 - any exported file changes between verification and publish
 
 The key is never printed — only its kind, role/ref, and an 8-character sha256 prefix.
 
-### Local-host allowlist — PENDING founder decision
+### Library-literal allowlist (founder-approved 2026-09-23)
 
-`LOCAL_HOST_ALLOWLIST` in the verifier is intentionally empty. A production-equivalent
-export (2026-09-23, commit `3f9416d7`) contains these library literals, so the strict
-check currently fails even with correct production values:
+Hermes bundles are checked literal-by-literal: the verifier reads the Hermes
+string table (bytecode v96; any other version fails closed until re-validated)
+and requires string literals **exactly equal** to the injected URL and key. A
+literal containing a local/LAN host fails unless it is **exactly** one of these
+library literals, found in the production-equivalent export of `3f9416d7`:
 
-| Literal in Hermes bundle | Origin |
+| Exact literal | Origin |
 |---|---|
 | `http://localhost:8081/` | `react-native/Libraries/Core/Devtools/getDevServer.js` (dev-server fallback) |
 | `http://localhost:9999` | `@supabase/auth-js/dist/main/lib/constants.js` (`GOTRUE_URL` default, unused when a URL is passed) |
-| `http://localhost:3000` | `expo-router/build/head/url.js` (iOS only; dev fallback) |
-| `127.0.0.1` | `@supabase/supabase-js` trace-propagation target list |
+| `http://localhost:3000` | `expo-router/build/head/url.js` (dev fallback; iOS bundle) |
+| `127.0.0.1` | `@supabase/supabase-js` trace-propagation target list (bare host) |
+| `localhost` | `@supabase/supabase-js` trace targets, `whatwg-url` and `@supabase/auth-js` webauthn hostname comparisons (bare host) |
 
-Until the founder approves an exact allowlist, `ota:production` cannot pass.
+Still failing, among others: `http://127.0.0.1`, `https://127.0.0.1`,
+`127.0.0.1:54321`, `http://localhost`, `https://localhost`, `localhost:54321`,
+any other localhost port or path, `10.0.2.2`, `host.docker.internal`, LAN
+addresses, and anything with `:54321`. The allowlist never applies to injected env
+values, to bytes outside the Hermes string table, to non-Hermes bundles or to
+assets. Changing it requires founder approval (`LIBRARY_LITERAL_ALLOWLIST` in
+`scripts/release/verify-mobile-bundle-env.mjs`).
+
+A library upgrade that adds a new local-host literal makes `ota:production` fail
+closed; report the exact literal and origin for approval — never widen the rule.
 
 ## Procedure
 
