@@ -8,7 +8,10 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "clean": "turbo run clean && rm -rf node_modules",
+    "ota:production": "bash scripts/release/ota-production.sh",
+    "ota:production:dry-run": "bash scripts/release/ota-production.sh --dry-run",
+    "test:release": "node --test scripts/release/"
   },
   "devDependencies": {
     "image-size": "^2.0.2",
