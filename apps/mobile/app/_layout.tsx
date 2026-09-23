@@ -19,7 +19,7 @@ import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { AppState, Platform, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, AppState, Platform, Text, TouchableOpacity, View } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 import { useAuthStore, isTransientError } from "@weglue/shared";
 import { supabase } from "../lib/supabase";
@@ -83,6 +83,9 @@ export const unstable_settings = {
 // same path a real network error already takes.
 const ACCESS_CHECK_TIMEOUT_MS = 5000;
 const SYNC_PROFILE_TIMEOUT_MS = 4000;
+const SESSION_RESTORE_TIMEOUT_MS = 6000;
+const PROFILE_CACHE_TIMEOUT_MS = 1500;
+const FONT_LOAD_TIMEOUT_MS = 4000;
 
 // expo-router renders this instead of crashing when any screen throws during
 // render (e.g. a malformed cached profile field reaching a component). It
@@ -231,7 +234,7 @@ function useRealtimeAuthBridge(): void {
 }
 
 function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Zain_400Regular,
     Zain_700Bold,
     Zain_800ExtraBold,
@@ -240,9 +243,17 @@ function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+  const [fontLoadTimedOut, setFontLoadTimedOut] = useState(false);
+  const fontsReady = fontsLoaded || !!fontError || fontLoadTimedOut;
 
-  const { session, setSession, setProfile, setOnboarded, setLoading } =
+  const { session, isLoading, setSession, setProfile, setOnboarded, setLoading } =
     useAuthStore();
+
+  useEffect(() => {
+    if (fontsReady) return;
+    const timer = setTimeout(() => setFontLoadTimedOut(true), FONT_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [fontsReady]);
 
   useRealtimeAuthBridge();
 
@@ -264,31 +275,66 @@ function RootLayout() {
   // only while a session exists and the first check is still in flight — a
   // signed-out user is never delayed by it.
   const [access, setAccess] = useState<AccessStatePayload | null | undefined>(undefined);
+  const studentUserId = session && shouldSyncStudentProfile(session) ? session.user.id : null;
+  const accessRequestRef = useRef<{
+    userId: string;
+    generation: number;
+    promise: Promise<void>;
+  } | null>(null);
+  const accessGenerationRef = useRef(0);
 
   const refreshAccess = useCallback(async () => {
-    if (!session || !shouldSyncStudentProfile(session)) {
+    if (!studentUserId) {
       setAccess(null);
       return;
     }
-    try {
-      setAccess(await withTimeout(getMyAccessState(), ACCESS_CHECK_TIMEOUT_MS));
-    } catch {
-      // Fail OPEN: a network blip (or a stalled cold-start request that never
-      // settles) must not lock a healthy student out, or hold the navigator
-      // hostage. This is safe because the server is the real control —
-      // migration 058 denies a restricted account regardless of what this
-      // client believes.
-      setAccess(null);
-    }
-  }, [session]);
+    const inFlight = accessRequestRef.current;
+    if (inFlight?.userId === studentUserId) return inFlight.promise;
+
+    const userId = studentUserId;
+    const generation = ++accessGenerationRef.current;
+    const promise = (async () => {
+      try {
+        const nextAccess = await withTimeout(getMyAccessState(), ACCESS_CHECK_TIMEOUT_MS);
+        const currentSession = useAuthStore.getState().session;
+        if (
+          accessGenerationRef.current === generation &&
+          currentSession?.user.id === userId &&
+          shouldSyncStudentProfile(currentSession)
+        ) {
+          setAccess(nextAccess);
+        }
+      } catch {
+        // Fail OPEN: a network blip (or a stalled cold-start request that never
+        // settles) must not lock a healthy student out, or hold the navigator
+        // hostage. This is safe because the server is the real control —
+        // migration 058 denies a restricted account regardless of what this
+        // client believes.
+        const currentSession = useAuthStore.getState().session;
+        if (
+          accessGenerationRef.current === generation &&
+          currentSession?.user.id === userId &&
+          shouldSyncStudentProfile(currentSession)
+        ) {
+          setAccess(null);
+        }
+      } finally {
+        if (accessRequestRef.current?.generation === generation) {
+          accessRequestRef.current = null;
+        }
+      }
+    })();
+    accessRequestRef.current = { userId, generation, promise };
+    return promise;
+  }, [studentUserId]);
 
   useEffect(() => {
     void refreshAccess();
   }, [refreshAccess]);
 
   useAccessSynchronization(
-    session?.user.id,
-    !!session && shouldSyncStudentProfile(session),
+    studentUserId ?? undefined,
+    !!studentUserId,
     refreshAccess,
   );
 
@@ -318,7 +364,7 @@ function RootLayout() {
   // This is not a broad access poll. It only recovers the one state change
   // that occurs when a timed suspension expires without a database write.
   // Every other access change converges through opaque Realtime plus the
-  // focus, reconnect, navigation, auth-refresh, denial and restart paths.
+  // focus, reconnect, denial and restart paths.
   useEffect(() => {
     const suspendedUntil = access?.state === "suspended" ? access.suspended_until : null;
     const expiryMs = suspendedUntil ? new Date(suspendedUntil).getTime() : Number.NaN;
@@ -357,8 +403,8 @@ function RootLayout() {
   useInviteDeepLink(!accessPending && !isRestricted);
 
   useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
+    if (fontsReady) SplashScreen.hideAsync();
+  }, [fontsReady]);
 
   // Detects a genuine sign-in during THIS process's lifetime using only
   // observed session-value transitions — never a single Supabase auth event
@@ -396,10 +442,11 @@ function RootLayout() {
   // real protection intact — a genuine sign-in, an account switch and a cold
   // start all still gate before the navigator renders — while a routine
   // refresh of an already-gated session no longer tears the UI down.
-  // Restriction enforcement is unchanged: refreshAccess() still re-runs on
-  // every one of these events (its useCallback identity changes with the new
-  // session object, re-firing the effect below), and the moment it reports a
-  // restriction the isRestricted branch replaces the navigator anyway.
+  // Restriction enforcement is unchanged: opaque Realtime, reconnect,
+  // foreground recovery and protected-query denials still refresh canonical
+  // access, and the moment one reports a restriction the isRestricted branch
+  // replaces the navigator. A same-user token refresh no longer repeats the
+  // RPC merely because Supabase emitted a new Session object.
   const accessGatedUserIdRef = useRef<string | null>(null);
   const shouldGateStartupAccess = useCallback((nextSession: Session | null): boolean => {
     const uid = nextSession?.user?.id ?? null;
@@ -412,10 +459,35 @@ function RootLayout() {
     return true;
   }, []);
 
+  const [sessionRestoreAttempt, setSessionRestoreAttempt] = useState(0);
+  const [sessionRestoreError, setSessionRestoreError] = useState(false);
+  const [sessionRestorePending, setSessionRestorePending] = useState(true);
+  const profileCacheReadRef = useRef<{
+    userId: string;
+    promise: Promise<Awaited<ReturnType<typeof readCachedProfile>>>;
+  } | null>(null);
+  const getProfileCacheRead = useCallback((userId: string) => {
+    if (profileCacheReadRef.current?.userId === userId) {
+      return profileCacheReadRef.current.promise;
+    }
+    const promise = withTimeout(
+      readCachedProfile(userId),
+      PROFILE_CACHE_TIMEOUT_MS,
+    ).catch(() => null);
+    profileCacheReadRef.current = { userId, promise };
+    return promise;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let authEventSeen = false;
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    setSessionRestoreError(false);
+    setSessionRestorePending(true);
+    void withTimeout(
+      supabase.auth.getSession(),
+      SESSION_RESTORE_TIMEOUT_MS,
+    ).then(async ({ data: { session }, error }) => {
+      if (error) throw error;
       // A later auth event is authoritative; an older session read must not
       // restore the previous user's navigator and its Realtime hooks.
       if (cancelled || authEventSeen) return;
@@ -426,7 +498,11 @@ function RootLayout() {
         setAccess(undefined);
         setLoading(true);
       }
+      if (session && shouldSyncStudentProfile(session)) {
+        void getProfileCacheRead(session.user.id);
+      }
       setSession(session);
+      setSessionRestorePending(false);
       if (!session) {
         setLoading(false);
         return;
@@ -442,12 +518,19 @@ function RootLayout() {
         return;
       }
 
+    }).catch(() => {
+      if (!cancelled && !authEventSeen) {
+        setSessionRestorePending(false);
+        setSessionRestoreError(true);
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       authEventSeen = true;
+      setSessionRestoreError(false);
+      setSessionRestorePending(false);
       observeSessionForSignInDetection(session);
       // A first-time gate for THIS user id (genuine login, account switch, or
       // cold start) — never a routine TOKEN_REFRESHED / re-emitted SIGNED_IN
@@ -466,6 +549,9 @@ function RootLayout() {
         setAccess(undefined);
         setLoading(true);
       }
+      if (session && shouldSyncStudentProfile(session)) {
+        void getProfileCacheRead(session.user.id);
+      }
       setSession(session);
       if (session && !shouldSyncStudentProfile(session)) {
         // Same guard on the live auth-state path (an admin signing in on a
@@ -482,6 +568,7 @@ function RootLayout() {
         // Signed out: forget which user has been gated, so the next sign-in
         // (including the same account signing back in) is gated again.
         accessGatedUserIdRef.current = null;
+        profileCacheReadRef.current = null;
         setAccess(null);
         setProfile(null);
         setOnboarded(false);
@@ -496,17 +583,22 @@ function RootLayout() {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [getProfileCacheRead, observeSessionForSignInDetection, sessionRestoreAttempt, shouldGateStartupAccess]);
 
   // Student profile work begins only after the canonical access decision. This
   // prevents cached Home/Profile data, ordinary profile queries, and any
   // follow-on routing from starting during a restricted-account startup.
+  const accessResolved = access !== undefined;
   useEffect(() => {
-    if (!session || !shouldSyncStudentProfile(session) || access === undefined || isRestricted) return;
+    if (!session || !shouldSyncStudentProfile(session) || !accessResolved || isRestricted) return;
     void syncProfile(session.user.id);
-  }, [session?.user?.id, access?.state, isRestricted]);
+  }, [session?.user?.id, accessResolved, access?.state, isRestricted]);
 
   async function syncProfile(userId: string) {
+    const isCurrentStudent = () => {
+      const currentSession = useAuthStore.getState().session;
+      return currentSession?.user.id === userId && shouldSyncStudentProfile(currentSession);
+    };
     // Defense in depth: even if a future caller forgets the guard above, the
     // profiles fetch and the ensure_profile() repair below must never run for
     // a platform-admin identity.
@@ -519,7 +611,8 @@ function RootLayout() {
     // the navigator never has to block on two fresh round trips just to show
     // what it already showed last time. The network fetch below still runs
     // and quietly reconciles with the real data.
-    const cached = await readCachedProfile(userId);
+    const cached = await getProfileCacheRead(userId);
+    if (!isCurrentStudent()) return;
     if (cached) {
       setProfile(cached.profile);
       setOnboarded(cached.isOnboarded);
@@ -538,6 +631,7 @@ function RootLayout() {
         SYNC_PROFILE_TIMEOUT_MS,
       );
       const onboarded = (interestsResult.data?.length ?? 0) > 0;
+      if (!isCurrentStudent()) return;
       if (profileResult.data) {
         // Onboarding completion is monotonic (it only ever flips to true).
         // A fetch that started BEFORE the completion write can resolve AFTER
@@ -559,7 +653,11 @@ function RootLayout() {
         // Profile row missing (e.g. the signup trigger hit a username
         // collision) — repair it server-side instead of stranding the user.
         void clearCachedProfile(userId);
-        const { data: repaired } = await supabase.rpc("ensure_profile");
+        const { data: repaired } = await withTimeout(
+          Promise.resolve(supabase.rpc("ensure_profile")),
+          SYNC_PROFILE_TIMEOUT_MS,
+        );
+        if (!isCurrentStudent()) return;
         if (repaired) {
           setProfile(repaired);
           void writeCachedProfile(userId, {
@@ -572,17 +670,85 @@ function RootLayout() {
     } catch {
       // Network failure on background sync — keep showing cached state.
     } finally {
-      setLoading(false);
+      if (isCurrentStudent()) setLoading(false);
     }
   }
 
-  if (!fontsLoaded) return null;
+  if (!fontsReady) return null;
+
+  if (sessionRestoreError) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#FEFCF0",
+          padding: 24,
+        }}
+      >
+        <Text style={{ fontSize: 20, fontWeight: "700", color: "#000", textAlign: "center" }}>
+          We couldn’t restore your session
+        </Text>
+        <Text style={{ fontSize: 14, color: "#444", textAlign: "center", marginTop: 8 }}>
+          Check your connection and try again.
+        </Text>
+        <TouchableOpacity
+          onPress={() => {
+            setSessionRestoreError(false);
+            setSessionRestorePending(true);
+            setSessionRestoreAttempt((attempt) => attempt + 1);
+          }}
+          activeOpacity={0.85}
+          style={{
+            marginTop: 24,
+            height: 48,
+            paddingHorizontal: 32,
+            backgroundColor: "#0FA6A6",
+            borderRadius: 40,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: "#FEFCF0", fontSize: 16, fontWeight: "600" }}>Try again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (sessionRestorePending) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#FEFCF0",
+        }}
+      >
+        <ActivityIndicator size="large" color="#0FA6A6" />
+        <Text style={{ marginTop: 12, color: "#444" }}>Restoring your session…</Text>
+      </View>
+    );
+  }
 
   // Never restore a cached authenticated navigator until the canonical access
   // state has resolved. A database outage can still fail open after the check,
   // but a normal restricted startup cannot flash Home, Messages, or Profile.
   if (accessPending) {
-    return <View style={{ flex: 1, backgroundColor: "#FEFCF0" }} />;
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#FEFCF0",
+        }}
+      >
+        <ActivityIndicator size="large" color="#0FA6A6" />
+        <Text style={{ marginTop: 12, color: "#444" }}>Checking your account…</Text>
+      </View>
+    );
   }
 
   // Platform-admin identities stop here. Returning the blocking screen INSTEAD
@@ -631,7 +797,7 @@ function RootLayout() {
         buster: "v2",
       }}
     >
-      <StudentSynchronizationHost userId={session?.user.id} />
+      <StudentSynchronizationHost userId={!isLoading ? session?.user.id : undefined} />
       {/* Screens are auto-registered by expo-router from the file tree.
           Declaring names that don't match real routes (e.g. "profile" when the
           routes are "profile/[userId]", "profile/own", …) makes the navigator
@@ -693,7 +859,7 @@ function RootLayout() {
       <ImageCropHost />
       {/* App-wide push + unread-badge wiring. Must live inside the query
           provider; renders nothing. */}
-      <PushNotificationsHost />
+      <PushNotificationsHost startupReady={!isLoading} />
     </PersistQueryClientProvider>
   );
 }

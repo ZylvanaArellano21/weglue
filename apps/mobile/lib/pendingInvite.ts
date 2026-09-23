@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { withTimeout } from './withTimeout';
 
 // ─── Deferred chat invitation token ─────────────────────────────────────────
 // A chat invite must survive: cold app launch, a long account creation, closing
@@ -10,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // authorization happens server-side in join_chat_invitation.
 
 const KEY = 'weglue-pending-invite-token';
+const PENDING_INVITE_STORAGE_TIMEOUT_MS = 1000;
 
 export async function setPendingInvite(token: string): Promise<void> {
   try {
@@ -21,7 +23,10 @@ export async function setPendingInvite(token: string): Promise<void> {
 
 export async function getPendingInvite(): Promise<string | null> {
   try {
-    return await AsyncStorage.getItem(KEY);
+    return await withTimeout(
+      AsyncStorage.getItem(KEY),
+      PENDING_INVITE_STORAGE_TIMEOUT_MS,
+    );
   } catch {
     return null;
   }

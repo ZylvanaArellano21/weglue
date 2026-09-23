@@ -17,6 +17,10 @@ import { resumePendingCheckin } from "../lib/pendingCheckin";
 import { checkAndroidInstallReferrerOnce } from "../lib/androidInstallReferrer";
 import { isContentDeepLinkUrl } from "../lib/coldStartRouting";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { withTimeout } from "../lib/withTimeout";
+
+const INITIAL_URL_TIMEOUT_MS = 2000;
+const STARTUP_STORAGE_TIMEOUT_MS = 1000;
 
 export default function WelcomeScreen() {
   const { session, isLoading, profile } = useAuthStore();
@@ -32,12 +36,35 @@ export default function WelcomeScreen() {
   // destination (the club profile flashes, then bounces to Home). This is an
   // iOS-only cold-start timing race; Android's App Link handling never hits it.
   const [contentDeepLink, setContentDeepLink] = useState<boolean | null>(null);
+  const [contentDeepLinkError, setContentDeepLinkError] = useState(false);
+  const [initialUrlAttempt, setInitialUrlAttempt] = useState(0);
 
   useEffect(() => {
-    Linking.getInitialURL().then((url) => {
-      setContentDeepLink(isContentDeepLinkUrl(url));
-    });
-    getPendingSignupEmail().then((stored) => setPendingSignupEmail(stored ?? ""));
+    let cancelled = false;
+    void withTimeout(Linking.getInitialURL(), INITIAL_URL_TIMEOUT_MS)
+      .then((url) => {
+        if (!cancelled) {
+          setContentDeepLinkError(false);
+          setContentDeepLink(isContentDeepLinkUrl(url));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setContentDeepLinkError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialUrlAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void withTimeout(getPendingSignupEmail(), STARTUP_STORAGE_TIMEOUT_MS)
+      .then((stored) => {
+        if (!cancelled) setPendingSignupEmail(stored ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) setPendingSignupEmail("");
+      });
     AsyncStorage.getItem("weglue-account-deletion-success").then((value) => {
       if (value === "1") {
         setDeletedNotice(true);
@@ -52,11 +79,15 @@ export default function WelcomeScreen() {
       hasSession: !!session?.user?.email_confirmed_at,
       isOnboarded: !!session?.user?.email_confirmed_at,
     });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (isLoading || contentDeepLink === null) return;
+    if (!session && pendingSignupEmail === null) return;
 
     if (!session) {
       // No session, but a signup is mid-flight (signed up, never verified,
@@ -110,7 +141,31 @@ export default function WelcomeScreen() {
     });
   }, [isLoading, session, profile, pendingSignupEmail, contentDeepLink]);
 
-  if (isLoading || pendingSignupEmail === null || contentDeepLink === null) {
+  if (contentDeepLinkError) {
+    return (
+      <View style={[styles.loading, { paddingHorizontal: 24 }]}>
+        <Text style={{ fontSize: 20, fontWeight: "700", color: "#000", textAlign: "center" }}>
+          We couldn’t open your launch link
+        </Text>
+        <Text style={{ fontSize: 14, color: "#444", textAlign: "center", marginTop: 8 }}>
+          Please try again so we can send you to the right place.
+        </Text>
+        <TouchableOpacity
+          style={[styles.primaryBtn, { marginTop: 24 }]}
+          onPress={() => {
+            setContentDeepLinkError(false);
+            setContentDeepLink(null);
+            setInitialUrlAttempt((attempt) => attempt + 1);
+          }}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.primaryBtnText}>Try again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (isLoading || contentDeepLink === null || (!session && pendingSignupEmail === null)) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#0FA6A6" />

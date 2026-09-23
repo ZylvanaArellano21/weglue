@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import { withTimeout } from './withTimeout';
 
 // ─── Deferred check-in destination ──────────────────────────────────────────
 // Mirrors lib/pendingInvite.ts's contract exactly, for the same reason: a
@@ -11,6 +12,7 @@ import { router } from 'expo-router';
 // resumePendingInvite) after auth/onboarding settles.
 
 const KEY = 'weglue-pending-checkin';
+const PENDING_CHECKIN_STORAGE_TIMEOUT_MS = 1000;
 
 interface PendingCheckin {
   clubId: string;
@@ -30,7 +32,10 @@ export async function setPendingCheckin(target: PendingCheckin): Promise<void> {
 
 export async function getPendingCheckin(): Promise<PendingCheckin | null> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await withTimeout(
+      AsyncStorage.getItem(KEY),
+      PENDING_CHECKIN_STORAGE_TIMEOUT_MS,
+    );
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (typeof parsed?.clubId === 'string' && (parsed.eventId === undefined || typeof parsed.eventId === 'string')) {
@@ -44,7 +49,10 @@ export async function getPendingCheckin(): Promise<PendingCheckin | null> {
 
 export async function clearPendingCheckin(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(KEY);
+    await withTimeout(
+      AsyncStorage.removeItem(KEY),
+      PENDING_CHECKIN_STORAGE_TIMEOUT_MS,
+    );
   } catch {
     // ignore
   }
