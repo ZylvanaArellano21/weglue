@@ -1,0 +1,44 @@
+# Triple-Check Before Done — MANDATORY
+
+Every single time all tasks in a chat are finished, you MUST triple-check that everything is working and looking good AND that every change and new addition works perfectly.
+
+Do NOT say "done", "finished", "completed", or any equivalent until a full clean triple-check passes with zero issues. No exceptions.
+
+## Pass 1 — Completeness Check
+
+- Every task listed in the user's prompt is addressed
+- No item was silently skipped or partially done
+- No file that should have been touched was left unchanged
+
+## Pass 2 — Correctness Check
+
+- Re-read every file you modified (use Read tool) and verify:
+  - The change matches the spec exactly (colors, sizes, fonts, layout)
+  - No syntax errors, unclosed tags, or broken JSX
+  - No duplicate or conflicting style properties
+  - New logic/imports compile and do not break existing behavior
+  - Linter errors you introduced are fixed (pre-existing errors are OK to leave)
+
+## Pass 3 — Integration Check
+
+- Changes in one file don't break neighboring files
+- Data contracts / prop types are still satisfied
+- Navigation and state logic are untouched (styling-only tasks)
+- Git diff makes sense — only the intended files changed
+
+## Fix Loop
+
+If Pass 1, 2, or 3 reveals ANY issue:
+
+1. Fix it immediately — do not mention it and move on
+2. Run all three passes again from Pass 1
+3.Do NOT say "done", "finished", "completed", or any equivalent until a full clean triple-check passes with zero issues. No exceptions.
+
+If you had to fix something after the triple-check, run the triple-check again from the start.
+
+## Hard Rules
+
+- NEVER say "done" or "I have completed all tasks" before finishing all three passes
+- If you had to make a fix after any pass, restart the triple-check from Pass 1
+- This rule applies to every chat, every task, no exceptions
+-If anything is broken, missed, or wrong (doesnt matter how small or big)— fix it immediately. Do not declare done until it is fixed

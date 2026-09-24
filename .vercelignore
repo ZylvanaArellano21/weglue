@@ -1,0 +1,20 @@
+node_modules
+**/node_modules
+.next
+**/.next
+.turbo
+**/.turbo
+.expo
+**/.expo
+dist
+**/dist
+build
+**/build
+.pnpm-store
+**/.pnpm-store
+.git
+**/.DS_Store
+App Store submission
+Screenshots mobile
+Screenshots webapp
+Corrections
