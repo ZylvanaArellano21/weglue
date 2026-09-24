@@ -284,5 +284,7 @@ After the user answers, restate the approved decisions before implementation.
 After completing all tasks in a prompt, or when user approval is required before continuing, run:
 ```bash
 afplay /System/Library/Sounds/Glass.aiff
+```
 and then say this ONLY IF ITS TRUE AND ACCURATE:
 “I have read, understood, and completed all the 16 requirements.”
+
