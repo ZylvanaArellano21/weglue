@@ -7,7 +7,7 @@
 // this endpoint is never called by clients.
 //
 // One run:
-//   1. Claims a batch of pending push_queue rows (claim_push_batch —
+//   1. Claims up to three batches of pending push_queue rows (claim_push_batch —
 //      FOR UPDATE SKIP LOCKED, so concurrent runs never double-send).
 //   2. Loads each recipient's ACTIVE device tokens; a user with none is
 //      'skipped' (they may re-register later; the in-app row still exists).
@@ -30,6 +30,11 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
 const BATCH_SIZE = 100;
+const CLAIM_SIZE = 200;
+// A fanout statement can enqueue 500 notifications but now wakes this worker
+// once. Drain up to three existing claim batches before relying on the cron
+// fallback for larger or newly arriving work.
+const MAX_CLAIM_BATCHES = 3;
 const MAX_ATTEMPTS = 3;
 
 type PushRow = {
@@ -83,14 +88,22 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const sent = await deliverPending(admin);
+  const sent = { claimed: 0, sent: 0, skipped: 0, failed: 0 };
+  for (let batchNumber = 0; batchNumber < MAX_CLAIM_BATCHES; batchNumber++) {
+    const batch = await deliverPending(admin);
+    sent.claimed += batch.claimed;
+    sent.sent += batch.sent;
+    sent.skipped += batch.skipped;
+    sent.failed += batch.failed;
+    if (batch.claimed < CLAIM_SIZE) break;
+  }
   const receipts = await reconcileReceipts(admin);
 
   return json({ ok: true, ...sent, ...receipts });
 });
 
 async function deliverPending(admin: SupabaseClient) {
-  const { data: batch, error } = await admin.rpc("claim_push_batch", { p_limit: 200 });
+  const { data: batch, error } = await admin.rpc("claim_push_batch", { p_limit: CLAIM_SIZE });
   if (error) {
     console.error("claim_push_batch failed:", error.message);
     return { claimed: 0, sent: 0, skipped: 0, failed: 0 };
