@@ -2,6 +2,16 @@
 -- All fixtures and the dispatcher spy are rolled back. No HTTP is sent.
 BEGIN;
 
+DO $$
+BEGIN
+  IF NOT has_function_privilege('service_role', 'public.invoke_push_dispatch()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.invoke_push_dispatch()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.invoke_push_dispatch()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'dispatcher EXECUTE permissions are not service-role-only';
+  END IF;
+END;
+$$;
+
 CREATE TEMP TABLE test_150_wakeups (id bigint GENERATED ALWAYS AS IDENTITY);
 CREATE TEMP TABLE test_150_users (n integer PRIMARY KEY, id uuid NOT NULL DEFAULT gen_random_uuid());
 
@@ -92,6 +102,7 @@ FROM test_150_users target, test_150_users actor
 WHERE target.n = 1 AND actor.n = 2;
 DO $$
 DECLARE v_entity uuid;
+        v_inserted integer;
 BEGIN
   SELECT entity_id INTO v_entity FROM public.notifications
   WHERE type = 'comment' AND message = 'first comment' AND user_id = (SELECT id FROM test_150_users WHERE n = 1);
@@ -103,6 +114,101 @@ BEGIN
      (SELECT max(group_count) FROM public.notifications WHERE type = 'comment' AND entity_id = v_entity) <> 2 THEN
     RAISE EXCEPTION 'nested group merge created extra wakeup or lost merge';
   END IF;
+
+  -- Hundreds of nested UPDATE statements still belong to one outer INSERT.
+  INSERT INTO public.notifications (user_id, actor_id, type, entity_id, entity_type, message)
+  SELECT target.id, actor.id, 'comment', v_entity, 'post', 'bulk merged comment'
+  FROM test_150_users target, test_150_users actor
+  WHERE target.n = 1 AND actor.n BETWEEN 4 AND 501;
+  GET DIAGNOSTICS v_inserted = ROW_COUNT;
+  IF v_inserted <> 0 OR
+     (SELECT count(*) FROM test_150_wakeups) <> 7 OR
+     (SELECT max(group_count) FROM public.notifications WHERE type = 'comment' AND entity_id = v_entity) <> 500 THEN
+    RAISE EXCEPTION 'large nested group merge amplified wakeups or lost updates';
+  END IF;
+END;
+$$;
+
+-- Exercise the database claim contract against more than 500 due fixtures.
+-- Snapshot queue status before each call so the test proves both the number
+-- returned and the exact rows transitioned, even if other local rows exist.
+DO $$
+DECLARE
+  v_limit integer;
+  v_expected integer;
+  v_returned integer;
+  v_transitioned integer;
+  v_round integer;
+  v_max_returned integer := 0;
+  v_max_transitioned integer := 0;
+BEGIN
+  IF (SELECT count(*) FROM public.push_queue pq
+      JOIN test_150_users u ON u.id = pq.user_id
+      WHERE pq.status = 'pending' AND pq.scheduled_for <= now()) < 500 THEN
+    RAISE EXCEPTION 'claim contract fixtures contain fewer than 500 due rows';
+  END IF;
+
+  CREATE TEMP TABLE test_150_claim_before (id uuid PRIMARY KEY, status text, attempts integer) ON COMMIT DROP;
+  CREATE TEMP TABLE test_150_claim_returned (id uuid PRIMARY KEY) ON COMMIT DROP;
+
+  FOR v_round IN 1..28 LOOP
+    v_limit := CASE v_round
+      WHEN 1 THEN 1 WHEN 2 THEN 199 WHEN 3 THEN 200
+      WHEN 4 THEN 201 WHEN 5 THEN 500 WHEN 6 THEN 501
+      WHEN 7 THEN 0 WHEN 8 THEN -1 ELSE 200 END;
+    v_expected := LEAST(GREATEST(v_limit, 1), 500);
+    TRUNCATE test_150_claim_before, test_150_claim_returned;
+    INSERT INTO test_150_claim_before
+    SELECT id, status, attempts FROM public.push_queue;
+    INSERT INTO test_150_claim_returned
+    SELECT id FROM public.claim_push_batch(v_limit);
+
+    SELECT count(*) INTO v_returned FROM test_150_claim_returned;
+    SELECT count(*) INTO v_transitioned
+    FROM public.push_queue q
+    JOIN test_150_claim_before b USING (id)
+    WHERE b.status = 'pending' AND q.status = 'processing'
+      AND q.attempts = b.attempts + 1;
+
+    IF v_returned <> v_expected OR v_transitioned <> v_expected
+       OR v_returned <> v_transitioned
+       OR EXISTS (
+         (SELECT id FROM test_150_claim_returned
+          EXCEPT
+          SELECT q.id FROM public.push_queue q
+          JOIN test_150_claim_before b USING (id)
+          WHERE b.status = 'pending' AND q.status = 'processing'
+            AND q.attempts = b.attempts + 1)
+         UNION ALL
+         (SELECT q.id FROM public.push_queue q
+          JOIN test_150_claim_before b USING (id)
+          WHERE b.status = 'pending' AND q.status = 'processing'
+            AND q.attempts = b.attempts + 1
+          EXCEPT
+          SELECT id FROM test_150_claim_returned)
+       ) THEN
+      RAISE EXCEPTION 'claim contract failed: round %, requested %, returned %, transitioned %',
+        v_round, v_limit, v_returned, v_transitioned;
+    END IF;
+    IF v_round > 8 THEN
+      v_max_returned := GREATEST(v_max_returned, v_returned);
+      v_max_transitioned := GREATEST(v_max_transitioned, v_transitioned);
+    END IF;
+    IF v_round <= 8 THEN
+      RAISE NOTICE 'claim limit %: returned %, transitioned %',
+        v_limit, v_returned, v_transitioned;
+    END IF;
+
+    -- Restore only rows this test claimed; the enclosing transaction rolls
+    -- back every fixture and replacement function when this script exits.
+    UPDATE public.push_queue q
+    SET status = 'pending', attempts = b.attempts, claimed_at = NULL
+    FROM test_150_claim_returned r
+    JOIN test_150_claim_before b USING (id)
+    WHERE q.id = r.id;
+  END LOOP;
+  RAISE NOTICE '20 repeated claim(200) calls: max returned %, max transitioned %',
+    v_max_returned, v_max_transitioned;
 END;
 $$;
 

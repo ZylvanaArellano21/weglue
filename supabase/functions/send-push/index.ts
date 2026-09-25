@@ -30,12 +30,22 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
 const BATCH_SIZE = 100;
-const CLAIM_SIZE = 200;
+const MAX_ROWS_PER_CLAIM = 200;
+const MAX_ROWS_PER_INVOCATION = 600;
+// PostgREST encodes .in() filters in the URL. Keep UUID lists well below
+// common gateway URL limits, including when one claim contains 200 users.
+const ID_FILTER_SIZE = 40;
 // A fanout statement can enqueue 500 notifications but now wakes this worker
-// once. Drain up to three existing claim batches before relying on the cron
-// fallback for larger or newly arriving work.
+// once. Drain up to three existing claim batches, then request another
+// asynchronous dispatch when the third batch is full.
 const MAX_CLAIM_BATCHES = 3;
 const MAX_ATTEMPTS = 3;
+// Bound concurrent per-recipient RPCs so one 200-row claim cannot open
+// hundreds of simultaneous gateway requests.
+const RPC_CONCURRENCY = 20;
+// supabase-js reports a request that never received an HTTP response as
+// status 0. Queue/ticket writes are idempotent, so retry those once.
+const TRANSPORT_RETRY_DELAY_MS = 250;
 
 type PushRow = {
   id: string;
@@ -55,6 +65,52 @@ type TokenRow = {
   token: string;
   platform: "ios" | "android";
 };
+
+async function updateByIds(
+  admin: SupabaseClient,
+  table: "push_queue" | "push_tokens" | "push_tickets",
+  column: "id" | "ticket_id",
+  ids: string[],
+  values: Record<string, unknown>,
+  stage: string,
+) {
+  for (let i = 0; i < ids.length; i += ID_FILTER_SIZE) {
+    const { error } = await withTransportRetry(() =>
+      admin.from(table).update(values).in(column, ids.slice(i, i + ID_FILTER_SIZE))
+    );
+    if (error) {
+      console.error(`${stage} update failed`, error.code ?? "database error");
+      throw new Error(`${stage} update failed`);
+    }
+  }
+}
+
+async function withTransportRetry<T extends { error: unknown; status: number }>(
+  request: () => PromiseLike<T>,
+): Promise<T> {
+  const first = await request();
+  if (!first.error || first.status !== 0) return first;
+  console.warn("push write transport retry");
+  await new Promise((resolve) => setTimeout(resolve, TRANSPORT_RETRY_DELAY_MS));
+  return await request();
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 function pushTitle(row: PushRow): string {
   const clubName = row.route && typeof row.route.clubName === "string"
@@ -88,43 +144,82 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
+  const invocationId = crypto.randomUUID();
   const sent = { claimed: 0, sent: 0, skipped: 0, failed: 0 };
+  let remainingClaimBudget = MAX_ROWS_PER_INVOCATION;
+  let totalClaimedThisInvocation = 0;
+  let reachedClaimLimit = false;
   for (let batchNumber = 0; batchNumber < MAX_CLAIM_BATCHES; batchNumber++) {
-    const batch = await deliverPending(admin);
-    sent.claimed += batch.claimed;
+    if (remainingClaimBudget <= 0) break;
+    const requestedClaimSize = Math.min(MAX_ROWS_PER_CLAIM, remainingClaimBudget);
+    const { data, error } = await admin.rpc("claim_push_batch", { p_limit: requestedClaimSize });
+    if (error) {
+      console.error("push claim failed", { invocationId, claimSequence: batchNumber + 1, code: error.code ?? "database error" });
+      return json({ ok: false, error: "push claim failed" }, 500);
+    }
+    const actualClaimed = Array.isArray(data) ? data.length : -1;
+    if (actualClaimed < 0 || actualClaimed > requestedClaimSize ||
+        totalClaimedThisInvocation + actualClaimed > MAX_ROWS_PER_INVOCATION) {
+      console.error("push claim invariant violation", {
+        invocationId, claimSequence: batchNumber + 1, requestedClaimSize,
+        actualClaimed, totalClaimedThisInvocation, remainingClaimBudget,
+      });
+      return json({ ok: false, error: "push claim invariant violation" }, 500);
+    }
+    totalClaimedThisInvocation += actualClaimed;
+    remainingClaimBudget -= actualClaimed;
+    console.info("push claim", {
+      invocationId, claimSequence: batchNumber + 1, requestedClaimSize,
+      actualClaimed, totalClaimedThisInvocation, remainingClaimBudget,
+    });
+    sent.claimed = totalClaimedThisInvocation;
+    if (actualClaimed === 0) break;
+
+    const batch = await deliverPending(admin, data as PushRow[]);
     sent.sent += batch.sent;
     sent.skipped += batch.skipped;
     sent.failed += batch.failed;
-    if (batch.claimed < CLAIM_SIZE) break;
+    if (batchNumber === MAX_CLAIM_BATCHES - 1 && actualClaimed === requestedClaimSize) {
+      reachedClaimLimit = true;
+    }
+    if (actualClaimed < requestedClaimSize) break;
+  }
+  if (reachedClaimLimit) {
+    // The RPC only queues pg_net work if due rows remain. Await that database
+    // operation, not the next Edge invocation; cron recovers a failed wakeup.
+    try {
+      const { error } = await admin.rpc("invoke_push_dispatch");
+      if (error) console.error("push continuation dispatch request failed");
+      console.info("push continuation", { invocationId, requested: error === null });
+    } catch {
+      console.error("push continuation dispatch request failed");
+      console.info("push continuation", { invocationId, requested: false });
+    }
   }
   const receipts = await reconcileReceipts(admin);
 
   return json({ ok: true, ...sent, ...receipts });
 });
 
-async function deliverPending(admin: SupabaseClient) {
-  const { data: batch, error } = await admin.rpc("claim_push_batch", { p_limit: CLAIM_SIZE });
-  if (error) {
-    console.error("claim_push_batch failed:", error.message);
-    return { claimed: 0, sent: 0, skipped: 0, failed: 0 };
-  }
-  const rows = (batch ?? []) as PushRow[];
-  if (rows.length === 0) return { claimed: 0, sent: 0, skipped: 0, failed: 0 };
-
+async function deliverPending(admin: SupabaseClient, rows: PushRow[]) {
   const userIds = [...new Set(rows.map((r) => r.user_id))];
-  const { data: tokenData, error: tokenErr } = await admin
-    .from("push_tokens")
-    .select("id, user_id, token, platform")
-    .in("user_id", userIds)
-    .eq("status", "active");
-  if (tokenErr) {
-    console.error("token load failed:", tokenErr.message);
-    await failRows(admin, rows, "token load failed");
-    return { claimed: rows.length, sent: 0, skipped: 0, failed: rows.length };
+  const tokenData: TokenRow[] = [];
+  for (let i = 0; i < userIds.length; i += ID_FILTER_SIZE) {
+    const { data, error: tokenErr } = await admin
+      .from("push_tokens")
+      .select("id, user_id, token, platform")
+      .in("user_id", userIds.slice(i, i + ID_FILTER_SIZE))
+      .eq("status", "active");
+    if (tokenErr) {
+      console.error("token load failed", tokenErr.code ?? "database error");
+      await failRows(admin, rows, "token load failed");
+      return { claimed: rows.length, sent: 0, skipped: 0, failed: rows.length };
+    }
+    tokenData.push(...((data ?? []) as TokenRow[]));
   }
 
   const tokensByUser = new Map<string, TokenRow[]>();
-  for (const t of (tokenData ?? []) as TokenRow[]) {
+  for (const t of tokenData) {
     const list = tokensByUser.get(t.user_id) ?? [];
     list.push(t);
     tokensByUser.set(t.user_id, list);
@@ -132,13 +227,13 @@ async function deliverPending(admin: SupabaseClient) {
 
   // iOS icon badge: one summary per recipient per run.
   const badgeByUser = new Map<string, number>();
-  const badgeResults = await Promise.all(
-    userIds
-      .filter((userId) => tokensByUser.has(userId))
-      .map(async (userId) => {
-        const { data } = await admin.rpc("get_unread_summary_for", { p_user: userId });
-        return [userId, data] as const;
-      }),
+  const badgeResults = await mapWithConcurrency(
+    userIds.filter((userId) => tokensByUser.has(userId)),
+    RPC_CONCURRENCY,
+    async (userId) => {
+      const { data } = await admin.rpc("get_unread_summary_for", { p_user: userId });
+      return [userId, data] as const;
+    },
   );
   for (const [userId, data] of badgeResults) {
     const summary = (data ?? {}) as { unread_notifications?: number; unread_threads?: number };
@@ -153,15 +248,13 @@ async function deliverPending(admin: SupabaseClient) {
   const skippedIds: string[] = [];
   const suppressedIds: string[] = [];
   const deferredIds: string[] = [];
-  const visibilityChecks = await Promise.all(
-    rows.map(async (row) => {
-      if (!row.source_message_id) return { row, active: true, error: null };
-      const { data: active, error } = await admin.rpc('message_is_active', {
-        p_message_id: row.source_message_id,
-      });
-      return { row, active: active === true, error };
-    }),
-  );
+  const visibilityChecks = await mapWithConcurrency(rows, RPC_CONCURRENCY, async (row) => {
+    if (!row.source_message_id) return { row, active: true, error: null };
+    const { data: active, error } = await admin.rpc('message_is_active', {
+      p_message_id: row.source_message_id,
+    });
+    return { row, active: active === true, error };
+  });
 
   for (const { row, active, error: activeError } of visibilityChecks) {
     // A deletion may race this already-claimed batch. Re-check the canonical
@@ -202,22 +295,18 @@ async function deliverPending(admin: SupabaseClient) {
   }
 
   if (skippedIds.length > 0) {
-    await admin
-      .from("push_queue")
-      .update({ status: "skipped", error: "no active device tokens" })
-      .in("id", skippedIds);
+    await updateByIds(admin, "push_queue", "id", skippedIds,
+      { status: "skipped", error: "no active device tokens" }, "skipped rows");
   }
   if (suppressedIds.length > 0) {
-    await admin
-      .from('push_queue')
-      .update({ status: 'suppressed', body: null, route: {}, error: 'source message unavailable' })
-      .in('id', suppressedIds);
+    await updateByIds(admin, "push_queue", "id", suppressedIds,
+      { status: 'suppressed', body: null, route: {}, error: 'source message unavailable' },
+      "suppressed rows");
   }
   if (deferredIds.length > 0) {
-    await admin
-      .from('push_queue')
-      .update({ status: 'pending', scheduled_for: new Date(Date.now() + 2 * 60_000).toISOString(), error: 'message visibility retry' })
-      .in('id', deferredIds);
+    await updateByIds(admin, "push_queue", "id", deferredIds,
+      { status: 'pending', scheduled_for: new Date(Date.now() + 2 * 60_000).toISOString(), error: 'message visibility retry' },
+      "deferred rows");
   }
 
   const expoHeaders: Record<string, string> = {
@@ -276,21 +365,18 @@ async function deliverPending(admin: SupabaseClient) {
   }
 
   if (invalidTokenIds.size > 0) {
-    await admin
-      .from("push_tokens")
-      .update({ status: "invalid" })
-      .in("id", [...invalidTokenIds]);
+    await updateByIds(admin, "push_tokens", "id", [...invalidTokenIds],
+      { status: "invalid" }, "invalid tokens");
   }
 
   if (tickets.length > 0) {
-    const { error: tErr } = await admin.from("push_tickets").insert(tickets);
-    if (tErr) console.error("push_tickets insert failed:", tErr.message);
+    const { error: tErr } = await withTransportRetry(() => admin.from("push_tickets").insert(tickets));
+    // Expo ticket ids are unique, so 23505 means a retried insert had landed.
+    if (tErr && tErr.code !== "23505") console.error("push_tickets insert failed:", tErr.message);
   }
   if (sentIds.size > 0) {
-    await admin
-      .from("push_queue")
-      .update({ status: "sent", sent_at: new Date().toISOString() })
-      .in("id", [...sentIds]);
+    await updateByIds(admin, "push_queue", "id", [...sentIds],
+      { status: "sent", sent_at: new Date().toISOString() }, "sent rows");
   }
 
   // Retry transient failures with backoff; give up after MAX_ATTEMPTS.
@@ -303,16 +389,15 @@ async function deliverPending(admin: SupabaseClient) {
     else dead.push({ id, error: message });
   }
   if (retry.length > 0) {
-    await admin
-      .from("push_queue")
-      .update({
+    await updateByIds(admin, "push_queue", "id", retry,
+      {
         status: "pending",
         scheduled_for: new Date(Date.now() + 2 * 60_000).toISOString(),
-      })
-      .in("id", retry);
+      }, "retry rows");
   }
   for (const d of dead) {
-    await admin.from("push_queue").update({ status: "failed", error: d.error }).eq("id", d.id);
+    await updateByIds(admin, "push_queue", "id", [d.id],
+      { status: "failed", error: d.error }, "failed row");
   }
 
   return {
@@ -321,6 +406,22 @@ async function deliverPending(admin: SupabaseClient) {
     skipped: skippedIds.length + suppressedIds.length,
     failed: failedIds.size,
   };
+}
+
+async function failRows(admin: SupabaseClient, rows: PushRow[], reason: string) {
+  const retryIds = rows.filter((row) => row.attempts < MAX_ATTEMPTS).map((row) => row.id);
+  const failedIds = rows.filter((row) => row.attempts >= MAX_ATTEMPTS).map((row) => row.id);
+  if (retryIds.length > 0) {
+    await updateByIds(admin, "push_queue", "id", retryIds,
+      {
+        status: "pending",
+        scheduled_for: new Date(Date.now() + 2 * 60_000).toISOString(),
+      }, "token-load retry rows");
+  }
+  if (failedIds.length > 0) {
+    await updateByIds(admin, "push_queue", "id", failedIds,
+      { status: "failed", error: reason }, "token-load failed rows");
+  }
 }
 
 async function reconcileReceipts(admin: SupabaseClient) {
@@ -360,13 +461,12 @@ async function reconcileReceipts(admin: SupabaseClient) {
       }
     }
     if (invalidTokenIds.size > 0) {
-      await admin
-        .from("push_tokens")
-        .update({ status: "invalid" })
-        .in("id", [...invalidTokenIds]);
+      await updateByIds(admin, "push_tokens", "id", [...invalidTokenIds],
+        { status: "invalid" }, "receipt invalid tokens");
       invalidated = invalidTokenIds.size;
     }
-    await admin.from("push_tickets").update({ checked: true }).in("ticket_id", ids);
+    await updateByIds(admin, "push_tickets", "ticket_id", ids,
+      { checked: true }, "receipt tickets");
   } catch (e) {
     console.error("receipt check failed:", String(e));
     return { receipts_checked: 0, tokens_invalidated: invalidated };

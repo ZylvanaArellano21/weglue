@@ -161,4 +161,43 @@ CREATE TRIGGER trg_notifications_dispatch_update
   FOR EACH STATEMENT
   EXECUTE FUNCTION public.notifications_dispatch_after_update_statement();
 
+-- Keep the existing blocked-row sweep and claim rules, but make the locked
+-- candidate set an explicit one-time, bounded input to the UPDATE.
+CREATE OR REPLACE FUNCTION public.claim_push_batch(p_limit integer DEFAULT 100)
+RETURNS SETOF public.push_queue LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  UPDATE public.push_queue pq
+  SET status = 'suppressed', error = 'block_relationship'
+  WHERE pq.status = 'pending'
+    AND pq.scheduled_for <= now()
+    AND EXISTS (
+      SELECT 1
+      FROM public.notifications n
+      JOIN public.notification_types nt ON nt.type = n.type
+      WHERE n.id = pq.notification_id
+        AND COALESCE(nt.blockable, true)
+        AND n.actor_id IS NOT NULL
+        AND public.users_have_block_relationship(n.user_id, n.actor_id)
+    );
+
+  RETURN QUERY
+  WITH claimed AS MATERIALIZED (
+    SELECT p.id
+    FROM public.push_queue p
+    WHERE p.status = 'pending'
+      AND p.scheduled_for <= now()
+    ORDER BY p.scheduled_for
+    LIMIT LEAST(GREATEST(p_limit, 1), 500)
+    FOR UPDATE SKIP LOCKED
+  )
+  UPDATE public.push_queue q
+  SET status = 'processing',
+      attempts = q.attempts + 1,
+      claimed_at = now()
+  FROM claimed
+  WHERE q.id = claimed.id
+  RETURNING q.*;
+END;
+$$;
+
 COMMIT;
