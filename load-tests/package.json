@@ -1,0 +1,31 @@
+{
+  "name": "@weglue/load-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --config vitest.config.ts",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "plan": "node dist/src/cli.js plan",
+    "preflight": "node dist/src/cli.js preflight",
+    "trace": "node dist/src/cli.js trace",
+    "seed": "node dist/src/cli.js seed",
+    "prepare-auth": "node dist/src/cli.js prepare-auth",
+    "reset-actions": "node dist/src/cli.js reset-actions",
+    "cleanup": "node dist/src/cli.js cleanup",
+    "campaign": "node dist/src/cli.js campaign",
+    "analyze": "node dist/src/cli.js analyze",
+    "compare": "node dist/src/cli.js compare"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.110.0",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/pg": "8.15.5",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
