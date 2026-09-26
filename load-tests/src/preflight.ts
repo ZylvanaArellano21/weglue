@@ -88,7 +88,7 @@ export function assertCronIsolation(jobs: Array<{ jobname: string; command: stri
  * underneath a running scheduler (for example by a database reset without a
  * restart), it can keep executing jobs that no longer exist in cron.job and
  * that no other check can see or disable. Any recent run of an unlisted job
- * refuses the environment.
+ * by the current scheduler process refuses the environment.
  */
 export function assertNoUnlistedCronRuns(runs: Array<{ jobid: number; command: string }>, listedJobIds: number[]): void {
   const ghosts = runs.filter((run) => !listedJobIds.includes(Number(run.jobid)));
@@ -164,7 +164,8 @@ export async function runPreflight(config: LoadTestConfig, repoRoot = process.cw
       const pushMode = classifyPushDispatch(dispatch.rows[0]?.url ?? null);
       const cron = await client.query<{ jobid: number; jobname: string; schedule: string; command: string; active: boolean }>('select jobid, jobname, schedule, command, active from cron.job order by jobname');
       assertCronIsolation(cron.rows);
-      const recentRuns = await client.query<{ jobid: number; command: string }>(`select distinct jobid, command from cron.job_run_details where start_time > now() - interval '15 minutes'`);
+      const recentRuns = await client.query<{ jobid: number; command: string }>(`select distinct jobid, command from cron.job_run_details
+         where start_time > greatest(now() - interval '15 minutes', (select max(backend_start) from pg_stat_activity where backend_type = 'pg_cron launcher'))`);
       assertNoUnlistedCronRuns(recentRuns.rows, cron.rows.map((job) => Number(job.jobid)));
 
       const university = await client.query<{ name: string; is_active: boolean }>('select name, is_active from public.universities where id = $1', [config.universityId]);
