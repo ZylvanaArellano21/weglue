@@ -77,6 +77,10 @@ export const REALTIME_WARMUP = Object.freeze({
   maxSeconds: 600,
 });
 
+// Standalone Realtime health check (`cli.js health`): the gate's criteria in
+// a short, bounded probe for periodic monitoring of the staging service.
+export const REALTIME_HEALTH_CHECK = Object.freeze({ ...REALTIME_WARMUP, maxRounds: 6, maxSeconds: 120 });
+
 export const HARD_STOP_THRESHOLDS = Object.freeze({
   httpErrorRate: 0.05,
   httpErrorWindowSeconds: 60,

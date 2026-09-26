@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzeRun } from './analyze.js';
-import { prepareSessions } from './auth.js';
+import { prepareSessions, refreshSessionsUntil } from './auth.js';
 import { runCampaign } from './campaign.js';
 import { cleanupSyntheticData, resetActionWrites } from './cleanup.js';
 import { compareRuns, loadRun, renderMarkdown } from './compare.js';
@@ -11,11 +11,14 @@ import { assertComparisonMigrations, buildContract } from './contract.js';
 import { buildPlateaus, campaignSeconds } from './ramp.js';
 import { generateTrace, writeTrace } from './trace.js';
 import { runPreflight } from './preflight.js';
+import { runRealtimeWarmup, supabaseWarmupJoiner, warmupTopics } from './realtime-warmup.js';
+import { readManifest } from './synthetic.js';
+import { REALTIME_HEALTH_CHECK } from './constants.js';
 import { seedSyntheticData } from './seed.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [command, ...args] = process.argv.slice(2);
-const USAGE = 'Usage: cli.js <plan|preflight|trace|seed|prepare-auth|reset-actions|cleanup|campaign> | analyze <run-dir> | compare --pre <run-dir>... --post <run-dir>... [--out <file-prefix>]';
+const USAGE = 'Usage: cli.js <plan|preflight|health|trace|seed|prepare-auth|reset-actions|cleanup|campaign> | analyze <run-dir> | compare --pre <run-dir>... --post <run-dir>... [--out <file-prefix>]';
 
 function flagValues(flag: string): string[] {
   const values: string[] = [];
@@ -80,6 +83,21 @@ async function main(): Promise<void> {
   if (command === 'preflight') {
     const report = await runPreflight(config, repoRoot);
     process.stdout.write(`${JSON.stringify({ ...report, fingerprint: { sections: report.fingerprint.sections, objectCount: Object.keys(report.fingerprint.objects).length } }, null, 2)}\n`);
+    return;
+  }
+  if (command === 'health') {
+    // Read-only Realtime probe: one synthetic user joins the gate topics. Sessions
+    // are refreshed (paced) only when they would expire during the probe.
+    const { bundle } = await refreshSessionsUntil(config, Math.floor(Date.now() / 1000) + REALTIME_HEALTH_CHECK.maxSeconds + 300, Math.random);
+    const session = bundle.sessions[0];
+    if (!session) throw new Error('No synthetic session is available for the Realtime health check');
+    const result = await runRealtimeWarmup({
+      phase: 'health-check',
+      topics: warmupTopics(session, readManifest(config.manifestFile, config)),
+      join: supabaseWarmupJoiner(config, () => session.accessToken),
+      limits: REALTIME_HEALTH_CHECK,
+    });
+    process.stdout.write(`${JSON.stringify({ type: 'realtime-health', healthy: result.passed, ...result })}\n`);
     return;
   }
   if (command === 'trace') {
