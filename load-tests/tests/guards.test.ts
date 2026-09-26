@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { assertSessionsCover } from '../src/auth.js';
 import { cpuRatio } from '../src/campaign.js';
 import { KNOWN_STAGING_PROJECT_REF, PRODUCTION_PROJECT_REF } from '../src/constants.js';
-import { assertCronIsolation, assertMigrationMarkers, classifyPushDispatch } from '../src/preflight.js';
+import { assertCronIsolation, assertMigrationMarkers, assertNoUnlistedCronRuns, classifyPushDispatch } from '../src/preflight.js';
 import { hostCounters, hostRatios, parsePrometheus, SustainedCondition } from '../src/prometheus.js';
 import { buildPlateaus, buildRampLevels, campaignSeconds, targetUsersAt } from '../src/ramp.js';
 import { baseTopicsFor, classifyJoin, jitteredReconnectAfterMs, sentAtFromPreview } from '../src/realtime-topology.js';
@@ -34,6 +34,11 @@ describe('environment state guards', () => {
     expect(() => assertCronIsolation([{ ...prod, active: false }])).not.toThrow();
     expect(() => assertCronIsolation([{ ...prod, command: "select net.http_post(url := 'https://abcdefghijklmnopqrst.supabase.co/x')" }])).toThrow(/non-staging/);
     expect(() => assertCronIsolation([{ jobname: 'dispatch-push', active: true, command: 'select public.invoke_push_dispatch()' }])).not.toThrow();
+  });
+
+  it('refuses a stale pg_cron scheduler that runs jobs absent from cron.job', () => {
+    expect(() => assertNoUnlistedCronRuns([{ jobid: 5, command: 'SELECT public.invoke_push_dispatch();' }], [1, 4, 5])).not.toThrow();
+    expect(() => assertNoUnlistedCronRuns([{ jobid: 8, command: 'SELECT public.process_notification_fanout();' }], [1, 4, 5])).toThrow(/absent from cron.job.*#8/);
   });
 
   it('requires sessions that outlive the plateau', () => {

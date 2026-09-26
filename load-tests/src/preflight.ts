@@ -83,6 +83,20 @@ export function assertCronIsolation(jobs: Array<{ jobname: string; command: stri
   }
 }
 
+/**
+ * pg_cron's scheduler keeps its own cache of jobs. If cron.job is rebuilt
+ * underneath a running scheduler (for example by a database reset without a
+ * restart), it can keep executing jobs that no longer exist in cron.job and
+ * that no other check can see or disable. Any recent run of an unlisted job
+ * refuses the environment.
+ */
+export function assertNoUnlistedCronRuns(runs: Array<{ jobid: number; command: string }>, listedJobIds: number[]): void {
+  const ghosts = runs.filter((run) => !listedJobIds.includes(Number(run.jobid)));
+  if (ghosts.length > 0) {
+    throw new Error(`REFUSING: pg_cron is executing jobs absent from cron.job (stale scheduler; restart the staging database): ${ghosts.map((run) => `#${run.jobid} ${run.command.slice(0, 60)}`).join('; ')}`);
+  }
+}
+
 function fingerprintFrom(rows: Array<{ section: string; name: string; definition: string }>): SchemaFingerprint {
   const objects: Record<string, string> = {};
   const bySection = new Map<string, string[]>();
@@ -148,8 +162,10 @@ export async function runPreflight(config: LoadTestConfig, repoRoot = process.cw
 
       const dispatch = await client.query<{ url: string | null }>(`select value #>> '{}' as url from public.notification_config where key = 'push.dispatch_url'`);
       const pushMode = classifyPushDispatch(dispatch.rows[0]?.url ?? null);
-      const cron = await client.query<{ jobname: string; schedule: string; command: string; active: boolean }>('select jobname, schedule, command, active from cron.job order by jobname');
+      const cron = await client.query<{ jobid: number; jobname: string; schedule: string; command: string; active: boolean }>('select jobid, jobname, schedule, command, active from cron.job order by jobname');
       assertCronIsolation(cron.rows);
+      const recentRuns = await client.query<{ jobid: number; command: string }>(`select distinct jobid, command from cron.job_run_details where start_time > now() - interval '15 minutes'`);
+      assertNoUnlistedCronRuns(recentRuns.rows, cron.rows.map((job) => Number(job.jobid)));
 
       const university = await client.query<{ name: string; is_active: boolean }>('select name, is_active from public.universities where id = $1', [config.universityId]);
       const universityRow = university.rows[0];

@@ -88,6 +88,38 @@ Preparation only. Nothing was seeded, no load was generated, and production was 
 
 **Runner host:** k6 is not installed on this machine, and it is required before any plateau can run.
 
+## 5b. Shakedown attempt (2026-09-26): stopped before any load
+
+Approved scope: install k6 (Homebrew, **k6 v2.3.0**), seed the minimum fixture, and run the 1 → 5 user shakedown. **No load was generated.** The supervisor aborted at its leftover-rows check, and the environment was then found unfit.
+
+**Fixture seeded** (namespace `wg-loadtest-pre149-shakedown`, Load Test Pre-149 University only):
+- 5 synthetic users (`@loadtest.invalid`, placed on the Load Test campus by We Glue's own signup hook);
+- 5 clubs, 100 events, 300 photo posts, 200 messages, 25 memberships, 10 follows, 5 likes, 5 comments;
+- trigger-generated rows: 10 conversations, 20 channels, 450 notifications, 300 photo fan-out jobs.
+
+A full before/after row-count diff of 119 tables shows writes only in synthetic scope:
+- 0 notifications to non-synthetic users;
+- 0 `push_queue` rows and 0 pg_net requests;
+- 0 profiles outside the Load Test university.
+
+Five password sign-ins succeeded with no Auth errors.
+
+**Harness defects found and fixed** (none is a We Glue defect):
+1. **Legacy keys:** staging has legacy JWT API keys disabled, so the harness now uses the project's publishable and secret keys.
+2. **Seed permissions:** the 148 schema grants `service_role` only `SELECT` on every fixture table, so the service-role seed could never write. Users now sign up through the Auth admin API with the campus slug, and the fixture is written by the database owner in one atomic transaction.
+3. **Seed message ordering:** seed messages were inserted before membership and without a user identity, so We Glue's `channel_restricted` trigger correctly rejected them. They are now posted after membership, under each sender's JWT claims, and the trigger evaluates and passes normally.
+4. **SQL binding:** scoped cleanup and count statements received more bind parameters than they referenced, and Postgres rejects that. That was the campaign abort. Every harness statement is now bound densely and has been executed against the real staging schema in a rolled-back transaction.
+
+**Staging anomaly, the blocker:** pg_cron's scheduler, running since 2026-08-29, survived the reset with a stale job cache. It executes three jobs that are no longer in `cron.job` and cannot be unscheduled:
+
+| Job | Command | Schedule |
+|---|---|---|
+| #7 | `cleanup_orphaned_pending_avatars()` | — |
+| #8 | `process_notification_fanout()` | every minute |
+| #9 | the fan-out reaper | every 5 min |
+
+`pg_stat_statements` counts about 39,000 calls to #8. After the seed it began draining the fixture's photo fan-out jobs, 10 per minute, writing `club_post` notifications after the seed watermark. None of these jobs makes an HTTP call, but they are an uncontrolled writer outside the 148 contract. Preflight now refuses any recent run of a job absent from `cron.job` (`assertNoUnlistedCronRuns`). Clearing the stale cache needs a staging database restart.
+
 ## 6. Synthetic-data rules
 
 - Accounts are created with the Auth Admin API as confirmed users: `wg-loadtest-<namespace>-<n>@loadtest.invalid` (reserved TLD, so no email can be delivered), deterministic passwords, `user_metadata.loadtest_namespace`. No OTP, confirmation email or signup flow is exercised.

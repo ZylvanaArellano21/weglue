@@ -60,6 +60,26 @@ function params(scope: ResetScope): unknown[] {
   return [scope.userIds, scope.conversationIds, scope.seededAt, scope.actionPrefix];
 }
 
+/**
+ * Binds a scoped statement to exactly the scope parameters it references.
+ * Postgres rejects surplus bind values and cannot type an unreferenced gap,
+ * so `$1 … $3` becomes `$1 … $2` with only those two values.
+ */
+export function bindScoped(sql: string, scope: ResetScope): { text: string; values: unknown[] } {
+  const all = params(scope);
+  const used = [...new Set([...sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])))].sort((a, b) => a - b);
+  if (used.some((index) => index < 1 || index > all.length)) throw new Error('Scoped statement references an unknown parameter');
+  const position = new Map(used.map((index, offset) => [index, offset + 1]));
+  return { text: sql.replace(/\$(\d+)/g, (_, index: string) => `$${position.get(Number(index))}`), values: used.map((index) => all[index - 1]) };
+}
+
+/** Exact count of campaign-generated rows in the synthetic scope. */
+export const RUN_SCOPED_ROWS_SQL = `
+  select (select count(*) from public.messages where conversation_id = any($2::uuid[]) and created_at > $3::timestamptz)
+       + (select count(*) from public.notifications where user_id = any($1::uuid[]) and created_at > $3::timestamptz)
+       + (select count(*) from public.event_rsvps where user_id = any($1::uuid[]))
+       + (select count(*) from public.saved_events where user_id = any($1::uuid[])) as n`;
+
 async function withPool<T>(config: LoadTestConfig, fn: (pool: pg.Pool) => Promise<T>): Promise<T> {
   if (!config.databaseUrl) throw new Error('LOADTEST_DATABASE_URL is required for scoped reset/cleanup');
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 1, connectionTimeoutMillis: 10_000 });
@@ -74,11 +94,8 @@ async function withPool<T>(config: LoadTestConfig, fn: (pool: pg.Pool) => Promis
 export async function countRunScopedRows(config: LoadTestConfig, manifest = readManifest(config.manifestFile, config)): Promise<number> {
   const scope = resetScope(manifest, config);
   return withPool(config, async (pool) => {
-    const result = await pool.query<{ n: number }>(`
-      select (select count(*) from public.messages where conversation_id = any($2::uuid[]) and created_at > $3::timestamptz)
-           + (select count(*) from public.notifications where user_id = any($1::uuid[]) and created_at > $3::timestamptz)
-           + (select count(*) from public.event_rsvps where user_id = any($1::uuid[]))
-           + (select count(*) from public.saved_events where user_id = any($1::uuid[])) as n`, params(scope));
+    const { text, values } = bindScoped(RUN_SCOPED_ROWS_SQL, scope);
+    const result = await pool.query<{ n: number }>(text, values);
     return Number(result.rows[0]?.n ?? 0);
   });
 }
@@ -91,12 +108,13 @@ export async function resetActionWrites(config: LoadTestConfig, manifest = readM
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const foreign = await client.query<{ n: number }>(RESET_STATEMENTS.foreignConversationWrites, params(scope));
+      const run = <T extends pg.QueryResultRow>(sql: string) => { const { text, values } = bindScoped(sql, scope); return client.query<T>(text, values); };
+      const foreign = await run<{ n: number }>(RESET_STATEMENTS.foreignConversationWrites);
       if ((foreign.rows[0]?.n ?? 0) > 0) throw new Error('Cleanup scope violation: non-campaign messages exist in synthetic conversations after the seed watermark');
-      const outside = await client.query<{ n: number }>(RESET_STATEMENTS.nonSyntheticRecipients, params(scope));
+      const outside = await run<{ n: number }>(RESET_STATEMENTS.nonSyntheticRecipients);
       if ((outside.rows[0]?.n ?? 0) > 0) throw new Error('Isolation violation: synthetic actors notified non-synthetic users');
       for (const name of ['deleteNotifications', 'deletePushQueue', 'deleteActionMessages', 'deleteRsvps', 'deleteSaves', 'restoreSeedNotifications', 'restoreReadWatermark'] as const) {
-        const result = await client.query(RESET_STATEMENTS[name], params(scope));
+        const result = await run(RESET_STATEMENTS[name]);
         counts[name] = result.rowCount ?? 0;
       }
       await client.query('commit');

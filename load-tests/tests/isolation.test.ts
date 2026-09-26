@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildObserverEnv, buildPublicWorkerEnv } from '../src/campaign.js';
-import { RESET_STATEMENTS, resetScope } from '../src/cleanup.js';
+import { bindScoped, RESET_STATEMENTS, RUN_SCOPED_ROWS_SQL, resetScope } from '../src/cleanup.js';
 import { loadConfig } from '../src/config.js';
 import { assertManifestHasNoSecrets } from '../src/manifest.js';
 import { seedEventDate, seedMemberRole } from '../src/seed.js';
@@ -129,5 +129,28 @@ describe('scoped reset and cleanup', () => {
     expect(scope.conversationIds).toEqual(manifestFixture.conversationIds);
     expect(scope.seededAt).toBe(manifestFixture.seededAt);
     expect(scope.actionPrefix).toBe('wg-loadtest-contract-test:action:');
+  });
+});
+
+describe('scoped statement binding', () => {
+  const scope = { userIds: ['u'], conversationIds: ['c'], seededAt: '2026-09-26T00:00:00Z', actionPrefix: 'p:' };
+  const all: unknown[] = [scope.userIds, scope.conversationIds, scope.seededAt, scope.actionPrefix];
+  const statements = { ...RESET_STATEMENTS, runScopedRows: RUN_SCOPED_ROWS_SQL };
+
+  it('binds exactly the parameters each statement references, numbered without gaps', () => {
+    for (const [name, sql] of Object.entries(statements)) {
+      const { text, values } = bindScoped(sql, scope);
+      const used = [...new Set([...text.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])))].sort((a, b) => a - b);
+      expect(used, name).toEqual(values.map((_, index) => index + 1));
+      const original = [...new Set([...sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])))].sort((a, b) => a - b);
+      expect(values, name).toEqual(original.map((index) => all[index - 1]));
+    }
+  });
+
+  it('maps $1 and $3 to $1 and $2 with the matching values', () => {
+    const { text, values } = bindScoped(RESET_STATEMENTS.deleteNotifications, scope);
+    expect(text).toContain('any($1::uuid[])');
+    expect(text).toContain('$2::timestamptz');
+    expect(values).toEqual([scope.userIds, scope.seededAt]);
   });
 });
