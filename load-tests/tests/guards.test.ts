@@ -3,7 +3,7 @@ import { assertSessionsCover } from '../src/auth.js';
 import { cpuRatio } from '../src/campaign.js';
 import { KNOWN_STAGING_PROJECT_REF, PRODUCTION_PROJECT_REF } from '../src/constants.js';
 import { HARD_STOP_THRESHOLDS } from '../src/constants.js';
-import { assertCronIsolation, assertMigrationMarkers, assertNoUnlistedCronRuns, classifyPushDispatch } from '../src/preflight.js';
+import { assertCronIsolation, assertMigrationMarkers, assertNoUnlistedCronRuns, classifyPushDispatch, fingerprintFrom } from '../src/preflight.js';
 import { hostCounters, hostRatios, HostTracker, parsePrometheus, SustainedCondition } from '../src/prometheus.js';
 import { buildPlateaus, buildRampLevels, campaignSeconds, targetUsersAt } from '../src/ramp.js';
 import { baseTopicsFor, classifyJoin, jitteredReconnectAfterMs, joinFailureKey, realtimeHardStopReasons, sentAtFromPreview } from '../src/realtime-topology.js';
@@ -210,5 +210,17 @@ describe('Realtime hard stops and failure evidence', () => {
     expect(joinFailureKey('CHANNEL_ERROR', 'Unauthorized: You do not have permissions to read from this Channel topic: sync:access:9c5b9b74-16f1-4e50-94d2-33a5bdabcf34'))
       .toBe('CHANNEL_ERROR: Unauthorized: You do not have permissions to read from this Channel topic: sync:access:<uuid>');
     expect(joinFailureKey('TIMED_OUT', undefined)).toBe('TIMED_OUT');
+  });
+});
+
+describe('schema fingerprint scope', () => {
+  it('ignores Supabase Realtime daily message partitions but keeps every app publication table', () => {
+    const app = [{ section: 'publication', name: 'supabase_realtime:public.messages', definition: 'supabase_realtime' }];
+    const partition = (day: string) => ({ section: 'publication', name: `supabase_realtime_messages_publication:realtime.messages_${day}`, definition: 'supabase_realtime_messages_publication' });
+    const monday = fingerprintFrom([...app, partition('2026_09_25'), partition('2026_09_26')]);
+    const friday = fingerprintFrom([...app, partition('2026_09_29'), partition('2026_09_30'), partition('2026_10_01')]);
+    expect(friday).toEqual(monday);
+    expect(Object.keys(monday.objects)).toEqual(['publication:supabase_realtime:public.messages']);
+    expect(fingerprintFrom([{ ...app[0]!, name: 'supabase_realtime:public.posts' }]).sections).not.toEqual(monday.sections);
   });
 });

@@ -97,10 +97,19 @@ export function assertNoUnlistedCronRuns(runs: Array<{ jobid: number; command: s
   }
 }
 
-function fingerprintFrom(rows: Array<{ section: string; name: string; definition: string }>): SchemaFingerprint {
+/**
+ * Supabase Realtime creates and drops daily partitions of realtime.messages in
+ * its own publication. They are platform-managed and roll with the calendar,
+ * so they are not part of the We Glue schema being compared.
+ */
+export function isPlatformManagedObject(section: string, name: string): boolean {
+  return section === 'publication' && /^supabase_realtime_messages_publication:realtime\.messages_\d{4}_\d{2}_\d{2}$/.test(name);
+}
+
+export function fingerprintFrom(rows: Array<{ section: string; name: string; definition: string }>): SchemaFingerprint {
   const objects: Record<string, string> = {};
   const bySection = new Map<string, string[]>();
-  for (const row of [...rows].sort((a, b) => `${a.section}|${a.name}`.localeCompare(`${b.section}|${b.name}`))) {
+  for (const row of [...rows].filter((item) => !isPlatformManagedObject(item.section, item.name)).sort((a, b) => `${a.section}|${a.name}`.localeCompare(`${b.section}|${b.name}`))) {
     const key = `${row.section}:${row.name}`;
     const hash = sha256(row.definition);
     objects[key] = hash;
