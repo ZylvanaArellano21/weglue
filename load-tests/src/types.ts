@@ -25,6 +25,8 @@ export type LoadTestConfig = {
   runLabel: string;
   idleBaselineSeconds: number;
   authSignInIntervalMs: number;
+  tokenRefreshLimit: number;
+  tokenRefreshIntervalMs: number;
   diskIopsLimit?: number;
   edgeFunctionInventory: string;
   resultsDir: string;

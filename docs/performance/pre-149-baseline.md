@@ -50,7 +50,7 @@ Production cannot represent 148 any more (its ledger is past 148, and `send-push
 - refuses a staging `push.dispatch_url` that targets production or any non-staging project;
 - refuses any **active cron job** whose command calls production or another project. The contract schema's `sync-store-versions` job hard-codes the production URL, so it must be disabled on staging.
 
-## 5. Staging requirements (all unverified today)
+## 5. Staging requirements
 
 1. A dedicated staging project at exactly 001–148 with a complete ledger (production has historical gaps, so it must not be cloned from production's ledger). Build it from the contract commit.
 2. Recorded: plan, compute size, region, pooler mode, Auth rate limits, Realtime limits (concurrent clients **and** channel joins/second), disk IOPS, extensions, publications, cron jobs.
@@ -59,6 +59,34 @@ Production cannot represent 148 any more (its ledger is past 148, and `send-push
 5. Edge Function inventory recorded in `LOADTEST_EDGE_FUNCTION_INVENTORY`, identical for 148 and 149.
 6. A quiet window: no concurrent validation, migration, deployment or campaign.
 7. A runner host with Node ≥ 20, k6 (not installed on this machine today), network reach to staging, and enough CPU. The supervisor stops if host CPU ≥ 85%.
+
+## 5a. Prepared staging environment (2026-09-26)
+
+Preparation only. Nothing was seeded, no load was generated, and production was not touched.
+
+**Build.** On `cwwmuxxqxovhcnnardlj` (Free plan, Postgres 17.6), `supabase db reset --linked --no-seed` ran from a detached worktree at `9f16ae84`. The worktree held 142 migration files, with no 149 and no 150. It removed all previous staging data: 951 users, 21 clubs, 1,866 messages and 4 universities.
+
+**Deviation: 8 data-seed migrations recorded, not executed.** The replay stopped at `095` (`zylvana21 profile not found`). Eight migrations need production-only data that no migration creates: the real profiles `zylvana21`, `sofiaruiz` and `KevinTS`, the Chess Club with the fixed id `e87b15ef…`, and 13 production club handles such as `TheAcademy`. Those eight are `095`, `096`, `106`, `107`, `116`, `120`, `123` and `132`. Each is pure data, with no DDL. With approval, they were marked applied (`supabase migration repair --status applied`). `097`–`148` were then applied with `supabase db push --include-all`, and the follow-up dry-run reports "up to date". So the schema, functions, policies, triggers, publications and cron definitions are exactly 148, while the production club and club-interest seed rows are absent. The workload uses only its own synthetic university, so it never reads those rows.
+
+| Check | Result |
+|---|---|
+| Ledger | 142 versions, `001`…`148`, equal to the contract file list. `ledgerSha256` `94107665…0978be` |
+| 149 / 150 markers | `migration149Function`, `migration149Policy`, `migration150InsertTrigger`, `migration150UpdateTrigger`: all absent |
+| Schema fingerprint | 868 objects (cron, extension, function, notification_config, policy, publication, trigger) |
+| `push.dispatch_url` | Replay set it to production's `send-push`, from an early migration. Nulled before any job could use it, so push mode is `dispatch-disabled`. `vault.secrets` is empty and `push_queue` is empty. |
+| Cron | `sync-store-versions` (hard-codes the production URL) is **inactive**; it never ran. `dispatch-push` (every minute) and `process-event-reminders` (every 5 min) are active and staging-local; with no URL and no secret, dispatch returns before any HTTP call. `net._http_response` is empty, so staging has made no outbound request. |
+| Edge Functions | none (`LOADTEST_EDGE_FUNCTION_INVENTORY=none`) |
+| Auth | `jwt_exp` 3600, refresh-token rotation on, `rate_limit_token_refresh` 150 per 5 min per IP, `before_user_created` hook = `public.before_user_created`, which allows `.invalid` addresses. No custom access-token hook. |
+| Realtime | 200 concurrent clients, 100 joins/s, 100 events/s |
+| Campus data | Created by migrations: `Lone Star College – Montgomery` (6 clubs), `Texas A&M University – College Station`. Added for the test: `Load Test Pre-149 University` (`55da4a32-026d-413a-ac77-c252508542c0`), active, `allowlist` mode for `loadtest.invalid` only. |
+| Users | 0 in `auth.users`; 0 synthetic push tokens; no other active client backends |
+| Preflight (state 148) | **pass**, 2026-09-26T02:17:13Z |
+
+**Resulting ceiling:** `min(150, floor(0.75 × 200))` = **150 users**. The planned peak is 15 joins/s against a budget of 75.
+
+**Credentials:** the staging database password was rotated. It is stored with the anon and service keys (verified to be for this ref and role) in a 0600 file outside the repository. Nothing was printed or committed.
+
+**Runner host:** k6 is not installed on this machine, and it is required before any plateau can run.
 
 ## 6. Synthetic-data rules
 
@@ -104,7 +132,7 @@ At 148 the `sync:block` join is **expected to be denied** (its receive policy ar
 | Hold | 5 min | 5 min | 10 min | 10 min | 10 min | 10 min | 10 min | 15 min |
 
 Each plateau is an **independent run**:
-1. Sessions are refreshed outside the measurement window.
+1. Sessions are refreshed outside the measurement window. Refreshes are spaced so that any 5-minute window stays within 75% of the verified per-IP `rate_limit_token_refresh` (`LOADTEST_VERIFIED_TOKEN_REFRESH_LIMIT`). At 150 this means at least 2,703 ms between refreshes (≤ 112 per window), so a full 150-session pass takes up to about 8 min. The plateau's token-coverage check includes that pass.
 2. Load ramps up over 2 min, holds, then ramps down over 30 s.
 3. A 5-min idle cooldown follows.
 4. The supervisor classifies the plateau and **does not advance past a degraded plateau or any hard stop.**

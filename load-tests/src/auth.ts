@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { TOKEN_REFRESH_JITTER_MS } from './constants.js';
 import { readManifest } from './synthetic.js';
 import { userClient } from './supabase.js';
 import type { LoadTestConfig, SessionBundle } from './types.js';
@@ -47,7 +48,8 @@ export async function prepareSessions(config: LoadTestConfig, pause: (ms: number
 /**
  * Normal refresh-token rotation for every session expiring before `requiredUntilSeconds`.
  * Only the supervisor refreshes (between plateaus), so no two processes ever
- * race on one rotating refresh token. Refreshes are jittered and paced.
+ * race on one rotating refresh token. Refreshes are spaced by the interval
+ * derived from the verified per-IP token-refresh limit, plus jitter.
  */
 export async function refreshSessionsUntil(
   config: LoadTestConfig,
@@ -59,7 +61,7 @@ export async function refreshSessionsUntil(
   let refreshed = 0;
   for (const session of bundle.sessions) {
     if (session.expiresAt >= requiredUntilSeconds) continue;
-    if (refreshed > 0) await pause(250 + Math.floor(random() * 250));
+    if (refreshed > 0) await pause(config.tokenRefreshIntervalMs + Math.floor(random() * TOKEN_REFRESH_JITTER_MS));
     const client = userClient(config);
     const result = await client.auth.refreshSession({ refresh_token: session.refreshToken });
     if (result.error || !result.data.session) throw new Error(`refresh synthetic user ${session.userIndex}: ${result.error?.message ?? 'no session'}`);

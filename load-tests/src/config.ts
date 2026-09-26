@@ -11,6 +11,9 @@ import {
   PRODUCTION_PROJECT_REF,
   REALTIME_LIMIT_FRACTION,
   SYNTHETIC_PREFIX,
+  TOKEN_REFRESH_JITTER_MS,
+  TOKEN_REFRESH_LIMIT_FRACTION,
+  TOKEN_REFRESH_WINDOW_SECONDS,
   WRITE_CONFIRMATION,
 } from './constants.js';
 import type { CacheMode, ExperimentState, LoadTestConfig, Scenario } from './types.js';
@@ -57,6 +60,22 @@ export function calculateCeiling(realtimeLimit: number): number {
 }
 
 /** Peak planned channel joins/second for a scenario's user-arrival rate. */
+/**
+ * Minimum spacing between two session refreshes. Spacing d guarantees at most
+ * floor(window / d) + 1 refreshes in any window, which is kept within 75% of
+ * the verified per-IP limit.
+ */
+export function tokenRefreshIntervalMs(tokenRefreshLimit: number): number {
+  const budget = Math.floor(tokenRefreshLimit * TOKEN_REFRESH_LIMIT_FRACTION);
+  if (budget < 2) throw new Error('LOADTEST_VERIFIED_TOKEN_REFRESH_LIMIT is too low to refresh sessions safely');
+  return Math.ceil((TOKEN_REFRESH_WINDOW_SECONDS * 1000) / (budget - 1));
+}
+
+/** Worst-case wall time for the supervisor to refresh `sessions` sessions. */
+export function maxRefreshSeconds(config: LoadTestConfig, sessions: number): number {
+  return Math.ceil((Math.max(0, sessions - 1) * (config.tokenRefreshIntervalMs + TOKEN_REFRESH_JITTER_MS)) / 1000);
+}
+
 export function plannedJoinsPerSecond(requestedUsers: number, scenario: Scenario, coldConnectRate: number): number {
   const arrivalsPerSecond = scenario === 'cold-connect' ? coldConnectRate : requestedUsers / PLATEAU_RAMP_SECONDS;
   return arrivalsPerSecond * MAX_CHANNELS_PER_USER;
@@ -83,6 +102,8 @@ export function loadConfig(env: Environment = process.env): LoadTestConfig {
 
   const realtimeLimit = positiveInteger(env, 'LOADTEST_VERIFIED_REALTIME_LIMIT');
   const joinsPerSecondLimit = positiveInteger(env, 'LOADTEST_VERIFIED_JOINS_PER_SECOND_LIMIT');
+  const tokenRefreshLimit = positiveInteger(env, 'LOADTEST_VERIFIED_TOKEN_REFRESH_LIMIT');
+  const refreshIntervalMs = tokenRefreshIntervalMs(tokenRefreshLimit);
   const requestedUsers = positiveInteger(env, 'LOADTEST_REQUESTED_USERS');
   const syntheticUsers = Number(env.LOADTEST_SYNTHETIC_USERS ?? 250);
   if (!Number.isInteger(syntheticUsers) || syntheticUsers < Math.max(5, requestedUsers) || syntheticUsers > 500) {
@@ -148,6 +169,8 @@ export function loadConfig(env: Environment = process.env): LoadTestConfig {
     runLabel,
     idleBaselineSeconds: optionalInteger(env, 'LOADTEST_IDLE_BASELINE_SECONDS', DEFAULT_IDLE_BASELINE_SECONDS, 60),
     authSignInIntervalMs: optionalInteger(env, 'LOADTEST_AUTH_SIGNIN_INTERVAL_MS', 10_000, 250),
+    tokenRefreshLimit,
+    tokenRefreshIntervalMs: refreshIntervalMs,
     diskIopsLimit,
     edgeFunctionInventory,
     resultsDir: base,
@@ -182,6 +205,7 @@ export function controlledConfig(config: LoadTestConfig): Record<string, string 
     syntheticUsers: config.syntheticUsers,
     realtimeLimit: config.realtimeLimit,
     joinsPerSecondLimit: config.joinsPerSecondLimit,
+    tokenRefreshLimit: config.tokenRefreshLimit,
     effectiveCeiling: config.effectiveCeiling,
     scenario: config.scenario,
     coldConnectRate: config.coldConnectRate,

@@ -7,7 +7,7 @@ import pg from 'pg';
 import { analyzeRun, analyzePlateau, readNdjson, type DatabaseSample, type K6Summary, type RealtimeWindowRecord, type RunEvent } from './analyze.js';
 import { assertSessionsCover, refreshSessionsUntil } from './auth.js';
 import { countRunScopedRows } from './cleanup.js';
-import { assertCampaignApproved } from './config.js';
+import { assertCampaignApproved, maxRefreshSeconds } from './config.js';
 import { HARD_STOP_THRESHOLDS as T } from './constants.js';
 import { assertManifestHasNoSecrets, buildRunManifest, type RunManifest } from './manifest.js';
 import { runPreflight } from './preflight.js';
@@ -227,8 +227,9 @@ export async function runCampaign(config: LoadTestConfig, repoRoot = process.cwd
     for (const plateau of plateaus) {
       if (stopReason) break;
       currentPlateau = plateau.index;
-      // Token refresh happens here, outside every measurement window.
-      const requiredUntil = Math.floor(Date.now() / 1000) + plateauLoadSeconds(plateau) + 300;
+      // Token refresh happens here, outside every measurement window. Sessions
+      // left unrefreshed must still cover the paced refresh pass itself.
+      const requiredUntil = Math.floor(Date.now() / 1000) + maxRefreshSeconds(config, config.requestedUsers) + plateauLoadSeconds(plateau) + 300;
       const { refreshed, bundle } = await refreshSessionsUntil(config, requiredUntil, Math.random);
       assertSessionsCover(bundle, plateau.users, requiredUntil);
       const run: RunManifest['plateauRuns'][number] = { index: plateau.index, users: plateau.users, startedAt: new Date().toISOString(), sessionsRefreshed: refreshed, exits: {} };

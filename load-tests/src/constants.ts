@@ -8,6 +8,11 @@ export const MIGRATION_150_SHA256 = '79e45736327273ce344450f56eb247ab6ad3a927901
 
 export const MAX_APPROVED_USERS = 150;
 export const REALTIME_LIMIT_FRACTION = 0.75;
+// Supabase Auth rate_limit_token_refresh counts refreshes per IP per 5 minutes.
+// The supervisor spaces refreshes so any 5-minute window stays at or below 75%.
+export const TOKEN_REFRESH_WINDOW_SECONDS = 300;
+export const TOKEN_REFRESH_LIMIT_FRACTION = 0.75;
+export const TOKEN_REFRESH_JITTER_MS = 500;
 export const DEFAULT_RAMP = [1, 5, 10, 25, 50, 75, 100, 150] as const;
 
 // Approved plateau schedule: 1 and 5 users hold 5 minutes, 10–100 hold 10
