@@ -151,6 +151,31 @@ Conclusion: the latency and transient *Unauthorized* results come from the **sta
 5. **Cached Metrics API:** the counters refresh about once a minute, so the CPU hard stop can never sustain (a missing sample counts as 0), and disk IOPS is overstated about 12×.
 6. **Analyzer labels:** it labels this run `breakingPoint: 1` without separating environment failures from system failures.
 
+## 5d. Harness fixes and third shakedown run (2026-09-26): environment not ready, no load
+
+**Harness fixes** (commits `112ec6f8`, `93f84476`; 98 tests):
+1. **Realtime readiness gate.** It runs before the idle baseline and before every plateau, outside every measurement window.
+   - One synthetic user joins the base topics on a fresh connection. `block` is excluded, so 148 and 149 run the identical gate.
+   - Load starts only after 3 consecutive rounds in which every join subscribes within 2 s. The gate gives up after 10 minutes or 40 rounds.
+   - A failed gate ends the run as `environment-not-ready`. That status is never a We Glue result, and `compare` rejects it.
+2. **Minimum samples for Realtime hard stops.** The p95 stops need at least 20 samples; the failure-rate stop keeps its 50-attempt minimum.
+3. **Join failure evidence.** The worker now records each failed join's status and message (identifiers redacted), plus a count of joins that recovered after a failure.
+4. **Matching ramps.** k6 runs step stages identical to the Realtime worker's `targetUsersAt`, and k6 2.3 was verified to execute them as modelled.
+5. **Cached Metrics API counters.** The observer computes rates only across observed refreshes and carries the last value forward, so the CPU and IOPS hard stops can now sustain and IOPS is no longer overstated.
+6. **Fingerprint scope** (a further defect found during pre-run verification). The schema fingerprint no longer counts Supabase Realtime's daily `realtime.messages` partitions. They made the 148 fingerprint drift with the calendar (868 → 873 objects).
+
+**Run** `148-steady-warm-shakedown-2`, harness commit `93f84476`: every pre-run check passed.
+- The gate ran from 03:53:39Z to 04:03:55Z. **All 33 rounds failed** the same way: `access` and `university` got *Unauthorized*; `message-inbox`, `notifications` and `club-sync` had no result within 12 s.
+- The status is `environment-not-ready`. There was no idle baseline, no load, and no table changes.
+
+**Diagnosis** (1-user diagnostics, `evidence/run3/realtime-diagnostics.txt`):
+- Staging's Realtime rejects private-channel joins as *Unauthorized* after about 4.5 s, then accepts the automatic rejoin at about 5–14 s.
+- `postgres_changes` joins take about 320 ms. At 03:38 private joins were briefly healthy too (0.5–2.4 s).
+- The database was idle throughout a failing join, and We Glue's policies evaluate true for the same user.
+- Conclusion: the delay and the transient denial come from the managed Realtime service's authorization step. They do not come from We Glue SQL or from the harness.
+
+**Application note (unverified on production):** `apps/mobile/lib/realtime.ts` treats any *Unauthorized* join as permanent and never retries. Under the Realtime behaviour observed here, a real app session would permanently lose its `sync:access` and `sync:university` channels.
+
 ## 6. Synthetic-data rules
 
 - Accounts are created with the Auth Admin API as confirmed users: `wg-loadtest-<namespace>-<n>@loadtest.invalid` (reserved TLD, so no email can be delivered), deterministic passwords, `user_metadata.loadtest_namespace`. No OTP, confirmation email or signup flow is exercised.
