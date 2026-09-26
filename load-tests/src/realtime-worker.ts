@@ -9,7 +9,8 @@ import {
   baseTopicsFor,
   classifyJoin,
   jitteredReconnectAfterMs,
-  percentile,
+  joinFailureKey,
+  realtimeHardStopReasons,
   sentAtFromPreview,
   type JoinOutcome,
   type TopicKind,
@@ -53,10 +54,16 @@ loopDelay.enable();
 const salt = randomBytes(3).toString('hex');
 let topicSequence = 0;
 
-type ChannelState = { spec: TopicSpec; channel: RealtimeChannel; joined: boolean; startedAt: number; outcome?: JoinOutcome };
+type ChannelState = { spec: TopicSpec; channel: RealtimeChannel; joined: boolean; startedAt: number; failedBefore?: boolean; outcome?: JoinOutcome };
 type ActiveUser = { userIndex: number; userId: string; client: SupabaseClient; channels: ChannelState[]; timers: NodeJS.Timeout[]; dropAt?: number; pendingResubscribe?: Set<ChannelState> };
+type JoinWindow = {
+  attempts: number; subscribed: number; expectedUnauthorized: number; unauthorized: number; errors: number; timeouts: number; latenciesMs: number[];
+  // Joins that subscribed after an earlier timeout or error on the same channel.
+  recovered: number;
+  failures: Record<string, number>;
+};
 type WindowStats = {
-  joins: Record<string, { attempts: number; subscribed: number; expectedUnauthorized: number; unauthorized: number; errors: number; timeouts: number; latenciesMs: number[] }>;
+  joins: Record<string, JoinWindow>;
   resubscribeMs: number[];
   deliveries: number;
   duplicateDeliveries: number;
@@ -88,7 +95,7 @@ function stats(): WindowStats {
 
 function joinStats(kind: TopicKind) {
   const current = stats();
-  current.joins[kind] ??= { attempts: 0, subscribed: 0, expectedUnauthorized: 0, unauthorized: 0, errors: 0, timeouts: 0, latenciesMs: [] };
+  current.joins[kind] ??= { attempts: 0, subscribed: 0, expectedUnauthorized: 0, unauthorized: 0, errors: 0, timeouts: 0, latenciesMs: [], recovered: 0, failures: {} };
   return current.joins[kind]!;
 }
 
@@ -125,6 +132,7 @@ function subscribe(user: ActiveUser, spec: TopicSpec): void {
       if (!entry.joined) {
         entry.joined = true;
         current.subscribed += 1;
+        if (entry.failedBefore) current.recovered += 1;
         const latency = performance.now() - entry.startedAt;
         current.latenciesMs.push(latency);
         totals.latencies.push(latency);
@@ -141,6 +149,9 @@ function subscribe(user: ActiveUser, spec: TopicSpec): void {
     // Errors raised by a deliberate network drop are part of the reconnect
     // measurement, not join failures.
     if (user.dropAt !== undefined && entry.joined) return;
+    const failure = joinFailureKey(status, error?.message);
+    current.failures[failure] = (current.failures[failure] ?? 0) + 1;
+    entry.failedBefore = true;
     if (outcome === 'expected-unauthorized') {
       current.expectedUnauthorized += 1;
       totals.validAttempts -= 1;
@@ -238,6 +249,8 @@ function summarize(index: number, value: WindowStats) {
     errors: item.errors,
     timeouts: item.timeouts,
     latenciesMs: item.latenciesMs.map((ms) => Math.round(ms)),
+    recovered: item.recovered,
+    failures: item.failures,
   }]));
   return {
     type: 'realtime-window',
@@ -267,14 +280,7 @@ function flushCompletedWindows(includeCurrent: boolean): void {
 }
 
 function evaluateHardStops(): string[] {
-  const reasons: string[] = [];
-  const failureRate = totals.validAttempts > 0 ? totals.validFailures / totals.validAttempts : 0;
-  if (totals.validAttempts >= 50 && failureRate > HARD_STOP_THRESHOLDS.realtimeJoinFailureRate) reasons.push(`valid Realtime join failure rate ${(failureRate * 100).toFixed(2)}% > 2%`);
-  if (percentile(totals.latencies, 0.95) > HARD_STOP_THRESHOLDS.realtimeColdJoinP95Ms) reasons.push('Realtime cold join p95 > 15000ms');
-  if (percentile(totals.resubscribe, 0.95) > HARD_STOP_THRESHOLDS.realtimeResubscribeP95Ms) reasons.push('full resubscription p95 > 15000ms');
-  const lag = loopDelay.percentile(95) / 1_000_000;
-  if (lag > HARD_STOP_THRESHOLDS.generatorEventLoopLagP95Ms) reasons.push(`generator event-loop lag p95 ${lag.toFixed(1)}ms > 50ms (run invalid: generator-bound)`);
-  return reasons;
+  return realtimeHardStopReasons(totals, loopDelay.percentile(95) / 1_000_000, HARD_STOP_THRESHOLDS);
 }
 
 const reconcileTimer = setInterval(() => void reconcile().catch((error) => fatal(error)), 1_000);

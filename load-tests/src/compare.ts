@@ -53,7 +53,7 @@ export function checkCompatibility(pre: LoadedRun[], post: LoadedRun[]): Compati
   for (const run of post) if (run.manifest.state !== '149') problems.push(`${run.manifest.runId} is not a 149 run`);
   const all = [...pre, ...post];
   for (const run of all) {
-    if (run.manifest.status === 'running' || run.manifest.status === 'error' || run.manifest.status === 'interrupted') problems.push(`${run.manifest.runId} did not finish cleanly (${run.manifest.status})`);
+    if (run.manifest.status === 'running' || run.manifest.status === 'error' || run.manifest.status === 'interrupted' || run.manifest.status === 'environment-not-ready') problems.push(`${run.manifest.runId} did not finish cleanly (${run.manifest.status})`);
     if (run.analysis.invalid) problems.push(`${run.manifest.runId} is invalid: ${run.analysis.invalidReasons.join('; ')}`);
   }
   const reference = all[0]?.manifest;

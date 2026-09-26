@@ -65,6 +65,18 @@ export const BANNER_JOIN_STAGGER_MS = 180;
 // Planned cold-connect arrival rates (new users/second), capped at 10.
 export const COLD_CONNECT_RATES = [1, 3, 5, 10] as const;
 
+// Realtime readiness gate, run before the idle baseline and before every
+// plateau (outside all measurement windows). A warm Realtime service joins in
+// well under a second; a cold one can take 5–30 s and transiently deny joins.
+export const REALTIME_WARMUP = Object.freeze({
+  consecutivePasses: 3,
+  maxJoinMs: 2_000,
+  joinTimeoutMs: 12_000,
+  pauseMs: 5_000,
+  maxRounds: 40,
+  maxSeconds: 600,
+});
+
 export const HARD_STOP_THRESHOLDS = Object.freeze({
   httpErrorRate: 0.05,
   httpErrorWindowSeconds: 60,
@@ -75,6 +87,9 @@ export const HARD_STOP_THRESHOLDS = Object.freeze({
   realtimeColdJoinP95Ms: 15_000,
   realtimeResubscribeP95Ms: 15_000,
   realtimeJoinFailureRate: 0.02,
+  // Latency percentiles hard-stop only once they rest on enough samples.
+  realtimeP95MinSamples: 20,
+  realtimeFailureMinAttempts: 50,
   databaseCpuRatio: 0.9,
   databaseCpuWindowSeconds: 120,
   databaseMemoryRatio: 0.9,

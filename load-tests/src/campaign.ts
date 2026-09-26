@@ -8,14 +8,15 @@ import { analyzeRun, analyzePlateau, readNdjson, type DatabaseSample, type K6Sum
 import { assertSessionsCover, refreshSessionsUntil } from './auth.js';
 import { countRunScopedRows } from './cleanup.js';
 import { assertCampaignApproved, maxRefreshSeconds } from './config.js';
-import { HARD_STOP_THRESHOLDS as T } from './constants.js';
+import { HARD_STOP_THRESHOLDS as T, REALTIME_WARMUP } from './constants.js';
 import { assertManifestHasNoSecrets, buildRunManifest, type RunManifest } from './manifest.js';
 import { runPreflight } from './preflight.js';
 import { SustainedCondition } from './prometheus.js';
 import { buildPlateaus, plateauLoadSeconds } from './ramp.js';
+import { runRealtimeWarmup, supabaseWarmupJoiner, warmupTopics, type WarmupJoiner, type WarmupLimits } from './realtime-warmup.js';
 import { readManifest } from './synthetic.js';
 import { readTrace } from './trace.js';
-import type { LoadTestConfig, Plateau } from './types.js';
+import type { LoadTestConfig, Plateau, SessionBundle } from './types.js';
 
 export const REALTIME_USERS_PER_SHARD = 25;
 const PRIVILEGED_VARIABLES = ['LOADTEST_SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'LOADTEST_DATABASE_URL', 'DATABASE_URL'];
@@ -132,19 +133,19 @@ function exitOf(child: ChildProcess): Promise<number | null> {
   });
 }
 
-export async function runCampaign(config: LoadTestConfig, repoRoot = process.cwd(), options: { plateaus?: Plateau[] } = {}): Promise<RunManifest> {
+export async function runCampaign(config: LoadTestConfig, repoRoot = process.cwd(), options: { plateaus?: Plateau[]; warmupJoiner?: WarmupJoiner; warmupLimits?: WarmupLimits } = {}): Promise<RunManifest> {
   assertCampaignApproved(config);
   if (!config.databaseUrl || !config.serviceRoleKey) throw new Error('The campaign supervisor requires LOADTEST_DATABASE_URL and the service-role key for the observer');
   const preflight = await runPreflight(config, repoRoot);
   const trace = readTrace(config.traceFile);
   if (trace.namespace !== config.namespace || trace.seed !== config.seed || trace.users !== config.requestedUsers) throw new Error('Trace/config mismatch');
-  readManifest(config.manifestFile, config);
+  const synthetic = readManifest(config.manifestFile, config);
   const leftover = await countRunScopedRows(config);
   if (leftover > 0) throw new Error(`REFUSING LOAD: ${leftover} run-generated rows remain from an earlier run; run reset-actions first`);
   if (existsSync(resolve(config.runDir, 'run-manifest.json'))) throw new Error(`Run ${config.runDir} already exists; choose a new LOADTEST_RUN_LABEL`);
   mkdirSync(config.runDir, { recursive: true });
 
-  // `options.plateaus` exists only so the supervisor can be exercised by tests with short schedules.
+  // `options.plateaus` and the warm-up options exist only so tests can exercise the supervisor quickly.
   const plateaus = options.plateaus ?? buildPlateaus(config.requestedUsers, config.scenario, config.coldConnectRate);
   const databaseStartedAt = await databaseNow(config);
   const manifest = buildRunManifest({ config, repoRoot, preflight, traceSha256: trace.sha256, plateaus, databaseStartedAt });
@@ -218,7 +219,31 @@ export async function runCampaign(config: LoadTestConfig, repoRoot = process.cwd
     while (!stopReason && Date.now() < until) await delay(Math.min(1_000, until - Date.now()));
   };
 
+  // Realtime readiness gate: outside every measurement window, identical for
+  // 148 and 149. A failure ends the run as "environment not ready".
+  const warmupGate = async (phase: string, sessions: SessionBundle): Promise<boolean> => {
+    const session = sessions.sessions[0];
+    if (!session) throw new Error('No synthetic session is available for the Realtime warm-up gate');
+    events.event('realtime-warmup-start', { phase });
+    const result = await runRealtimeWarmup({
+      phase,
+      topics: warmupTopics(session, synthetic),
+      join: options.warmupJoiner ?? supabaseWarmupJoiner(config, () => session.accessToken),
+      limits: options.warmupLimits,
+      shouldStop: () => Boolean(stopReason),
+    });
+    manifest.warmups = [...(manifest.warmups ?? []), result];
+    writeManifest();
+    events.event('realtime-warmup-end', { phase, passed: result.passed, rounds: result.rounds.length });
+    if (!result.passed && !stopReason) {
+      stop(`environment not ready: Realtime warm-up gate failed before ${phase} after ${result.rounds.length} rounds`, 'environment-not-ready');
+    }
+    return result.passed;
+  };
+
   try {
+    const initialSessions = await refreshSessionsUntil(config, Math.floor(Date.now() / 1000) + REALTIME_WARMUP.maxSeconds + 300, Math.random);
+    if (!(await warmupGate('idle-baseline', initialSessions.bundle))) throw new Error(stopReason ?? 'Realtime warm-up gate failed');
     events.event('idle-start');
     await sleepUnlessStopped(config.idleBaselineSeconds);
     events.event('idle-end');
@@ -229,9 +254,10 @@ export async function runCampaign(config: LoadTestConfig, repoRoot = process.cwd
       currentPlateau = plateau.index;
       // Token refresh happens here, outside every measurement window. Sessions
       // left unrefreshed must still cover the paced refresh pass itself.
-      const requiredUntil = Math.floor(Date.now() / 1000) + maxRefreshSeconds(config, config.requestedUsers) + plateauLoadSeconds(plateau) + 300;
+      const requiredUntil = Math.floor(Date.now() / 1000) + maxRefreshSeconds(config, config.requestedUsers) + REALTIME_WARMUP.maxSeconds + plateauLoadSeconds(plateau) + 300;
       const { refreshed, bundle } = await refreshSessionsUntil(config, requiredUntil, Math.random);
       assertSessionsCover(bundle, plateau.users, requiredUntil);
+      if (!(await warmupGate(`plateau-${plateau.index}`, bundle))) break;
       const run: RunManifest['plateauRuns'][number] = { index: plateau.index, users: plateau.users, startedAt: new Date().toISOString(), sessionsRefreshed: refreshed, exits: {} };
       manifest.plateauRuns.push(run);
       writeManifest();

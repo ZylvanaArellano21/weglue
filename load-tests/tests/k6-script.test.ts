@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { plateauStages } from '../k6/lib/ramp.js';
 import { generateTrace } from '../src/trace.js';
 import { manifestFixture } from './fixtures.js';
 
@@ -52,7 +53,9 @@ describe('k6 plateau script', () => {
   it('runs exactly one plateau: ramp, hold, ramp-down, with the approved hard stops', () => {
     const scenario = script.options.scenarios.plateau;
     expect(scenario.executor).toBe('ramping-vus');
-    expect(scenario.stages).toEqual([{ duration: '120s', target: 10 }, { duration: '600s', target: 10 }, { duration: '30s', target: 0 }]);
+    expect(scenario.stages).toEqual(plateauStages(10, 120, 600, 30));
+    expect(scenario.stages[0]).toEqual({ duration: '0s', target: 1 });
+    expect(scenario.stages.at(-1)).toEqual({ duration: '1500ms', target: 0 });
     expect(script.options.thresholds.weglue_request_errors[0]).toMatchObject({ threshold: 'rate<=0.05', abortOnFail: true, delayAbortEval: '60s' });
     expect(script.options.thresholds.weglue_timeouts[0]).toMatchObject({ threshold: 'rate<=0.01', abortOnFail: true });
     expect(script.options.thresholds.weglue_interactive_duration[0]).toMatchObject({ threshold: 'p(95)<=5000', abortOnFail: true, delayAbortEval: '120s' });
@@ -103,5 +106,19 @@ describe('k6 plateau script', () => {
     expect(Object.keys(output)[0]).toBe(join(dir, 'summary.json'));
     expect(summary).toMatchObject({ schemaVersion: 2, state: '148', plateau: { index: 2, users: 10 }, namespace: manifestFixture.namespace });
     expect(summary.traceSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('k6 plateau stages', () => {
+  it('match the Realtime worker ramp second by second', async () => {
+    const { stageTargetAt } = await import('../k6/lib/ramp.js');
+    const { targetUsersAt } = await import('../src/ramp.js');
+    for (const [users, ramp, hold, down] of [[1, 120, 300, 30], [5, 120, 300, 30], [150, 120, 900, 30], [10, 1, 60, 30], [7, 3, 10, 30]] as const) {
+      const stages = plateauStages(users, ramp, hold, down);
+      for (let ms = 370; ms < (ramp + hold + down) * 1000; ms += 997) {
+        expect(stageTargetAt(stages, ms), `${users} users at ${ms} ms`).toBe(targetUsersAt(ms / 1000, { index: 0, users, rampSeconds: ramp, holdSeconds: hold, rampDownSeconds: down, cooldownSeconds: 0 }));
+      }
+      expect(stages.reduce((total: number, stage: { duration: string }) => total + (stage.duration.endsWith('ms') ? Number(stage.duration.slice(0, -2)) : 0), 0)).toBe((ramp + hold + down) * 1000);
+    }
   });
 });

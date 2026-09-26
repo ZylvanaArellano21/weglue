@@ -5,8 +5,9 @@ import { join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { CAMPAIGN_CONFIRMATION } from '../src/constants.js';
+import { CAMPAIGN_CONFIRMATION, REALTIME_WARMUP } from '../src/constants.js';
 import { generateTrace, writeTrace } from '../src/trace.js';
+import type { WarmupJoiner } from '../src/realtime-warmup.js';
 import type { Plateau } from '../src/types.js';
 import { manifestFixture } from './fixtures.js';
 import { testEnv } from './helpers.js';
@@ -63,7 +64,7 @@ vi.mock('../src/preflight.js', () => ({
 }));
 vi.mock('../src/cleanup.js', () => ({ countRunScopedRows: async () => 0 }));
 vi.mock('../src/auth.js', () => ({
-  refreshSessionsUntil: async () => ({ refreshed: 0, bundle: { sessions: [] } }),
+  refreshSessionsUntil: async () => ({ refreshed: 0, bundle: { sessions: [{ userIndex: 0, userId: '00000000-0000-4000-8000-00000000000a', accessToken: 'a', refreshToken: 'r', expiresAt: 0 }] } }),
   assertSessionsCover: () => undefined,
 }));
 vi.mock('pg', () => ({ default: { Pool: class { query = async () => ({ rows: [{ now: new Date('2026-09-25T00:00:00Z') }] }); end = async () => undefined; } } }));
@@ -82,6 +83,8 @@ function setup(label: string) {
 }
 
 const repoRoot = resolve(__dirname, '../..');
+const fastGate = { ...REALTIME_WARMUP, pauseMs: 0, maxRounds: 5 };
+const warm: WarmupJoiner = async (topics) => topics.map((topic) => ({ kind: topic.kind, status: 'SUBSCRIBED', latencyMs: 120 }));
 
 beforeEach(() => {
   spawned.length = 0;
@@ -91,7 +94,7 @@ describe('campaign supervisor', () => {
   it('refuses to start without the exact campaign approval', async () => {
     const { runCampaign } = await import('../src/campaign.js');
     const config = { ...setup('noapproval'), campaignApproved: false };
-    await expect(runCampaign(config, repoRoot, { plateaus })).rejects.toThrow(/REFUSING LOAD/);
+    await expect(runCampaign(config, repoRoot, { plateaus, warmupJoiner: warm, warmupLimits: fastGate })).rejects.toThrow(/REFUSING LOAD/);
     expect(spawned).toHaveLength(0);
   });
 
@@ -99,7 +102,7 @@ describe('campaign supervisor', () => {
     const { runCampaign } = await import('../src/campaign.js');
     behaviour = { k6Exit: () => 99, realtimeLines: () => [] };
     const config = setup('hardstop');
-    const manifest = await runCampaign(config, repoRoot, { plateaus });
+    const manifest = await runCampaign(config, repoRoot, { plateaus, warmupJoiner: warm, warmupLimits: fastGate });
     expect(manifest.status).toBe('hard-stop');
     expect(manifest.stopReason).toMatch(/k6 exited with 99/);
     expect(manifest.plateauRuns.map((run) => run.index)).toEqual([0]);
@@ -115,7 +118,7 @@ describe('campaign supervisor', () => {
     const { runCampaign } = await import('../src/campaign.js');
     behaviour = { k6Exit: () => 0, realtimeLines: () => [] };
     const config = setup('degraded');
-    const manifest = await runCampaign(config, repoRoot, { plateaus });
+    const manifest = await runCampaign(config, repoRoot, { plateaus, warmupJoiner: warm, warmupLimits: fastGate });
     // No k6 summary and no observer samples: recovery cannot be verified → degraded.
     expect(manifest.status).toBe('degraded-stop');
     expect(manifest.plateauRuns.map((run) => run.index)).toEqual([0]);
@@ -126,7 +129,7 @@ describe('campaign supervisor', () => {
     const { runCampaign } = await import('../src/campaign.js');
     behaviour = { k6Exit: () => 99, realtimeLines: () => [JSON.stringify({ type: 'realtime-window', plateau: 0, window: 0, joins: {}, resubscribeMs: [], deliveries: 0, duplicateDeliveries: 0, deliveryLatencyMs: [], reconnects: 0, eventLoopLagP95Ms: 1 })] };
     const config = setup('secrets');
-    await runCampaign(config, repoRoot, { plateaus });
+    await runCampaign(config, repoRoot, { plateaus, warmupJoiner: warm, warmupLimits: fastGate });
     for (const call of spawned) {
       const env = JSON.stringify(call.env);
       const isObserver = call.args.some((arg) => arg.endsWith('observer-worker.js'));
@@ -147,7 +150,35 @@ describe('campaign supervisor', () => {
     const { runCampaign } = await import('../src/campaign.js');
     behaviour = { k6Exit: () => 99, realtimeLines: () => [] };
     const config = setup('twice');
-    await runCampaign(config, repoRoot, { plateaus });
-    await expect(runCampaign(config, repoRoot, { plateaus })).rejects.toThrow(/already exists/);
+    await runCampaign(config, repoRoot, { plateaus, warmupJoiner: warm, warmupLimits: fastGate });
+    await expect(runCampaign(config, repoRoot, { plateaus, warmupJoiner: warm, warmupLimits: fastGate })).rejects.toThrow(/already exists/);
+  });
+
+  it('ends as environment-not-ready, before any load, when the Realtime warm-up gate fails', async () => {
+    const { runCampaign } = await import('../src/campaign.js');
+    behaviour = { k6Exit: () => 0, realtimeLines: () => [] };
+    const cold: WarmupJoiner = async (topics) => topics.map((topic, index) => (index === 0
+    ? { kind: topic.kind, status: 'CHANNEL_ERROR', failure: 'CHANNEL_ERROR: Unauthorized: ... sync:access:<uuid>' }
+    : { kind: topic.kind, status: 'SUBSCRIBED', latencyMs: 9_000 }));
+    const config = setup('coldgate');
+    const manifest = await runCampaign(config, repoRoot, { plateaus, warmupJoiner: cold, warmupLimits: fastGate });
+    expect(manifest.status).toBe('environment-not-ready');
+    expect(manifest.stopReason).toMatch(/Realtime warm-up gate failed before idle-baseline/);
+    expect(manifest.plateauRuns).toHaveLength(0);
+    expect(manifest.warmups?.[0]).toMatchObject({ phase: 'idle-baseline', passed: false });
+    expect(manifest.warmups?.[0]?.rounds[0]?.joins[0]?.failure).toMatch(/Unauthorized/);
+    expect(spawned.filter((call) => call.command === 'k6' || call.args.some((arg) => arg.endsWith('realtime-worker.js')))).toHaveLength(0);
+    expect(readFileSync(join(config.runDir, 'events.ndjson'), 'utf8')).not.toMatch(/idle-start/);
+  });
+
+  it('passes the gate before the idle baseline and before every plateau, and records it', async () => {
+    const { runCampaign } = await import('../src/campaign.js');
+    behaviour = { k6Exit: () => 99, realtimeLines: () => [] };
+    const config = setup('warmgate');
+    const manifest = await runCampaign(config, repoRoot, { plateaus, warmupJoiner: warm, warmupLimits: fastGate });
+    expect(manifest.warmups?.map((warmup) => [warmup.phase, warmup.passed, warmup.rounds.length])).toEqual([['idle-baseline', true, 3], ['plateau-0', true, 3]]);
+    const events = readFileSync(join(config.runDir, 'events.ndjson'), 'utf8');
+    expect(events.indexOf('realtime-warmup-end')).toBeLessThan(events.indexOf('idle-start'));
+    expect(events.lastIndexOf('realtime-warmup-end')).toBeLessThan(events.indexOf('plateau-start'));
   });
 });

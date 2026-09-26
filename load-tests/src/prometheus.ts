@@ -66,6 +66,44 @@ export function hostRatios(previous: HostCounters | undefined, current: HostCoun
   return ratios;
 }
 
+export type TrackedHost = HostRatios & { hostCountersRefreshed: boolean; hostSampleAgeSeconds?: number };
+
+/**
+ * The Metrics API serves cached counters that refresh on its own cadence
+ * (about once a minute), so consecutive scrapes are usually identical.
+ * Rates are computed only between two observed refreshes, and the last
+ * computed values are carried forward so sustained hard stops see the most
+ * recent real measurement rather than a missing sample.
+ */
+export class HostTracker {
+  private last: HostCounters | undefined;
+  private primed = false;
+  private carried: HostRatios = {};
+  constructor(private readonly diskIopsLimit?: number) {}
+
+  update(current: HostCounters): TrackedHost {
+    const memory = hostRatios(undefined, current).memoryRatio;
+    const withMemory = (ratios: HostRatios) => (memory === undefined ? ratios : { ...ratios, memoryRatio: memory });
+    const changed = !this.last
+      || current.cpuTotalSeconds !== this.last.cpuTotalSeconds
+      || current.cpuIdleSeconds !== this.last.cpuIdleSeconds
+      || current.diskOps !== this.last.diskOps;
+    if (!changed) {
+      return { ...withMemory(this.carried), hostCountersRefreshed: false, hostSampleAgeSeconds: (current.at - this.last!.at) / 1000 };
+    }
+    const previous = this.last;
+    this.last = current;
+    // The first refresh after start spans an unknown part of a cache period,
+    // so rates are reported only from the second observed refresh onward.
+    if (previous && this.primed) {
+      const { memoryRatio: _memory, ...rates } = hostRatios(previous, current, this.diskIopsLimit);
+      this.carried = rates;
+    }
+    if (previous) this.primed = true;
+    return { ...withMemory(this.carried), hostCountersRefreshed: true, hostSampleAgeSeconds: 0 };
+  }
+}
+
 /** Tracks how long a condition has held continuously. */
 export class SustainedCondition {
   private since: number | undefined;

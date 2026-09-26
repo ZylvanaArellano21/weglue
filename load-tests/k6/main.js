@@ -5,6 +5,7 @@ import { SharedArray } from 'k6/data';
 import { check, fail, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { actionClientTag, assertAllowedStages, buildJourney, JOURNEY_NAMES } from './lib/journeys.js';
+import { plateauStages } from './lib/ramp.js';
 import { uuidFromSha256Hex } from './lib/uuid.js';
 
 // One k6 process runs exactly one plateau (ramp → hold → ramp-down). The
@@ -81,11 +82,8 @@ export const options = {
     plateau: {
       executor: 'ramping-vus',
       startVUs: 0,
-      stages: [
-        { duration: `${rampSeconds}s`, target: plateauUsers },
-        { duration: `${holdSeconds}s`, target: plateauUsers },
-        { duration: `${rampDownSeconds}s`, target: 0 },
-      ],
+      // Step stages identical to the Realtime worker's targetUsersAt.
+      stages: plateauStages(plateauUsers, rampSeconds, holdSeconds, rampDownSeconds),
       gracefulRampDown: '20s',
       gracefulStop: '20s',
     },

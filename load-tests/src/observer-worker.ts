@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
 import { HARD_STOP_THRESHOLDS as T } from './constants.js';
-import { hostCounters, hostRatios, parsePrometheus, SustainedCondition, type HostCounters } from './prometheus.js';
+import { hostCounters, HostTracker, parsePrometheus, SustainedCondition } from './prometheus.js';
 import { OBSERVER_SQL } from './observer-sql.js';
 import type { SyntheticManifest } from './types.js';
 
@@ -25,10 +25,10 @@ const syntheticIds = manifest.users.map((user) => user.id);
 const pool = new pg.Pool({ connectionString, max: 1, connectionTimeoutMillis: 10_000, application_name: 'weglue-loadtest-observer' });
 let baselineDeadlocks = 0;
 let stopped = false;
-let previousHost: HostCounters | undefined;
 let metricsWarned = false;
 const connectionPressure = new SustainedCondition(T.databasePressureWindowSeconds * 1_000);
 const memoryPressure = new SustainedCondition(T.databasePressureWindowSeconds * 1_000);
+const hostTracker = new HostTracker(diskIopsLimit);
 const cpuPressure = new SustainedCondition(T.databaseCpuWindowSeconds * 1_000);
 const iopsPressure = new SustainedCondition(T.databaseDiskIopsWindowSeconds * 1_000);
 
@@ -40,10 +40,8 @@ async function scrapeHost(): Promise<Record<string, number | boolean | undefined
       signal: AbortSignal.timeout(4_000),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const current = hostCounters(parsePrometheus(await response.text()), Date.now());
-    const ratios = hostRatios(previousHost, current, diskIopsLimit);
-    previousHost = current;
-    return { metricsApiAvailable: true, ...ratios };
+    const tracked = hostTracker.update(hostCounters(parsePrometheus(await response.text()), Date.now()));
+    return { metricsApiAvailable: true, ...tracked };
   } catch (error) {
     if (!metricsWarned) process.stderr.write(`Observer: Metrics API unavailable (${String(error)}); dashboard watch is mandatory\n`);
     metricsWarned = true;

@@ -8,6 +8,7 @@ import { APPLICATION_CONTRACT_COMMIT, MIGRATION_149_FILE, MIGRATION_150_FILE } f
 import { controlledConfig } from './config.js';
 import { sha256File } from './contract.js';
 import type { PreflightReport } from './preflight.js';
+import type { WarmupResult } from './realtime-warmup.js';
 import type { LoadTestConfig, Plateau } from './types.js';
 
 export type RunManifest = {
@@ -18,7 +19,7 @@ export type RunManifest = {
   scenario: LoadTestConfig['scenario'];
   cacheMode: LoadTestConfig['cacheMode'];
   runLabel: string;
-  status: 'running' | 'completed' | 'degraded-stop' | 'hard-stop' | 'error' | 'interrupted';
+  status: 'running' | 'completed' | 'degraded-stop' | 'hard-stop' | 'environment-not-ready' | 'error' | 'interrupted';
   stopReason?: string;
   startedAt: string;
   databaseStartedAt: string;
@@ -34,6 +35,8 @@ export type RunManifest = {
   controlledConfigSha256: string;
   tooling: { node: string; k6: string; supabaseJs: string; pg: string; platform: string; hostname: string; cpuCount: number; cpuModel: string };
   plannedPlateaus: Plateau[];
+  // Realtime readiness gate results, in order (before the idle baseline and each plateau).
+  warmups?: WarmupResult[];
   plateauRuns: Array<{ index: number; users: number; startedAt: string; loadEndedAt?: string; cooldownEndedAt?: string; sessionsRefreshed: number; exits: Record<string, number | null> }>;
 };
 

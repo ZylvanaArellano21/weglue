@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { assertSessionsCover } from '../src/auth.js';
 import { cpuRatio } from '../src/campaign.js';
 import { KNOWN_STAGING_PROJECT_REF, PRODUCTION_PROJECT_REF } from '../src/constants.js';
+import { HARD_STOP_THRESHOLDS } from '../src/constants.js';
 import { assertCronIsolation, assertMigrationMarkers, assertNoUnlistedCronRuns, classifyPushDispatch } from '../src/preflight.js';
-import { hostCounters, hostRatios, parsePrometheus, SustainedCondition } from '../src/prometheus.js';
+import { hostCounters, hostRatios, HostTracker, parsePrometheus, SustainedCondition } from '../src/prometheus.js';
 import { buildPlateaus, buildRampLevels, campaignSeconds, targetUsersAt } from '../src/ramp.js';
-import { baseTopicsFor, classifyJoin, jitteredReconnectAfterMs, sentAtFromPreview } from '../src/realtime-topology.js';
+import { baseTopicsFor, classifyJoin, jitteredReconnectAfterMs, joinFailureKey, realtimeHardStopReasons, sentAtFromPreview } from '../src/realtime-topology.js';
 import { manifestFixture } from './fixtures.js';
 
 const none = { migration149Function: false, migration149Policy: false, migration150InsertTrigger: false, migration150UpdateTrigger: false };
@@ -150,5 +151,64 @@ node_disk_writes_completed_total{device="nvme0n1"} ${ops / 2}
   it('computes generator CPU from os.cpus deltas', () => {
     const snapshot = (idle: number, user: number) => [{ model: 'x', speed: 1, times: { user, nice: 0, sys: 0, idle, irq: 0 } }];
     expect(cpuRatio(snapshot(100, 100), snapshot(110, 190))).toBeCloseTo(0.9);
+  });
+});
+
+describe('cached Metrics API counters', () => {
+  const at = (seconds: number, cpuIdle: number, cpuTotal: number, diskOps: number) => ({ at: seconds * 1000, cpuIdleSeconds: cpuIdle, cpuTotalSeconds: cpuTotal, diskOps, memTotalBytes: 100, memAvailableBytes: 40 });
+
+  it('computes rates only across observed refreshes and carries the last value forward', () => {
+    const tracker = new HostTracker(3000);
+    // Counters refresh once a minute; the observer scrapes every 5 s.
+    expect(tracker.update(at(0, 100, 200, 1000))).toMatchObject({ hostCountersRefreshed: true, memoryRatio: 0.6 });
+    expect(tracker.update(at(5, 100, 200, 1000)).cpuRatio).toBeUndefined();
+    // First refresh spans an unknown part of a cache period: not reported.
+    expect(tracker.update(at(60, 130, 260, 7000)).cpuRatio).toBeUndefined();
+    const second = tracker.update(at(120, 157, 320, 13000));
+    expect(second.cpuRatio).toBeCloseTo(0.55);
+    expect(second.diskIops).toBeCloseTo(100);
+    expect(second.diskIopsRatio).toBeCloseTo(100 / 3000);
+    // Between refreshes the last real measurement is carried, never dropped to 0.
+    const carried = tracker.update(at(125, 157, 320, 13000));
+    expect(carried).toMatchObject({ hostCountersRefreshed: false, hostSampleAgeSeconds: 5 });
+    expect(carried.cpuRatio).toBeCloseTo(0.55);
+    expect(carried.diskIops).toBeCloseTo(100);
+  });
+
+  it('lets a sustained CPU condition hold across cached scrapes', () => {
+    const tracker = new HostTracker();
+    const cpu = new SustainedCondition(120_000);
+    tracker.update(at(0, 0, 0, 0));
+    tracker.update(at(60, 5, 60, 0));
+    let fired = false;
+    for (let second = 120; second <= 300; second += 5) {
+      const refresh = second % 60 === 0;
+      const minute = Math.floor(second / 60);
+      const sample = tracker.update(at(refresh ? second : minute * 60, 5 + (minute - 1) * 3, minute * 60, 0));
+      fired ||= cpu.update((sample.cpuRatio ?? 0) >= 0.9, second * 1000);
+    }
+    expect(fired).toBe(true);
+  });
+});
+
+describe('Realtime hard stops and failure evidence', () => {
+  const none = { validAttempts: 0, validFailures: 0, latencies: [] as number[], resubscribe: [] as number[] };
+
+  it('does not hard-stop a p95 or a failure rate that rests on too few samples', () => {
+    expect(realtimeHardStopReasons({ ...none, validAttempts: 6, validFailures: 5, latencies: [18_870] }, 5, HARD_STOP_THRESHOLDS)).toEqual([]);
+  });
+
+  it('hard-stops once enough samples show the breach', () => {
+    const slow = Array(20).fill(16_000);
+    expect(realtimeHardStopReasons({ ...none, validAttempts: 20, latencies: slow }, 5, HARD_STOP_THRESHOLDS)).toEqual(['Realtime cold join p95 > 15000ms']);
+    expect(realtimeHardStopReasons({ ...none, validAttempts: 50, validFailures: 2 }, 5, HARD_STOP_THRESHOLDS)).toEqual(['valid Realtime join failure rate 4.00% > 2%']);
+    expect(realtimeHardStopReasons({ ...none, resubscribe: slow }, 5, HARD_STOP_THRESHOLDS)).toEqual(['full resubscription p95 > 15000ms']);
+    expect(realtimeHardStopReasons(none, 80, HARD_STOP_THRESHOLDS)[0]).toMatch(/generator-bound/);
+  });
+
+  it('groups join failures by status and message without identifiers', () => {
+    expect(joinFailureKey('CHANNEL_ERROR', 'Unauthorized: You do not have permissions to read from this Channel topic: sync:access:9c5b9b74-16f1-4e50-94d2-33a5bdabcf34'))
+      .toBe('CHANNEL_ERROR: Unauthorized: You do not have permissions to read from this Channel topic: sync:access:<uuid>');
+    expect(joinFailureKey('TIMED_OUT', undefined)).toBe('TIMED_OUT');
   });
 });

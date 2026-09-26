@@ -94,3 +94,32 @@ export function sentAtFromPreview(preview: unknown, namespace: string): number |
   const match = /:t:(\d{13})$/.exec(preview);
   return match ? Number(match[1]) : undefined;
 }
+
+/** Status and message of a failed join, with identifiers removed so failures group. */
+export function joinFailureKey(status: string, errorMessage: string | undefined): string {
+  const message = (errorMessage ?? '').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>').trim();
+  return (message ? `${status}: ${message}` : status).slice(0, 160);
+}
+
+export type RealtimeTotals = { validAttempts: number; validFailures: number; latencies: number[]; resubscribe: number[] };
+
+/** Realtime hard stops. Rates and percentiles fire only with enough samples to mean something. */
+export function realtimeHardStopReasons(
+  totals: RealtimeTotals,
+  eventLoopLagP95Ms: number,
+  limits: { realtimeJoinFailureRate: number; realtimeFailureMinAttempts: number; realtimeColdJoinP95Ms: number; realtimeResubscribeP95Ms: number; realtimeP95MinSamples: number; generatorEventLoopLagP95Ms: number },
+): string[] {
+  const reasons: string[] = [];
+  const failureRate = totals.validAttempts > 0 ? totals.validFailures / totals.validAttempts : 0;
+  if (totals.validAttempts >= limits.realtimeFailureMinAttempts && failureRate > limits.realtimeJoinFailureRate) {
+    reasons.push(`valid Realtime join failure rate ${(failureRate * 100).toFixed(2)}% > ${limits.realtimeJoinFailureRate * 100}%`);
+  }
+  if (totals.latencies.length >= limits.realtimeP95MinSamples && percentile(totals.latencies, 0.95) > limits.realtimeColdJoinP95Ms) {
+    reasons.push(`Realtime cold join p95 > ${limits.realtimeColdJoinP95Ms}ms`);
+  }
+  if (totals.resubscribe.length >= limits.realtimeP95MinSamples && percentile(totals.resubscribe, 0.95) > limits.realtimeResubscribeP95Ms) {
+    reasons.push(`full resubscription p95 > ${limits.realtimeResubscribeP95Ms}ms`);
+  }
+  if (eventLoopLagP95Ms > limits.generatorEventLoopLagP95Ms) reasons.push(`generator event-loop lag p95 ${eventLoopLagP95Ms.toFixed(1)}ms > ${limits.generatorEventLoopLagP95Ms}ms (run invalid: generator-bound)`);
+  return reasons;
+}
