@@ -1,0 +1,11 @@
+dist/
+results/
+secrets/
+private/
+.env
+.env.*
+!.env.example
+*.local.json
+*.ndjson
+*.json.gz
+*.csv
