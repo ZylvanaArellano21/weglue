@@ -120,6 +120,37 @@ Five password sign-ins succeeded with no Auth errors.
 
 `pg_stat_statements` counts about 39,000 calls to #8. After the seed it began draining the fixture's photo fan-out jobs, 10 per minute, writing `club_post` notifications after the seed watermark. None of these jobs makes an HTTP call, but they are an uncontrolled writer outside the 148 contract. Preflight now refuses any recent run of a job absent from `cron.job` (`assertNoUnlistedCronRuns`). Clearing the stale cache needs a staging database restart.
 
+## 5c. Shakedown run after the staging restart (2026-09-26): failed at 1 user, not a We Glue result
+
+**Restart:** the staging database was restarted at 02:42:13Z with approval. The new pg_cron launcher runs only the listed jobs #1 and #5, and the ghost jobs are gone. The 440 notifications written by the ghost fan-out were removed with `reset-actions`. The pre-run checks and preflight passed: fingerprint identical, 149/150 absent, dispatch null, `sync-store-versions` inactive, limits unchanged.
+
+**Run** `148-steady-warm-shakedown-1` (harness commit `2d636e4f`):
+- 15 min idle baseline;
+- 1-user stage started 03:01:50Z;
+- **Realtime hard stop at 03:02:12Z** (cold join p95 > 15 s);
+- 5 min cooldown;
+- the 5-user stage correctly never started.
+
+k6 sent 0 HTTP requests. Its `ramping-vus` executor had not yet started the single virtual user.
+
+**Diagnosis:** a 1-user diagnostic using plain supabase-js reproduces the Realtime behaviour outside the harness:
+- joins are answered roughly one at a time, 4–5 s apart;
+- `access` and `university` first return *Unauthorized*, then subscribe on retry;
+- the DB policies evaluate **true** for the same user;
+- Realtime's own authorization queries average 1.6–20 ms in the database;
+- REST round trips are 130–180 ms, but a plain Realtime HTTP ping took 2.26 s;
+- Realtime migrated its own tenant schema (83 → 86) in the same window.
+
+Conclusion: the latency and transient *Unauthorized* results come from the **staging Realtime service's cold start after the restart**, not from We Glue policies and not from the harness client. Realtime's authorization pool is 2 connections.
+
+**Harness defects found** (not fixed yet):
+1. **No warm-up:** there is no Realtime warm-up or health gate before load, so a cold Realtime tenant shows up as a We Glue failure.
+2. **p95 hard stop on one sample:** the cold-join p95 stop fires on a single sample, with no minimum count.
+3. **Error messages not recorded:** the Realtime worker keeps counts only, so a transient Unauthorized is indistinguishable from a policy denial.
+4. **Ramp mismatch:** the k6 and Realtime ramps disagree at low user counts (k6 starts its first VU at the end of the ramp; the Realtime worker starts it immediately).
+5. **Cached Metrics API:** the counters refresh about once a minute, so the CPU hard stop can never sustain (a missing sample counts as 0), and disk IOPS is overstated about 12×.
+6. **Analyzer labels:** it labels this run `breakingPoint: 1` without separating environment failures from system failures.
+
 ## 6. Synthetic-data rules
 
 - Accounts are created with the Auth Admin API as confirmed users: `wg-loadtest-<namespace>-<n>@loadtest.invalid` (reserved TLD, so no email can be delivered), deterministic passwords, `user_metadata.loadtest_namespace`. No OTP, confirmation email or signup flow is exercised.
